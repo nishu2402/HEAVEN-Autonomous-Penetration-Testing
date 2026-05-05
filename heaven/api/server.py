@@ -879,6 +879,8 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
     store = None
     try:
         store = _engagement_store_factory(engagement_name)
+        # Auto-create engagement record so the header/dashboard shows it
+        store.create_engagement(name=engagement_name)
         store.record_scan_start(scan_id, name=req.name or engagement_name,
                                 mode=req.mode or req.scan_type or "web")
     except Exception as e:
@@ -903,6 +905,9 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             checkpoint_store=store,
         )
 
+        # Track which findings we've already persisted to avoid duplicates
+        persisted_finding_keys: set[str] = set()
+
         async def progress_update(progress):
             pct = getattr(progress, "percent", None)
             if pct is not None:
@@ -911,6 +916,27 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             for ws in list(ws_connections):
                 try:
                     await ws.send_json({"scan_id": scan_id, **(progress.to_dict() if hasattr(progress, "to_dict") else {})})
+                except Exception:
+                    pass
+
+            # Flush any new findings to the engagement store in real time
+            if store:
+                try:
+                    for tid, res in orch.results.items():
+                        if res.state != "completed" or not res.data:
+                            continue
+                        data = res.data if isinstance(res.data, dict) else {}
+                        for key in ("vulnerabilities", "findings", "candidates", "validated_findings"):
+                            for f in data.get(key, []):
+                                fkey = f"{f.get('target','')}:{f.get('vuln_type','')}:{f.get('title','')}"
+                                if fkey not in persisted_finding_keys:
+                                    persisted_finding_keys.add(fkey)
+                                    try:
+                                        store.upsert_finding(scan_id, f)
+                                        count = active_scans[scan_id].get("findings_count", 0) + 1
+                                        active_scans[scan_id]["findings_count"] = count
+                                    except Exception:
+                                        pass
                 except Exception:
                     pass
 

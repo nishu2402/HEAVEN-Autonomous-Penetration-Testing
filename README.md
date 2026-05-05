@@ -74,7 +74,7 @@ If you need any of the above for an engagement, you have other tools for it. HEA
 ## Quick start
 
 ```bash
-git clone <repo>
+git clone https://github.com/nishu2402/Autonomous-penetration-testing--heaven-.git 
 cd heaven
 ./install.sh                    # creates venv, installs deps, optional Postgres setup
 

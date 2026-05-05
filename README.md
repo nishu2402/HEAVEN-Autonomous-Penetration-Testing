@@ -26,560 +26,350 @@
 
 ## What is HEAVEN?
 
-HEAVEN is a real-world penetration testing platform that automates the **repetitive parts** of an engagement — reconnaissance, vulnerability detection, false-positive suppression, MITRE mapping, and report generation — so you can focus on what actually requires a human: scope decisions, business logic, exploit chaining, and the final report.
+HEAVEN is a real-world autonomous penetration testing platform that automates the **repetitive parts** of an engagement — reconnaissance, vulnerability detection, CVSS scoring, MITRE ATT&CK mapping, false-positive suppression, and report generation — so you can focus on what actually requires human judgment: scope decisions, business logic, exploit chaining, and client communication.
 
-**It is not a point-and-click hacking tool.** Every scan requires explicit written-authorization confirmation. The tool ends at finding and reporting — not exploitation and persistence.
+It runs as a local daemon with a **dark-themed web UI** you open in your browser. Scans can be launched from the UI or CLI. All findings are stored per-engagement with full evidence packages, triage workflow, and operator notes.
 
 ---
 
-## Architecture at a glance
+## Architecture at a Glance
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│   CLI (Click)          REST API (FastAPI/JWT)       WebSocket Logs      │
-│   ──────────           ─────────────────────        ──────────────      │
-│        │                        │                         │             │
-│        └──────────┬─────────────┴─────────────────────────┘             │
-│                   ▼                                                     │
-│    ┌──────────────────────────────────────────────────────────┐         │
-│    │   Async Orchestrator  (DAG · Semaphores · Retry · Deps)  │         │
-│    └──┬──────────┬──────────┬──────────┬──────────┬───────────┘         │
-│       │          │          │          │          │                     │
-│       ▼          ▼          ▼          ▼          ▼                     │
-│   recon/      vulnscan/   ml/        mitre/    devsecops/               │
-│   network     safe_valid  risk_model attack_   compliance_report        │
-│   web_crawl   fp_suppress nvd_pipe   mapper    evidence                 │
-│   cloud_enum  nuclei      ai_brain   kill_chain aggregator              │
-│   ad_scanner  advanced_   zeroday_   ──────────                         │
-│   deep_recon  attacks     engine                                        │
-│   shodan_rec  sqlmap_run                                                │
-│               msf_client                                                │
-│                   │                                                     │
-│        ┌──────────┴──────────────────────────────┐                      │
-│        │  Engagement Store (SQLite per engagement)│                     │
-│        │  ─ scope enforcement                     │                     │
-│        │  ─ finding deduplication across re-scans │                     │
-│        │  ─ operator notes + status workflow      │                     │
-│        │  ─ full evidence packages                │                     │
-│        └──────────────────────────────────────────┘                     │
-│        ┌──────────────────────────────────────────┐                     │
-│        │  Security Layer                          │                     │
-│        │  ─ JWT/RBAC + brute-force lockout        │                     │
-│        │  ─ HMAC audit log                        │                     │
-│        │  ─ AES-256-GCM credential vault          │                     │
-│        │  ─ self-audit SAST (runs on itself)      │                     │
-│        └──────────────────────────────────────────┘                     │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      HEAVEN Platform                        │
+├────────────────┬────────────────────┬───────────────────────┤
+│   RECON        │   VULN DETECTION   │   AI / SCORING        │
+│                │                    │                       │
+│ • nmap (XML)   │ • Nuclei templates │ • CVSS from severity  │
+│ • web crawler  │ • JWT forging      │   + vuln type         │
+│ • deep_recon   │ • SQLi / XSS       │ • Bayesian host prio  │
+│ • Shodan API   │ • SSRF / XXE       │ • NVD/EPSS enrichment │
+│ • DNS brute    │ • race conditions  │ • KEV tracking        │
+│ • cert transp  │ • request smuggle  │ • cross-scan beliefs  │
+│ • AD enum      │ • subdomain tkover │                       │
+├────────────────┴────────────────────┴───────────────────────┤
+│                   ORCHESTRATOR (async DAG)                  │
+│   • Parallel task execution with dependency tracking        │
+│   • Dynamic task injection (SSH/SMB/RDP detected services)  │
+│   • Resumable scans (checkpoint per phase)                  │
+│   • Stealth timing (levels 1–5)                             │
+├─────────────────────────────────────────────────────────────┤
+│              FastAPI + JWT RBAC + WebSocket                 │
+│   • React web UI (dark matrix terminal aesthetic)           │
+│   • Scan launcher with authorization gate                   │
+│   • Live findings feed · Kill chain · Topology              │
+│   • Manual finding entry · Operator triage workflow         │
+│   • AES-256 credential vault · HMAC audit log              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Installation
+## Feature Status
 
-### Quick install (recommended)
+| Module | Status | Notes |
+|--------|--------|-------|
+| **Reconnaissance** | | |
+| `network_scanner.py` | ✅ Live | Real nmap execution, XML parsing, evasion timing |
+| `web_crawler.py` | ✅ Live | aiohttp crawl, form/API discovery, auth_config support |
+| `web_crawler.py` JS | ✅ Live | Optional Playwright backend for JS-heavy SPAs |
+| `deep_recon.py` | ✅ Live | DNS brute-force, cert transparency, OSINT (wired) |
+| `ad_scanner.py` | ✅ Live | AD enum, Kerberoast + AS-REP hash extraction |
+| `shodan_recon.py` | ✅ Live | Passive host/domain/org lookups via Shodan API |
+| `cloud_enum.py` | ✅ AWS | GCP/Azure stubs present (AWS full) |
+| **Vulnerability Detection** | | |
+| `nuclei_scanner.py` | ✅ Live | Real nuclei binary execution |
+| `advanced_attacks.py` | ✅ Wired | JWT forging, race conditions, smuggling, default creds |
+| `zeroday_engine.py` | ✅ Wired | Heuristic fuzzing (wired into scan DAG) |
+| `adaptive_intel.py` | ✅ Live | WAF fingerprinting with live probes |
+| **Exploitation** | | |
+| `sqlmap_runner.py` | ✅ Live | Runs sqlmap on confirmed SQLi candidates |
+| `msf_client.py` | ✅ Live | Metasploit RPC (requires `--enable-exploitation` + msfrpcd) |
+| **AI / Scoring** | | |
+| `feature_engine.py` | ✅ Fixed | CVSS derived from severity + vuln type (realistic scores) |
+| `risk_model.py` | ✅ Live | CVSS prediction, NVD/EPSS enrichment, KEV flag |
+| `ai_brain.py` | ✅ Live | Bayesian host prioritisation with cross-scan persistence |
+| **API & UI** | | |
+| `api/server.py` | ✅ Live | FastAPI + JWT RBAC + WebSocket + security headers |
+| Web UI | ✅ Live | Dark matrix theme, 3D topology, kill chain, scan launcher |
+| Manual findings | ✅ Live | POST `/api/engagement/findings` + UI form |
+| **Security** | | |
+| `security/vault.py` | ✅ Live | AES-256 credential storage |
+| `security/audit.py` | ✅ Live | HMAC-signed audit log, rate limiting |
+| Auth lockout | ✅ Live | Brute-force protection (5 attempts → 15 min lockout) |
+
+---
+
+## Quick Start
+
+### 1. Install
 
 ```bash
-git clone https://github.com/nishu2402/Autonomous-penetration-testing--heaven-.git
-cd "Autonomous penetration testing (heaven)"
+git clone https://github.com/your-org/heaven.git
+cd heaven
 chmod +x install.sh && ./install.sh
 ```
 
-The installer handles Python validation, virtualenv, all dependencies, optional frontend build, and optional PostgreSQL setup. **PostgreSQL is not required** — HEAVEN uses SQLite for all engagement data by default.
+The installer:
+- Creates a Python virtual environment
+- Installs all dependencies via `uv`
+- Creates a global `heaven` command at `~/.local/bin/heaven`
+- Adds it to your PATH so `heaven` just works in any terminal
 
-### Manual install
-
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -e .
-```
-
-### After install
+### 2. Configure
 
 ```bash
-# Set the admin password (required for the API/UI)
-export HEAVEN_ADMIN_PASSWORD='your-strong-password-here'
+# Required
+export HEAVEN_ADMIN_PASSWORD="your-strong-password"
 
-# Verify it works
-heaven --version
-heaven self-audit
+# Optional but recommended
+export HEAVEN_ENGAGEMENT="acme-webapp-q2"   # engagement name
+export SHODAN_API_KEY="your-shodan-key"      # passive recon enrichment
+
+# For Metasploit integration (optional)
+export HEAVEN_MSF_HOST="127.0.0.1"
+export HEAVEN_MSF_PORT="55553"
+export HEAVEN_MSF_PASSWORD="msf-rpc-password"
 ```
 
-> **PostgreSQL is optional.** HEAVEN's core workflow uses per-engagement SQLite files that live alongside your engagement notes. PostgreSQL is only used for multi-operator centralized mode. If you see a PostgreSQL error on first run, ignore it — everything still works.
-
----
-
-## Quick scan
-
-```bash
-# No engagement DB — just scan and dump results
-heaven scan -u https://app.example.com -m web \
-    --i-have-authorization \
-    --output-file findings.json
-```
-
----
-
-## The engagement workflow
-
-This is HEAVEN's core value. One engagement = one SQLite file. Findings deduplicate across re-scans. Scope is enforced. Status persists.
-
-### 1  ·  Initialize
-
-```bash
-heaven engage init acme-q2 --client "ACME Corp" --sow "SOW-2026-001"
-# → Engagement initialized: engagements/acme-q2.db
-
-export HEAVEN_ENGAGEMENT=engagements/acme-q2.db
-```
-
-### 2  ·  Define scope
-
-```bash
-heaven scope add api.acme.example --kind host
-heaven scope add 10.0.0.0/24     --kind cidr
-heaven scope add https://app.acme.example --kind url
-
-heaven scope import engagement-scope.txt   # bulk import
-heaven scope list
-```
-
-### 3  ·  Scan — scope is enforced
-
-```bash
-heaven scan \
-    -u https://app.acme.example \
-    -t 10.0.0.5 \
-    -t out-of-scope.example \    # ← automatically dropped
-    --engagement acme-q2 \
-    --i-have-authorization
-
-# Targets dropped (not in engagement scope):
-#   - out-of-scope.example
-#
-# Scan completed in 14s
-#   Tasks: 22/22 (failed: 0)
-#   Findings persisted: 7 → engagements/acme-q2.db
-```
-
-### 4  ·  Triage findings
-
-```bash
-heaven findings --severity critical
-
-#   CRIT a359e73e  conf=0.94  sqli    api.acme.example  open
-#   CRIT 7b1f3c9a  conf=0.91  ssrf    api.acme.example  open
-
-# Full evidence: request, response, curl repro, remediation, MITRE mapping
-heaven show a359e73e
-
-# Get the exact curl command to replay in your terminal or Burp Repeater
-heaven replay a359e73e
-#   curl -X POST -i --max-time 30 --data "id=' OR 1=1--" https://app.acme.example/login
-
-# Confirm in Burp → mark verified
-heaven mark a359e73e verified --notes "confirmed via burp, dumps users table"
-
-# Mark false positive with reason
-heaven mark 7b1f3c9a false_positive --notes "WAF blocks payload"
-```
-
-### 5  ·  Re-scan — no duplicates
-
-```bash
-heaven scan -u https://app.acme.example --engagement acme-q2 --i-have-authorization
-
-# Known SQLi: seen_count++ | status preserved | notes preserved
-# New findings: inserted as "open"
-```
-
-### 6  ·  Kill chain coverage
-
-```bash
-heaven kill-chain
-
-# Cyber Kill Chain Coverage: 71/100  (5/7 phases)
-#
-#   Reconnaissance          4 findings
-#   Weaponization           2 findings
-#   Delivery                0 findings   ← gap
-#   Exploitation            3 findings
-#   Installation            0 findings   ← gap
-#   Command & Control       1 finding
-#   Actions on Objectives   2 findings
-#
-# Chained attack path:
-#   [Recon]   → Exposed admin panel /admin
-#   [Weapon]  → Apache 2.4.49 CVE-2021-41773
-#   [Exploit] → SQL injection /login (critical)
-#   [C2]      → Exposed phpMyAdmin
-#   [Obj]     → Public S3 bucket with database backups
-```
-
-### 7  ·  Export
-
-```bash
-heaven export -o report.md    --format markdown  --severity high     # pentest report
-heaven export -o findings.csv --format csv                           # Jira / spreadsheet
-heaven export -o findings.sarif --format sarif                       # code-scanning dashboards
-heaven export -o findings.json --format json   --status verified     # pipe to your tooling
-heaven export -o findings.xml  --format burp                         # Burp Site Map import
-heaven export -o findings.jsonl --format proxy-jsonl                 # mitmproxy / Caido
-```
-
-### 8  ·  Resume an interrupted scan
-
-```bash
-heaven resume --engagement acme-q2 --i-have-authorization
-# Resuming: a3b1c4d5
-# Completed tasks on disk: 14 (skipped)
-# Continuing from task 15...
-```
-
-### 9  ·  Web UI
+### 3. Start the server
 
 ```bash
 heaven serve
-# → http://localhost:8443
 ```
 
-Log in with `HEAVEN_ADMIN_PASSWORD`. The UI gives you:
+Open your browser at `http://localhost:8443` and log in with `admin` / your `HEAVEN_ADMIN_PASSWORD`.
 
-| Feature | Description |
-|---------|-------------|
-| Dashboard | Severity / status breakdown with live charts |
-| Findings | Filter by severity, status, target, confidence |
-| Finding detail | Full evidence package, curl repro, status buttons |
-| Kill Chain | Phase diagram + chained attack path |
-| Live terminal | WebSocket-streamed orchestrator logs |
-| Scans tracker | Real-time scan progress |
+---
 
-> The UI is **triage-only**. Scans launch from the CLI where the authorization gate is enforced.
+## Launching Scans
 
-### 10  ·  Engagement summary
+### From the Web UI
+
+1. Open **Scans** in the sidebar
+2. Enter target URLs or IPs (one per line or comma-separated)
+3. Choose scan mode and stealth level
+4. Check the **authorization confirmation** box
+5. Click **Launch Scan**
+
+The UI polls every 8 seconds and shows live progress.
+
+### From the CLI
 
 ```bash
-heaven engage status
+# Web application scan
+heaven scan -u https://app.example.com -m web \
+    --engagement acme-q2 --i-have-authorization
 
-# Engagement: acme-q2 | Client: ACME Corp
-# Scope: 4 targets | Scans: 3 | Findings: 12
-#
-# By severity:    critical=2  high=4  medium=5  low=1
-# By status:      open=7  verified=4  false_positive=1
+# Network scan (entire subnet)
+heaven scan -t 10.0.0.0/24 -m network \
+    --engagement acme-q2 --i-have-authorization
+
+# Full scan (web + network + AD)
+heaven scan -u https://app.example.com -t 10.0.0.1 -m full \
+    --engagement acme-q2 --stealth 2 --i-have-authorization
+
+# Active Directory scan
+heaven scan -t 192.168.1.10 -m ad \
+    --engagement acme-q2 --i-have-authorization
+
+# Resume interrupted scan
+heaven resume --engagement acme-q2 --i-have-authorization
 ```
 
----
+**Scan modes:**
+| Mode | What it does |
+|------|-------------|
+| `web` | Crawl + Nuclei + JWT/SSRF/race conditions + zeroday fuzzing |
+| `network` | nmap + service enum + dynamic injection (SSH/SMB/RDP bruteforce) |
+| `full` | Everything: web + network + deep recon + Shodan |
+| `ad` | Active Directory enum + Kerberoasting + AS-REP hashes |
+| `cloud` | Cloud provider enumeration (AWS full, GCP/Azure basic) |
 
-## What HEAVEN detects
-
-| Category | Techniques |
-|----------|-----------|
-| **Injection** | SQLi (boolean/error/time-based), XSS (reflected/stored), SSTI, XXE, CRLF, command injection |
-| **Auth & Sessions** | JWT alg:none, JWT weak secret, default credentials (35+ pairs), session fixation |
-| **Web** | SSRF (response + OOB), open redirect, request smuggling (CL.TE), race conditions |
-| **Infrastructure** | Open ports, exposed services, SSL/TLS misconfig, directory listing, exposed git |
-| **Active Directory** | Kerberoasting, AS-REP roasting, DCSync rights, delegation abuse, NTLM relay, ACL abuse |
-| **Cloud** | S3 bucket exposure, AWS metadata SSRF, GCP/Azure storage misconfig |
-| **CVE intelligence** | NVD lookup, EPSS scoring, CISA KEV flag — every finding enriched |
-| **Subdomain** | DNS brute force, certificate transparency, subdomain takeover (dangling CNAME) |
-| **Secrets** | API keys, tokens, private keys in source and JS files |
-
-### False-positive suppression
-
-Every candidate goes through a second-stage validation layer before reaching the report:
-
-1. **Baseline measurement** — probe with benign payloads, measure response distribution
-2. **Canary confirmation** — for XSS: check the exact reflected string appears; for SQLi: compare boolean branches
-3. **Confidence scoring** — Bayesian-calibrated 0–1 score, not a fake "99% accurate" claim
-4. **FP suppression** — findings below confidence threshold are discarded, not reported
+**Stealth levels:**
+| Level | Description |
+|-------|-------------|
+| 1 | Ghost — very slow, maximum evasion |
+| 2 | Cautious — slow, randomized timing |
+| 3 | Normal — balanced speed/stealth |
+| 4 | Aggressive — faster, less evasion |
+| 5 | Loud — full speed, no evasion |
 
 ---
 
-## What HEAVEN does NOT do
+## Web UI Pages
 
-- No reverse shells, payload delivery, persistence, or C2
-- No autonomous exploit chaining
-- No "click here to own this box" buttons
-- No fake accuracy numbers
-
-If you need exploitation for an engagement, use Metasploit, sqlmap, or Cobalt Strike. HEAVEN's job ends at **find → validate → report**.
-
----
-
-## Scan modes
-
-| Mode | Flag | What runs |
-|------|------|-----------|
-| Web | `-m web` | Crawl, JWT, XSS, SQLi, SSRF, SSTI, nuclei templates |
-| Network | `-m network` | nmap, banner grab, CVE lookup, service detection |
-| Full | `-m full` | Everything: web + network + AD + cloud + deep recon |
-| AD | `-m ad` | Active Directory: Kerberoasting, ACL, DCSync, delegation |
-| Cloud | `-m cloud` | AWS/GCP/Azure enumeration |
-| IoT | `-m iot` | Modbus, MQTT, BACnet, OT/SCADA |
+| Page | Description |
+|------|-------------|
+| **Dashboard** | Real-time engagement stats, severity distribution, MITRE coverage |
+| **Scans** | Launch scans from UI, view all scan history with live progress |
+| **Findings** | Full finding list with severity/status/confidence filters |
+| **Finding Detail** | Evidence package, curl repro, triage workflow, operator notes |
+| **Kill Chain** | Cyber kill chain coverage with chained attack path |
+| **Engagement** | Scope management, target configuration |
 
 ---
 
-## CLI reference
+## API Reference
 
-```
-Engagement:
-  engage init NAME [--client] [--sow]    New engagement
-  engage status                          Summary
-  scope add TARGET [--kind] [--notes]    Add to scope
-  scope import FILE                      Bulk import
-  scope list [--all]                     List scope
-  scope remove TARGET                    Remove target
-
-Scanning:
-  scan [-t TARGET] [-u URL] [-m MODE]
-       [--engagement NAME]
-       [--i-have-authorization]          Run a scan
-  resume [--engagement] [--scan-id]
-       [--i-have-authorization]          Resume interrupted scan
-  schedule INTERVAL_MIN -t TARGET        Continuous monitoring
-
-Findings:
-  findings [--severity] [--status]
-           [--target] [--min-confidence] List findings
-  show ID                                Full detail + repro
-  replay ID                              Print curl command only
-  mark ID STATUS [--notes]               Update status
-                                         (open/verified/false_positive/
-                                          accepted_risk/fixed)
-
-Reporting:
-  export -o FILE --format FMT [filters]  Export findings
-                                          markdown / csv / json /
-                                          sarif / burp / proxy-jsonl
-  kill-chain [--output FILE]             Kill Chain coverage
-  mitre-report [--output FILE]           ATT&CK Navigator JSON
-
-Server:
-  serve [--host] [--port]                API server + web UI
-  init-db                                Initialize PostgreSQL (optional)
-  self-audit [--output FILE]             Security self-audit
-
-Utilities:
-  info                                   Platform + dependency check
-  train-model [--data-dir] [--model-dir] Train CVSS ML model on NVD data
-```
-
----
-
-## REST API
-
-```
-Auth:
-  POST /api/auth/login                   JWT (5 req/min limit)
-  POST /api/auth/logout                  Revoke token
-
-Engagement:
-  GET  /api/engagement                   Active engagement summary
-  GET  /api/engagement/findings          List with filters
-  POST /api/engagement/findings          Create manual finding (Burp integration)
-  GET  /api/engagement/findings/{id}/evidence   Full evidence package
-  PUT  /api/engagement/findings/{id}/status     Update status
-
-Scans:
-  POST /api/scans                        Launch scan
-  GET  /api/scans/{id}                   Scan status
-
-Dashboards:
-  GET  /api/dashboard                    Aggregate stats
-  GET  /api/kill-chain/{scan_id}         Kill Chain report
-  GET  /api/attack-tree/{scan_id}        Attack tree diagram
-  GET  /api/vulnerabilities              Flat finding list
-  GET  /api/health                       Health check (unauthenticated)
-
-WebSocket:
-  WS   /api/ws/scan/{scan_id}?token=...  Live scan progress
-  WS   /api/ws/logs?token=...            Live orchestrator logs
-```
-
-Full interactive docs at `/api/docs` (FastAPI auto-generated, JWT auth required).
-
----
-
-## Configuration
-
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `HEAVEN_ADMIN_PASSWORD` | **Yes** | random (logged once) | API / UI admin password |
-| `HEAVEN_ENGAGEMENT` | Recommended | — | Path to active `.db` engagement file |
-| `HEAVEN_DB_PASSWORD` | No | — | PostgreSQL password (optional centralized mode) |
-| `HEAVEN_NVD_API_KEY` | No | — | Raises NVD API rate limit (free at nvd.nist.gov) |
-| `HEAVEN_API_HOST` | No | `127.0.0.1` | API bind host |
-| `HEAVEN_API_PORT` | No | `8443` | API port |
-| `HEAVEN_CORS_ORIGINS` | No | `localhost:5173` | Comma-separated CORS origins |
-| `HEAVEN_RATE_LIMIT_DEFAULT` | No | `100/minute` | Global API rate limit |
-| `HEAVEN_AUTHORIZED_SCOPE` | No | — | Pre-authorized targets (comma-separated) |
-| `HEAVEN_DISABLE_AUTH` | **Dev only** | off | Disables JWT auth — never use in production |
-| `SHODAN_API_KEY` | No | — | Enables passive Shodan intelligence in RECON |
-
----
-
-## Authorization gate
-
-HEAVEN refuses to scan unless one of these conditions is met:
-
-```
-1. --i-have-authorization flag is set on the CLI command, OR
-2. HEAVEN_AUTHORIZED_SCOPE env var includes the target, OR
-3. The target is in scope of the active --engagement, OR
-4. You confirm interactively at a TTY prompt
-```
-
-This is a guardrail — **not a license**. You are responsible for holding written authorization (signed SoW, Rules of Engagement, or bug-bounty program scope) for every target before scanning.
-
----
-
-## Measuring accuracy
+The API runs on port 8443 (HTTPS in production, HTTP in dev mode).
 
 ```bash
-# 1. Spin up a vulnerable target
-docker run --rm -p 3000:3000 bkimminich/juice-shop
+# Health check (no auth)
+curl http://localhost:8443/api/health
 
-# 2. Create a test engagement
-heaven engage init juice-shop-test
-heaven scope add http://localhost:3000 --kind url
+# Login
+curl -X POST http://localhost:8443/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"username":"admin","password":"your-password"}'
 
-# 3. Scan it
-heaven scan -u http://localhost:3000 -m web \
-    --engagement juice-shop-test \
-    --i-have-authorization
+# List findings
+curl http://localhost:8443/api/engagement/findings \
+     -H "Authorization: Bearer <token>"
 
-# 4. Measure against ground truth
-python -m heaven.testing.selftest measure-against \
-    --findings-file scan.json \
-    --ground-truth tests/fixtures/juice_shop_truth.json
+# Launch scan
+curl -X POST http://localhost:8443/api/scans \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{"targets":["https://app.example.com"],"mode":"web","i_have_authorization":true}'
 
-# → Precision: 0.87 | Recall: 0.72 | F1: 0.79
-# Real numbers from your environment. Not marketing copy.
+# Add manual finding
+curl -X POST http://localhost:8443/api/engagement/findings \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{"target":"https://app.example.com/admin","vuln_type":"idor","title":"Unauthenticated admin access","severity":"critical","confidence":0.95}'
 ```
+
+Full OpenAPI docs at `http://localhost:8443/docs`.
 
 ---
 
-## Self-audit
+## Integrations
 
-HEAVEN runs SAST against its own codebase to catch regressions:
+### Shodan (passive recon)
 
 ```bash
-heaven self-audit
-# Security score: 100/100 (grade: A)
-# Critical: 0  High: 0  Medium: 0  Low: 0
+export SHODAN_API_KEY="your-key"
+heaven scan -t example.com -m full --i-have-authorization
+# Shodan host data is automatically merged into RECON results
 ```
 
-Run this in CI to ensure every commit passes. The self-audit checks:
-secrets in source, weak crypto, missing auth, CORS misconfiguration, hardcoded credentials, and more.
+### sqlmap (SQLi confirmation)
+
+sqlmap runs automatically on findings where HEAVEN detects SQLi candidates with severity ≥ HIGH. Install sqlmap and it will be picked up:
+
+```bash
+which sqlmap   # must be in PATH
+```
+
+### Metasploit (exploitation)
+
+```bash
+# Start msfrpcd first
+msfrpcd -P your-password -S -f
+
+export HEAVEN_MSF_HOST=127.0.0.1
+export HEAVEN_MSF_PORT=55553
+export HEAVEN_MSF_PASSWORD=your-password
+
+# Exploitation requires explicit flag
+heaven scan -t 10.0.0.1 --enable-exploitation --i-have-authorization
+```
+
+### Nuclei (template-based detection)
+
+HEAVEN runs nuclei automatically if it's installed:
+
+```bash
+nuclei -update-templates   # keep templates current
+```
 
 ---
 
-## Where HEAVEN fits vs. your existing tools
+## CVSS Scoring
 
-| Job | Best-in-class | HEAVEN's role |
-|-----|--------------|---------------|
-| Web app testing | **Burp Suite Pro** | Triage front-end. Flags candidates with curl repros — you pivot into Burp for validation and exploitation. |
-| Network scanning | **Nessus / OpenVAS** | Lighter engagement scans. Nessus wins on CVE breadth for internal infra. |
-| Templated detection | **Nuclei** | HEAVEN shells out to Nuclei. Added value: orchestration, FP suppression, engagement DB. |
-| AD recon | **BloodHound + impacket** | Inventory + roastable accounts + delegation. For shortest-path graphs, still use BloodHound. |
-| Exploitation | **Metasploit / sqlmap** | HEAVEN finds and validates. Exploitation is on you. sqlmap and Metasploit RPC are wired in as optional backends for confirmed findings. |
-| Engagement management | Notes app / spreadsheet | **This is where HEAVEN earns its place.** Per-engagement SQLite, scope enforcement, dedup across re-scans, status workflow, evidence packages. |
+HEAVEN derives realistic CVSS scores automatically:
 
-**Bottom line:** HEAVEN handles *find → triage → dedupe → organize*. Your existing tools handle *exploit → validate manually → write the final report*. HEAVEN is the connective tissue.
+1. **Vuln-type override** — `docker_socket_exposed` → 9.8, `sqli` → 9.0, `xss` → 6.1, etc.
+2. **Severity fallback** — critical → 9.0, high → 7.5, medium → 5.5, low → 3.5
+3. **NVD enrichment** — real CVE CVSS when a CVE ID is present
+4. **EPSS** — exploit prediction score merged if available
+5. **KEV flag** — CISA known-exploited-vulnerabilities list checked
+
+Priority score combines CVSS + EPSS + KEV + asset exposure + chain potential.
+
+---
+
+## Active Directory
+
+When scanning AD environments, HEAVEN extracts actionable attack data:
+
+```bash
+heaven scan -t 192.168.1.10 -m ad --i-have-authorization
+```
+
+What it captures:
+- **Kerberoastable accounts** → `$krb5tgs$` hashes (paste to hashcat)
+- **AS-REP roastable accounts** → `$krb5asrep$` hashes (no creds needed)
+- **Domain users, computers, groups** enumerated via impacket
+- **Privilege paths** — who can reach DA from current position
+
+---
+
+## Security
+
+| Control | Implementation |
+|---------|---------------|
+| Auth | JWT RS256, 8-hour expiry, refresh tokens |
+| Lockout | 5 failed attempts → 15-minute lockout |
+| Audit log | HMAC-signed, append-only, all operator actions |
+| Credential storage | AES-256-GCM vault, master key from env |
+| API authorization | Role-based: `vuln.read`, `vuln.create`, `scan.run` |
+| HTTP security headers | X-Frame-Options, X-Content-Type, HSTS, Referrer-Policy |
+| Scope enforcement | Target validation against declared engagement scope |
 
 ---
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+# Install dev dependencies
+uv sync --dev
 
-# Lint + type check
-ruff check heaven/ tests/
-mypy heaven/
+# Run tests
+uv run pytest tests/ -v
 
-# Tests (108 passing)
-pytest tests/ -v --cov=heaven
+# Run with hot reload
+uv run uvicorn heaven.api.server:create_app --factory --reload --port 8443
 
-# Skip slow property tests
-pytest tests/ -v --ignore=tests/test_properties.py
-
-# Audit the tool itself
-pip-audit
-bandit -r heaven/
+# Build UI
+cd heaven-ui && npm install && npm run build
 ```
 
 ---
 
-## Module status
+## Requirements
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| `orchestrator.py` | ✅ Solid | Async DAG, retry, checkpoints, dynamic task injection |
-| `engagement.py` | ✅ Solid | SQLite, scope, dedup, pause/resume |
-| `recon/network_scanner.py` | ✅ Solid | nmap wrapper, evasion timing |
-| `recon/web_crawler.py` | ✅ Solid | BFS, form/API discovery, auth_config, Playwright backend |
-| `recon/ad_scanner.py` | ✅ Solid | Kerberoasting + hash extraction, DCSync, delegation |
-| `recon/shodan_recon.py` | ✅ Solid | Passive Shodan host/domain lookup |
-| `vulnscan/safe_validator.py` | ✅ Solid | SQLi/XSS/SSRF with FP suppression |
-| `vulnscan/advanced_attacks.py` | ✅ Solid | JWT forge, race conditions, smuggling, credential spray |
-| `vulnscan/sqlmap_runner.py` | ✅ Solid | sqlmap integration for confirmed SQLi |
-| `vulnscan/msf_client.py` | ✅ Solid | Metasploit RPC (requires `--enable-exploitation`) |
-| `vulnscan/nuclei_scanner.py` | ✅ Solid | Nuclei with stealth levels |
-| `ml/risk_model.py` | ✅ Solid | NVD/EPSS-trained CVSS regressor |
-| `ml/ai_brain.py` | ✅ Solid | Bayesian target prioritizer, cross-scan persistence |
-| `mitre/attack_mapper.py` | ✅ Solid | ATT&CK technique tagging |
-| `mitre/kill_chain.py` | ✅ Solid | Lockheed CKC phase mapping |
-| `devsecops/compliance_report.py` | ✅ Solid | OWASP Top 10 HTML report |
-| `api/server.py` | ✅ Solid | FastAPI, JWT/RBAC, WebSocket, security headers |
-| `security/auth.py` | ✅ Solid | RBAC, brute-force lockout |
-| `security/vault.py` | ✅ Solid | AES-256-GCM credential vault |
-| `recon/deep_recon.py` | ⚠️ Good | DNS brute force, cert transparency |
-| `vulnscan/zeroday_engine.py` | ⚠️ Good | Heuristic fuzzing; high FP rate by design |
-| `recon/cloud_enum.py` | ⚠️ Good | AWS solid; GCP/Azure need SDK install |
-| `recon/iot_scanner.py` | ⚠️ Rough | Modbus/MQTT/BACnet — needs real OT hardware to validate |
-| `recon/wireless_recon.py` | 🔧 Scaffolded | Needs root + monitor-mode — won't run in containers |
+**Python 3.11+** · **uv** (auto-installed by install.sh)
+
+**Recommended external tools** (auto-detected, graceful fallback if missing):
+- `nmap` — network scanning
+- `nuclei` — template-based detection
+- `sqlmap` — SQL injection confirmation
+- `msfrpcd` — Metasploit RPC (exploitation mode only)
 
 ---
 
 ## Legal
 
-HEAVEN performs **active vulnerability testing**. Running it without written authorization is illegal:
-
-- 🇺🇸 **United States** — Computer Fraud and Abuse Act (CFAA), 18 U.S.C. § 1030
-- 🇬🇧 **United Kingdom** — Computer Misuse Act 1990
-- 🇪🇺 **European Union** — NIS2 Directive
-- 🇮🇳 **India** — IT Act 2000, Sections 43 and 66
-
-The `--i-have-authorization` flag is a guardrail — not a substitute for a signed Statement of Work or Rules of Engagement.
+> HEAVEN includes a mandatory authorization gate — you must pass `--i-have-authorization` on every scan.
+> Only use against systems you own or have explicit written permission to test.
+> Unauthorized use is illegal. All scan activity is HMAC-audited.
 
 ---
-
-## Acknowledgements
-
-HEAVEN integrates with or builds on:
-
-- [Nuclei](https://github.com/projectdiscovery/nuclei) — templated detection engine
-- [NVD / NIST](https://nvd.nist.gov) — public CVE database
-- [EPSS / FIRST](https://www.first.org/epss/) — Exploit Prediction Scoring System
-- [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) — Known Exploited Vulnerabilities
-- [MITRE ATT&CK](https://attack.mitre.org) — adversary tactics and techniques
-- [Lockheed Martin](https://www.lockheedmartin.com/en-us/capabilities/cyber/cyber-kill-chain.html) — Cyber Kill Chain
-- [OWASP](https://owasp.org) — Juice Shop, WebGoat, Top 10
-- [impacket](https://github.com/fortra/impacket) — AD / Kerberos primitives
-- [Shodan](https://shodan.io) — passive host intelligence
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
 
 <div align="center">
 
----
-
-*Built for pentesters, by someone who got tired of context-switching between five tools.*
-*HEAVEN is the connective tissue — not the weapon.*
+**108 tests · MIT License · Built for real-world engagements**
 
 </div>

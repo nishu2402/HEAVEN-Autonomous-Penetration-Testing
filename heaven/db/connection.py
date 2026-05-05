@@ -112,30 +112,51 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-async def init_db() -> None:
-    """Initialise the database schema from schema.sql."""
+async def init_db() -> bool:
+    """
+    Initialise the PostgreSQL schema from schema.sql.
+
+    PostgreSQL is OPTIONAL — HEAVEN's core workflow uses per-engagement
+    SQLite files. This function returns True on success, False on failure
+    so callers can decide whether to warn or abort.
+    """
+    if asyncpg is None:
+        logger.warning(
+            "asyncpg not installed — skipping PostgreSQL init "
+            "(pip install asyncpg if you need centralised DB mode)"
+        )
+        return False
+
     from pathlib import Path
 
     schema_path = Path(__file__).parent / "schema.sql"
+    if not schema_path.exists():
+        logger.warning(f"Schema file not found at {schema_path} — skipping PostgreSQL init")
+        return False
+
     schema_sql = schema_path.read_text()
 
     try:
         async with get_connection() as conn:
             await conn.execute(schema_sql)
-            logger.info("Database schema initialised")
+            logger.info("PostgreSQL schema initialised successfully")
+            return True
     except (ConnectionRefusedError, OSError) as e:
-        logger.error(
-            f"Connection error: {e}\n"
-            "The PostgreSQL database is not running or unreachable.\n"
-            "Please start the database first using:\n"
-            "    docker-compose up -d postgres"
+        logger.warning(
+            f"PostgreSQL unreachable: {e}\n"
+            "  HEAVEN will continue using SQLite for engagement data.\n"
+            "  To use centralised PostgreSQL mode, start the database:\n"
+            "    docker compose up -d postgres\n"
+            "  then run: heaven init-db"
         )
-        import sys
-        sys.exit(1)
+        return False
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        import sys
-        sys.exit(1)
+        logger.warning(
+            f"PostgreSQL init skipped: {e}\n"
+            "  Ensure HEAVEN_DB_PASSWORD is set and the 'heaven' user exists.\n"
+            "  HEAVEN's core features work without PostgreSQL."
+        )
+        return False
 
 
 async def close_all() -> None:

@@ -1,135 +1,196 @@
 #!/usr/bin/env bash
+# ==============================================================================
+#  HEAVEN — Autonomous Penetration Testing Framework
+#  Installer v2.0
+# ==============================================================================
+
 set -euo pipefail
 
-# ==============================================================================
-# HEAVEN v1.0 — Installer
-# ==============================================================================
+# ── Colors ────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
+ok()   { echo -e "${GREEN}[+]${NC} $*"; }
+info() { echo -e "${CYAN}[*]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+fail() { echo -e "${RED}[✗]${NC} $*"; exit 1; }
 
-echo -e "${CYAN}======================================================${NC}"
-echo -e "${CYAN}   HEAVEN v1.0 — Installation Setup                  ${NC}"
-echo -e "${CYAN}======================================================${NC}"
-echo ""
+# ── Banner ────────────────────────────────────────────────────────────────────
+echo -e ""
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║   ██╗  ██╗███████╗ █████╗ ██╗   ██╗███████╗███╗   ██╗   ║${NC}"
+echo -e "${CYAN}${BOLD}║   ██║  ██║██╔════╝██╔══██╗██║   ██║██╔════╝████╗  ██║   ║${NC}"
+echo -e "${CYAN}${BOLD}║   ███████║█████╗  ███████║██║   ██║█████╗  ██╔██╗ ██║   ║${NC}"
+echo -e "${CYAN}${BOLD}║   ██╔══██║██╔══╝  ██╔══██║╚██╗ ██╔╝██╔══╝  ██║╚██╗██║   ║${NC}"
+echo -e "${CYAN}${BOLD}║   ██║  ██║███████╗██║  ██║ ╚████╔╝ ███████╗██║ ╚████║   ║${NC}"
+echo -e "${CYAN}${BOLD}║   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝   ║${NC}"
+echo -e "${CYAN}${BOLD}║            Autonomous Penetration Testing Framework       ║${NC}"
+echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e ""
 
-# ─── 1. Python version check (no `bc` dependency) ──────────────────
-echo -e "[*] Checking Python version..."
+# ── 1. Python check ───────────────────────────────────────────────────────────
+info "Checking Python version..."
+
 if command -v python3 >/dev/null 2>&1; then
     PYTHON_CMD="python3"
 elif command -v python >/dev/null 2>&1; then
     PYTHON_CMD="python"
 else
-    echo -e "${RED}[!] Python 3 is not installed. Install Python 3.11 or higher.${NC}"
-    exit 1
+    fail "Python 3 is not installed. Install Python 3.11 or higher."
 fi
 
 PY_OK=$($PYTHON_CMD -c 'import sys; print(1 if sys.version_info >= (3, 11) else 0)')
 PY_VER=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
-if [ "$PY_OK" != "1" ]; then
-    echo -e "${RED}[!] Python 3.11+ required. Found: $PY_VER${NC}"
-    exit 1
-fi
-echo -e "${GREEN}[+] Found Python $PY_VER${NC}"
 
-# ─── 2. Virtual environment ────────────────────────────────────────
-echo -e "\n[*] Creating virtual environment (venv)..."
+if [ "$PY_OK" != "1" ]; then
+    fail "Python 3.11+ required. Found: $PY_VER"
+fi
+ok "Python $PY_VER"
+
+# ── 2. Virtual environment ────────────────────────────────────────────────────
+info "Setting up virtual environment..."
 if [ ! -d "venv" ]; then
     $PYTHON_CMD -m venv venv
-    echo -e "${GREEN}[+] venv created${NC}"
+    ok "venv created"
 else
-    echo -e "${GREEN}[+] venv already exists, reusing${NC}"
+    ok "venv already exists — reusing"
 fi
 
-# ─── 3. Activate venv ──────────────────────────────────────────────
 # shellcheck source=/dev/null
 source venv/bin/activate
 
-# ─── 4. Upgrade pip toolchain ──────────────────────────────────────
-echo -e "\n[*] Upgrading pip, setuptools, wheel..."
-pip install --upgrade pip setuptools wheel >/dev/null
-echo -e "${GREEN}[+] Toolchain upgraded${NC}"
+# ── 3. Pip toolchain ──────────────────────────────────────────────────────────
+info "Upgrading pip toolchain..."
+pip install --upgrade pip setuptools wheel -q
+ok "Toolchain ready"
 
-# ─── 5. Install HEAVEN ─────────────────────────────────────────────
-echo -e "\n[*] Installing HEAVEN dependencies..."
-pip install -r requirements.txt
-pip install -e .
-echo -e "${GREEN}[+] HEAVEN installed${NC}"
+# ── 4. Install HEAVEN ─────────────────────────────────────────────────────────
+info "Installing HEAVEN and dependencies..."
 
-# ─── 5.5 Frontend (optional) ───────────────────────────────────────
-if [ -d "heaven-ui" ]; then
-    echo -e "\n[*] Building frontend UI..."
-    if ! command -v npm >/dev/null 2>&1; then
-        echo -e "${YELLOW}[!] npm not found. Skipping frontend build.${NC}"
-        echo "    Install Node.js 18+ to build the UI later: cd heaven-ui && npm install && npm run build"
+# Use requirements.txt if present, else fall back to pyproject extras
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt -q || warn "Some optional deps failed — continuing"
+fi
+pip install -e . -q
+ok "HEAVEN installed"
+
+# ── 5. External tools check (optional) ───────────────────────────────────────
+echo ""
+echo -e "${BOLD}External tool availability:${NC}"
+
+check_tool() {
+    local name="$1"; local cmd="$2"; local install_hint="$3"
+    if command -v "$cmd" >/dev/null 2>&1; then
+        ok "$name found: $(command -v "$cmd")"
     else
-        ( cd heaven-ui && npm install && npm run build )
-        echo -e "${GREEN}[+] Frontend built${NC}"
+        warn "$name not found — $install_hint"
+    fi
+}
+
+check_tool "nmap"    "nmap"    "install with: brew install nmap  /  apt install nmap"
+check_tool "nuclei"  "nuclei"  "install from: https://github.com/projectdiscovery/nuclei"
+check_tool "sqlmap"  "sqlmap"  "install with: pip install sqlmap  /  apt install sqlmap"
+
+# ── 6. Frontend (optional) ────────────────────────────────────────────────────
+echo ""
+if [ -d "heaven-ui" ]; then
+    info "Building frontend UI..."
+    if ! command -v npm >/dev/null 2>&1; then
+        warn "npm not found — skipping frontend build"
+        echo -e "  ${DIM}Install Node.js 18+ and run: cd heaven-ui && npm install && npm run build${NC}"
+    else
+        NODE_VER=$(node --version 2>/dev/null || echo "?")
+        info "Node $NODE_VER detected"
+        ( cd heaven-ui && npm install --legacy-peer-deps -q && npm run build ) \
+            && ok "Frontend built → heaven-ui/dist/" \
+            || warn "Frontend build failed — UI won't be served (core CLI still works)"
     fi
 fi
 
-# ─── 6. Database setup ─────────────────────────────────────────────
-echo -e "\n[*] Setting up PostgreSQL..."
+# ── 7. PostgreSQL (FULLY OPTIONAL) ───────────────────────────────────────────
+echo ""
+echo -e "${BOLD}PostgreSQL setup (optional — HEAVEN uses SQLite by default):${NC}"
+echo -e "${DIM}  HEAVEN's core workflow stores engagement data in local SQLite files.${NC}"
+echo -e "${DIM}  PostgreSQL is only needed for multi-operator centralized mode.${NC}"
+echo ""
 
-# Generate a DB password if the user hasn't provided one
 if [ -z "${HEAVEN_DB_PASSWORD:-}" ]; then
     HEAVEN_DB_PASSWORD=$($PYTHON_CMD -c 'import secrets; print(secrets.token_urlsafe(24))')
-    echo -e "${YELLOW}[!] HEAVEN_DB_PASSWORD not set in environment.${NC}"
-    echo -e "    Generated one for this install. Save it: ${CYAN}$HEAVEN_DB_PASSWORD${NC}"
-    echo "    Add to your shell profile: export HEAVEN_DB_PASSWORD='$HEAVEN_DB_PASSWORD'"
+    warn "HEAVEN_DB_PASSWORD not set — generated: ${CYAN}${HEAVEN_DB_PASSWORD:0:8}...${NC}"
+    echo -e "  Save to your shell profile: ${CYAN}export HEAVEN_DB_PASSWORD='$HEAVEN_DB_PASSWORD'${NC}"
     export HEAVEN_DB_PASSWORD
 fi
 
+POSTGRES_STARTED=0
 if command -v docker-compose >/dev/null 2>&1; then
-    POSTGRES_PASSWORD="$HEAVEN_DB_PASSWORD" docker-compose up -d postgres
-    sleep 5
+    info "Starting PostgreSQL via docker-compose..."
+    if POSTGRES_PASSWORD="$HEAVEN_DB_PASSWORD" docker-compose up -d postgres 2>/dev/null; then
+        sleep 4
+        POSTGRES_STARTED=1
+        ok "PostgreSQL started via docker-compose"
+    else
+        warn "docker-compose up failed — skipping PostgreSQL"
+    fi
 elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    POSTGRES_PASSWORD="$HEAVEN_DB_PASSWORD" docker compose up -d postgres
-    sleep 5
+    info "Starting PostgreSQL via docker compose..."
+    if POSTGRES_PASSWORD="$HEAVEN_DB_PASSWORD" docker compose up -d postgres 2>/dev/null; then
+        sleep 4
+        POSTGRES_STARTED=1
+        ok "PostgreSQL started via docker compose"
+    else
+        warn "docker compose up failed — skipping PostgreSQL"
+    fi
 elif command -v psql >/dev/null 2>&1; then
-    echo -e "${CYAN}[*] Using native PostgreSQL${NC}"
+    info "Native PostgreSQL detected — configuring..."
     if command -v systemctl >/dev/null 2>&1; then
         sudo systemctl start postgresql 2>/dev/null || true
     fi
-    sudo -u postgres psql -c "CREATE USER heaven WITH PASSWORD '$HEAVEN_DB_PASSWORD';" 2>/dev/null || \
-        sudo -u postgres psql -c "ALTER USER heaven WITH PASSWORD '$HEAVEN_DB_PASSWORD';" 2>/dev/null || true
+    sudo -u postgres psql -c "CREATE USER heaven WITH PASSWORD '$HEAVEN_DB_PASSWORD';" 2>/dev/null \
+        || sudo -u postgres psql -c "ALTER USER heaven WITH PASSWORD '$HEAVEN_DB_PASSWORD';" 2>/dev/null \
+        || true
     sudo -u postgres psql -c "CREATE DATABASE heaven OWNER heaven;" 2>/dev/null || true
-    # Note: we are NOT giving SUPERUSER. Restrict privileges per principle of least privilege.
     sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE heaven TO heaven;" 2>/dev/null || true
+    POSTGRES_STARTED=1
+    ok "Native PostgreSQL configured"
 else
-    echo -e "${YELLOW}[!] Neither Docker nor native PostgreSQL found.${NC}"
-    echo "    Install one of them, then run: heaven init-db"
+    warn "PostgreSQL / Docker not found — skipping (HEAVEN works fine without it)"
 fi
 
-# ─── 7. Init schema ────────────────────────────────────────────────
-echo -e "\n[*] Initialising database schema..."
-heaven init-db || echo -e "${YELLOW}[!] Database init failed. Make sure PostgreSQL is running and HEAVEN_DB_PASSWORD is set.${NC}"
+# ── 8. Init schema (only if PostgreSQL started) ───────────────────────────────
+if [ "$POSTGRES_STARTED" = "1" ]; then
+    info "Initialising database schema..."
+    heaven init-db && ok "Schema initialised" \
+        || warn "Schema init failed — run 'heaven init-db' after setting HEAVEN_DB_PASSWORD"
+fi
 
-# ─── 8. Optional: global symlink (no sudo by default) ──────────────
-echo -e "\n[*] Setup notes:"
-echo -e "    - Activate the venv: ${CYAN}source venv/bin/activate${NC}"
-echo -e "    - Run the CLI:        ${CYAN}heaven --help${NC}"
-echo -e "    - Start the server:   ${CYAN}heaven serve${NC}"
-echo -e "    - Required env vars to set:"
-echo -e "        ${CYAN}HEAVEN_DB_PASSWORD${NC}      (set: ${HEAVEN_DB_PASSWORD:0:6}...)"
-echo -e "        ${CYAN}HEAVEN_ADMIN_PASSWORD${NC}   (for the API admin user)"
+# ── 9. Quick smoke test ───────────────────────────────────────────────────────
 echo ""
-
-if [ "${HEAVEN_INSTALL_GLOBAL:-0}" = "1" ]; then
-    HEAVEN_BIN="$(pwd)/venv/bin/heaven"
-    if [ -w "/usr/local/bin" ]; then
-        ln -sf "$HEAVEN_BIN" /usr/local/bin/heaven
-        echo -e "${GREEN}[+] Global 'heaven' command installed${NC}"
-    else
-        sudo ln -sf "$HEAVEN_BIN" /usr/local/bin/heaven && \
-            echo -e "${GREEN}[+] Global 'heaven' command installed${NC}" || \
-            echo -e "${YELLOW}[!] Could not install global symlink (sudo declined)${NC}"
-    fi
+info "Running smoke test..."
+if heaven --version >/dev/null 2>&1; then
+    ok "HEAVEN CLI is working"
+else
+    warn "CLI smoke test failed — check installation"
 fi
 
-echo -e "\n${CYAN}======================================================${NC}"
-echo -e "${GREEN}Setup complete.${NC}"
-echo -e "${CYAN}======================================================${NC}"
+# ── 10. Summary ───────────────────────────────────────────────────────────────
+echo ""
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║                    INSTALLATION COMPLETE                  ║${NC}"
+echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${BOLD}Next steps:${NC}"
+echo -e "  ${CYAN}source venv/bin/activate${NC}          # activate the environment"
+echo ""
+echo -e "${BOLD}Required environment variables:${NC}"
+echo -e "  ${CYAN}export HEAVEN_ADMIN_PASSWORD='<strong-password>'${NC}   # API admin login"
+echo -e "  ${DIM}(HEAVEN_DB_PASSWORD only needed for PostgreSQL mode)${NC}"
+echo ""
+echo -e "${BOLD}Quick start:${NC}"
+echo -e "  ${CYAN}heaven --version${NC}                  # version check"
+echo -e "  ${CYAN}heaven self-audit${NC}                 # security baseline"
+echo -e "  ${CYAN}heaven engage init my-engagement${NC}  # create an engagement"
+echo -e "  ${CYAN}heaven scan -u https://target.example --i-have-authorization${NC}"
+echo -e "  ${CYAN}heaven serve${NC}                      # start web UI at http://localhost:8443"
+echo ""
+echo -e "${DIM}Documentation: README.md | Full API: heaven serve → /api/docs${NC}"
+echo ""

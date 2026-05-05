@@ -48,6 +48,7 @@ async def crawl_url(
     url: str, max_depth: int = 3, max_pages: int = 200,
     timeout: float = 10.0, semaphore: Optional[asyncio.Semaphore] = None,
     evasion_headers: Optional[dict] = None,
+    auth_config: Optional[dict] = None,
 ) -> list[WebEndpoint]:
     """BFS web crawler that maps endpoints and extracts input vectors."""
     import aiohttp
@@ -59,8 +60,17 @@ async def crawl_url(
     queue: deque[tuple[str, int]] = deque([(url, 0)])
     base_domain = urlparse(url).netloc
 
+    _cookies: dict = {}
+    _extra_headers: dict = {}
+    if auth_config:
+        _cookies = auth_config.get("cookies", {})
+        _extra_headers = auth_config.get("headers", {})
+        if auth_config.get("bearer_token"):
+            _extra_headers["Authorization"] = f"Bearer {auth_config['bearer_token']}"
+
     async with aiohttp.ClientSession(
-        headers=evasion_headers or {},
+        headers={**(evasion_headers or {}), **_extra_headers},
+        cookies=_cookies,
         timeout=aiohttp.ClientTimeout(total=timeout),
         connector=aiohttp.TCPConnector(ssl=False, limit=50),
     ) as session:
@@ -220,7 +230,8 @@ async def discover_apis(base_url: str, timeout: float = 10.0, evasion_headers: O
     return endpoints
 
 
-async def crawl_targets(urls: list[str], stealth_level: str = "normal", **kwargs) -> dict[str, Any]:
+async def crawl_targets(urls: list[str], stealth_level: str = "normal",
+                        auth_config: Optional[dict] = None, **kwargs) -> dict[str, Any]:
     """Main entry point for web crawling (called by orchestrator)."""
     if not urls:
         logger.info("No URLs specified — skipping web crawl")
@@ -242,7 +253,7 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal", **kwargs
     for url in urls:
         await engine.apply_evasion_delay()
         headers = engine.get_http_headers()
-        eps = await crawl_url(url, semaphore=sem, evasion_headers=headers)
+        eps = await crawl_url(url, semaphore=sem, evasion_headers=headers, auth_config=auth_config)
         api_eps = await discover_apis(url, evasion_headers=headers)
         all_endpoints.extend(eps)
         all_endpoints.extend(api_eps)
@@ -264,3 +275,100 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal", **kwargs
         "js_endpoints": js_endpoints,
         "input_vectors": total_vectors,
     }
+
+
+async def crawl_url_js(
+    url: str,
+    max_depth: int = 2,
+    max_pages: int = 50,
+    auth_config: Optional[dict] = None,
+    evasion_headers: Optional[dict] = None,
+) -> list[WebEndpoint]:
+    """
+    Playwright-based crawler for JavaScript-heavy SPAs.
+    Falls back to aiohttp crawl_url if Playwright is not installed.
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logger.debug("Playwright not installed — falling back to aiohttp crawler")
+        return await crawl_url(url, max_depth=max_depth, max_pages=max_pages,
+                               evasion_headers=evasion_headers, auth_config=auth_config)
+
+    endpoints: list[WebEndpoint] = []
+    visited: set[str] = set()
+    base_domain = urlparse(url).netloc
+
+    launch_args = ["--no-sandbox", "--disable-dev-shm-usage"]
+    extra_headers = dict(evasion_headers or {})
+    if auth_config:
+        extra_headers.update(auth_config.get("headers", {}))
+        if auth_config.get("bearer_token"):
+            extra_headers["Authorization"] = f"Bearer {auth_config['bearer_token']}"
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=launch_args)
+            context = await browser.new_context(
+                extra_http_headers=extra_headers,
+                ignore_https_errors=True,
+            )
+            if auth_config and auth_config.get("cookies"):
+                cookie_list = [
+                    {"name": k, "value": v, "domain": base_domain, "path": "/"}
+                    for k, v in auth_config["cookies"].items()
+                ]
+                await context.add_cookies(cookie_list)
+
+            queue = [(url, 0)]
+            while queue and len(visited) < max_pages:
+                current_url, depth = queue.pop(0)
+                if current_url in visited or depth > max_depth:
+                    continue
+                visited.add(current_url)
+
+                try:
+                    page = await context.new_page()
+                    response = await page.goto(current_url, wait_until="networkidle", timeout=15000)
+                    status = response.status if response else 0
+
+                    content = await page.content()
+                    ep = WebEndpoint(url=current_url, status_code=status)
+
+                    # Extract links from rendered DOM
+                    links = await page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
+                    for link in links:
+                        parsed = urlparse(link)
+                        if parsed.netloc == base_domain and link not in visited:
+                            queue.append((link, depth + 1))
+
+                    # Extract forms
+                    forms = await page.eval_on_selector_all("form", """forms => forms.map(f => ({
+                        action: f.action, method: f.method,
+                        inputs: Array.from(f.elements).map(el => ({name: el.name, type: el.type}))
+                    }))""")
+                    ep.forms = forms
+                    ep.input_vectors = [
+                        {"url": current_url, "method": f.get("method", "GET"),
+                         "param": inp.get("name", ""), "type": inp.get("type", "text")}
+                        for f in forms for inp in f.get("inputs", []) if inp.get("name")
+                    ]
+
+                    # Extract JS files
+                    js_srcs = await page.eval_on_selector_all(
+                        "script[src]", "els => els.map(e => e.src)"
+                    )
+                    ep.js_files = [s for s in js_srcs if s]
+
+                    endpoints.append(ep)
+                    await page.close()
+                except Exception as page_err:
+                    logger.debug(f"Playwright page error {current_url}: {page_err}")
+
+            await browser.close()
+    except Exception as exc:
+        logger.warning(f"Playwright crawl failed for {url}: {exc} — falling back to aiohttp")
+        return await crawl_url(url, max_depth=max_depth, max_pages=max_pages,
+                               evasion_headers=evasion_headers, auth_config=auth_config)
+
+    return endpoints

@@ -142,6 +142,7 @@ class ScanOrchestrator:
         self._prioritiser = BayesianPrioritiser()
         self.priority_targets: list[str] = []
         self.net_task_id: Optional[str] = None
+        self._injected_service_keys: set[str] = set()
 
         self._checkpoint_store = checkpoint_store
         self._resumed_checkpoints: dict[str, dict] = {}
@@ -349,6 +350,77 @@ class ScanOrchestrator:
 
         return True
 
+    def _inject_service_tasks(self, net_data: dict) -> None:
+        """Inject follow-on tasks based on services discovered during RECON."""
+        hosts = net_data.get("hosts", [])
+        for host in hosts:
+            ip = host.get("ip", "")
+            for port_info in host.get("open_ports", []):
+                port = port_info.get("port", 0)
+                service = (port_info.get("service") or "").lower()
+                banner = (port_info.get("banner") or "").lower()
+
+                task_key = f"dynamic_{ip}_{port}"
+                if task_key in self._injected_service_keys:
+                    continue
+                self._injected_service_keys.add(task_key)
+
+                if "ssh" in service or port == 22:
+                    async def _ssh_check(ip=ip, port=port, **kw):
+                        try:
+                            from heaven.vulnscan.advanced_attacks import CredentialSprayer
+                            import aiohttp
+                            async with aiohttp.ClientSession() as session:
+                                sprayer = CredentialSprayer()
+                                return await sprayer.spray(session, f"ssh://{ip}:{port}")
+                        except Exception:
+                            return {}
+                    self.add_task(f"SSH Credential Check {ip}:{port}", _ssh_check,
+                                  phase=ScanPhase.VULN_SCAN, timeout=120)
+
+                elif port in (445, 139) or "smb" in service or "microsoft-ds" in service:
+                    async def _smb_enum(ip=ip, **kw):
+                        try:
+                            from heaven.recon.ad_scanner import scan_active_directory
+                            return await scan_active_directory(dc_host=ip)
+                        except Exception:
+                            return {}
+                    self.add_task(f"SMB Enumeration {ip}", _smb_enum,
+                                  phase=ScanPhase.AD_RECON, timeout=180)
+
+                elif port == 3389 or "rdp" in service or "ms-wbt-server" in service:
+                    async def _rdp_check(ip=ip, port=port, **kw):
+                        try:
+                            from heaven.vulnscan.advanced_attacks import test_default_credentials
+                            import aiohttp
+                            async with aiohttp.ClientSession() as session:
+                                return await test_default_credentials(session, f"http://{ip}:{port}")
+                        except Exception:
+                            return {}
+                    self.add_task(f"RDP Default Credentials {ip}", _rdp_check,
+                                  phase=ScanPhase.VULN_SCAN, timeout=120)
+
+                elif port in (3306, 5432, 1433, 27017, 6379) or any(
+                    db in service for db in ("mysql", "postgres", "mssql", "mongodb", "redis")
+                ):
+                    async def _db_check(ip=ip, port=port, service=service, **kw):
+                        return {
+                            "finding": {
+                                "target": f"{ip}:{port}",
+                                "vuln_type": "exposed_database",
+                                "title": f"Exposed {service.upper()} port {port}",
+                                "severity": "high",
+                                "confidence": 0.8,
+                            }
+                        }
+                    self.add_task(f"Exposed DB {ip}:{port}", _db_check,
+                                  phase=ScanPhase.VULN_SCAN, timeout=30)
+
+        injected = [t for t in self.tasks.values() if t.id.startswith("dynamic_") or
+                    any(x in t.name for x in ("SSH", "SMB", "RDP", "Exposed DB"))]
+        if injected:
+            logger.info(f"Dynamic injection: {len(injected)} service-specific tasks added")
+
     async def _execute_phase(self, phase: ScanPhase) -> list[TaskResult]:
         """Execute all tasks for a given phase with dependency resolution."""
         phase_tasks = [t for t in self.tasks.values() if t.phase == phase and t.state == TaskState.PENDING]
@@ -448,6 +520,8 @@ class ScanOrchestrator:
                     top = self._prioritiser.get_top_targets(n=20)
                     logger.info(f"Prioritised targets: {[t.host for t in top[:5]]}")
                     self.priority_targets = [t.host for t in top]
+                    # Dynamic task injection based on discovered services
+                    self._inject_service_tasks(net_result.data)
                 else:
                     self.priority_targets = []
 
@@ -578,6 +652,33 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         timeout=600,
     )
 
+    # ═══ Phase: SHODAN PASSIVE RECON ═══
+    async def _shodan_recon(**kw):
+        try:
+            from heaven.recon.shodan_recon import ShodanRecon
+            recon = ShodanRecon()
+            results = {"hosts": [], "domains": []}
+            for ip in targets.get("ips", []):
+                info = await recon.lookup_host(ip)
+                if info:
+                    results["hosts"].append(info)
+            for url in targets.get("urls", []):
+                from urllib.parse import urlparse
+                domain = urlparse(url).hostname or ""
+                if domain:
+                    info = await recon.lookup_domain(domain)
+                    if info:
+                        results["domains"].append(info)
+            return results
+        except ImportError:
+            return {}
+
+    orch.add_task(
+        "Shodan Passive Intelligence", _shodan_recon,
+        phase=ScanPhase.RECON,
+        timeout=120,
+    )
+
     # ═══ Phase: ADAPTIVE PROFILING (WAF fingerprint, tech stack) ═══
     async def _adaptive_profile(**kw):
         try:
@@ -662,11 +763,21 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             from heaven.vulnscan.advanced_attacks import run_advanced_tests
             import aiohttp
             findings = []
+            # Build scan_data from completed recon results so JWT + race tests fire
+            scan_data: dict = {"jwt_tokens": [], "critical_endpoints": []}
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                scan_data["jwt_tokens"].extend(data.get("jwt_tokens", []))
+                scan_data["critical_endpoints"].extend(data.get("endpoints", []))
+                for ep in data.get("forms", []):
+                    scan_data["critical_endpoints"].append(ep.get("action", ""))
             async with aiohttp.ClientSession() as session:
                 for url in targets.get("urls", []):
-                    found = await run_advanced_tests(session, url)
+                    found = await run_advanced_tests(session, url, scan_data=scan_data)
                     findings.extend([{
-                        "target": f.target, "type": f.vuln_type,
+                        "target": f.target, "vuln_type": f.vuln_type,
                         "severity": f.severity, "title": f.title,
                         "confidence": f.confidence,
                     } for f in found])
@@ -685,7 +796,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         try:
             from heaven.vulnscan.nuclei_scanner import scan_nuclei
             urls = targets.get("urls", [])
-            
+            stealth = targets.get("stealth_level", "normal")
             # Also extract URLs from crawler if available
             for tid, res in orch.results.items():
                 if res.state == TaskState.COMPLETED and res.data:
@@ -693,8 +804,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                         for ep in res.data["endpoints"]:
                             if ep.get("url") and ep["url"] not in urls:
                                 urls.append(ep["url"])
-                                
-            return await scan_nuclei(urls)
+            return await scan_nuclei(urls, stealth_level=stealth)
         except ImportError:
             return {}
 
@@ -725,6 +835,33 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "PoC Validation", _validate_findings,
         phase=ScanPhase.VALIDATION,
         depends_on=[vuln_id, zday_id, adv_id, nuclei_id],
+    )
+
+    # ═══ Phase: SQLMAP (confirmed SQLi targets only) ═══
+    async def _sqlmap_scan(**kw):
+        try:
+            from heaven.vulnscan.sqlmap_runner import run_sqlmap_on_findings
+            sqli_targets = []
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                for f in (data.get("findings", []) + data.get("candidates", [])
+                          + data.get("validated_findings", [])):
+                    vt = (f.get("vuln_type") or f.get("type") or "").lower()
+                    sev = (f.get("severity") or "").lower()
+                    if "sqli" in vt and sev in ("critical", "high"):
+                        sqli_targets.append(f)
+            if not sqli_targets:
+                return {"skipped": True, "reason": "no confirmed SQLi candidates"}
+            return await run_sqlmap_on_findings(sqli_targets)
+        except ImportError:
+            return {}
+
+    orch.add_task(
+        "SQLMap Exploitation", _sqlmap_scan,
+        phase=ScanPhase.VALIDATION, depends_on=[val_id],
+        timeout=600,
     )
 
     # ═══ Phase: ATTACK CHAIN ANALYSIS ═══

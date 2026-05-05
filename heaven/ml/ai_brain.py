@@ -162,6 +162,33 @@ class BayesianPrioritiser:
         ]
         return sorted(candidates, key=lambda b: b.ucb_score, reverse=True)[:n]
 
+    def save_beliefs(self, path: "Path") -> None:
+        """Persist beliefs to JSON so future scans start with prior knowledge."""
+        import json
+        from dataclasses import asdict
+        from pathlib import Path as _Path
+        _Path(path).write_text(
+            json.dumps({h: asdict(b) for h, b in self.beliefs.items()}, indent=2),
+            encoding="utf-8",
+        )
+
+    def load_beliefs(self, path: "Path") -> None:
+        """Load persisted beliefs. Unknown fields are silently ignored."""
+        import json
+        from pathlib import Path as _Path
+        p = _Path(path)
+        if not p.exists():
+            return
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            import dataclasses
+            valid_fields = {f.name for f in dataclasses.fields(TargetBelief)}
+            for host, vals in data.items():
+                filtered = {k: v for k, v in vals.items() if k in valid_fields}
+                self.beliefs[host] = TargetBelief(**filtered)
+        except Exception:
+            pass  # Corrupt persistence file — start fresh
+
     def summary(self) -> dict:
         top = self.get_next_targets(10)
         return {

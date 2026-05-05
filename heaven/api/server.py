@@ -81,6 +81,16 @@ class FindingStatusUpdate(BaseModel):
     notes: str = ""
 
 
+class ManualFindingRequest(BaseModel):
+    target: str
+    vuln_type: str
+    title: str
+    severity: str
+    confidence: float = 0.9
+    evidence: dict = {}
+    notes: str = ""
+
+
 class DashboardData(BaseModel):
     total_scans: int = 0
     total_assets: int = 0
@@ -260,6 +270,23 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+    # Security headers middleware — defense-in-depth for the API
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            response = await call_next(request)
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["X-XSS-Protection"] = "1; mode=block"
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+            if not os.environ.get("HEAVEN_DEV"):
+                response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            return response
+
+    app.add_middleware(_SecurityHeadersMiddleware)
 
     def _data_dir() -> Path:
         from heaven.config import get_config
@@ -613,6 +640,28 @@ def create_app() -> FastAPI:
             ],
             "count": len(results),
         }
+
+    @app.post("/api/engagement/findings")
+    async def create_manual_finding(
+        req: ManualFindingRequest,
+        user: User = Depends(require_permission("vuln.create")),
+    ):
+        """Record a finding discovered manually (e.g. via Burp Suite)."""
+        store = _engagement_store_factory()
+        if not store:
+            raise HTTPException(404, "No active engagement.")
+        finding_dict = {
+            "target": req.target,
+            "vuln_type": req.vuln_type,
+            "title": req.title,
+            "severity": req.severity,
+            "confidence": req.confidence,
+            "evidence": req.evidence,
+            "notes": req.notes,
+            "source": "manual",
+        }
+        finding_id = store.upsert_finding("manual", finding_dict)
+        return {"finding_id": finding_id, "status": "created"}
 
     @app.put("/api/engagement/findings/{finding_id}/status")
     async def update_finding_status_endpoint(

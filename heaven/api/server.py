@@ -67,6 +67,9 @@ class ScanRequest(BaseModel):
     cloud_providers: list[str] = Field(default_factory=list)
     ports: str = "1-1024"
     scan_type: str = "full"
+    mode: str = "web"
+    stealth_level: int = 3
+    engagement: Optional[str] = None
     i_have_authorization: bool = False
 
 
@@ -359,51 +362,98 @@ def create_app() -> FastAPI:
         scan_id: Optional[str] = None,
         user: User = Depends(require_permission("scan.view")),
     ):
+        # Primary: engagement store (populated by UI-launched + CLI scans)
+        eng_store = _engagement_store_factory()
+        eng_findings = []
+        if eng_store:
+            try:
+                eng_findings = [f.__dict__ for f in eng_store.list_findings(limit=1000)]
+            except Exception:
+                pass
+
+        # Fallback: report JSON files (written by CLI scans without engagement set)
+        report_findings: list[dict] = []
         data = _get_latest_report_data(scan_id)
-        summary = data.get("summary", {})
+        report_findings = data.get("vulnerabilities", []) or data.get("findings", [])
 
-        vulns = data.get("vulnerabilities", [])
-        avg_risk = sum(v.get("risk_score", 0) for v in vulns) / len(vulns) if vulns else 0.0
+        # Merge — engagement store takes priority
+        vulns = eng_findings if eng_findings else report_findings
 
+        sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for f in vulns:
+            s = (f.get("severity") or "info").lower()
+            if s in sev:
+                sev[s] += 1
+
+        avg_risk = 0.0
+        if vulns:
+            scores = [float(f.get("priority_score") or f.get("predicted_cvss_score") or 0) for f in vulns]
+            avg_risk = round(sum(scores) / len(scores), 1)
+
+        # Recent scans: in-memory running + persisted
         all_scans = []
+        seen_ids: set[str] = set()
         for sid, active in active_scans.items():
-            if active.get("status") != "completed":
-                all_scans.append({
-                    "id": sid,
-                    "name": active.get("config", {}).get("name", "HEAVEN Scan"),
-                    "status": active.get("status", "running"),
-                    "vulns": 0,
-                    "date": active.get("created", ""),
-                })
+            seen_ids.add(sid)
+            all_scans.append({
+                "id": sid,
+                "name": active.get("config", {}).get("name", "HEAVEN Scan"),
+                "status": active.get("status", "running"),
+                "vulns": active.get("findings_count", 0),
+                "date": active.get("created", ""),
+            })
 
+        # From engagement store
+        if eng_store:
+            try:
+                for s in eng_store.list_scans(limit=20):
+                    sid = s.get("id") or s.get("scan_id", "")
+                    if sid not in seen_ids:
+                        seen_ids.add(sid)
+                        all_scans.append({
+                            "id": sid,
+                            "name": s.get("name", "HEAVEN Scan"),
+                            "status": s.get("status", "completed"),
+                            "vulns": s.get("n_findings", 0),
+                            "date": s.get("started_at", ""),
+                        })
+            except Exception:
+                pass
+
+        # From report JSON files
         d = _data_dir()
         for file in sorted(glob.glob(str(d / "report_*.json")), key=os.path.getmtime, reverse=True)[:10]:
             try:
                 with open(file, "r") as f:
                     r = json.load(f)
-                all_scans.append({
-                    "id": r.get("scan_id", "unknown"),
-                    "name": r.get("config", {}).get("name", "HEAVEN Scan") if "config" in r else "HEAVEN Scan",
-                    "status": "completed",
-                    "vulns": len(r.get("vulnerabilities", [])),
-                    "date": r.get("timestamp", ""),
-                })
+                sid = r.get("scan_id", "unknown")
+                if sid not in seen_ids:
+                    seen_ids.add(sid)
+                    all_scans.append({
+                        "id": sid,
+                        "name": r.get("config", {}).get("name", "HEAVEN Scan"),
+                        "status": "completed",
+                        "vulns": len(r.get("vulnerabilities", [])),
+                        "date": r.get("timestamp", ""),
+                    })
             except Exception as e:
                 logger.debug(f"Skipping unreadable report {file}: {e}")
 
+        top_vulns = sorted(vulns, key=lambda f: float(f.get("priority_score") or f.get("predicted_cvss_score") or 0), reverse=True)[:5]
+
         return DashboardData(
             total_scans=len(all_scans),
-            total_assets=summary.get("total_assets", 0),
-            total_vulns=summary.get("total_vulnerabilities", 0),
-            critical=summary.get("critical", 0),
-            high=summary.get("high", 0),
-            medium=summary.get("medium", 0),
-            low=summary.get("low", 0),
-            confirmed=summary.get("confirmed", 0),
-            secrets=summary.get("secrets_found", 0),
-            avg_risk=round(avg_risk, 1),
+            total_assets=len(set(f.get("target", "") for f in vulns if f.get("target"))),
+            total_vulns=len(vulns),
+            critical=sev["critical"],
+            high=sev["high"],
+            medium=sev["medium"],
+            low=sev["low"],
+            confirmed=sum(1 for f in vulns if f.get("status") == "verified"),
+            secrets=0,
+            avg_risk=avg_risk,
             recent_scans=all_scans,
-            top_vulns=vulns[:5],
+            top_vulns=top_vulns,
             severity_trend=[],
         )
 
@@ -447,6 +497,11 @@ def create_app() -> FastAPI:
             severity=AuditSeverity.INFO,
         )
 
+        # Resolve engagement: explicit field > env var
+        if not req.engagement:
+            req.engagement = os.environ.get("HEAVEN_ENGAGEMENT")
+
+        active_scans[scan_id]["scan_id"] = scan_id
         asyncio.create_task(_run_scan_background(scan_id, req))
         return ScanResponse(scan_id=scan_id, status="pending", message="Scan queued")
 
@@ -455,7 +510,22 @@ def create_app() -> FastAPI:
         limit: int = Query(20, ge=1, le=100),
         user: User = Depends(require_permission("scan.view")),
     ):
-        return {"scans": list(active_scans.values())[:limit]}
+        # In-memory scans (current session)
+        mem = [{**v, "scan_id": k} for k, v in active_scans.items()]
+        # Persisted scans from engagement store
+        persisted = []
+        store = _engagement_store_factory()
+        if store:
+            try:
+                for s in store.list_scans(limit=limit):
+                    sid = s.get("scan_id") or s.get("id", "")
+                    if sid not in active_scans:
+                        persisted.append(s)
+            except Exception:
+                pass
+        combined = mem + persisted
+        combined.sort(key=lambda s: s.get("created") or s.get("started_at") or "", reverse=True)
+        return {"scans": combined[:limit]}
 
     @app.get("/api/scans/{scan_id}")
     async def get_scan(
@@ -593,22 +663,34 @@ def create_app() -> FastAPI:
         }
 
     # ── Engagement workflow ──
-    def _engagement_store_factory():
-        """Resolve engagement store from env var; None if not set."""
+    def _engagement_store_factory(name: Optional[str] = None):
+        """Resolve engagement store. Falls back to env var, then a default DB."""
         import os
         from heaven.engagement import EngagementStore
-        path = os.environ.get("HEAVEN_ENGAGEMENT")
-        if not path:
-            return None
-        return EngagementStore(path)
+        path = name or os.environ.get("HEAVEN_ENGAGEMENT") or "default"
+        # If it's just a name (no path separator), put it in data_dir
+        p = Path(path)
+        if not p.suffix and not p.is_absolute() and "/" not in path and "\\" not in path:
+            p = _data_dir() / "engagements" / f"{path}.db"
+        return EngagementStore(p)
 
     @app.get("/api/engagement")
     async def engagement_summary(
         user: User = Depends(require_permission("scan.view")),
     ):
-        """Active engagement summary + stats. Returns empty state if no engagement set."""
+        """Active engagement summary + stats."""
         store = _engagement_store_factory()
-        if not store:
+        try:
+            eng = store.get_engagement()
+            stats = store.stats()
+            no_engagement = stats.get("total_findings", 0) == 0 and stats.get("scans_run", 0) == 0
+            return {
+                "engagement": eng.__dict__ if eng else None,
+                "stats": stats,
+                "no_engagement": no_engagement,
+            }
+        except Exception as e:
+            logger.warning(f"Engagement store read error: {e}")
             return {
                 "engagement": None,
                 "stats": {
@@ -618,12 +700,6 @@ def create_app() -> FastAPI:
                 },
                 "no_engagement": True,
             }
-        eng = store.get_engagement()
-        return {
-            "engagement": eng.__dict__ if eng else None,
-            "stats": store.stats(),
-            "no_engagement": False,
-        }
 
     @app.get("/api/engagement/findings")
     async def engagement_findings(
@@ -637,8 +713,6 @@ def create_app() -> FastAPI:
     ):
         """List findings from the active engagement."""
         store = _engagement_store_factory()
-        if not store:
-            return {"findings": [], "count": 0, "no_engagement": True}
         results = store.list_findings(
             severity=severity, status=status, target=target,
             vuln_type=vuln_type, min_confidence=min_confidence, limit=limit,
@@ -796,35 +870,105 @@ def create_app() -> FastAPI:
 
 
 async def _run_scan_background(scan_id: str, req: ScanRequest):
-    """Run a scan in the background and update status."""
+    """Run a scan in the background, persist findings to engagement store and report file."""
     active_scans[scan_id]["status"] = "running"
+    active_scans[scan_id]["progress_pct"] = 0
+
+    # Engagement store — always open one (defaults to "default" engagement)
+    engagement_name = req.engagement or os.environ.get("HEAVEN_ENGAGEMENT") or "default"
+    store = None
+    try:
+        store = _engagement_store_factory(engagement_name)
+        store.record_scan_start(scan_id, name=req.name or engagement_name,
+                                mode=req.mode or req.scan_type or "web")
+    except Exception as e:
+        logger.warning(f"Could not open engagement store '{engagement_name}': {e}")
 
     try:
         from heaven.orchestrator import build_full_scan
-        orch = build_full_scan({
-            "ips": req.targets, "urls": req.urls,
-            "repositories": req.repositories,
-            "cloud_providers": req.cloud_providers,
-            "ports": req.ports,
-        })
+        from heaven.config import get_config
+        cfg = get_config()
+        cfg.stealth_level = req.stealth_level or 3
+
+        orch = build_full_scan(
+            {
+                "ips": req.targets,
+                "urls": req.urls,
+                "repositories": req.repositories,
+                "cloud_providers": req.cloud_providers,
+                "ports": req.ports,
+                "stealth_level": req.stealth_level or 3,
+            },
+            cfg,
+            checkpoint_store=store,
+        )
 
         async def progress_update(progress):
-            active_scans[scan_id]["progress"] = progress.to_dict()
+            pct = getattr(progress, "percent", None)
+            if pct is not None:
+                active_scans[scan_id]["progress_pct"] = round(pct)
+            active_scans[scan_id]["progress"] = progress.to_dict() if hasattr(progress, "to_dict") else {}
             for ws in list(ws_connections):
                 try:
-                    await ws.send_json(progress.to_dict())
+                    await ws.send_json({"scan_id": scan_id, **(progress.to_dict() if hasattr(progress, "to_dict") else {})})
                 except Exception:
                     pass
 
         orch.on_progress(progress_update)
         result = await orch.run()
+
+        findings = result.get("vulnerabilities", []) or result.get("findings", [])
         active_scans[scan_id]["status"] = "completed"
-        active_scans[scan_id]["result"] = result
+        active_scans[scan_id]["findings_count"] = len(findings)
+        active_scans[scan_id]["progress_pct"] = 100
+        active_scans[scan_id]["result"] = {k: v for k, v in result.items() if k != "vulnerabilities"}
+
+        # 1. Persist findings to engagement store (powers /api/engagement/findings + dashboard)
+        if store:
+            try:
+                for finding in findings:
+                    store.upsert_finding(scan_id, finding)
+                store.record_scan_complete(scan_id, summary={
+                    "total": len(findings),
+                    "elapsed_seconds": result.get("elapsed_seconds", 0),
+                    "severity": {
+                        s: sum(1 for f in findings if (f.get("severity") or "info").lower() == s)
+                        for s in ("critical", "high", "medium", "low", "info")
+                    },
+                })
+            except Exception as e:
+                logger.error(f"Failed persisting findings to engagement store: {e}")
+
+        # 2. Save report JSON (powers /api/dashboard, /api/vulnerabilities)
+        try:
+            from heaven.config import get_config as _gc
+            data_dir = _gc().data_dir
+            data_dir.mkdir(parents=True, exist_ok=True)
+            report_path = data_dir / f"report_{scan_id}.json"
+            report_data = {
+                "scan_id": scan_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "config": req.dict(),
+                "vulnerabilities": findings,
+                "findings": findings,
+                "assets": result.get("assets", []),
+                "summary": {
+                    "total_vulnerabilities": len(findings),
+                    "total_assets": len(result.get("assets", [])),
+                    "elapsed_seconds": result.get("elapsed_seconds", 0),
+                    **{s: sum(1 for f in findings if (f.get("severity") or "info").lower() == s)
+                       for s in ("critical", "high", "medium", "low", "info")},
+                },
+            }
+            report_path.write_text(json.dumps(report_data, indent=2, default=str))
+            logger.info(f"Report saved to {report_path} ({len(findings)} findings)")
+        except Exception as e:
+            logger.error(f"Failed saving report JSON: {e}")
 
         from heaven.security.audit import get_audit_logger, AuditAction, AuditSeverity
         get_audit_logger().log(
             AuditAction.SCAN_COMPLETED, target=scan_id,
-            details={"elapsed_s": result.get("elapsed_seconds", 0)},
+            details={"elapsed_s": result.get("elapsed_seconds", 0), "findings": len(findings)},
             actor=active_scans[scan_id].get("created_by", "system"),
             severity=AuditSeverity.INFO,
         )
@@ -832,7 +976,13 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
     except Exception as e:
         active_scans[scan_id]["status"] = "failed"
         active_scans[scan_id]["error"] = str(e)
-        logger.error(f"Background scan {scan_id} failed: {e}")
+        logger.error(f"Background scan {scan_id} failed: {e}", exc_info=True)
+
+        if store:
+            try:
+                store.record_scan_complete(scan_id, summary={"error": str(e)}, status="failed")
+            except Exception:
+                pass
 
         from heaven.security.audit import get_audit_logger, AuditAction, AuditSeverity
         get_audit_logger().log(

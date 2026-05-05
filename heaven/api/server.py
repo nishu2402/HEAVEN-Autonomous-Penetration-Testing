@@ -606,14 +606,23 @@ def create_app() -> FastAPI:
     async def engagement_summary(
         user: User = Depends(require_permission("scan.view")),
     ):
-        """Active engagement summary + stats."""
+        """Active engagement summary + stats. Returns empty state if no engagement set."""
         store = _engagement_store_factory()
         if not store:
-            raise HTTPException(404, "No active engagement. Set HEAVEN_ENGAGEMENT env var.")
+            return {
+                "engagement": None,
+                "stats": {
+                    "scope_targets": 0, "scans_run": 0, "total_findings": 0,
+                    "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                    "by_status": {},
+                },
+                "no_engagement": True,
+            }
         eng = store.get_engagement()
         return {
             "engagement": eng.__dict__ if eng else None,
             "stats": store.stats(),
+            "no_engagement": False,
         }
 
     @app.get("/api/engagement/findings")
@@ -629,7 +638,7 @@ def create_app() -> FastAPI:
         """List findings from the active engagement."""
         store = _engagement_store_factory()
         if not store:
-            raise HTTPException(404, "No active engagement.")
+            return {"findings": [], "count": 0, "no_engagement": True}
         results = store.list_findings(
             severity=severity, status=status, target=target,
             vuln_type=vuln_type, min_confidence=min_confidence, limit=limit,

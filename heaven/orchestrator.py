@@ -517,7 +517,7 @@ class ScanOrchestrator:
                 net_result = self.results.get(self.net_task_id)
                 if net_result and net_result.data:
                     self._prioritiser.initialise_beliefs(net_result.data)
-                    top = self._prioritiser.get_top_targets(n=20)
+                    top = self._prioritiser.get_next_targets(n=20)
                     logger.info(f"Prioritised targets: {[t.host for t in top[:5]]}")
                     self.priority_targets = [t.host for t in top]
                     # Dynamic task injection based on discovered services

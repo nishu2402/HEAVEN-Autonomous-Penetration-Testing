@@ -3,14 +3,18 @@ import { useParams, Link } from "react-router-dom";
 import { Engagement } from "../api";
 
 const STATUSES = ["open", "verified", "false_positive", "accepted_risk", "fixed"];
+const STATUS_COLORS = {
+  open: "#FFB800", verified: "#00FF41",
+  false_positive: "#555", accepted_risk: "#00D4FF", fixed: "rgba(0,255,65,0.4)"
+};
 
 export default function FindingDetail() {
   const { id } = useParams();
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [notes, setNotes] = useState("");
+  const [data, setData]       = useState(null);
+  const [error, setError]     = useState(null);
+  const [notes, setNotes]     = useState("");
   const [updating, setUpdating] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied]   = useState(false);
 
   function load() {
     setError(null);
@@ -19,7 +23,7 @@ export default function FindingDetail() {
       .catch((e) => setError(e.message));
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+  useEffect(() => { load(); }, [id]);
 
   async function changeStatus(newStatus) {
     setUpdating(true);
@@ -34,55 +38,108 @@ export default function FindingDetail() {
   }
 
   async function copyCurl() {
-    if (!data?.evidence_package?.curl_command) return;
+    const cmd = data?.evidence_package?.curl_command;
+    if (!cmd) return;
     try {
-      await navigator.clipboard.writeText(data.evidence_package.curl_command);
+      await navigator.clipboard.writeText(cmd);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch { /* no clipboard */ }
+    } catch { /* no clipboard API */ }
   }
 
-  if (error) return <div className="card error">{error}</div>;
-  if (!data) return <div className="card">Loading…</div>;
+  if (error) return (
+    <div className="page">
+      <div className="card error">
+        <div style={{ marginBottom: 8 }}>{error}</div>
+        <Link to="/findings" className="btn-small">← Back</Link>
+      </div>
+    </div>
+  );
 
-  const f = data.finding;
-  const ev = data.evidence_package;
+  if (!data) return (
+    <div className="page">
+      <div className="card"><span className="dim blink">Loading evidence package...</span></div>
+    </div>
+  );
+
+  const f  = data.finding || {};
+  const ev = data.evidence_package || {};
 
   return (
-    <div className="finding-detail">
+    <div className="page">
+      {/* Header */}
       <div className="card">
-        <Link to="/findings" className="btn-small">← Back to findings</Link>
-        <h2>
-          <span className={`sev-pill sev-${f.severity}`}>{f.severity}</span>
-          {" "}{f.vuln_type.toUpperCase()} — <span className="dim">{f.target}</span>
-        </h2>
-        <table className="kv-table">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <Link to="/findings" className="btn-small" style={{ marginBottom: 10, display: "inline-block" }}>
+              ← All findings
+            </Link>
+            <h2 style={{ fontSize: 16, marginTop: 8, color: "#00FF41", fontWeight: 700, letterSpacing: "0.05em" }}>
+              <span className={`sev-pill sev-${f.severity}`} style={{ marginRight: 8 }}>{f.severity}</span>
+              {(f.vuln_type || "").toUpperCase()}
+            </h2>
+            <div style={{ color: "rgba(0,255,65,0.5)", fontSize: 12, marginTop: 4 }}>{f.target}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 10, color: "rgba(0,255,65,0.35)", marginBottom: 4 }}>FINDING ID</div>
+            <code style={{ fontSize: 11 }}>{f.id}</code>
+          </div>
+        </div>
+
+        <table className="kv-table" style={{ marginTop: 16 }}>
           <tbody>
-            <tr><td>ID</td><td><code>{f.id}</code></td></tr>
-            <tr><td>Confidence</td><td>{Number(f.confidence).toFixed(2)} ({f.confidence_bucket || "—"})</td></tr>
+            <tr><td>Title</td><td style={{ color: "#00FF41" }}>{f.title || "—"}</td></tr>
+            <tr><td>Confidence</td><td>
+              <span style={{ color: Number(f.confidence) >= 0.9 ? "#00FF41" : "#FFB800" }}>
+                {Number(f.confidence).toFixed(2)}
+              </span>
+              {f.confidence_bucket && <span className="dim" style={{ marginLeft: 6 }}>({f.confidence_bucket})</span>}
+            </td></tr>
             <tr><td>CVE</td><td>{f.cve_id || "—"}</td></tr>
-            <tr><td>Risk score</td><td>{f.risk_score?.toFixed?.(1) || "—"}</td></tr>
-            <tr><td>Title</td><td>{f.title}</td></tr>
-            <tr><td>Current status</td><td><span className={`status-pill status-${f.status}`}>{f.status}</span></td></tr>
+            <tr><td>Predicted CVSS</td><td>{f.predicted_cvss_score?.toFixed?.(1) ?? "—"}</td></tr>
+            <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "—"}</td></tr>
+            <tr><td>MITRE Technique</td><td>{f.mitre_technique || "—"}</td></tr>
+            <tr><td>Seen</td><td className="dim">{f.seen_count ?? 1}× (last: {(f.last_seen_at || "").slice(0, 10)})</td></tr>
+            <tr><td>Status</td><td>
+              <span className={`status-pill status-${f.status}`}>{f.status}</span>
+            </td></tr>
           </tbody>
         </table>
       </div>
 
+      {/* Operator workflow */}
       <div className="card">
-        <h3>Operator workflow</h3>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Notes on this finding (saved with status change)"
-          rows={3}
-        />
-        <div className="status-buttons">
+        <div className="card-title">Triage</div>
+        <div style={{ marginBottom: 10 }}>
+          <label className="form-label" style={{ marginBottom: 4, display: "block" }}>
+            Operator notes (saved with status change)
+          </label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g. confirmed via Burp Repeater — response includes admin hashes"
+            rows={3}
+            style={{
+              width: "100%", background: "rgba(0,255,65,0.04)",
+              border: "1px solid rgba(0,255,65,0.2)", color: "#00FF41",
+              fontFamily: "inherit", fontSize: 12, padding: "8px 10px", outline: "none",
+              resize: "vertical",
+            }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {STATUSES.map((s) => (
             <button
               key={s}
               disabled={updating || f.status === s}
               onClick={() => changeStatus(s)}
-              className={`btn status-btn-${s}`}
+              className="btn"
+              style={{
+                borderColor: STATUS_COLORS[s],
+                color: STATUS_COLORS[s],
+                opacity: f.status === s ? 1 : 0.6,
+                fontWeight: f.status === s ? 700 : 400,
+              }}
             >
               {f.status === s ? `✓ ${s}` : s}
             </button>
@@ -90,46 +147,59 @@ export default function FindingDetail() {
         </div>
       </div>
 
-      {ev?.curl_command && (
+      {/* Curl repro */}
+      {ev.curl_command && (
         <div className="card">
-          <h3>Reproduce in your shell</h3>
-          <p className="dim">
-            Paste this into a terminal or Burp's "Paste URL as request" to verify manually.
+          <div className="card-title">Reproduce</div>
+          <p className="dim" style={{ fontSize: 11, marginBottom: 8 }}>
+            Paste into terminal or Burp's "Paste as request" to verify manually.
           </p>
-          <pre className="code">{ev.curl_command}</pre>
-          <button className="btn" onClick={copyCurl}>
-            {copied ? "✓ Copied" : "Copy curl"}
+          <div className="evidence-block">{ev.curl_command}</div>
+          <button className="btn" onClick={copyCurl} style={{ marginTop: 10 }}>
+            {copied ? "✓ Copied to clipboard" : "Copy curl command"}
           </button>
         </div>
       )}
 
-      <div className="card">
-        <h3>Proof of issue</h3>
-        <h4>Request</h4>
-        <pre className="code">
-          {ev.request_method} {ev.request_url}{"\n"}
-          {Object.entries(ev.request_headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n")}
-          {ev.request_body ? "\n\n" + ev.request_body.slice(0, 1500) : ""}
-        </pre>
-        <h4>Response — HTTP {ev.response_status} ({ev.response_size_bytes} bytes)</h4>
-        <pre className="code">
-          {ev.response_excerpt?.slice(0, 2000) || "(no response captured)"}
-        </pre>
-      </div>
+      {/* Request / Response */}
+      {(ev.request_url || ev.request_method) && (
+        <div className="card">
+          <div className="card-title">Evidence</div>
+          <div style={{ marginBottom: 8, fontSize: 10, color: "rgba(0,255,65,0.4)", letterSpacing: "0.08em" }}>
+            REQUEST
+          </div>
+          <div className="evidence-block">
+            {ev.request_method} {ev.request_url}{"\n"}
+            {Object.entries(ev.request_headers || {}).map(([k, v]) => `${k}: ${v}`).join("\n")}
+            {ev.request_body ? "\n\n" + ev.request_body.slice(0, 1000) : ""}
+          </div>
 
+          <div style={{ margin: "12px 0 8px", fontSize: 10, color: "rgba(0,255,65,0.4)", letterSpacing: "0.08em" }}>
+            RESPONSE — HTTP {ev.response_status} ({ev.response_size_bytes ?? "?"} bytes)
+          </div>
+          <div className="evidence-block">
+            {ev.response_excerpt?.slice(0, 2000) || "(no response captured)"}
+          </div>
+        </div>
+      )}
+
+      {/* Why flagged */}
       {ev.reasons?.length > 0 && (
         <div className="card">
-          <h3>Why this is flagged</h3>
-          <ul>
-            {ev.reasons.map((r, i) => <li key={i}>{r}</li>)}
+          <div className="card-title">Detection Rationale</div>
+          <ul style={{ paddingLeft: 16, lineHeight: 2 }}>
+            {ev.reasons.map((r, i) => (
+              <li key={i} style={{ color: "rgba(0,255,65,0.7)", fontSize: 12 }}>{r}</li>
+            ))}
           </ul>
         </div>
       )}
 
+      {/* Remediation */}
       {ev.remediation && (
         <div className="card">
-          <h3>Remediation</h3>
-          <pre className="code">{ev.remediation}</pre>
+          <div className="card-title">Remediation</div>
+          <div className="evidence-block">{ev.remediation}</div>
         </div>
       )}
     </div>

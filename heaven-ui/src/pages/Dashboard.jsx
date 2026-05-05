@@ -2,99 +2,146 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import NetworkTopology3D from '../components/NetworkTopology3D'
 import LiveTerminal from '../components/LiveTerminal'
-import { Engagement } from '../api'
+import { Engagement, Dashboard as DashApi } from '../api'
 
-const FADE_UP = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } }
+const SEV_COLORS = {
+  critical: '#FF003C', high: '#FF6B00', medium: '#FFB800', low: '#00D4FF',
+}
 
-function StatCard({ label, value, color, delay }) {
+function StatCard({ label, value, color, sub }) {
   return (
-    <motion.div className="card" variants={FADE_UP} transition={{ delay }}
-                style={{ textAlign: 'center', borderColor: color + '44' }}>
-      <div className="card-title">{label}</div>
-      <div style={{ fontSize: '2.5rem', color, fontWeight: 700,
-                    textShadow: `0 0 20px ${color}44` }}>
+    <motion.div
+      className="stat-card"
+      style={{ color }}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <div className="stat-label">{label}</div>
+      <div className="stat-value" style={{ color, textShadow: `0 0 20px ${color}55` }}>
         {value ?? '—'}
       </div>
+      {sub && <div style={{ fontSize: 9, color: 'rgba(0,255,65,0.3)', marginTop: 4 }}>{sub}</div>}
     </motion.div>
   )
 }
 
 export default function Dashboard() {
-  const [data, setData] = useState(null)
-  const [clock, setClock] = useState(new Date().toLocaleTimeString())
-  const [activeScanId, setActiveScanId] = useState(
-    localStorage.getItem('heaven_active_scan') || ''
-  )
+  const [eng, setEng] = useState(null)
+  const [dash, setDash] = useState(null)
+  const [activeScanId] = useState(localStorage.getItem('heaven_active_scan') || '')
 
   useEffect(() => {
-    const fetch = () => Engagement.summary().then(setData).catch(() => {})
-    fetch()
-    const t = setInterval(fetch, 5000)
+    const load = () => {
+      Engagement.summary().then(setEng).catch(() => {})
+      DashApi.get().then(setDash).catch(() => {})
+    }
+    load()
+    const t = setInterval(load, 8000)
     return () => clearInterval(t)
   }, [])
 
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000)
-    return () => clearInterval(t)
-  }, [])
+  const stats = eng?.stats || {}
+  const hosts = dash?.assets || []
+  const noEng = !eng || eng.no_engagement
 
-  const stats = data?.stats || {}
-  const hosts = data?.assets || []
+  const critCount = stats.by_severity?.critical ?? 0
+  const highCount = stats.by_severity?.high ?? 0
+  const medCount  = stats.by_severity?.medium ?? 0
+  const totalFindings = stats.total_findings ?? 0
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px',
-                  gridTemplateRows: 'auto 1fr', height: '100vh',
-                  gap: '1px', background: 'rgba(0,255,65,0.1)' }}>
+    <div className="dashboard-grid">
+      {/* Left: 3D + stat cards */}
+      <div className="dashboard-left">
+        {/* 3D Topology */}
+        <div style={{ position: 'relative', overflow: 'hidden' }}>
+          <NetworkTopology3D hosts={hosts} isDemo={noEng} />
 
-      {/* Top bar */}
-      <div style={{ gridColumn: '1/-1', display: 'flex', alignItems: 'center',
-                    padding: '8px 16px', background: '#000',
-                    borderBottom: '1px solid rgba(0,255,65,0.2)' }}>
-        <span style={{ color: '#00FF41', letterSpacing: '0.2em', fontSize: '14px' }}>
-          H E A V E N
-        </span>
-        <span style={{ flex: 1, textAlign: 'center', color: '#666', fontSize: '11px' }}>
-          {clock}
-        </span>
-        <span style={{ color: '#666', fontSize: '11px' }}>
-          {activeScanId ? (
-            <><span style={{ color: '#00FF41', fontSize: '8px' }} className="blink">●</span>
-            {' '}{activeScanId.slice(0, 8)}</>
-          ) : 'IDLE'}
-        </span>
+          {/* Overlay info */}
+          {noEng && (
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', pointerEvents: 'none',
+            }}>
+              <div style={{
+                background: 'rgba(0,0,0,0.75)',
+                border: '1px solid rgba(0,212,255,0.3)',
+                padding: '12px 20px',
+                textAlign: 'center',
+                backdropFilter: 'blur(4px)',
+              }}>
+                <div style={{ color: '#00D4FF', fontSize: 11, letterSpacing: '0.1em', marginBottom: 4 }}>
+                  NO ACTIVE ENGAGEMENT
+                </div>
+                <div style={{ color: 'rgba(0,255,65,0.4)', fontSize: 10 }}>
+                  heaven engage init &lt;name&gt;
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Stat cards */}
+        <div className="stat-grid">
+          <StatCard
+            label="Critical" value={critCount} color={SEV_COLORS.critical}
+            sub={critCount > 0 ? 'NEEDS ATTENTION' : 'CLEAR'}
+          />
+          <StatCard
+            label="High" value={highCount} color={SEV_COLORS.high}
+          />
+          <StatCard
+            label="Medium" value={medCount} color={SEV_COLORS.medium}
+          />
+          <StatCard
+            label="Targets" value={stats.scope_targets ?? 0} color="#00FF41"
+            sub={`${stats.scans_run ?? 0} scan${stats.scans_run !== 1 ? 's' : ''}`}
+          />
+        </div>
       </div>
 
-      {/* Left column */}
-      <div style={{ background: '#000', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ flex: '0 0 45vh' }}>
-          <NetworkTopology3D hosts={hosts} />
+      {/* Right: terminal + info */}
+      <div className="dashboard-right">
+        {/* Engagement mini-summary */}
+        <div style={{
+          padding: '10px 14px',
+          borderBottom: '1px solid rgba(0,255,65,0.1)',
+          fontSize: 11,
+        }}>
+          {noEng ? (
+            <div style={{ color: 'rgba(0,255,65,0.3)', fontSize: 10 }}>
+              <div style={{ marginBottom: 6, color: '#00D4FF', letterSpacing: '0.1em', fontSize: 9 }}>QUICK START</div>
+              <div style={{ lineHeight: 1.8 }}>
+                <div>$ heaven engage init my-eng</div>
+                <div>$ heaven scope add 10.0.0.0/24 --kind cidr</div>
+                <div>$ heaven scan -t 10.0.0.1 --i-have-authorization</div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ color: 'rgba(0,255,65,0.4)', fontSize: 9, letterSpacing: '0.1em', marginBottom: 4 }}>
+                ENGAGEMENT
+              </div>
+              <div style={{ color: '#00FF41', fontWeight: 700, marginBottom: 2 }}>
+                {eng.engagement?.name}
+              </div>
+              <div style={{ color: 'rgba(0,255,65,0.45)', fontSize: 10 }}>
+                {totalFindings} findings · {stats.scope_targets} targets in scope
+              </div>
+              <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                {Object.entries(SEV_COLORS).map(([s, c]) => (
+                  <span key={s} style={{ fontSize: 10, color: c }}>
+                    {stats.by_severity?.[s] ?? 0} {s.charAt(0).toUpperCase()}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        <motion.div style={{ flex: 1, padding: '12px', display: 'grid',
-                             gridTemplateColumns: 'repeat(4,1fr)', gap: '8px' }}
-                    initial="hidden" animate="show"
-                    variants={{ show: { transition: { staggerChildren: 0.1 } } }}>
-          <StatCard label="Critical" value={stats.by_severity?.critical}
-                    color="#FF003C" delay={0} />
-          <StatCard label="High" value={stats.by_severity?.high}
-                    color="#FF6B00" delay={0.1} />
-          <StatCard label="Medium" value={stats.by_severity?.medium}
-                    color="#FFB800" delay={0.2} />
-          <StatCard label="Assets" value={stats.scope_targets}
-                    color="#00D4FF" delay={0.3} />
-        </motion.div>
-      </div>
-
-      {/* Right column: terminal */}
-      <div style={{ background: '#000', borderLeft: '1px solid rgba(0,255,65,0.15)',
-                    display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(0,255,65,0.1)',
-                      fontSize: '10px', color: '#666', letterSpacing: '0.1em' }}>
-          LIVE TELEMETRY
-        </div>
-        <div style={{ flex: 1 }}>
-          <LiveTerminal scanId={activeScanId} />
-        </div>
+        {/* Live terminal */}
+        <LiveTerminal scanId={activeScanId} />
       </div>
     </div>
   )

@@ -4,45 +4,53 @@ import { Engagement, getUser, logout } from "../api";
 
 export default function Header() {
   const [eng, setEng] = useState(null);
-  const [err, setErr] = useState(null);
+  const [clock, setClock] = useState(new Date().toLocaleTimeString());
   const navigate = useNavigate();
   const location = useLocation();
   const user = getUser();
 
   useEffect(() => {
-    Engagement.summary()
-      .then(setEng)
-      .catch((e) => setErr(e.message));
+    Engagement.summary().then(setEng).catch(() => {});
   }, [location.pathname]);
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   async function handleLogout() {
     await logout();
     navigate("/login", { replace: true });
   }
 
+  const hasEngagement = eng && !eng.no_engagement && eng.engagement;
+
   return (
     <header className="header">
       <div className="header-left">
-        {eng && eng.engagement ? (
+        {hasEngagement ? (
           <>
-            <span className="eng-label">Engagement:</span>{" "}
-            <strong>{eng.engagement.name}</strong>
+            <span className="eng-label">ENG</span>
+            <span className="eng-name">{eng.engagement.name}</span>
             {eng.engagement.client && (
-              <span className="eng-client"> — {eng.engagement.client}</span>
+              <span className="eng-stats"> — {eng.engagement.client}</span>
             )}
             <span className="eng-stats">
-              {" · "}
-              {eng.stats.total_findings} findings · {eng.stats.scope_targets} in scope
+              {" · "}{eng.stats.total_findings ?? 0} findings
+              {" · "}{eng.stats.scope_targets ?? 0} targets
             </span>
           </>
-        ) : err ? (
-          <span className="eng-warn">No active engagement (set HEAVEN_ENGAGEMENT)</span>
         ) : (
-          <span className="dim">Loading engagement...</span>
+          <span className="eng-warn">
+            No engagement — run: heaven engage init &lt;name&gt;
+          </span>
         )}
       </div>
       <div className="header-right">
-        {user && <span className="user-badge">{user.username} ({user.role})</span>}
+        <span className="header-clock">{clock}</span>
+        {user && (
+          <span className="user-badge">{user.username} · {user.role}</span>
+        )}
         <button className="logout-btn" onClick={handleLogout}>Sign out</button>
       </div>
     </header>

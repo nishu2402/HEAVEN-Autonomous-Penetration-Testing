@@ -1,45 +1,48 @@
 import { useEffect, useRef, useState } from 'react'
+import { openLogStream, getToken } from '../api'
 
-const SEV_COLOR = {
-  critical: '#FF003C', high: '#FF6B00', medium: '#FFB800',
-  low: '#00D4FF', info: '#888',
+const DEMO_LINES = [
+  { type: 'info',    text: 'HEAVEN initialized — operator-driven mode' },
+  { type: 'success', text: 'Bayesian prioritiser loaded' },
+  { type: 'info',    text: 'Evasion engine: NORMAL profile' },
+  { type: 'success', text: 'Security headers middleware active' },
+  { type: 'success', text: 'API server ready on :8443' },
+  { type: 'dim',     text: '─'.repeat(42) },
+  { type: 'info',    text: 'Awaiting scan target...' },
+  { type: 'dim',     text: 'heaven scan -u https://target --i-have-authorization' },
+]
+
+function classify(line) {
+  const l = line.toLowerCase()
+  if (l.includes('error') || l.includes('fail') || l.includes('critical')) return 'error'
+  if (l.includes('warn') || l.includes('skip')) return 'warn'
+  if (l.includes('found') || l.includes('complet') || l.includes('success')) return 'success'
+  if (l.includes('[*]') || l.includes('info') || l.includes('scan')) return 'info'
+  return 'dim'
 }
 
 export default function LiveTerminal({ scanId }) {
-  const [lines, setLines] = useState([])
+  const [lines, setLines] = useState(DEMO_LINES)
   const [connected, setConnected] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const bottomRef = useRef()
-  const wsRef = useRef()
+  const bottomRef = useRef(null)
 
   useEffect(() => {
-    if (!scanId) return
-    const token = localStorage.getItem('heaven_token') || ''
-    const ws = new WebSocket(
-      `ws://${window.location.hostname}:8443/api/ws/scan/${scanId}?token=${token}`
-    )
-    wsRef.current = ws
-
-    ws.onopen = () => setConnected(true)
-    ws.onclose = () => setConnected(false)
-    ws.onmessage = (e) => {
+    if (!scanId || !getToken()) return
+    const ws = openLogStream((msg) => {
       try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'progress') {
-          setProgress(msg.data?.progress || 0)
-          setLines(l => [...l.slice(-499), {
-            type: 'log',
-            text: `[${new Date().toLocaleTimeString()}] ${msg.data?.current_task || ''}`,
-          }])
-        } else if (msg.type === 'finding') {
-          const f = msg.data
-          setLines(l => [...l.slice(-499), { type: 'finding', data: f }])
-        } else if (msg.type === 'log') {
-          setLines(l => [...l.slice(-499), { type: 'log', text: msg.data }])
-        }
-      } catch {}
+        const data = JSON.parse(msg)
+        const text = data.message || data.msg || data.log || String(msg)
+        setLines(prev => [...prev.slice(-200), { type: classify(text), text }])
+      } catch {
+        setLines(prev => [...prev.slice(-200), { type: classify(msg), text: msg }])
+      }
+    })
+    if (ws) {
+      ws.onopen = () => setConnected(true)
+      ws.onclose = () => setConnected(false)
+      ws.onerror = () => setConnected(false)
     }
-    return () => ws.close()
+    return () => { ws?.close(); setConnected(false) }
   }, [scanId])
 
   useEffect(() => {
@@ -47,43 +50,26 @@ export default function LiveTerminal({ scanId }) {
   }, [lines])
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column',
-                  fontFamily: 'monospace', fontSize: '11px' }}>
-      <div style={{ padding: '6px 8px', borderBottom: '1px solid rgba(0,255,65,0.2)',
-                    display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ color: connected ? '#00FF41' : '#FF003C', fontSize: '8px' }}>
-          {connected ? '● LIVE' : '○ IDLE'}
+    <div className="terminal-pane">
+      <div className="terminal-header">
+        <span>
+          {connected
+            ? <><span className="blink" style={{ color: '#00FF41' }}>●</span> LIVE</>
+            : scanId ? '◌ CONNECTING' : '○ IDLE'
+          }
+          {scanId && (
+            <span style={{ marginLeft: 8, color: 'rgba(0,255,65,0.3)' }}>
+              {scanId.slice(0, 8)}
+            </span>
+          )}
         </span>
-        <div style={{ flex: 1, height: '3px', background: 'rgba(0,255,65,0.1)' }}>
-          <div style={{ width: `${progress}%`, height: '100%',
-                        background: '#00FF41', transition: 'width 0.5s' }} />
-        </div>
-        <span style={{ color: '#666' }}>{Math.round(progress)}%</span>
+        <span>{lines.length} lines</span>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
-        {!scanId && (
-          <span style={{ color: '#1a4a1a' }}>
-            AWAITING TARGET<span className="blink">_</span>
-          </span>
-        )}
+      <div className="terminal-body">
         {lines.map((line, i) => (
-          <div key={i} style={{ marginBottom: '1px' }}>
-            {line.type === 'finding' ? (
-              <span>
-                <span style={{ color: '#666' }}>
-                  [{new Date().toLocaleTimeString()}]{' '}
-                </span>
-                <span style={{ color: SEV_COLOR[line.data?.severity] || '#00FF41' }}>
-                  [{line.data?.severity?.toUpperCase()}]{' '}
-                </span>
-                <span style={{ color: '#00D4FF' }}>{line.data?.vuln_type} </span>
-                <span style={{ color: '#888' }}>| {line.data?.target} | </span>
-                <span>conf:{(line.data?.confidence || 0).toFixed(2)}</span>
-              </span>
-            ) : (
-              <span style={{ color: '#1a4a1a' }}>{line.text}</span>
-            )}
+          <div key={i} className={`terminal-line ${line.type}`}>
+            {line.text}
           </div>
         ))}
         <div ref={bottomRef} />

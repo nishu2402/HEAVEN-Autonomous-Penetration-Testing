@@ -3,10 +3,9 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import { isAuthenticated, onAuthChange } from "./api";
 
-import Sidebar from "./components/Sidebar.jsx";
-import Header from "./components/Header.jsx";
-import LiveTerminal from "./components/LiveTerminal.jsx";
-import LoginPage from "./pages/LoginPage.jsx";
+import Sidebar      from "./components/Sidebar.jsx";
+import Header       from "./components/Header.jsx";
+import LoginPage    from "./pages/LoginPage.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Engagement from "./pages/Engagement.jsx";
 import Findings from "./pages/Findings.jsx";
@@ -60,7 +59,6 @@ function Shell() {
             <Route path="/scans" element={<Scans />} />
           </Routes>
         </div>
-        <LiveTerminal />
       </div>
     </div>
   );

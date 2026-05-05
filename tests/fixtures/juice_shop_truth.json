@@ -1,0 +1,27 @@
+{
+  "target": "http://localhost:3000",
+  "fixture": "juice-shop",
+  "vendor": "OWASP Juice Shop",
+  "vendor_url": "https://owasp.org/www-project-juice-shop/",
+  "notes": "OWASP Juice Shop is intentionally vulnerable. Spin up with: docker run --rm -p 3000:3000 bkimminich/juice-shop. Authorization to scan localhost is implicit when you run the image yourself.",
+  "expected_findings": [
+    {"category": "sqli", "endpoint": "/rest/user/login", "present": true,
+     "description": "SQL injection in login endpoint via email parameter"},
+    {"category": "xss", "endpoint": "/#/search", "present": true,
+     "description": "Reflected XSS in search query"},
+    {"category": "broken_access_control", "endpoint": "/rest/basket", "present": true,
+     "description": "Horizontal privilege escalation on basket endpoint"},
+    {"category": "sensitive_data", "endpoint": "/ftp", "present": true,
+     "description": "Exposed FTP-style listing of sensitive files"},
+    {"category": "xxe", "endpoint": "/file-upload", "present": true,
+     "description": "XXE in XML file upload"},
+    {"category": "open_redirect", "endpoint": "/redirect", "present": true,
+     "description": "Open redirect via 'to' parameter"},
+    {"category": "ssrf", "endpoint": "/profile", "present": false,
+     "description": "Negative control — SSRF should not fire here"},
+    {"category": "command_injection", "endpoint": "/", "present": false,
+     "description": "Negative control — no command injection on home page"}
+  ],
+  "expected_min_recall": 0.5,
+  "expected_max_fp_rate": 0.2
+}

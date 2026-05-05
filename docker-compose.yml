@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: heaven
+      POSTGRES_USER: heaven
+      POSTGRES_PASSWORD: ${HEAVEN_DB_PASSWORD:?HEAVEN_DB_PASSWORD must be set in env or .env}
+    # No host port published by default — keep DB on internal network only.
+    # Uncomment to expose for local debugging:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./heaven/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heaven"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  heaven-api:
+    build: .
+    ports:
+      - "127.0.0.1:8443:8443"  # Bind to localhost only by default
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HEAVEN_DB_HOST: postgres
+      HEAVEN_DB_PORT: "5432"
+      HEAVEN_DB_NAME: heaven
+      HEAVEN_DB_USER: heaven
+      HEAVEN_DB_PASSWORD: ${HEAVEN_DB_PASSWORD:?HEAVEN_DB_PASSWORD must be set}
+      HEAVEN_ADMIN_PASSWORD: ${HEAVEN_ADMIN_PASSWORD:?HEAVEN_ADMIN_PASSWORD must be set}
+      HEAVEN_API_HOST: "0.0.0.0"  # OK inside container; host port is bound to 127.0.0.1
+      HEAVEN_API_PORT: "8443"
+      HEAVEN_DEBUG: "false"
+      HEAVEN_CORS_ORIGINS: ${HEAVEN_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:

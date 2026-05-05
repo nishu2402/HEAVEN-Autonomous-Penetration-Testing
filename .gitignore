@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.tox/
+htmlcov/
+build/
+
+# Virtualenvs
+venv/
+env/
+.venv/
+
+# Frontend
+heaven-ui/node_modules/
+heaven-ui/.vite/
+
+# Engagement data (per-engagement, never commit)
+engagement.db
+engagements/
+data/
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Secrets
+.env
+.env.local

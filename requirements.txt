@@ -1,0 +1,111 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  HEAVEN v1.0 — Requirements                                      ║
+# ║  Vulnerability Scanner & Risk Triage Platform                    ║
+# ╚══════════════════════════════════════════════════════════════════╝
+#
+# Install:    pip install -r requirements.txt
+# Python:     >= 3.11
+
+# ─── Core Async Engine ───────────────────────────────────────────────
+uvloop>=0.19.0; sys_platform != "win32"
+aiohttp>=3.9.0
+aiofiles>=23.2.0
+asyncio-throttle>=1.0.2
+
+# ─── Database (PostgreSQL) ───────────────────────────────────────────
+asyncpg>=0.29.0
+sqlalchemy[asyncio]>=2.0.0
+alembic>=1.13.0
+
+# ─── API Server (FastAPI + WebSocket) ────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+python-multipart>=0.0.9
+starlette>=0.36.0
+slowapi>=0.1.9
+
+# ─── Machine Learning & Risk Scoring ─────────────────────────────────
+# Pin xgboost to a CPU-only build to avoid pulling the 300+MB nvidia-nccl wheel
+# on installs that don't need GPU support. Set HEAVEN_USE_GPU_XGBOOST=1 and
+# replace this line with `xgboost>=2.0.0` if you want CUDA support.
+xgboost-cpu>=2.0.0; sys_platform != "darwin"
+xgboost>=2.0.0; sys_platform == "darwin"
+scikit-learn>=1.4.0
+numpy>=1.26.0
+pandas>=2.2.0
+joblib>=1.3.0
+scipy>=1.12.0
+
+# ─── Security & Cryptography ─────────────────────────────────────────
+cryptography>=42.0.0
+bcrypt>=4.1.0
+PyJWT>=2.8.0
+passlib[bcrypt]>=1.7.4
+argon2-cffi>=23.1.0
+
+# ─── Network Reconnaissance ──────────────────────────────────────────
+scapy>=2.5.0
+python-nmap>=0.7.1
+dnspython>=2.6.0
+python-whois>=0.9.4
+shodan>=1.31.0
+
+# ─── Web Reconnaissance & Parsing ────────────────────────────────────
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+httpx>=0.27.0
+# selenium is optional (heavy, browser-based) — uncomment if you need JS-rendered crawling
+# selenium>=4.17.0
+
+# ─── Active Directory & Kerberos ─────────────────────────────────────
+impacket>=0.11.0
+ldap3>=2.9.1
+pyasn1>=0.6.0
+pycryptodome>=3.20.0
+
+# ─── MITRE ATT&CK Framework ──────────────────────────────────────────
+mitreattack-python>=0.0.6
+stix2>=3.0.1
+taxii2-client>=2.3.0
+
+# ─── Container & Kubernetes ──────────────────────────────────────────
+kubernetes>=29.0.0
+docker>=7.0.0
+
+# ─── Cloud SDKs ──────────────────────────────────────────────────────
+boto3>=1.34.0
+# Optional cloud SDKs (uncomment as needed):
+# google-cloud-compute>=1.17.0
+# azure-mgmt-compute>=30.0.0
+
+# ─── Reporting & Visualization ───────────────────────────────────────
+jinja2>=3.1.3
+matplotlib>=3.8.0
+weasyprint>=62.0
+reportlab>=4.0.0
+
+# ─── Utilities ───────────────────────────────────────────────────────
+apscheduler>=3.10.0
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+rich>=13.7.0
+click>=8.1.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+tabulate>=0.9.0
+tqdm>=4.66.0
+colorama>=0.4.6
+
+# ─── Optional: AI-assisted remediation ───────────────────────────────
+# Heavy dependency, only needed if you use heaven.devsecops.ai_remediation
+# google-generativeai>=0.4.0
+
+# ─── Development & Testing (optional) ────────────────────────────────
+# pytest>=8.0.0
+# pytest-asyncio>=0.23.0
+# pytest-cov>=4.1.0
+# black>=24.0.0
+# ruff>=0.2.0
+# mypy>=1.8.0
+# bandit>=1.7.7

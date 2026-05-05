@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_smoke.py -v --tb=short)",
+      "Bash(python -m heaven.main info)"
+    ]
+  }
+}

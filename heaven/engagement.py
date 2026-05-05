@@ -330,8 +330,8 @@ class EngagementStore:
         try:
             with self._conn() as conn:
                 conn.execute(
-                    "UPDATE scans SET status='paused', updated_at=? WHERE id=?",
-                    (datetime.now(timezone.utc).isoformat(), scan_id)
+                    "UPDATE scans SET status='paused' WHERE id=?",
+                    (scan_id,)
                 )
             return True
         except Exception:

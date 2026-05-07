@@ -373,5 +373,3 @@ cd heaven-ui && npm install && npm run build
 **108 tests · MIT License · Built for real-world engagements**
 
 </div>
-
-nisarg

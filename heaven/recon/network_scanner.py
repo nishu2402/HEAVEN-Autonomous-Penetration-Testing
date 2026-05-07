@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import socket
 import sys
 import time
 from dataclasses import dataclass, field
@@ -143,7 +142,6 @@ def guess_os_from_ttl(ttl: int) -> str:
 
 
 import xml.etree.ElementTree as ET
-import tempfile
 
 async def scan_host(
     host: str,

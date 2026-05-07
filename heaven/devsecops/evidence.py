@@ -12,10 +12,9 @@ designed to be exported into Markdown/HTML/PDF without further enrichment.
 
 from __future__ import annotations
 
-import json
 import shlex
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 
 @dataclass
@@ -270,7 +269,7 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "") ->
     """Render multiple findings as a single Markdown report."""
     from datetime import datetime, timezone
     out = []
-    out.append(f"# HEAVEN Findings Report")
+    out.append("# HEAVEN Findings Report")
     if engagement_name:
         out.append(f"\n**Engagement:** {engagement_name}")
     out.append(f"\n**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
@@ -306,7 +305,8 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "") ->
 
 def export_findings_csv(findings: list[dict]) -> str:
     """Render findings as CSV — for ticket-system import."""
-    import csv, io
+    import csv
+    import io
     buf = io.StringIO()
     fields = [
         "id", "target", "vuln_type", "title", "severity", "confidence",

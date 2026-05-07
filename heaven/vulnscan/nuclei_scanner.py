@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import Any
 
 from heaven.utils.logger import get_logger

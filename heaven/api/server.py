@@ -664,10 +664,10 @@ def create_app() -> FastAPI:
 
     # ── Engagement workflow ──
     def _engagement_store_factory(name: Optional[str] = None):
+        """Resolve engagement store. Falls back to env var, then a default DB."""
         from pathlib import Path
         from heaven.config import get_config
         _data_dir = get_config().data_dir
-        """Resolve engagement store. Falls back to env var, then a default DB."""
         import os
         from heaven.engagement import EngagementStore
         path = name or os.environ.get("HEAVEN_ENGAGEMENT") or "default"

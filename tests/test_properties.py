@@ -156,7 +156,7 @@ def test_kill_chain_empty_findings_zero_score():
 
 
 def test_kill_chain_full_coverage_max_score():
-    from heaven.mitre.kill_chain import KillChainAnalyzer, KillChainPhase
+    from heaven.mitre.kill_chain import KillChainAnalyzer
     analyzer = KillChainAnalyzer()
     # Hand-craft findings hitting every phase
     findings = [

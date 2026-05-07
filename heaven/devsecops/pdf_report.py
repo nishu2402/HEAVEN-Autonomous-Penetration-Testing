@@ -6,7 +6,6 @@ Generates branded, high-quality PDF reports for penetration test results.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 import datetime
 

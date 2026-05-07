@@ -1,7 +1,4 @@
-import asyncio
 import json
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 
 def test_compliance_report_owasp():

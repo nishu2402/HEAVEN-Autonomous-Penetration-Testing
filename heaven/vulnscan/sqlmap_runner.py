@@ -7,7 +7,6 @@ Only invoked when a finding with vuln_type='sqli' and severity critical/high is 
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 import tempfile
 from pathlib import Path

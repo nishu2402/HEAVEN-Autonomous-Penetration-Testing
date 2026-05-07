@@ -5,7 +5,6 @@ Run with:  pytest tests/test_smoke.py -v
 """
 from __future__ import annotations
 
-import os
 import re
 import sys
 

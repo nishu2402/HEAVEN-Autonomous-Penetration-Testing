@@ -29,7 +29,6 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 # ── Known test images (these run locally; you spin them up yourself) ──
@@ -139,10 +138,10 @@ class AccuracyReport:
 
     def print_summary(self) -> None:
         """Print a human-readable summary."""
-        print(f"\n=== HEAVEN Accuracy Report ===")
+        print("\n=== HEAVEN Accuracy Report ===")
         print(f"Target:    {self.target}")
         print(f"Fixture:   {self.fixture}")
-        print(f"\nConfusion matrix:")
+        print("\nConfusion matrix:")
         print(f"  True Positives:  {self.true_positives}")
         print(f"  False Positives: {self.false_positives}")
         print(f"  True Negatives:  {self.true_negatives}")
@@ -150,9 +149,9 @@ class AccuracyReport:
         print(f"\nPrecision: {self.precision:.1%}  (lower bound on accuracy)")
         print(f"Recall:    {self.recall:.1%}  (coverage of known issues)")
         print(f"F1 Score:  {self.f1_score:.3f}")
-        print(f"\nNote: numbers are calibrated to this fixture only. They do")
-        print(f"not generalize to all targets. A real engagement requires")
-        print(f"manual validation regardless of automated scores.\n")
+        print("\nNote: numbers are calibrated to this fixture only. They do")
+        print("not generalize to all targets. A real engagement requires")
+        print("manual validation regardless of automated scores.\n")
 
 
 def evaluate_against_truth(scan_findings: list[dict], truth: dict) -> AccuracyReport:

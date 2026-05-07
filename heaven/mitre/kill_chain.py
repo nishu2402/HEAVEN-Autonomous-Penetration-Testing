@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Iterable, Optional
+from typing import Iterable
 
 from heaven.utils.logger import get_logger
 

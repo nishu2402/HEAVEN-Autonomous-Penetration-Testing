@@ -4,10 +4,9 @@ web crawler auth_config, security headers, manual finding endpoint, dynamic inje
 """
 
 import asyncio
-import json
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 
 # ── Shodan ──────────────────────────────────────────────────────────────────

@@ -105,7 +105,7 @@ It runs as a local daemon with a **dark-themed web UI** you open in your browser
 ### 1. Install
 
 ```bash
-git clone https://github.com/your-org/heaven.git
+git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git
 cd heaven
 chmod +x install.sh && ./install.sh
 ```

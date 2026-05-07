@@ -387,7 +387,6 @@ class ADScanner:
 
                         tgs = await loop.run_in_executor(None, _get_tgs)
                         # Format as hashcat $krb5tgs$23$ hash
-                        from impacket.krb5.crypto import _enctype_table
                         enc_type = tgs["ticket"]["enc-part"]["etype"]
                         cipher_text = bytes(tgs["ticket"]["enc-part"]["cipher"])
                         hash_str = (

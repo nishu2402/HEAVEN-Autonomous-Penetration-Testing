@@ -664,6 +664,9 @@ def create_app() -> FastAPI:
 
     # ── Engagement workflow ──
     def _engagement_store_factory(name: Optional[str] = None):
+        from pathlib import Path
+        from heaven.config import get_config
+        _data_dir = get_config().data_dir
         """Resolve engagement store. Falls back to env var, then a default DB."""
         import os
         from heaven.engagement import EngagementStore
@@ -671,7 +674,7 @@ def create_app() -> FastAPI:
         # If it's just a name (no path separator), put it in data_dir
         p = Path(path)
         if not p.suffix and not p.is_absolute() and "/" not in path and "\\" not in path:
-            p = _data_dir() / "engagements" / f"{path}.db"
+            p = _data_dir / "engagements" / f"{path}.db"
         return EngagementStore(p)
 
     @app.get("/api/engagement")

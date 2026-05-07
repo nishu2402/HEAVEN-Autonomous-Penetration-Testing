@@ -5,9 +5,7 @@ Passive host/domain lookup via Shodan API (no active probing).
 
 from __future__ import annotations
 
-import asyncio
 import os
-from typing import Optional
 
 try:
     import aiohttp

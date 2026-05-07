@@ -5,7 +5,6 @@ Sends real-time notifications to Slack/Discord/Teams for critical findings.
 
 from __future__ import annotations
 
-import json
 import os
 import requests
 from typing import Any

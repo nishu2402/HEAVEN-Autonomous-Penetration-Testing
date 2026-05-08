@@ -54,7 +54,7 @@ def compile_json_report(scan_data: dict, output_path: str = None) -> dict:
 
 def export_sarif(scan_data: dict, output_path: str = "heaven-results.sarif") -> dict:
     """Export findings in SARIF 2.1.0 format for GitHub Security tab."""
-    sarif = {
+    sarif: dict[str, Any] = {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
@@ -72,7 +72,7 @@ def export_sarif(scan_data: dict, output_path: str = "heaven-results.sarif") -> 
     }
 
     rules_seen = set()
-    run = sarif["runs"][0]
+    run: dict[str, Any] = sarif["runs"][0]
 
     for vuln in scan_data.get("vulnerabilities", []):
         rule_id = vuln.get("cve_id") or vuln.get("title", "unknown")

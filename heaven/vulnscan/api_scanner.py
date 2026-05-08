@@ -256,7 +256,7 @@ class RESTAPIScanner:
                                      url: str) -> list[APIFinding]:
         """Test for mass assignment vulnerabilities."""
         findings = []
-        payloads = [
+        payloads: list[dict[str, object]] = [
             {"role": "admin", "is_admin": True, "admin": True},
             {"email_verified": True, "active": True, "approved": True},
             {"credit": 999999, "balance": 999999, "discount": 100},

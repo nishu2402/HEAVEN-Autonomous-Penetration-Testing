@@ -57,7 +57,7 @@ async def _evasive_request(session: aiohttp.ClientSession, method: str, url: str
         req_headers.update(headers)
 
     try:
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "headers": req_headers,
             "timeout": aiohttp.ClientTimeout(total=timeout),
             "allow_redirects": allow_redirects,

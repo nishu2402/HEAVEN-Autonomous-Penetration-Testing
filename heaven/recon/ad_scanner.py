@@ -250,7 +250,7 @@ class ADScanner:
                 }
                 spn_accounts.append(account)
                 # Add to attack graph
-                self._graph[account["username"]].add("Kerberoastable")
+                self._graph[str(account.get("username", ""))].add("Kerberoastable")
 
             self._domain_info.spn_accounts = spn_accounts
 
@@ -269,7 +269,7 @@ class ADScanner:
                         f"TGS tickets can be requested and cracked offline. "
                         f"{len(admin_spns)} are privileged accounts."
                     ),
-                    affected_objects=[a["username"] for a in spn_accounts],
+                    affected_objects=[str(a.get("username", "")) for a in spn_accounts],
                     confidence=0.95,
                     remediation=(
                         "Use Group Managed Service Accounts (gMSA). "
@@ -307,7 +307,7 @@ class ADScanner:
                 account = {"username": str(entry.sAMAccountName),
                            "admin_count": getattr(entry, 'adminCount', 0)}
                 asrep_accounts.append(account)
-                self._graph[account["username"]].add("AS-REP Roastable")
+                self._graph[str(account.get("username", ""))].add("AS-REP Roastable")
 
             self._domain_info.asrep_accounts = asrep_accounts
 
@@ -321,7 +321,7 @@ class ADScanner:
                         f"Found {len(asrep_accounts)} accounts with Kerberos pre-authentication disabled. "
                         "AS-REP can be requested and cracked offline without credentials."
                     ),
-                    affected_objects=[a["username"] for a in asrep_accounts],
+                    affected_objects=[str(a.get("username", "")) for a in asrep_accounts],
                     confidence=0.95,
                     remediation="Enable Kerberos pre-authentication on all user accounts.",
                     mitre_technique="T1558.004",
@@ -731,7 +731,7 @@ class ADScanner:
                 severity="critical",
                 title=f"Attack Path Analysis: {len(paths)} paths to Domain Admin",
                 description=f"Discovered {len(paths)} attack paths from unprivileged user to Domain Admin.",
-                attack_path=[p["name"] for p in paths],
+                attack_path=[str(p.get("name", "")) for p in paths],
                 confidence=0.85,
                 remediation="Implement tiered administration. Protect Tier 0 assets.",
                 mitre_technique="T1078",

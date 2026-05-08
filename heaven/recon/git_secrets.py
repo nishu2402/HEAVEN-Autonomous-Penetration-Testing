@@ -48,7 +48,7 @@ def shannon_entropy(data: str) -> float:
     """Calculate Shannon entropy of a string."""
     if not data:
         return 0.0
-    freq = {}
+    freq: dict[str, int] = {}
     for c in data:
         freq[c] = freq.get(c, 0) + 1
     length = len(data)
@@ -70,7 +70,7 @@ class SecretFinding:
 
 def scan_file(file_path: Path, base_dir: Path = None) -> list[SecretFinding]:
     """Scan a single file for secrets."""
-    findings = []
+    findings: list[SecretFinding] = []
     if file_path.suffix in IGNORE_EXTENSIONS:
         return findings
     try:
@@ -109,7 +109,7 @@ def scan_file(file_path: Path, base_dir: Path = None) -> list[SecretFinding]:
 
 def scan_git_history(repo_path: Path, max_commits: int = 500) -> list[SecretFinding]:
     """Scan git history for secrets in past commits."""
-    findings = []
+    findings: list[SecretFinding] = []
     try:
         result = subprocess.run(
             ["git", "log", f"--max-count={max_commits}", "--diff-filter=A", "--name-only", "--pretty=format:%H|%aI|%an"],
@@ -202,7 +202,7 @@ async def scan_repositories(repos: list[str] = None, **kwargs) -> dict[str, Any]
         all_findings.extend(findings)
         logger.info(f"  {repo}: {len(findings)} secrets found")
 
-    by_type = {}
+    by_type: dict[str, int] = {}
     for f in all_findings:
         by_type[f.secret_type] = by_type.get(f.secret_type, 0) + 1
 

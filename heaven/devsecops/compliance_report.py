@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 class ComplianceReportGenerator:
@@ -46,7 +46,7 @@ class ComplianceReportGenerator:
                    "High" if sev_counts["high"] > 0 else
                    "Medium" if sev_counts["medium"] > 0 else "Low")
 
-        owasp_coverage = {}
+        owasp_coverage: dict[str, dict[str, Any]] = {}
         for f in findings:
             vt = (f.get("vuln_type") or "").lower()
             for key, (ctrl_id, ctrl_name) in self.OWASP_MAP.items():

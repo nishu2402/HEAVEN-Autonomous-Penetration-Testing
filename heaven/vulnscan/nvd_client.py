@@ -91,7 +91,7 @@ class NVDClient:
         client = await self._get_client()
 
         try:
-            params = {"cpeName": cpe, "resultsPerPage": 50}
+            params: dict[str, str | int] = {"cpeName": cpe, "resultsPerPage": 50}
             resp = await client.get(NVD_BASE_URL, params=params)
 
             if resp.status_code != 200:
@@ -192,7 +192,7 @@ async def lookup_vulnerabilities(scan_id: str = "", cpes: list[str] = None, **kw
     client = NVDClient()
     await client.load_kev_catalog()
 
-    all_vulns = []
+    all_vulns: list[dict[str, Any]] = []
     stats = {"total_cves": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "in_kev": 0}
 
     for cpe in cpes:
@@ -209,10 +209,10 @@ async def lookup_vulnerabilities(scan_id: str = "", cpes: list[str] = None, **kw
 
     # Enrich with EPSS
     if all_vulns:
-        cve_ids = [v["cve_id"] for v in all_vulns]
+        cve_ids = [str(v.get("cve_id", "")) for v in all_vulns]
         epss_scores = await client.enrich_epss(cve_ids)
         for v in all_vulns:
-            v["epss_score"] = epss_scores.get(v["cve_id"], 0.0)
+            v["epss_score"] = epss_scores.get(str(v.get("cve_id", "")), 0.0)
 
     await client.close()
     stats["total_cves"] = len(all_vulns)

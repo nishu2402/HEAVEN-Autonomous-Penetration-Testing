@@ -242,7 +242,7 @@ async def _discover_js_files(session: aiohttp.ClientSession, url: str) -> list[s
 async def discover_vhosts(session: aiohttp.ClientSession, ip: str,
                            domain: str, wordlist: list[str] = None) -> list[DiscoveredAsset]:
     """Discover virtual hosts by sending requests with different Host headers."""
-    discovered = []
+    discovered: list[DiscoveredAsset] = []
     words = wordlist or SUBDOMAIN_WORDLIST[:30]
 
     # Get baseline response

@@ -54,7 +54,7 @@ def _lookup_vendor(mac: str) -> str:
 def parse_pcap(pcap_path: str) -> dict:
     """Parse PCAP to extract wireless networks, clients, and rogue APs."""
     try:
-        from scapy.all import rdpcap, Dot11, Dot11Beacon, Dot11Elt, RadioTap
+        from scapy.all import rdpcap, Dot11, Dot11Beacon, Dot11Elt, RadioTap  # type: ignore[attr-defined]
     except ImportError:
         logger.error("scapy not installed — cannot parse PCAPs")
         return {"networks": [], "clients": [], "rogue_aps": [], "total_frames": 0}
@@ -172,7 +172,7 @@ async def scan_wireless(pcap_files: list[str] = None, **kwargs) -> dict[str, Any
         return {"networks": [], "clients": [], "rogue_aps": []}
 
     loop = asyncio.get_event_loop()
-    all_data: dict[str, list] = {"networks": [], "clients": [], "rogue_aps": [], "total_frames": 0}
+    all_data: dict[str, Any] = {"networks": [], "clients": [], "rogue_aps": [], "total_frames": 0}
 
     for pcap in pcap_files:
         result = await loop.run_in_executor(None, parse_pcap, pcap)

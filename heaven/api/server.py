@@ -14,7 +14,7 @@ import glob
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 try:
     from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Depends, Header, Request
@@ -206,6 +206,20 @@ def require_permission(permission: str):
     return _checker
 
 
+def _engagement_store_factory(name: Optional[str] = None):
+    """Resolve engagement store. Falls back to env var, then a default DB."""
+    from heaven.config import get_config
+    from heaven.engagement import EngagementStore
+
+    data_dir = get_config().data_dir
+    path = name or os.environ.get("HEAVEN_ENGAGEMENT") or "default"
+    # If it's just a name (no path separator), put it in data_dir
+    p = Path(path)
+    if not p.suffix and not p.is_absolute() and "/" not in path and "\\" not in path:
+        p = data_dir / "engagements" / f"{path}.db"
+    return EngagementStore(p)
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
 
@@ -245,7 +259,10 @@ def create_app() -> FastAPI:
         rate_login = os.environ.get("HEAVEN_RATE_LIMIT_LOGIN", "5/minute")
         limiter = Limiter(key_func=get_remote_address, default_limits=[rate_default])
         app.state.limiter = limiter
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_exception_handler(
+            RateLimitExceeded,
+            cast(Any, _rate_limit_exceeded_handler),
+        )
     else:
         limiter = None
         rate_login = None
@@ -663,20 +680,6 @@ def create_app() -> FastAPI:
         }
 
     # ── Engagement workflow ──
-    def _engagement_store_factory(name: Optional[str] = None):
-        """Resolve engagement store. Falls back to env var, then a default DB."""
-        from pathlib import Path
-        from heaven.config import get_config
-        _data_dir = get_config().data_dir
-        import os
-        from heaven.engagement import EngagementStore
-        path = name or os.environ.get("HEAVEN_ENGAGEMENT") or "default"
-        # If it's just a name (no path separator), put it in data_dir
-        p = Path(path)
-        if not p.suffix and not p.is_absolute() and "/" not in path and "\\" not in path:
-            p = _data_dir / "engagements" / f"{path}.db"
-        return EngagementStore(p)
-
     @app.get("/api/engagement")
     async def engagement_summary(
         user: User = Depends(require_permission("scan.view")),
@@ -893,7 +896,6 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         from heaven.orchestrator import build_full_scan
         from heaven.config import get_config
         cfg = get_config()
-        cfg.stealth_level = req.stealth_level or 3
 
         orch = build_full_scan(
             {

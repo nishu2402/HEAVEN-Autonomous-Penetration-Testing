@@ -31,7 +31,7 @@ logger = get_logger("adaptive")
 
 # ── WAF/IDS Fingerprinting ──
 
-WAF_SIGNATURES = {
+WAF_SIGNATURES: dict[str, dict[str, list[str] | list[int]]] = {
     "cloudflare": {
         "headers": ["cf-ray", "cf-cache-status", "server: cloudflare"],
         "body": ["attention required! | cloudflare", "ray id:", "cloudflare"],
@@ -149,8 +149,11 @@ class AdaptiveIntelligence:
         for waf_name, sigs in WAF_SIGNATURES.items():
             confidence = 0.0
             evidence = []
+            header_sigs = [str(x) for x in sigs.get("headers", [])]
+            body_sigs = [str(x) for x in sigs.get("body", [])]
+            bypass_techniques = [str(x) for x in sigs.get("bypass_techniques", [])]
 
-            for h in sigs["headers"]:
+            for h in header_sigs:
                 if ":" in h:
                     key, val = h.split(":", 1)
                     if key.strip() in headers_lower and val.strip() in headers_lower.get(key.strip(), ""):
@@ -160,7 +163,7 @@ class AdaptiveIntelligence:
                     confidence += 0.25
                     evidence.append(f"Header present: {h}")
 
-            for pattern in sigs["body"]:
+            for pattern in body_sigs:
                 if pattern in body_lower:
                     confidence += 0.2
                     evidence.append(f"Body pattern: {pattern}")
@@ -169,7 +172,7 @@ class AdaptiveIntelligence:
                 best_confidence = confidence
                 best_match = WAFFingerprint(
                     name=waf_name, confidence=min(confidence, 1.0),
-                    evidence=evidence, bypass_techniques=sigs["bypass_techniques"],
+                    evidence=evidence, bypass_techniques=bypass_techniques,
                 )
 
         # Step 2: Send a known-malicious probe to trigger WAF block

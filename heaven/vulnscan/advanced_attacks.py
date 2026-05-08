@@ -145,7 +145,7 @@ class JWTAttacker:
     async def test_jwt_vulnerabilities(cls, session: aiohttp.ClientSession,
                                         url: str, token: str) -> list[AdvancedFinding]:
         """Run all JWT attacks."""
-        findings = []
+        findings: list[AdvancedFinding] = []
 
         try:
             header, payload, _ = cls.decode_jwt(token)
@@ -247,7 +247,7 @@ class SubdomainTakeoverDetector:
     """Detect dangling DNS records vulnerable to subdomain takeover."""
 
     # Fingerprints for services vulnerable to takeover
-    TAKEOVER_FINGERPRINTS = {
+    TAKEOVER_FINGERPRINTS: dict[str, dict[str, list[str] | list[int]]] = {
         "github_pages": {"cname": ["github.io"], "body": ["there isn't a github pages site here"],
                           "status": [404]},
         "heroku": {"cname": ["herokuapp.com", "herokussl.com"],
@@ -296,8 +296,10 @@ class SubdomainTakeoverDetector:
                     body = (await resp.text()).lower()
                     status = resp.status
 
-                    for body_sig in fingerprint["body"]:
-                        if body_sig.lower() in body and status in fingerprint["status"]:
+                    body_sigs = [str(s) for s in fingerprint.get("body", [])]
+                    statuses = [int(s) for s in fingerprint.get("status", [])]
+                    for body_sig in body_sigs:
+                        if body_sig.lower() in body and status in statuses:
                             return AdvancedFinding(
                                 target=subdomain, vuln_type="subdomain_takeover",
                                 severity="high",

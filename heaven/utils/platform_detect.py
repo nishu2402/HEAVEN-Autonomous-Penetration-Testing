@@ -54,7 +54,8 @@ def detect_platform() -> PlatformInfo:
     elif os_name == "windows":
         try:
             import ctypes
-            is_root = ctypes.windll.shell32.IsUserAnAdmin() != 0
+            windll = getattr(ctypes, "windll", None)
+            is_root = bool(windll and windll.shell32.IsUserAnAdmin() != 0)
         except Exception:
             is_root = False
 
@@ -175,4 +176,3 @@ def print_platform_info(info: PlatformInfo) -> None:
         print(f"Privileged: {'yes' if info.is_root else 'no'}")
         print(f"Event Loop: {info.event_loop_policy}")
         print(f"Tools: {', '.join(sorted(info.available_tools.keys())) or 'none'}")
-

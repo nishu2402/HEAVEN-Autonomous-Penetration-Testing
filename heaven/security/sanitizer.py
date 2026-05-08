@@ -12,6 +12,7 @@ import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlparse
 
 from heaven.utils.logger import get_logger
@@ -189,9 +190,9 @@ class InputSanitizer:
 
     def sanitize_targets(self, targets: dict) -> dict:
         """Sanitize all targets in a scan configuration."""
-        errors = []
-        warnings = []
-        sanitized = {}
+        errors: list[str] = []
+        warnings: list[str] = []
+        sanitized: dict[str, Any] = {}
 
         # IPs
         safe_ips = []

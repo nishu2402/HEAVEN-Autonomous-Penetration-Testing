@@ -283,17 +283,23 @@ class AttackChainEngine:
         for i, vuln in enumerate(vulns):
             vuln_type = vuln.get("vuln_type", vuln.get("type", "unknown"))
             mapping = VULN_CAPABILITY_MAP.get(vuln_type, {})
+            raw_tactic = mapping.get("tactic", TacticPhase.RECON)
+            tactic = raw_tactic if isinstance(raw_tactic, TacticPhase) else TacticPhase.RECON
+            raw_technique = mapping.get("technique", "")
+            technique = raw_technique if isinstance(raw_technique, str) else ""
+            raw_provides = mapping.get("provides", [])
+            provides = [str(cap) for cap in raw_provides] if isinstance(raw_provides, list) else []
 
             node = AttackNode(
                 node_id=f"vuln-{i}",
                 host=vuln.get("host", vuln.get("asset", "")),
                 port=vuln.get("port", 0),
                 vulnerability=vuln.get("cve", vuln.get("cve_id", f"HEAVEN-{vuln_type.upper()}")),
-                technique=mapping.get("technique", ""),
-                tactic=mapping.get("tactic", TacticPhase.RECON),
+                technique=technique,
+                tactic=tactic,
                 description=vuln.get("title", vuln.get("description", "")),
                 confidence=vuln.get("confidence", vuln.get("validation_confidence", 0.5)),
-                provides=mapping.get("provides", []),
+                provides=provides,
                 evidence={"source": "vulnerability_scan"},
             )
             self.nodes.append(node)
@@ -426,7 +432,9 @@ class AttackChainEngine:
                     # Can reach this node if it needs a capability we provide
                     vuln_type = node.vulnerability.lower()
                     mapping = VULN_CAPABILITY_MAP.get(vuln_type, {})
-                    if capability in mapping.get("provides", []) or capability in str(node.provides):
+                    raw_provides = mapping.get("provides", [])
+                    mapping_provides = [str(cap) for cap in raw_provides] if isinstance(raw_provides, list) else []
+                    if capability in mapping_provides or capability in str(node.provides):
                         visited.add(node.node_id)
                         queue.append((node, path + [node]))
 

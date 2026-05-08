@@ -11,7 +11,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import click
@@ -196,7 +196,7 @@ if HAS_CLICK:
         """Launch a vulnerability scan against specified targets."""
         print_banner()
 
-        targets = {
+        targets: dict[str, Any] = {
             "ips": list(target), "urls": list(url),
             "repositories": list(repo), "cloud_providers": list(cloud),
             "ports": ports, "stealth_level": stealth,
@@ -219,13 +219,13 @@ if HAS_CLICK:
             if use_scope:
                 # Filter targets to those explicitly in scope
                 kept_ips, dropped_ips = [], []
-                for t in targets["ips"]:
+                for t in list(targets["ips"]):
                     if engagement_store.is_in_scope(t):
                         kept_ips.append(t)
                     else:
                         dropped_ips.append(t)
                 kept_urls, dropped_urls = [], []
-                for u in targets["urls"]:
+                for u in list(targets["urls"]):
                     if engagement_store.is_in_scope(u):
                         kept_urls.append(u)
                     else:
@@ -247,9 +247,11 @@ if HAS_CLICK:
 
                 target_input = Prompt.ask("[bold]Enter target IP/host or URL[/bold] (e.g., 127.0.0.1 or https://example.com)")
                 if target_input.startswith("http"):
-                    targets["urls"].append(target_input)
+                    cast_urls: list[str] = targets["urls"]
+                    cast_urls.append(target_input)
                 else:
-                    targets["ips"].append(target_input)
+                    cast_ips: list[str] = targets["ips"]
+                    cast_ips.append(target_input)
 
                 mode = Prompt.ask(
                     "[bold]Select Scan Mode[/bold]",
@@ -269,11 +271,11 @@ if HAS_CLICK:
 
         # Target validation — real regex this time
         invalid = []
-        for t in targets["ips"]:
+        for t in list(targets["ips"]):
             ok, _kind = _validate_target_string(t)
             if not ok:
                 invalid.append(t)
-        for u in targets["urls"]:
+        for u in list(targets["urls"]):
             if not _URL_REGEX.match(u):
                 invalid.append(u)
         if invalid:
@@ -336,8 +338,8 @@ if HAS_CLICK:
             from rich.text import Text
             import time as _time
 
-            findings_log = []
-            log_lines = []
+            findings_log: list[dict[str, Any]] = []
+            log_lines: list[str] = []
 
             progress_bar = Progress(
                 TextColumn("[cyan]{task.description}"),
@@ -380,7 +382,10 @@ if HAS_CLICK:
                 log_lines.append(f"[{_time.strftime('%H:%M:%S')}] {progress.current_task}")
 
             with Live(build_layout(), refresh_per_second=4, screen=False) as live:
-                orch.on_progress(lambda p: (progress_callback(p), live.update(build_layout())))
+                def _on_progress(p):
+                    progress_callback(p)
+                    live.update(build_layout())
+                orch.on_progress(_on_progress)
                 try:
                     summary = asyncio.run(orch.run())
                 except KeyboardInterrupt:
@@ -1151,7 +1156,7 @@ if HAS_CLICK:
 
 else:
     # Fallback CLI without click
-    def cli():
+    def cli():  # type: ignore[misc]
         """Minimal CLI fallback when click is not installed."""
         print(__banner__)
         print(f"HEAVEN v{__version__}")

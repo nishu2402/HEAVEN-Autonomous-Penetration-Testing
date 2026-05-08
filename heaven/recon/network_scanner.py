@@ -12,6 +12,7 @@ import asyncio
 import ipaddress
 import sys
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -140,8 +141,6 @@ def guess_os_from_ttl(ttl: int) -> str:
         return "Network Device/Solaris"
     return "unknown"
 
-
-import xml.etree.ElementTree as ET
 
 async def scan_host(
     host: str,

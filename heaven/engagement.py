@@ -469,15 +469,20 @@ class EngagementStore:
         sql = "SELECT * FROM findings WHERE 1=1"
         args: list = []
         if severity:
-            sql += " AND severity = ?"; args.append(severity)
+            sql += " AND severity = ?"
+            args.append(severity)
         if status:
-            sql += " AND status = ?"; args.append(status)
+            sql += " AND status = ?"
+            args.append(status)
         if target:
-            sql += " AND target LIKE ?"; args.append(f"%{target}%")
+            sql += " AND target LIKE ?"
+            args.append(f"%{target}%")
         if vuln_type:
-            sql += " AND vuln_type = ?"; args.append(vuln_type)
+            sql += " AND vuln_type = ?"
+            args.append(vuln_type)
         if min_confidence > 0:
-            sql += " AND confidence >= ?"; args.append(min_confidence)
+            sql += " AND confidence >= ?"
+            args.append(min_confidence)
         sql += " ORDER BY CASE severity "
         sql += "WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 "
         sql += "WHEN 'low' THEN 3 ELSE 4 END, confidence DESC LIMIT ?"

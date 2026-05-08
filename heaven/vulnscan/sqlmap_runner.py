@@ -71,13 +71,14 @@ def _parse_sqlmap_output(output: str, url: str, work_dir: Path) -> dict:
     current_db = ""
 
     for line in output.splitlines():
-        l = line.strip()
-        if "is vulnerable" in l or "parameter" in l.lower() and "injectable" in l.lower():
-            injectable_params.append(l)
-        if "back-end DBMS:" in l:
-            dbms = l.split("back-end DBMS:")[-1].strip()
-        if "current database:" in l.lower():
-            current_db = l.split(":")[-1].strip().strip("'")
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
+        if "is vulnerable" in line_clean or ("parameter" in line_lower and "injectable" in line_lower):
+            injectable_params.append(line_clean)
+        if "back-end dbms:" in line_lower:
+            dbms = line_clean.split("back-end DBMS:")[-1].strip()
+        if "current database:" in line_lower:
+            current_db = line_clean.split(":")[-1].strip().strip("'")
 
     if injectable_params:
         findings.append({

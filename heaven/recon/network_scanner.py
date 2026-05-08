@@ -251,7 +251,7 @@ async def scan_host(
 
 def expand_targets(targets: list[str]) -> list[str]:
     """Expand CIDR notation and hostname targets to individual IPs."""
-    expanded = []
+    expanded: list[str] = []
     for target in targets:
         target = target.strip()
         if not target:

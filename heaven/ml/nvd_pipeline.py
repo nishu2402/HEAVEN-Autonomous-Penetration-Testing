@@ -10,6 +10,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 
@@ -30,9 +31,10 @@ class NVDPipeline:
         Handles pagination automatically (2000 per page).
         """
         headers = {"apiKey": self.api_key} if self.api_key else {}
-        params = {"pubStartDate": start, "pubEndDate": end,
-                  "resultsPerPage": 2000, "startIndex": 0}
-        results = []
+        start_index = 0
+        params: dict[str, str | int] = {"pubStartDate": start, "pubEndDate": end,
+                                        "resultsPerPage": 2000, "startIndex": start_index}
+        results: list[dict[str, Any]] = []
         while True:
             async with session.get(self.NVD_API, params=params,
                                    headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as r:
@@ -42,9 +44,10 @@ class NVDPipeline:
                 data = await r.json()
             batch = data.get("vulnerabilities", [])
             results.extend(batch)
-            total = data.get("totalResults", 0)
-            params["startIndex"] += 2000
-            if params["startIndex"] >= total:
+            total = int(data.get("totalResults", 0))
+            start_index += 2000
+            params["startIndex"] = start_index
+            if start_index >= total:
                 break
             await asyncio.sleep(self.delay)
         return results

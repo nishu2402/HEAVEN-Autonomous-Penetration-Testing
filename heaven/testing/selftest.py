@@ -238,7 +238,12 @@ def list_fixtures() -> None:
     print("\nKnown vulnerable test fixtures:\n")
     for name, info in KNOWN_FIXTURES.items():
         print(f"  {name:25} {info['image']}")
-        print(f"    Categories: {', '.join(info['categories'])}")
+        categories = info.get("categories", [])
+        if isinstance(categories, list):
+            categories_str = ", ".join(str(c) for c in categories)
+        else:
+            categories_str = ""
+        print(f"    Categories: {categories_str}")
         print(f"    Vendor:     {info['vendor_url']}")
         print(f"    Spin up:    docker run --rm -p {info['default_port']}:{info['default_port']} {info['image']}")
         print()

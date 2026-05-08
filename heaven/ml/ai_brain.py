@@ -15,6 +15,7 @@ import math
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from heaven.utils.logger import get_logger
 
@@ -162,7 +163,7 @@ class BayesianPrioritiser:
         ]
         return sorted(candidates, key=lambda b: b.ucb_score, reverse=True)[:n]
 
-    def save_beliefs(self, path: "Path") -> None:
+    def save_beliefs(self, path: Path) -> None:
         """Persist beliefs to JSON so future scans start with prior knowledge."""
         import json
         from dataclasses import asdict
@@ -172,7 +173,7 @@ class BayesianPrioritiser:
             encoding="utf-8",
         )
 
-    def load_beliefs(self, path: "Path") -> None:
+    def load_beliefs(self, path: Path) -> None:
         """Load persisted beliefs. Unknown fields are silently ignored."""
         import json
         from pathlib import Path as _Path
@@ -344,7 +345,13 @@ class SmartPayloadSelector:
                         })
 
         # Sort by expected success rate and take top N
-        candidates.sort(key=lambda c: c["success_rate"], reverse=True)
+        def _success_rate(candidate: dict[str, object]) -> float:
+            value = candidate.get("success_rate", 0.0)
+            if isinstance(value, (int, float)):
+                return float(value)
+            return 0.0
+
+        candidates.sort(key=_success_rate, reverse=True)
         selected = candidates[:budget]
 
         if not selected:

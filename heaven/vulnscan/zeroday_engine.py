@@ -194,10 +194,10 @@ class ProtocolFuzzer:
                     candidates.append(anomaly)
 
         # Format string probes
-        for payload in mutation.format_string_payloads()[:5]:
-            result = await self._send_tcp_probe(host, port, payload.encode())
+        for format_payload in mutation.format_string_payloads()[:5]:
+            result = await self._send_tcp_probe(host, port, format_payload.encode())
             if result:
-                anomaly = self._analyze_format_string_response(result, payload)
+                anomaly = self._analyze_format_string_response(result, format_payload)
                 if anomaly:
                     anomaly.target = f"{host}:{port}"
                     anomaly.service = service
@@ -573,5 +573,4 @@ class VersionRegressionAnalyzer:
                             cwe_id="CWE-119", technique="version_regression",
                         ))
         return candidates
-
 

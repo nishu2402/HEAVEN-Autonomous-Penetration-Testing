@@ -30,10 +30,10 @@ if not HAS_SQLALCHEMY:
         def __class_getitem__(cls, item): return Any
     mapped_column = _Stub()
     relationship = _Stub()
-    Mapped = Any  # type: ignore[assignment]
+    Mapped = Any  # type: ignore[misc,assignment]
     # Type stubs
-    UUID = String = Text = Integer = Float = Boolean = DateTime = _Stub
-    JSONB = ARRAY = ForeignKey = UniqueConstraint = CheckConstraint = Index = Column = Enum = _Stub
+    UUID = String = Text = Integer = Float = Boolean = DateTime = _Stub  # type: ignore[misc,assignment]
+    JSONB = ARRAY = ForeignKey = UniqueConstraint = CheckConstraint = Index = Column = Enum = _Stub  # type: ignore[misc,assignment]
 
 
 class Base(DeclarativeBase):

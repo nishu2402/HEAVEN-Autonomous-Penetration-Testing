@@ -136,7 +136,7 @@ class KubernetesScanner:
     async def check_api_server(cls, host: str = "localhost",
                                  port: int = 6443) -> list[ContainerFinding]:
         """Check Kubernetes API server for misconfigurations."""
-        findings = []
+        findings: list[ContainerFinding] = []
         if not HAS_AIOHTTP:
             return findings
 

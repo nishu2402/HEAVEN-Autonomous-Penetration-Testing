@@ -9,7 +9,7 @@ import asyncio
 import re
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from urllib.parse import urljoin, urlparse
 
 from heaven.recon.evasion_engine import EvasionEngine, EvasionProfile, StealthLevel
@@ -101,36 +101,39 @@ async def crawl_url(
 
                             # Extract links for BFS
                             for a in soup.find_all("a", href=True):
-                                link = urljoin(current_url, a["href"])
+                                href = a.get("href")
+                                link = urljoin(current_url, str(href or ""))
                                 if urlparse(link).netloc == base_domain and link not in visited:
                                     queue.append((link, depth + 1))
 
                             # Extract JS files
                             for script in soup.find_all("script", src=True):
-                                js = urljoin(current_url, script["src"])
+                                src = script.get("src")
+                                js = urljoin(current_url, str(src or ""))
                                 ep.js_files.append(js)
 
                             # Extract forms and input vectors
                             for form in soup.find_all("form"):
-                                form_data = {
-                                    "action": urljoin(current_url, form.get("action", "")),
-                                    "method": form.get("method", "GET").upper(),
+                                form_data: dict[str, Any] = {
+                                    "action": urljoin(current_url, str(form.get("action", ""))),
+                                    "method": str(form.get("method", "GET")).upper(),
                                     "inputs": [],
                                 }
+                                form_inputs = cast(list[dict[str, str]], form_data["inputs"])
                                 for inp in form.find_all(["input", "textarea", "select"]):
                                     input_info = {
-                                        "name": inp.get("name", ""),
-                                        "type": inp.get("type", "text"),
-                                        "id": inp.get("id", ""),
+                                        "name": str(inp.get("name", "")),
+                                        "type": str(inp.get("type", "text")),
+                                        "id": str(inp.get("id", "")),
                                     }
-                                    form_data["inputs"].append(input_info)
+                                    form_inputs.append(input_info)
                                     if inp.get("name"):
                                         ep.input_vectors.append({
                                             "type": "form_input",
                                             "url": form_data["action"],
                                             "method": form_data["method"],
-                                            "param": inp.get("name"),
-                                            "input_type": inp.get("type", "text"),
+                                            "param": str(inp.get("name", "")),
+                                            "input_type": str(inp.get("type", "text")),
                                         })
                                 ep.forms.append(form_data)
 
@@ -147,7 +150,7 @@ async def crawl_url(
                             # Meta generator
                             gen = soup.find("meta", attrs={"name": "generator"})
                             if gen and gen.get("content"):
-                                ep.technologies.append(gen["content"])
+                                ep.technologies.append(str(gen.get("content", "")))
 
                         endpoints.append(ep)
 

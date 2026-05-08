@@ -3,9 +3,7 @@ Phase 5 integration tests — Shodan, sqlmap runner, MSF client, belief persiste
 web crawler auth_config, security headers, manual finding endpoint, dynamic injection.
 """
 
-import asyncio
 import os
-from pathlib import Path
 
 
 # ── Shodan ────────────────────────────────────────────────────────────[...]

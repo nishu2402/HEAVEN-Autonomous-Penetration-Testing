@@ -335,7 +335,6 @@ async def crawl_url_js(
                     response = await page.goto(current_url, wait_until="networkidle", timeout=15000)
                     status = response.status if response else 0
 
-                    content = await page.content()
                     ep = WebEndpoint(url=current_url, status_code=status)
 
                     # Extract links from rendered DOM

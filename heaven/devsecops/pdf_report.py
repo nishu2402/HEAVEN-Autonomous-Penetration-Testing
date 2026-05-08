@@ -216,7 +216,7 @@ class PDFReportGenerator:
             # Ensure directory exists
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
             
-            pdf = self.weasyprint.HTML(string=html_content).write_pdf(output_path)
+            self.weasyprint.HTML(string=html_content).write_pdf(output_path)
             logger.info(f"PDF report generated successfully at: {output_path}")
             return True
             

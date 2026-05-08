@@ -106,7 +106,7 @@ class TestBurpExport:
         }]
         jsonl = export_proxy_history_jsonl(findings)
         # Each line is valid JSON
-        lines = [l for l in jsonl.splitlines() if l]
+        lines = [line for line in jsonl.splitlines() if line]
         assert len(lines) == 1
         rec = _json.loads(lines[0])
         assert rec["finding_id"] == "x"
@@ -203,8 +203,6 @@ class TestFPSuppressionIntegration:
         import heaven.vulnscan.fp_suppress as fp_mod
         called = []
 
-        original_suppress = fp_mod.suppress_finding
-
         async def mock_suppress(session, finding):
             called.append(finding["vuln_type"])
             return fp_mod.SuppressionVerdict(
@@ -233,7 +231,7 @@ class TestFPSuppressionIntegration:
         except ImportError:
             pytest.skip("aiohttp not available")
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession():
             findings = [{"type": "sqli", "target": "https://x.test",
                          "param": "id", "method": "GET"}]
             result = await safe_validator.validate_findings(findings=findings)

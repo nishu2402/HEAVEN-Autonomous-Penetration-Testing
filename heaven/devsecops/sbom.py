@@ -30,7 +30,6 @@ def generate_cyclonedx_sbom(scan_data: dict[str, Any], output_path: str = "heave
             if not isinstance(details, dict):
                 continue
                 
-            service = details.get("service", "")
             product = details.get("product", "")
             version = details.get("version", "")
             

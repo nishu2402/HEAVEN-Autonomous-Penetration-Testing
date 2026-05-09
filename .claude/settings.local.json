@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(python -m pytest tests/test_smoke.py -v --tb=short)",
-      "Bash(python -m heaven.main info)"
+      "Bash(python -m heaven.main info)",
+      "Bash(python -c \"import heaven; print\\('OK'\\)\")",
+      "Bash(python3 -c \"import heaven; print\\('OK'\\)\")",
+      "Bash(python3 -m pytest tests/ -v --tb=short)",
+      "Bash(python3 -c ' *)",
+      "Bash(xxd /Users/heaven/Downloads/HEAVEN-Autonomous-Penetration-Testing/NVD_model.pkl)",
+      "Bash(pip3 install *)",
+      "Bash(python3 -m venv venv)",
+      "Bash(venv/bin/pip install *)",
+      "Bash(venv/bin/python -c ' *)",
+      "Bash(venv/bin/python -m pytest tests/ -v --tb=short)"
     ]
   }
 }

@@ -142,6 +142,28 @@ def guess_os_from_ttl(ttl: int) -> str:
     return "unknown"
 
 
+def _build_nmap_port_spec(ports: list[int]) -> str:
+    """
+    Convert a sorted list of port numbers into a compact nmap port spec string.
+    Contiguous runs become ranges (e.g. [1,2,3,80] → '1-3,80') to keep the
+    command line short without accidentally scanning ports outside the requested set.
+    """
+    if not ports:
+        return ""
+    sorted_ports = sorted(set(ports))
+    segments: list[str] = []
+    run_start = sorted_ports[0]
+    run_end = sorted_ports[0]
+    for p in sorted_ports[1:]:
+        if p == run_end + 1:
+            run_end = p
+        else:
+            segments.append(str(run_start) if run_start == run_end else f"{run_start}-{run_end}")
+            run_start = run_end = p
+    segments.append(str(run_start) if run_start == run_end else f"{run_start}-{run_end}")
+    return ",".join(segments)
+
+
 async def scan_host(
     host: str,
     ports: list[int],
@@ -155,19 +177,12 @@ async def scan_host(
     host_result = HostResult(host=host)
     start = time.time()
 
-    # Create port string like 22,80,443 or a range
-    # nmap takes max 1024 ports at a time if listed individually, so we might need ranges.
-    # To keep it simple, if ports are sequentially 1-1024, pass "1-1024".
-    # Otherwise pass comma separated list.
-    if len(ports) > 100:
-        port_str = f"{min(ports)}-{max(ports)}"
-    else:
-        port_str = ",".join(map(str, ports))
+    port_str = _build_nmap_port_spec(ports)
         
     cmd = ["nmap", "-sV", "-p", port_str, "-oX", "-", host]
     
     if include_udp and udp_ports:
-        udp_str = ",".join(map(str, udp_ports[:50])) # Limit UDP for speed
+        udp_str = _build_nmap_port_spec(udp_ports[:50])
         cmd = ["nmap", "-sV", "-sS", "-sU", "-p", f"T:{port_str},U:{udp_str}", "-oX", "-", host]
         
     # Stealth options

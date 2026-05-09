@@ -1,0 +1,15 @@
+[
+  "attack_vector",
+  "attack_complexity",
+  "privileges_required",
+  "user_interaction",
+  "scope",
+  "conf_impact",
+  "integ_impact",
+  "avail_impact",
+  "vuln_age_days",
+  "ref_count",
+  "cpe_count",
+  "epss_score_pct",
+  "in_kev"
+]

@@ -84,34 +84,48 @@ class NVDPipeline:
                     year += 1
         return out_file
 
+    # Canonical 13-feature names used by NVD_model.pkl
+    FEATURE_NAMES = [
+        "attack_vector", "attack_complexity", "privileges_required",
+        "user_interaction", "scope", "conf_impact", "integ_impact",
+        "avail_impact", "vuln_age_days", "ref_count", "cpe_count",
+        "epss_score_pct", "in_kev",
+    ]
+
     def parse_dataset(self, jsonl_path: Path):
         """
-        Parse JSONL dataset into lists of feature dicts + target scores.
-        Returns (X, y, feature_cols) — X is numpy array, y is score array.
+        Parse NVD JSONL dataset into feature arrays for model training.
+
+        Returns (X, y, feature_cols):
+          - X: numpy array of shape (n_samples, 13) with NVD_model.pkl features
+          - y: numpy array of CVSS base scores (regression target)
+          - feature_cols: list of the 13 feature names
         """
         import pandas as pd
 
-        AV_MAP = {"NETWORK": 4, "ADJACENT_NETWORK": 3, "ADJACENT": 3,
-                  "LOCAL": 2, "PHYSICAL": 1}
-        AC_MAP = {"LOW": 2, "HIGH": 1}
-        PR_MAP = {"NONE": 3, "LOW": 2, "HIGH": 1}
-        UI_MAP = {"NONE": 2, "REQUIRED": 1}
-        SC_MAP = {"CHANGED": 2, "UNCHANGED": 1}
+        AV_MAP  = {"NETWORK": 4, "ADJACENT_NETWORK": 3, "ADJACENT": 3,
+                   "LOCAL": 2, "PHYSICAL": 1}
+        AC_MAP  = {"LOW": 2, "HIGH": 1}
+        PR_MAP  = {"NONE": 3, "LOW": 2, "HIGH": 1}
+        UI_MAP  = {"NONE": 2, "REQUIRED": 1}
+        SC_MAP  = {"CHANGED": 2, "UNCHANGED": 1}
         IMP_MAP = {"HIGH": 3, "LOW": 2, "NONE": 1}
 
         rows = []
-        with open(jsonl_path) as f:
-            for line in f:
+        with open(jsonl_path) as fh:
+            for line in fh:
                 try:
                     item = json.loads(line)
-                    cve = item.get("cve", item)  # handle both wrapped and flat
-                    metrics = (cve.get("metrics", {})
-                               .get("cvssMetricV31", [{}])[0]
-                               .get("cvssData", {}))
-                    if not metrics:
-                        metrics = (cve.get("metrics", {})
-                                   .get("cvssMetricV30", [{}])[0]
-                                   .get("cvssData", {}))
+                    cve = item.get("cve", item)
+
+                    # Prefer CVSSv3.1, fall back to v3.0
+                    metrics31 = (cve.get("metrics", {})
+                                 .get("cvssMetricV31", [{}])[0]
+                                 .get("cvssData", {}))
+                    metrics30 = (cve.get("metrics", {})
+                                 .get("cvssMetricV30", [{}])[0]
+                                 .get("cvssData", {}))
+                    metrics = metrics31 if metrics31 else metrics30
                     score = metrics.get("baseScore")
                     if score is None:
                         continue
@@ -123,25 +137,40 @@ class NVDPipeline:
                     except Exception:
                         age_days = 365
 
+                    # Count references and CPE configurations
+                    references = cve.get("references", [])
+                    ref_count = min(len(references), 50)
+
+                    confs = cve.get("configurations", [])
+                    cpe_count = 0
+                    for conf in confs:
+                        for node in conf.get("nodes", []):
+                            cpe_count += len(node.get("cpeMatch", []))
+                    cpe_count = min(cpe_count, 20)
+
                     row = {
-                        "cvss_base_score": float(score),
-                        "attack_vector": AV_MAP.get(metrics.get("attackVector", ""), 2),
-                        "attack_complexity": AC_MAP.get(metrics.get("attackComplexity", ""), 1),
+                        "attack_vector":       AV_MAP.get(metrics.get("attackVector", ""),  2),
+                        "attack_complexity":   AC_MAP.get(metrics.get("attackComplexity", ""), 1),
                         "privileges_required": PR_MAP.get(metrics.get("privilegesRequired", ""), 2),
-                        "user_interaction": UI_MAP.get(metrics.get("userInteraction", ""), 1),
-                        "scope": SC_MAP.get(metrics.get("scope", ""), 1),
-                        "conf_impact": IMP_MAP.get(metrics.get("confidentialityImpact", ""), 1),
-                        "integ_impact": IMP_MAP.get(metrics.get("integrityImpact", ""), 1),
-                        "avail_impact": IMP_MAP.get(metrics.get("availabilityImpact", ""), 1),
-                        "vuln_age_days": min(age_days, 3650),
+                        "user_interaction":    UI_MAP.get(metrics.get("userInteraction", ""), 1),
+                        "scope":               SC_MAP.get(metrics.get("scope", ""), 1),
+                        "conf_impact":         IMP_MAP.get(metrics.get("confidentialityImpact", ""), 1),
+                        "integ_impact":        IMP_MAP.get(metrics.get("integrityImpact", ""), 1),
+                        "avail_impact":        IMP_MAP.get(metrics.get("availabilityImpact", ""), 1),
+                        "vuln_age_days":       min(age_days, 3650),
+                        "ref_count":           float(ref_count),
+                        "cpe_count":           float(cpe_count),
+                        "epss_score_pct":      0.0,   # populated by fetch_epss post-processing
+                        "in_kev":              0.0,   # populated by fetch_kev post-processing
+                        "_cvss_base_score":    float(score),
                     }
                     rows.append(row)
                 except Exception:
                     continue
 
         df = pd.DataFrame(rows)
-        feature_cols = [c for c in df.columns if c != "cvss_base_score"]
-        return df[feature_cols].values, df["cvss_base_score"].values, feature_cols
+        feature_cols = self.FEATURE_NAMES
+        return df[feature_cols].values, df["_cvss_base_score"].values, feature_cols
 
     async def fetch_epss(self, cve_ids: list[str],
                          session: aiohttp.ClientSession) -> dict[str, float]:

@@ -5,7 +5,7 @@ Generates HTML security assessment reports with OWASP Top 10 mapping.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, Optional
 
@@ -131,7 +131,7 @@ class ComplianceReportGenerator:
         <h1>HEAVEN // SECURITY ASSESSMENT REPORT</h1>
         <div style="color:#666;font-size:11px;margin-bottom:24px">
           {engagement_name} &nbsp;|&nbsp;
-          Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} &nbsp;|&nbsp;
+          Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')} &nbsp;|&nbsp;
           Overall Risk: <span style="color:{sev_color.get(overall,'#ccc')}">{overall}</span>
         </div>
 

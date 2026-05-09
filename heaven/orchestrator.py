@@ -591,7 +591,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "Network Reconnaissance", scan_network,
         phase=ScanPhase.RECON, concurrency_group="network",
         targets=targets.get("ips", []),
-        port_range=targets.get("ports", "1-1024"),
+        port_range=targets.get("ports", "1-65535"),
         stealth_level=stealth,
     )
     orch.net_task_id = net_id

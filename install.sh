@@ -116,10 +116,7 @@ _write_wrapper() {
 WRAPPER_PATH=""
 ADDED_RC=""
 
-# ── Strategy A: /usr/local/bin — system-wide, no PATH changes ever needed ─────
-# Guard: directory must EXIST (-d) AND be writable (-w).
-# On some minimal Linux images /usr/local/bin is absent even though -w may
-# misbehave, so the -d guard is essential.
+# ── Strategy A: /usr/local/bin directly (already writable — e.g. root) ─────────
 if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
     if _write_wrapper "/usr/local/bin/heaven"; then
         WRAPPER_PATH="/usr/local/bin/heaven"
@@ -128,16 +125,22 @@ if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
 fi
 
 # ── Strategy B: sudo to /usr/local/bin ────────────────────────────────────────
-if [ -z "$WRAPPER_PATH" ] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    # Export the function body so the sudo subshell can call it
+# This prompts for the user's sudo password — standard for installers.
+# /usr/local/bin is always in PATH, so 'heaven' works immediately after install.
+if [ -z "$WRAPPER_PATH" ] && command -v sudo >/dev/null 2>&1; then
+    info "Installing system-wide command (sudo required for /usr/local/bin)..."
     if sudo bash -c "
+        set -e
+        mkdir -p /usr/local/bin
         VENV_PYTHON_REAL='$VENV_PYTHON_REAL'
-        $(declare -f _write_wrapper)
-        mkdir -p /usr/local/bin 2>/dev/null
-        _write_wrapper /usr/local/bin/heaven
-    " 2>/dev/null; then
+        printf '#!/usr/bin/env bash\nexec \"%s\" -m heaven.main \"\$@\"\n' \
+            \"\$VENV_PYTHON_REAL\" > /usr/local/bin/heaven
+        chmod +x /usr/local/bin/heaven
+    "; then
         WRAPPER_PATH="/usr/local/bin/heaven"
-        ok "Global command installed: /usr/local/bin/heaven (sudo)"
+        ok "Global command installed: /usr/local/bin/heaven"
+    else
+        warn "sudo install failed — falling back to user-local install"
     fi
 fi
 

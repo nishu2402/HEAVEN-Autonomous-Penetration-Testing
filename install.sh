@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  HEAVEN — Autonomous Penetration Testing Framework
-#  Installer v2.1
+#  Installer v2.2
 # ==============================================================================
 
 set -euo pipefail
@@ -14,254 +14,254 @@ ok()   { echo -e "${GREEN}[+]${NC} $*"; }
 info() { echo -e "${CYAN}[*]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 fail() { echo -e "${RED}[✗]${NC} $*"; exit 1; }
+step() { echo -e "${BOLD}${CYAN}[→]${NC}${BOLD} $*${NC}"; }
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo -e ""
-echo -e "${CYAN}${BOLD}╔═══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}${BOLD}║    ██╗  ██╗███████╗ █████╗ ██╗   ██╗███████╗███╗   ██╗    ║${NC}"
-echo -e "${CYAN}${BOLD}║    ██║  ██║██╔════╝██╔══██╗██║   ██║██╔════╝████╗  ██║    ║${NC}"
-echo -e "${CYAN}${BOLD}║    ███████║█████╗  ███████║██║   ██║█████╗  ██╔██╗ ██║    ║${NC}"
-echo -e "${CYAN}${BOLD}║    ██╔══██║██╔══╝  ██╔══██║╚██╗ ██╔╝██╔══╝  ██║╚██╗██║    ║${NC}"
-echo -e "${CYAN}${BOLD}║    ██║  ██║███████╗██║  ██║ ╚████╔╝ ███████╗██║ ╚████║    ║${NC}"
-echo -e "${CYAN}${BOLD}║    ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝    ║${NC}"
-echo -e "${CYAN}${BOLD}║         Autonomous Penetration Testing Framework          ║${NC}"
-echo -e "${CYAN}${BOLD}╚═══════════════════════════════════════════════════════════╝${NC}"
+echo -e "${CYAN}${BOLD}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║   ██╗  ██╗███████╗ █████╗ ██╗   ██╗███████╗███╗   ██╗     ║${NC}"
+echo -e "${CYAN}${BOLD}║   ██║  ██║██╔════╝██╔══██╗██║   ██║██╔════╝████╗  ██║     ║${NC}"
+echo -e "${CYAN}${BOLD}║   ███████║█████╗  ███████║██║   ██║█████╗  ██╔██╗ ██║     ║${NC}"
+echo -e "${CYAN}${BOLD}║   ██╔══██║██╔══╝  ██╔══██║╚██╗ ██╔╝██╔══╝  ██║╚██╗██║     ║${NC}"
+echo -e "${CYAN}${BOLD}║   ██║  ██║███████╗██║  ██║ ╚████╔╝ ███████╗██║ ╚████║     ║${NC}"
+echo -e "${CYAN}${BOLD}║   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝   ║${NC}"
+echo -e "${CYAN}${BOLD}║        Autonomous Penetration Testing Framework            ║${NC}"
+echo -e "${CYAN}${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"
 echo -e ""
 
 # ── Resolve install directory ──────────────────────────────────────────────
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-info "Install directory: $INSTALL_DIR"
+info "Install directory: ${BOLD}$INSTALL_DIR${NC}"
+
+# ── Detect target user (handle sudo correctly) ────────────────────────────────
+TARGET_USER="${SUDO_USER:-$USER}"
+if [ -n "${SUDO_USER:-}" ] && command -v getent >/dev/null 2>&1; then
+    TARGET_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || eval echo "~${SUDO_USER}")"
+else
+    TARGET_HOME="$HOME"
+fi
+[ -d "$TARGET_HOME" ] || fail "Cannot determine home directory (TARGET_HOME='$TARGET_HOME')"
 
 # ── 1. Python check ───────────────────────────────────────────────────────────
-info "Checking Python version..."
+step "Step 1/8 — Checking Python..."
 
 if command -v python3 >/dev/null 2>&1; then
     PYTHON_CMD="python3"
 elif command -v python >/dev/null 2>&1; then
     PYTHON_CMD="python"
 else
-    fail "Python 3 is not installed. Install Python 3.11 or higher."
+    fail "Python 3 is not installed. Install Python 3.11 or higher and re-run."
 fi
 
 PY_OK=$($PYTHON_CMD -c 'import sys; print(1 if sys.version_info >= (3, 11) else 0)')
 PY_VER=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
 
 if [ "$PY_OK" != "1" ]; then
-    fail "Python 3.11+ required. Found: $PY_VER"
+    fail "Python 3.11+ required. Found: $PY_VER. Please upgrade Python."
 fi
 ok "Python $PY_VER"
 
 # ── 2. Virtual environment ────────────────────────────────────────────────────
-info "Setting up virtual environment..."
+step "Step 2/8 — Setting up virtual environment..."
 if [ ! -d "$INSTALL_DIR/venv" ]; then
     $PYTHON_CMD -m venv "$INSTALL_DIR/venv"
-    ok "venv created at $INSTALL_DIR/venv"
+    ok "Created venv at $INSTALL_DIR/venv"
 else
-    ok "venv already exists — reusing"
+    ok "Reusing existing venv at $INSTALL_DIR/venv"
 fi
 
 VENV_PYTHON="$INSTALL_DIR/venv/bin/python"
 VENV_PIP="$INSTALL_DIR/venv/bin/pip"
 
+# Verify venv python works
+"$VENV_PYTHON" -c "import sys; assert sys.version_info >= (3,11)" 2>/dev/null \
+    || fail "venv Python is broken. Delete '$INSTALL_DIR/venv' and re-run."
+
 # ── 3. Pip toolchain ──────────────────────────────────────────────────────────
-info "Upgrading pip toolchain..."
+step "Step 3/8 — Upgrading pip toolchain..."
 "$VENV_PIP" install --upgrade pip setuptools wheel -q
-ok "Toolchain ready"
+ok "pip / setuptools / wheel up to date"
 
 # ── 4. Install HEAVEN ─────────────────────────────────────────────────────────
-info "Installing HEAVEN and dependencies..."
+step "Step 4/8 — Installing HEAVEN and dependencies..."
 
 if [ -f "$INSTALL_DIR/requirements.txt" ]; then
-    "$VENV_PIP" install -r "$INSTALL_DIR/requirements.txt" -q || warn "Some optional deps failed — continuing"
+    "$VENV_PIP" install -r "$INSTALL_DIR/requirements.txt" -q \
+        || warn "Some optional dependencies failed to install — core features unaffected"
 fi
 "$VENV_PIP" install -e "$INSTALL_DIR" -q
-ok "HEAVEN installed"
+ok "HEAVEN installed (editable mode)"
 
-# ── 5. Install global wrapper (works without venv activation) ──────────────────
-echo ""
-info "Installing global 'heaven' command..."
+# ── 5. Write global 'heaven' wrapper ──────────────────────────────────────────
+step "Step 5/8 — Installing global 'heaven' command..."
 
-WRAPPER_CONTENT="#!/usr/bin/env bash
-# HEAVEN global wrapper — no venv activation needed
-exec \"$INSTALL_DIR/venv/bin/python\" -m heaven.main \"\$@\"
-"
+# Determine the exact python binary path inside the venv (resolves symlinks)
+VENV_PYTHON_REAL="$("$VENV_PYTHON" -c "import sys; print(sys.executable)")"
 
-WRAPPER_INSTALLED=0
+# Write wrapper using printf (more portable than echo for multi-line content)
+_write_wrapper() {
+    local dest="$1"
+    printf '#!/usr/bin/env bash\n# HEAVEN global wrapper — generated by install.sh\n# Do not edit; reinstall to update.\nexec "%s" -m heaven.main "$@"\n' \
+        "$VENV_PYTHON_REAL" > "$dest"
+    chmod +x "$dest"
+}
 
-# Determine target user home for wrapper install.
-# If install.sh is run with sudo, $HOME may be /root; use SUDO_USER instead.
-TARGET_USER="${SUDO_USER:-$USER}"
-TARGET_HOME="${SUDO_HOME:-${HOME}}"
+WRAPPER_PATH=""
 
-if [ -n "${SUDO_USER:-}" ] && [ -n "${SUDO_USER}" ] && [ "$TARGET_HOME" = "/root" ]; then
-    # Resolve home directory for the sudo user
-    if getent passwd "$SUDO_USER" >/dev/null 2>&1; then
-        TARGET_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-    else
-        # Fallback: common locations
-        TARGET_HOME="$(eval echo ~${SUDO_USER} 2>/dev/null || true)"
+# ── Strategy A: /usr/local/bin (system-wide, works for all users) ─────────────
+if [ -w "/usr/local/bin" ]; then
+    _write_wrapper "/usr/local/bin/heaven"
+    WRAPPER_PATH="/usr/local/bin/heaven"
+    ok "Global command installed: /usr/local/bin/heaven"
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    # passwordless sudo available
+    sudo bash -c "$(declare -f _write_wrapper); _write_wrapper /usr/local/bin/heaven" 2>/dev/null \
+        && { WRAPPER_PATH="/usr/local/bin/heaven"; ok "Global command installed: /usr/local/bin/heaven (sudo)"; } \
+        || true
+fi
+
+# ── Strategy B: ~/.local/bin (user-local, XDG standard) ──────────────────────
+if [ -z "$WRAPPER_PATH" ]; then
+    LOCAL_BIN="$TARGET_HOME/.local/bin"
+    mkdir -p "$LOCAL_BIN" 2>/dev/null || true
+    if [ -d "$LOCAL_BIN" ]; then
+        _write_wrapper "$LOCAL_BIN/heaven"
+        WRAPPER_PATH="$LOCAL_BIN/heaven"
+        ok "User command installed: $LOCAL_BIN/heaven"
+
+        # Add ~/.local/bin to PATH in shell RC if not already present
+        _add_to_path() {
+            local rc="$1"
+            local marker="# HEAVEN PATH"
+            if [ -f "$rc" ] && grep -q "$marker" "$rc" 2>/dev/null; then
+                return  # already added by a previous install
+            fi
+            {
+                printf '\n%s\n' "$marker"
+                printf 'if [ -d "$HOME/.local/bin" ] && [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then\n'
+                printf '    export PATH="$HOME/.local/bin:$PATH"\n'
+                printf 'fi\n'
+            } >> "$rc"
+            ok "Added ~/.local/bin to PATH in $rc"
+        }
+
+        ADDED_RC=""
+        case "${SHELL:-/bin/bash}" in
+            */zsh)
+                [ -f "$TARGET_HOME/.zshrc" ] && _add_to_path "$TARGET_HOME/.zshrc" && ADDED_RC="$TARGET_HOME/.zshrc"
+                ;;
+            */fish)
+                FISH_CFG="$TARGET_HOME/.config/fish/config.fish"
+                mkdir -p "$(dirname "$FISH_CFG")" 2>/dev/null || true
+                _add_to_path "$FISH_CFG" && ADDED_RC="$FISH_CFG"
+                ;;
+            *)
+                # bash / sh / other — try both .bashrc and .profile
+                [ -f "$TARGET_HOME/.bashrc" ] && _add_to_path "$TARGET_HOME/.bashrc" && ADDED_RC="$TARGET_HOME/.bashrc"
+                if [ -z "$ADDED_RC" ]; then
+                    _add_to_path "$TARGET_HOME/.profile" && ADDED_RC="$TARGET_HOME/.profile"
+                fi
+                ;;
+        esac
     fi
 fi
 
-# Normalize TARGET_HOME
-if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
-    fail "Could not determine install home directory for wrapper (TARGET_HOME='$TARGET_HOME')"
+if [ -z "$WRAPPER_PATH" ]; then
+    warn "Could not install 'heaven' to any standard location."
+    warn "Add '$INSTALL_DIR/venv/bin' to your PATH manually, or use:"
+    warn "  $VENV_PYTHON -m heaven.main <command>"
 fi
 
-# Try ~/.local/bin first (no sudo, XDG standard)
-if [ -d "$TARGET_HOME/.local/bin" ] || mkdir -p "$TARGET_HOME/.local/bin" 2>/dev/null; then
-    # Install wrapper for the target user.
-    echo "$WRAPPER_CONTENT" > "$TARGET_HOME/.local/bin/heaven"
-    chmod +x "$TARGET_HOME/.local/bin/heaven"
-    ok "Global command installed: $TARGET_HOME/.local/bin/heaven (user: $TARGET_USER)"
-    WRAPPER_INSTALLED=1
-fi
-
-# Do NOT overwrite $TARGET_HOME/.local/bin/heaven here.
-# The venv's 'heaven' file may be a relative/venv-specific script; overwriting can cause
-# failures when different HOME/PATH contexts are involved.
-
-
-
-
-
-# Detect shell and add ~/.local/bin to PATH if missing
-SHELL_RC=""
-case "$SHELL" in
-    */zsh)  SHELL_RC="$HOME/.zshrc" ;;
-    */bash) SHELL_RC="$HOME/.bashrc" ;;
-    */fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
-    *)      SHELL_RC="$HOME/.profile" ;;
-esac
-
-PATH_EXPORT='export PATH="$HOME/.local/bin:$PATH"'
-if [ -n "$SHELL_RC" ] && ! grep -q "\.local/bin" "$SHELL_RC" 2>/dev/null; then
-    echo "" >> "$SHELL_RC"
-    echo "# HEAVEN — added by install.sh" >> "$SHELL_RC"
-    echo "$PATH_EXPORT" >> "$SHELL_RC"
-    ok "Added ~/.local/bin to PATH in $SHELL_RC"
-    warn "Run: source $SHELL_RC  (or open a new terminal) to use 'heaven' immediately"
-fi
-
-# Also try /usr/local/bin with sudo if ~/.local/bin didn't work
-if [ "$WRAPPER_INSTALLED" = "0" ]; then
-    if [ -w "/usr/local/bin" ]; then
-        ln -sf "$INSTALL_DIR/venv/bin/heaven" /usr/local/bin/heaven
-        ok "Global command installed: /usr/local/bin/heaven"
-    else
-        sudo ln -sf "$INSTALL_DIR/venv/bin/heaven" /usr/local/bin/heaven 2>/dev/null \
-            && ok "Global command installed: /usr/local/bin/heaven (sudo)" \
-            || warn "Could not install global command — add to PATH manually"
-    fi
-fi
-
-# ── 6. External tools check (optional) ───────────────────────────────────────
+# ── 6. External tools check ───────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}External tool availability:${NC}"
+step "Step 6/8 — Checking external tools..."
+echo ""
 
 check_tool() {
     local name="$1"; local cmd="$2"; local install_hint="$3"
     if command -v "$cmd" >/dev/null 2>&1; then
-        ok "$name found: $(command -v "$cmd")"
+        ok "$name → $(command -v "$cmd")"
     else
-        warn "$name not found — $install_hint"
+        warn "$name not found  ($install_hint)"
     fi
 }
 
-check_tool "nmap"    "nmap"    "apt install nmap  /  brew install nmap"
-check_tool "nuclei"  "nuclei"  "https://github.com/projectdiscovery/nuclei/releases"
-check_tool "sqlmap"  "sqlmap"  "pip install sqlmap  /  apt install sqlmap"
+check_tool "nmap"    "nmap"    "apt install nmap  |  brew install nmap"
+check_tool "nuclei"  "nuclei"  "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+check_tool "sqlmap"  "sqlmap"  "pip install sqlmap  |  apt install sqlmap"
 
-# ── 7. Frontend (optional) ────────────────────────────────────────────────────
+# ── 7. Frontend build (optional) ──────────────────────────────────────────────
 echo ""
+step "Step 7/8 — Building web UI..."
+
 if [ -d "$INSTALL_DIR/heaven-ui" ]; then
-    info "Building frontend UI..."
     if ! command -v npm >/dev/null 2>&1; then
         warn "npm not found — skipping frontend build"
-        echo -e "  ${DIM}Install Node.js 18+ then run: cd heaven-ui && npm install --legacy-peer-deps && npm run build${NC}"
+        echo -e "  ${DIM}Install Node.js 18+ then: cd heaven-ui && npm install --legacy-peer-deps && npm run build${NC}"
     else
         NODE_VER=$(node --version 2>/dev/null || echo "?")
         info "Node $NODE_VER detected"
-        ( cd "$INSTALL_DIR/heaven-ui" && npm install --legacy-peer-deps -q && npm run build ) \
-            && ok "Frontend built → heaven-ui/dist/" \
-            || warn "Frontend build failed — UI unavailable but CLI works fine"
+        if ( cd "$INSTALL_DIR/heaven-ui" && npm install --legacy-peer-deps -q 2>/dev/null && npm run build -q 2>/dev/null ); then
+            ok "Frontend built → heaven-ui/dist/"
+        else
+            warn "Frontend build failed — UI unavailable but CLI works fine"
+        fi
     fi
-fi
-
-# ── 8. PostgreSQL (FULLY OPTIONAL) ───────────────────────────────────────────
-echo ""
-echo -e "${BOLD}PostgreSQL setup (optional — HEAVEN uses SQLite by default):${NC}"
-echo -e "${DIM}  HEAVEN's core workflow stores engagement data in local SQLite files.${NC}"
-echo -e "${DIM}  PostgreSQL is only needed for multi-operator centralized mode.${NC}"
-echo ""
-
-if [ -z "${HEAVEN_DB_PASSWORD:-}" ]; then
-    HEAVEN_DB_PASSWORD=$($PYTHON_CMD -c 'import secrets; print(secrets.token_urlsafe(24))')
-    warn "HEAVEN_DB_PASSWORD not set — generated a temporary one"
-    echo -e "  To enable PostgreSQL mode, add to your shell profile:"
-    echo -e "  ${CYAN}export HEAVEN_DB_PASSWORD='$HEAVEN_DB_PASSWORD'${NC}"
-    export HEAVEN_DB_PASSWORD
-fi
-
-POSTGRES_STARTED=0
-if command -v docker-compose >/dev/null 2>&1; then
-    info "Attempting PostgreSQL via docker-compose..."
-    POSTGRES_PASSWORD="$HEAVEN_DB_PASSWORD" docker-compose up -d postgres 2>/dev/null \
-        && { sleep 4; POSTGRES_STARTED=1; ok "PostgreSQL started via docker-compose"; } \
-        || warn "docker-compose up failed — skipping PostgreSQL (core features unaffected)"
-elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    info "Attempting PostgreSQL via docker compose..."
-    POSTGRES_PASSWORD="$HEAVEN_DB_PASSWORD" docker compose up -d postgres 2>/dev/null \
-        && { sleep 4; POSTGRES_STARTED=1; ok "PostgreSQL started"; } \
-        || warn "docker compose up failed — skipping PostgreSQL"
-elif command -v psql >/dev/null 2>&1; then
-    info "Native PostgreSQL detected — configuring..."
-    command -v systemctl >/dev/null 2>&1 && sudo systemctl start postgresql 2>/dev/null || true
-    sudo -u postgres psql -c "CREATE USER heaven WITH PASSWORD '$HEAVEN_DB_PASSWORD';" 2>/dev/null \
-        || sudo -u postgres psql -c "ALTER USER heaven WITH PASSWORD '$HEAVEN_DB_PASSWORD';" 2>/dev/null || true
-    sudo -u postgres psql -c "CREATE DATABASE heaven OWNER heaven;" 2>/dev/null || true
-    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE heaven TO heaven;" 2>/dev/null || true
-    POSTGRES_STARTED=1
-    ok "Native PostgreSQL configured"
 else
-    warn "PostgreSQL / Docker not found — skipping (HEAVEN works fine without it)"
+    warn "heaven-ui directory not found — skipping frontend build"
 fi
 
-if [ "$POSTGRES_STARTED" = "1" ]; then
-    info "Initialising database schema..."
-    "$INSTALL_DIR/venv/bin/heaven" init-db \
-        && ok "Schema initialised" \
-        || warn "Schema init failed — run 'heaven init-db' after setting HEAVEN_DB_PASSWORD"
-fi
-
-# ── 9. Quick smoke test ───────────────────────────────────────────────────────
+# ── 8. Smoke test ─────────────────────────────────────────────────────────────
 echo ""
-info "Running smoke test..."
-if "$INSTALL_DIR/venv/bin/heaven" --version >/dev/null 2>&1; then
-    ok "HEAVEN CLI is working"
+step "Step 8/8 — Smoke test..."
+
+if "$VENV_PYTHON" -m heaven.main --version >/dev/null 2>&1; then
+    HEAVEN_VER=$("$VENV_PYTHON" -m heaven.main --version 2>&1 | head -1)
+    ok "CLI smoke test passed: $HEAVEN_VER"
 else
-    warn "CLI smoke test failed — check installation logs above"
+    warn "CLI smoke test failed — check errors above"
 fi
 
-# ── 10. Summary ───────────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}${BOLD}║                    INSTALLATION COMPLETE                  ║${NC}"
-echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║                    INSTALLATION COMPLETE                     ║${NC}"
+echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${BOLD}The 'heaven' command is now available globally.${NC}"
-echo -e "${DIM}  No need to activate a virtualenv — just type 'heaven' in any terminal.${NC}"
+
+# ── PATH activation notice (only when ~/.local/bin was used) ──────────────────
+if [[ "$WRAPPER_PATH" == *"/.local/bin/"* ]]; then
+    echo -e "${YELLOW}${BOLD}ACTION REQUIRED — Activate the 'heaven' command:${NC}"
+    echo ""
+    if [ -n "${ADDED_RC:-}" ]; then
+        echo -e "  ${BOLD}Option 1 (current terminal):${NC}"
+        echo -e "    ${CYAN}source ${ADDED_RC}${NC}"
+        echo ""
+        echo -e "  ${BOLD}Option 2:${NC}"
+        echo -e "    Open a new terminal window — the command will work immediately."
+        echo ""
+    else
+        echo -e "  Add this to your shell config and then source it:"
+        echo -e "    ${CYAN}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
+        echo ""
+    fi
+    echo -e "  ${DIM}(This is a one-time step. All future terminals will have 'heaven' in PATH.)${NC}"
+    echo ""
+fi
+
+# ── Required config ───────────────────────────────────────────────────────────
+echo -e "${BOLD}Required — set your admin password:${NC}"
+echo -e "  ${CYAN}export HEAVEN_ADMIN_PASSWORD='your-strong-password'${NC}"
+echo -e "  ${DIM}Add this to your shell profile to persist it across sessions.${NC}"
 echo ""
-echo -e "${BOLD}Required environment variable:${NC}"
-echo -e "  ${CYAN}export HEAVEN_ADMIN_PASSWORD='<strong-password>'${NC}   # API / UI login"
-echo -e "  ${DIM}Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.)${NC}"
-echo ""
+
+# ── Quick start ───────────────────────────────────────────────────────────────
 echo -e "${BOLD}Quick start:${NC}"
-echo -e "  ${CYAN}heaven --version${NC}                   # confirm it works"
-echo -e "  ${CYAN}heaven self-audit${NC}                  # security baseline"
-echo -e "  ${CYAN}heaven engage init my-eng${NC}          # create an engagement"
+echo -e "  ${CYAN}heaven --version${NC}                                  # verify install"
+echo -e "  ${CYAN}heaven engage init my-engagement${NC}                  # create engagement"
 echo -e "  ${CYAN}heaven scan -u https://target --i-have-authorization${NC}"
-echo -e "  ${CYAN}heaven serve${NC}                       # web UI → http://localhost:8443"
+echo -e "  ${CYAN}heaven serve${NC}                                      # web UI → http://localhost:8443"
 echo ""
-echo -e "${DIM}Tip: open a new terminal (or run: source $SHELL_RC) for PATH to take effect${NC}"
+echo -e "${DIM}If 'heaven' is not found, use the full path:${NC}"
+echo -e "  ${DIM}$VENV_PYTHON -m heaven.main <command>${NC}"
 echo ""

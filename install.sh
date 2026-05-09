@@ -92,116 +92,66 @@ fi
 "$VENV_PIP" install -e "$INSTALL_DIR" -q
 ok "HEAVEN installed (editable mode)"
 
-# ── 5. Write global 'heaven' wrapper ──────────────────────────────────────────
+# ── 5. Install global 'heaven' command ────────────────────────────────────────
 step "Step 5/8 — Installing global 'heaven' command..."
 
-# Resolve the exact python binary used by this venv (no symlinks)
-VENV_PYTHON_REAL="$("$VENV_PYTHON" -c "import sys; print(sys.executable)")"
-
-# _write_wrapper <dest>  — writes the wrapper; returns 1 on any failure.
-# All call sites use  if _write_wrapper ...; then  so set -e never fires.
-_write_wrapper() {
-    local dest="$1"
-    [ -d "$(dirname "$dest")" ] || return 1
-    printf '#!/usr/bin/env bash\nexec "%s" -m heaven.main "$@"\n' \
-        "$VENV_PYTHON_REAL" > "$dest" 2>/dev/null || return 1
-    chmod +x "$dest" 2>/dev/null || return 1
-}
-
+# After 'pip install -e .' the venv already has a working heaven script.
+VENV_HEAVEN="$INSTALL_DIR/venv/bin/heaven"
 WRAPPER_PATH=""
 ADDED_RC=""
 
-# ── Strategy A: any writable directory already in the user's PATH ─────────────
-# This is the zero-config path: if ANY directory the shell already knows about
-# is writable (e.g. ~/bin, ~/.local/bin, /usr/local/bin as root), we use it.
-# heaven works immediately — no sudo, no sourcing, no new terminal needed.
-_path_writable_dir() {
-    local IFS=':'
-    local preferred="/usr/local/bin $HOME/.local/bin $HOME/bin"
-    # Preferred well-known dirs first
-    for d in $preferred; do
-        case ":$PATH:" in *":$d:"*)
-            if [ -d "$d" ] && [ -w "$d" ]; then echo "$d"; return 0; fi
-        esac
-    done
-    # Any other writable PATH dir
-    for d in $PATH; do
-        if [ -d "$d" ] && [ -w "$d" ]; then echo "$d"; return 0; fi
-    done
-    return 1
-}
-
-if WRITABLE_DIR="$(_path_writable_dir 2>/dev/null)"; then
-    if _write_wrapper "$WRITABLE_DIR/heaven"; then
-        WRAPPER_PATH="$WRITABLE_DIR/heaven"
-        ok "Global command installed: $WRAPPER_PATH"
-    fi
+if [ ! -f "$VENV_HEAVEN" ]; then
+    fail "venv/bin/heaven not found — did step 4 succeed? Check errors above."
 fi
 
-# ── Strategy B: sudo to /usr/local/bin ───────────────────────────────────────
-# Prompts for the sudo password — same as apt, homebrew, etc.
-# /usr/local/bin is always in PATH so heaven works in every terminal immediately.
-if [ -z "$WRAPPER_PATH" ] && command -v sudo >/dev/null 2>&1; then
-    info "Need sudo to install system-wide (will prompt for password)..."
-    _PYR="$VENV_PYTHON_REAL"   # capture before sudo subshell
-    if sudo bash -c "
-        mkdir -p /usr/local/bin || exit 1
-        printf '#!/usr/bin/env bash\nexec \"%s\" -m heaven.main \"\$@\"\n' '$_PYR' \
-            > /usr/local/bin/heaven 2>/dev/null || exit 1
-        chmod +x /usr/local/bin/heaven
-    "; then
+# ── Try 1: direct write to /usr/local/bin (already writable = running as root) ─
+if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+    if ln -sf "$VENV_HEAVEN" /usr/local/bin/heaven 2>/dev/null; then
         WRAPPER_PATH="/usr/local/bin/heaven"
-        ok "Global command installed: /usr/local/bin/heaven"
+        ok "Installed: /usr/local/bin/heaven"
+    fi
+fi
+
+# ── Try 2: sudo ln -sf (two plain commands, no heredoc, no escaping issues) ────
+if [ -z "$WRAPPER_PATH" ] && command -v sudo >/dev/null 2>&1; then
+    info "sudo needed to install system-wide (you may be asked for your password):"
+    if sudo mkdir -p /usr/local/bin 2>/dev/null \
+    && sudo ln -sf "$VENV_HEAVEN" /usr/local/bin/heaven 2>/dev/null; then
+        WRAPPER_PATH="/usr/local/bin/heaven"
+        ok "Installed: /usr/local/bin/heaven"
     else
-        warn "sudo install to /usr/local/bin failed — trying user-local fallback"
+        warn "sudo failed — using PATH fallback instead"
     fi
 fi
 
-# ── Strategy C: ~/.local/bin — create + add to PATH in shell RC ───────────────
-# Last resort. heaven will work after opening a new terminal (PATH is updated
-# in the shell RC so every future session includes ~/.local/bin automatically).
+# ── Try 3: add venv/bin to PATH in shell RC (no root needed) ──────────────────
+# heaven already exists at venv/bin/heaven — just make PATH include it.
 if [ -z "$WRAPPER_PATH" ]; then
-    LOCAL_BIN="$TARGET_HOME/.local/bin"
-    mkdir -p "$LOCAL_BIN" 2>/dev/null || true
-    if [ -d "$LOCAL_BIN" ] && _write_wrapper "$LOCAL_BIN/heaven"; then
-        WRAPPER_PATH="$LOCAL_BIN/heaven"
-        ok "User command installed: $LOCAL_BIN/heaven"
+    VENV_BIN="$INSTALL_DIR/venv/bin"
+    WRAPPER_PATH="$VENV_HEAVEN"
 
-        # Idempotently inject PATH update into the user's shell RC
-        _add_to_path() {
-            local rc="$1"
-            [ -f "$rc" ] || return 1
-            grep -q "# HEAVEN PATH" "$rc" 2>/dev/null && return 0
-            {
-                printf '\n# HEAVEN PATH\n'
-                printf 'if [ -d "$HOME/.local/bin" ]; then\n'
-                printf '  case ":$PATH:" in\n'
-                printf '    *":$HOME/.local/bin:"*) ;;\n'
-                printf '    *) export PATH="$HOME/.local/bin:$PATH" ;;\n'
-                printf '  esac\n'
-                printf 'fi\n'
-            } >> "$rc" 2>/dev/null && ok "PATH updated in $rc"
-        }
+    # Pick the shell RC file
+    case "${SHELL:-/bin/bash}" in
+        */zsh)  RC_FILE="$TARGET_HOME/.zshrc"   ;;
+        */fish) RC_FILE="$TARGET_HOME/.config/fish/config.fish"
+                mkdir -p "$(dirname "$RC_FILE")" 2>/dev/null || true ;;
+        *)      RC_FILE="$TARGET_HOME/.bashrc"  ;;
+    esac
+    # Create RC file if it doesn't exist
+    touch "$RC_FILE" 2>/dev/null || RC_FILE="$TARGET_HOME/.profile"
+    touch "$RC_FILE" 2>/dev/null || true
 
-        case "${SHELL:-/bin/bash}" in
-            */zsh)
-                _add_to_path "$TARGET_HOME/.zshrc"    && ADDED_RC="$TARGET_HOME/.zshrc"  ;;
-            */fish)
-                FISH_CFG="$TARGET_HOME/.config/fish/config.fish"
-                mkdir -p "$(dirname "$FISH_CFG")" 2>/dev/null || true
-                _add_to_path "$FISH_CFG"              && ADDED_RC="$FISH_CFG"  ;;
-            *)
-                _add_to_path "$TARGET_HOME/.bashrc"   && ADDED_RC="$TARGET_HOME/.bashrc"
-                [ -z "$ADDED_RC" ] && \
-                _add_to_path "$TARGET_HOME/.profile"  && ADDED_RC="$TARGET_HOME/.profile"  ;;
-        esac
+    # Inject PATH line (idempotent — skip if already present)
+    if ! grep -q "HEAVEN_BIN" "$RC_FILE" 2>/dev/null; then
+        printf '\n# HEAVEN_BIN\nexport PATH="%s:$PATH"\n' "$VENV_BIN" >> "$RC_FILE"
+        ok "Added $VENV_BIN to PATH in $RC_FILE"
+    else
+        ok "$VENV_BIN already in $RC_FILE"
     fi
+    ADDED_RC="$RC_FILE"
 fi
 
-if [ -z "$WRAPPER_PATH" ]; then
-    warn "Could not write heaven wrapper to any location."
-    warn "Run directly: $VENV_PYTHON_REAL -m heaven.main <command>"
-fi
+ok "heaven command: $WRAPPER_PATH"
 
 # ── 6. External tools check ───────────────────────────────────────────────────
 echo ""
@@ -260,21 +210,12 @@ echo -e "${CYAN}${BOLD}║                    INSTALLATION COMPLETE             
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# ── Show where heaven landed and what to do next ─────────────────────────────
-if [ -n "$WRAPPER_PATH" ]; then
-    ok "heaven command: $WRAPPER_PATH"
+# ── Activation notice (only when venv/bin fallback was used) ─────────────────
+if [ -n "${ADDED_RC:-}" ]; then
+    echo -e "${YELLOW}${BOLD}Run this ONE command to activate 'heaven' right now:${NC}"
+    echo -e "  ${CYAN}source ${ADDED_RC}${NC}"
+    echo -e "${DIM}  (New terminals will have 'heaven' automatically — this is a one-time step.)${NC}"
     echo ""
-    # Only need to source if we used ~/.local/bin (not already in this session's PATH)
-    if [[ "$WRAPPER_PATH" == *"/.local/bin/"* ]] || [[ "$WRAPPER_PATH" == *"/home/"*"/bin/"* ]]; then
-        echo -e "${YELLOW}${BOLD}One-time setup — run this in your current terminal:${NC}"
-        if [ -n "${ADDED_RC:-}" ]; then
-            echo -e "  ${CYAN}source ${ADDED_RC}${NC}"
-        else
-            echo -e "  ${CYAN}export PATH=\"\$(dirname '$WRAPPER_PATH'):\$PATH\"${NC}"
-        fi
-        echo -e "${DIM}  (Every new terminal after this will have 'heaven' automatically.)${NC}"
-        echo ""
-    fi
 fi
 
 # ── Required config ───────────────────────────────────────────────────────────

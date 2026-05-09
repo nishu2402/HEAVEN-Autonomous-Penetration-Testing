@@ -133,6 +133,7 @@ class ScanOrchestrator:
         self.progress = ScanProgress(scan_id=self.scan_id)
         self._cancelled = False
         self._progress_callbacks: list[Callable[[ScanProgress], Any]] = []
+        self._finding_callbacks: list[Callable[[dict], Any]] = []
         # Per-task asyncio.Event so dep waiters can be unblocked on completion
         # without busy-polling.
         self._task_done_events: dict[str, asyncio.Event] = {}
@@ -195,6 +196,10 @@ class ScanOrchestrator:
     def on_progress(self, callback: Callable[[ScanProgress], Any]) -> None:
         """Register a progress callback (called on each task completion)."""
         self._progress_callbacks.append(callback)
+
+    def on_finding(self, callback: Callable[[dict], Any]) -> None:
+        """Register a callback fired for each new finding discovered during the scan."""
+        self._finding_callbacks.append(callback)
 
     def cancel(self) -> None:
         """Request graceful cancellation of the scan."""
@@ -290,6 +295,35 @@ class ScanOrchestrator:
                     logger.error(f"✗ {task.name} timed out after {task.timeout}s")
                 else:
                     logger.error(f"✗ {task.name} failed after {retry_count} attempt(s): {last_error}")
+
+            # Fire finding callbacks for any findings produced by this task
+            if last_error is None and result_data and isinstance(result_data, dict):
+                new_findings = []
+                for key in ("vulnerabilities", "findings", "candidates", "validated_findings"):
+                    for f in result_data.get(key, []):
+                        if isinstance(f, dict):
+                            new_findings.append(f)
+                for f in new_findings:
+                    for cb in self._finding_callbacks:
+                        try:
+                            cb_ret = cb(f)
+                            if asyncio.iscoroutine(cb_ret):
+                                await cb_ret
+                        except Exception as e:
+                            logger.debug(f"Finding callback error: {e}")
+                if new_findings:
+                    self.progress.findings_count += len(new_findings)
+                    self.progress.vulns_found += sum(
+                        1 for f in new_findings
+                        if f.get("severity", "info").lower() in ("critical", "high")
+                    )
+                asset_count = (
+                    len(result_data.get("hosts", []))
+                    + len(result_data.get("endpoints", []))
+                    + len(result_data.get("assets", []))
+                )
+                if asset_count:
+                    self.progress.assets_discovered += asset_count
 
             task.result = result
             self.results[task.id] = result

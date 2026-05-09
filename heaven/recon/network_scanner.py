@@ -164,6 +164,20 @@ def _build_nmap_port_spec(ports: list[int]) -> str:
     return ",".join(segments)
 
 
+def _nmap_timing_args(stealth_level: str) -> list[str]:
+    """
+    Return nmap timing and rate flags for the requested stealth level.
+    Lower stealth = slower + quieter. Higher stealth = faster + noisier.
+    """
+    return {
+        "paranoid":   ["-T1", "--min-rate", "10",    "--max-retries", "3"],
+        "stealth":    ["-T2", "--min-rate", "100",   "--max-retries", "2"],
+        "normal":     ["-T4", "--min-rate", "1000",  "--max-retries", "2"],
+        "aggressive": ["-T4", "--min-rate", "5000",  "--max-retries", "1"],
+        "loud":       ["-T5", "--min-rate", "10000", "--max-retries", "1"],
+    }.get(stealth_level, ["-T4", "--min-rate", "1000", "--max-retries", "2"])
+
+
 async def scan_host(
     host: str,
     ports: list[int],
@@ -171,85 +185,147 @@ async def scan_host(
     semaphore: Optional[asyncio.Semaphore] = None,
     include_udp: bool = False,
     udp_ports: Optional[list[int]] = None,
+    stealth_level: str = "normal",
 ) -> HostResult:
-    """Scan host using real nmap system binary for accurate pentesting results."""
+    """
+    Full-spectrum nmap scan: all ports, service detection, default NSE scripts,
+    OS fingerprinting, and UDP probes when requested.
+    Uses stealth-level-aware timing so the same function works from
+    ghost-mode recon through loud exploitation-support scans.
+    """
+    import os as _os
+
     sem = semaphore or asyncio.Semaphore(50)
     host_result = HostResult(host=host)
     start = time.time()
 
     port_str = _build_nmap_port_spec(ports)
-        
-    cmd = ["nmap", "-sV", "-p", port_str, "-oX", "-", host]
-    
+    timing = _nmap_timing_args(stealth_level)
+
+    # ── Base TCP command ──────────────────────────────────────────────────────
+    # -sV  : service / version detection
+    # -sC  : run default NSE scripts (banner grab, vuln checks, auth testing)
+    # -O   : OS fingerprinting (requires raw-socket access; skipped if not root)
+    # -oX  : XML output → stdout for parsing
+    # --host-timeout : abort per-host after this long (prevents hangs on firewalled hosts)
+    cmd = ["nmap", "-sV", "-sC", "-p", port_str, "-oX", "-", "--host-timeout", "30m"]
+
+    # OS detection needs raw sockets; root on Linux, any user on macOS/Windows
+    try:
+        if _os.geteuid() == 0:
+            cmd.insert(1, "-O")
+    except AttributeError:
+        pass  # Windows — no geteuid; nmap handles privileges itself
+
     if include_udp and udp_ports:
-        udp_str = _build_nmap_port_spec(udp_ports[:50])
-        cmd = ["nmap", "-sV", "-sS", "-sU", "-p", f"T:{port_str},U:{udp_str}", "-oX", "-", host]
-        
-    # Stealth options
-    cmd.extend(["-T4", "--max-retries", "1", "--host-timeout", "10m"])
+        udp_str = _build_nmap_port_spec(udp_ports[:100])
+        cmd = ["nmap", "-sV", "-sC", "-sS", "-sU",
+               "-p", f"T:{port_str},U:{udp_str}",
+               "-oX", "-", "--host-timeout", "30m"]
+        try:
+            if _os.geteuid() == 0:
+                cmd.insert(1, "-O")
+        except AttributeError:
+            pass
+
+    cmd.extend(timing)
+    cmd.append(host)
 
     async with sem:
-        logger.debug(f"Running nmap command: {' '.join(cmd)}")
+        logger.debug(f"nmap: {' '.join(cmd)}")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
-            
+
             if stdout:
                 try:
-                    root = ET.fromstring(stdout)
-                    
-                    # Check if host is up
-                    status = root.find(".//status")
+                    xml_root = ET.fromstring(stdout)
+
+                    # ── Host liveness ─────────────────────────────────────────
+                    status = xml_root.find(".//status")
                     if status is not None and status.get("state") == "up":
                         host_result.is_alive = True
-                        
-                    # Parse ports
-                    for port_elem in root.findall(".//port"):
+
+                    # ── Open ports + service info ─────────────────────────────
+                    for port_elem in xml_root.findall(".//port"):
                         state_elem = port_elem.find("state")
-                        if state_elem is not None and state_elem.get("state") == "open":
-                            portid = int(port_elem.get("portid"))
-                            protocol = port_elem.get("protocol")
-                            
-                            service_elem = port_elem.find("service")
-                            service = service_elem.get("name", "") if service_elem is not None else ""
-                            product = service_elem.get("product", "") if service_elem is not None else ""
-                            version = service_elem.get("version", "") if service_elem is not None else ""
-                            
-                            banner = f"{product} {version}".strip()
-                            
-                            cpe = ""
-                            cpe_elem = port_elem.find(".//cpe")
-                            if cpe_elem is not None and cpe_elem.text:
-                                cpe = cpe_elem.text
-                                
-                            pr = PortResult(
-                                host=host,
-                                port=portid,
-                                protocol=protocol,
-                                state="open",
-                                service=service,
-                                version=version,
-                                banner=banner,
-                                cpe=cpe,
-                            )
-                            host_result.open_ports.append(pr)
-                            
-                    # OS Guess (very rough without -O)
-                    os_match = root.find(".//osmatch")
+                        if state_elem is None or state_elem.get("state") != "open":
+                            continue
+
+                        portid   = int(port_elem.get("portid", 0))
+                        protocol = port_elem.get("protocol", "tcp")
+
+                        svc = port_elem.find("service")
+                        service = svc.get("name", "")    if svc is not None else ""
+                        product = svc.get("product", "") if svc is not None else ""
+                        version = svc.get("version", "") if svc is not None else ""
+                        extra   = svc.get("extrainfo", "") if svc is not None else ""
+
+                        banner_parts = [p for p in [product, version, extra] if p]
+                        banner = " ".join(banner_parts)
+
+                        cpe = ""
+                        cpe_elem = port_elem.find(".//cpe")
+                        if cpe_elem is not None and cpe_elem.text:
+                            cpe = cpe_elem.text
+
+                        # Collect NSE script output into fingerprint dict
+                        script_output: dict = {}
+                        for script in port_elem.findall(".//script"):
+                            sid = script.get("id", "")
+                            out = script.get("output", "")
+                            if sid and out:
+                                script_output[sid] = out[:500]
+
+                        pr = PortResult(
+                            host=host,
+                            port=portid,
+                            protocol=protocol,
+                            state="open",
+                            service=service,
+                            version=version,
+                            banner=banner,
+                            cpe=cpe,
+                            fingerprint=script_output,
+                        )
+                        host_result.open_ports.append(pr)
+
+                    # ── OS fingerprinting ─────────────────────────────────────
+                    os_match = xml_root.find(".//osmatch")
                     if os_match is not None:
-                        host_result.os_guess = os_match.get("name", "unknown")
-                        
+                        host_result.os_guess = os_match.get("name", "")
+                    if not host_result.os_guess:
+                        # Fallback: infer from TTL in host element
+                        host_elem = xml_root.find(".//host")
+                        if host_elem is not None:
+                            distance = host_elem.find(".//distance")
+                            # nmap reports TTL in <distance> under <os>; try host ttl attr
+                            ttl_val = 0
+                            for dist in xml_root.findall(".//distance"):
+                                try:
+                                    ttl_val = int(dist.get("value", 0))
+                                except ValueError:
+                                    pass
+                            if ttl_val:
+                                host_result.os_guess = guess_os_from_ttl(ttl_val)
+                                host_result.ttl = ttl_val
+
                 except ET.ParseError as e:
-                    logger.error(f"Failed to parse nmap XML for {host}: {e}")
-                    
+                    logger.error(f"nmap XML parse error for {host}: {e}")
+
+            if stderr:
+                err_text = stderr.decode(errors="replace").strip()
+                if err_text and "WARNING" not in err_text and "Note:" not in err_text:
+                    logger.debug(f"nmap stderr ({host}): {err_text[:300]}")
+
         except FileNotFoundError:
-            logger.error("nmap binary not found. Please install nmap to use the network scanner.")
-            # Fallback could go here if we wanted to keep the old socket scanner
-            pass
+            logger.error(
+                "nmap not found. Install it: apt install nmap  /  brew install nmap"
+            )
             
     # Honeypot heuristic: too many open ports is suspicious
     open_count = len(host_result.open_ports)
@@ -283,7 +359,7 @@ def expand_targets(targets: list[str]) -> list[str]:
 
 async def scan_network(
     targets: list[str],
-    port_range: str = "1-1024",
+    port_range: str = "1-65535",
     timeout: float = 2.0,
     include_udp: bool = False,
     stealth_level: str = "normal",
@@ -344,7 +420,10 @@ async def scan_network(
     for host in expanded_targets:
         await engine.apply_evasion_delay()
 
-        result = await scan_host(host, ports, timeout=timeout, semaphore=sem, include_udp=include_udp)
+        result = await scan_host(
+            host, ports, timeout=timeout, semaphore=sem,
+            include_udp=include_udp, stealth_level=stealth_level,
+        )
 
         if not isinstance(result, HostResult):
             continue

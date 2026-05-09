@@ -166,7 +166,7 @@ if HAS_CLICK:
     @click.option("--repo", "-r", multiple=True, help="Git repositories to scan")
     @click.option("--cloud", "-c", multiple=True, help="Cloud providers (aws, gcp, azure)")
     @click.option("--mode", "-m", type=click.Choice([m.value for m in ScanMode]), default="full")
-    @click.option("--ports", "-p", default="1-1024", help="Port range for network scan")
+    @click.option("--ports", "-p", default="1-65535", help="Port range for network scan (default: all ports)")
     @click.option("--stealth", "-s", type=click.Choice(["aggressive", "normal", "stealth", "paranoid"]), default="normal")
     @click.option("--output", "-o", type=click.Choice(["json", "sarif", "html", "pdf", "markdown"]), default="json")
     @click.option("--output-file", type=click.Path(), help="Output file path")

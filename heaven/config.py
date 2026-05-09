@@ -112,7 +112,7 @@ class ScannerConfig:
     """Scanner concurrency and timeout configuration."""
     net_concurrency: int = 500
     net_timeout: float = 2.0
-    net_port_range: str = "1-1024"
+    net_port_range: str = "1-65535"
     web_concurrency: int = 100
     web_timeout: float = 10.0
     web_max_depth: int = 5

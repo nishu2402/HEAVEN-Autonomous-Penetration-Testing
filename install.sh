@@ -88,21 +88,42 @@ exec \"$INSTALL_DIR/venv/bin/python\" -m heaven.main \"\$@\"
 
 WRAPPER_INSTALLED=0
 
+# Determine target user home for wrapper install.
+# If install.sh is run with sudo, $HOME may be /root; use SUDO_USER instead.
+TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_HOME="${SUDO_HOME:-${HOME}}"
+
+if [ -n "${SUDO_USER:-}" ] && [ -n "${SUDO_USER}" ] && [ "$TARGET_HOME" = "/root" ]; then
+    # Resolve home directory for the sudo user
+    if getent passwd "$SUDO_USER" >/dev/null 2>&1; then
+        TARGET_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    else
+        # Fallback: common locations
+        TARGET_HOME="$(eval echo ~${SUDO_USER} 2>/dev/null || true)"
+    fi
+fi
+
+# Normalize TARGET_HOME
+if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
+    fail "Could not determine install home directory for wrapper (TARGET_HOME='$TARGET_HOME')"
+fi
+
 # Try ~/.local/bin first (no sudo, XDG standard)
-if [ -d "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin" 2>/dev/null; then
-    echo "$WRAPPER_CONTENT" > "$HOME/.local/bin/heaven"
-    chmod +x "$HOME/.local/bin/heaven"
-    ok "Global command installed: ~/.local/bin/heaven"
+if [ -d "$TARGET_HOME/.local/bin" ] || mkdir -p "$TARGET_HOME/.local/bin" 2>/dev/null; then
+    # Install wrapper for the target user.
+    echo "$WRAPPER_CONTENT" > "$TARGET_HOME/.local/bin/heaven"
+    chmod +x "$TARGET_HOME/.local/bin/heaven"
+    ok "Global command installed: $TARGET_HOME/.local/bin/heaven (user: $TARGET_USER)"
     WRAPPER_INSTALLED=1
 fi
 
-# Also try the venv's own heaven binary directly — symlink it to ~/.local/bin
-if [ -f "$INSTALL_DIR/venv/bin/heaven" ]; then
-    # Patch the shebang inside the venv script to use absolute path
-    # (already absolute since venv was created with absolute path)
-    ln -sf "$INSTALL_DIR/venv/bin/heaven" "$HOME/.local/bin/heaven" 2>/dev/null || true
-    ok "Linked $INSTALL_DIR/venv/bin/heaven → ~/.local/bin/heaven"
-fi
+# Do NOT overwrite $TARGET_HOME/.local/bin/heaven here.
+# The venv's 'heaven' file may be a relative/venv-specific script; overwriting can cause
+# failures when different HOME/PATH contexts are involved.
+
+
+
+
 
 # Detect shell and add ~/.local/bin to PATH if missing
 SHELL_RC=""

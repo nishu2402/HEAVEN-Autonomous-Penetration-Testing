@@ -106,7 +106,7 @@ It runs as a local daemon with a **dark-themed web UI** you open in your browser
 
 ```bash
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git
-cd heaven
+cd HEAVEN-Autonomous-Penetration-Testing
 chmod +x install.sh && ./install.sh
 ```
 

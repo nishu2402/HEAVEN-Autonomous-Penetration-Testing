@@ -112,9 +112,18 @@ chmod +x install.sh && ./install.sh
 
 The installer:
 - Creates a Python virtual environment
-- Installs all dependencies via `uv`
-- Creates a global `heaven` command at `~/.local/bin/heaven`
-- Adds it to your PATH so `heaven` just works in any terminal
+- Installs dependencies via `uv`
+- Creates a global `heaven` command for your user (typically `~/.local/bin/heaven`)
+- Adds the user bin directory to your PATH
+
+Uninstall:
+```bash
+chmod +x uninstall.sh && ./uninstall.sh
+```
+
+Note: If you ran `install.sh` with `sudo`, make sure you open a new terminal after install (PATH changes are written to the invoking user’s shell config).
+
+
 
 ### 2. Configure
 

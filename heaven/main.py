@@ -333,59 +333,161 @@ if HAS_CLICK:
         try:
             from rich.live import Live
             from rich.layout import Layout
-            from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
+            from rich.progress import (
+                Progress, BarColumn, TextColumn,
+                TimeElapsedColumn, SpinnerColumn,
+            )
             from rich.table import Table
+            from rich.panel import Panel
             from rich.text import Text
             import time as _time
 
             findings_log: list[dict[str, Any]] = []
             log_lines: list[str] = []
+            sev_counts: dict[str, int] = {
+                "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+            }
+            _sev_colors = {
+                "critical": "bold red", "high": "red",
+                "medium": "yellow", "low": "cyan", "info": "dim white",
+            }
 
             progress_bar = Progress(
-                TextColumn("[cyan]{task.description}"),
-                BarColumn(bar_width=40),
-                TextColumn("[green]{task.completed}/{task.total}"),
+                SpinnerColumn(style="cyan"),
+                TextColumn("[bold cyan]{task.description}"),
+                BarColumn(bar_width=36, style="cyan", complete_style="bold green"),
+                TextColumn("[bold green]{task.percentage:>3.0f}%"),
                 TimeElapsedColumn(),
+                expand=False,
             )
-            scan_task = progress_bar.add_task("Scanning...", total=100)
+            scan_task = progress_bar.add_task("INIT", total=100)
 
-            def build_layout():
-                table = Table(show_header=True, header_style="bold cyan",
-                              box=None, padding=(0, 1))
-                table.add_column("SEV", width=8)
-                table.add_column("TYPE", width=20)
-                table.add_column("TARGET", width=35)
-                table.add_column("CONF", width=6)
-                sev_colors = {"critical": "bold red", "high": "red",
-                              "medium": "yellow", "low": "cyan", "info": "dim"}
-                for f in findings_log[-15:]:
-                    sev = f.get("severity", "info").lower()
-                    table.add_row(
-                        f"[{sev_colors.get(sev,'dim')}]{sev[:4].upper()}[/]",
-                        str(f.get("vuln_type", ""))[:20],
-                        str(f.get("target", ""))[:35],
-                        f"{f.get('confidence', 0):.2f}",
+            def build_layout() -> Layout:
+                p = orch.progress
+
+                # ── Stats bar ─────────────────────────────────────────────────
+                elapsed_s = p.elapsed_seconds
+                elapsed_str = f"{int(elapsed_s // 60)}m{int(elapsed_s % 60):02d}s"
+                crit = sev_counts["critical"]
+                high = sev_counts["high"]
+                med = sev_counts["medium"]
+                if crit + high + med:
+                    sev_str = (
+                        f"[bold red]{crit}C[/]  "
+                        f"[red]{high}H[/]  "
+                        f"[yellow]{med}M[/]  "
+                        f"[cyan]{sev_counts['low']}L[/]"
                     )
-                log_text = Text("\n".join(log_lines[-8:]), style="dim")
+                else:
+                    sev_str = "[dim]none yet[/dim]"
+
+                stats_grid = Table.grid(padding=(0, 3))
+                stats_grid.add_column()
+                stats_grid.add_column()
+                stats_grid.add_column()
+                stats_grid.add_column()
+                stats_grid.add_row(
+                    f"[cyan]Phase[/]   [bold white]{p.phase.value.upper()}[/]",
+                    f"[cyan]Tasks[/]   [green]{p.completed_tasks}[/][dim]/{p.total_tasks}[/]",
+                    f"[cyan]Findings[/]   {sev_str}",
+                    f"[cyan]Assets[/]   [bold]{p.assets_discovered}[/]  "
+                    f"[cyan]Elapsed[/]   [bold]{elapsed_str}[/]",
+                )
+                stats_panel = Panel(
+                    stats_grid,
+                    title="[bold cyan] HEAVEN [/bold cyan]",
+                    border_style="cyan",
+                    padding=(0, 1),
+                )
+
+                # ── Live findings table ────────────────────────────────────────
+                ftable = Table(
+                    show_header=True,
+                    header_style="bold cyan",
+                    border_style="dim",
+                    padding=(0, 1),
+                    expand=True,
+                )
+                ftable.add_column("SEV",  width=6,  no_wrap=True)
+                ftable.add_column("TYPE", width=24, no_wrap=True)
+                ftable.add_column("TARGET", ratio=1)
+                ftable.add_column("CONF", width=6, justify="right")
+
+                if findings_log:
+                    for f in findings_log[-20:]:
+                        sev = (f.get("severity") or "info").lower()
+                        color = _sev_colors.get(sev, "dim")
+                        conf_val = f.get("confidence", 0)
+                        try:
+                            conf_str = f"{float(conf_val):.2f}"
+                        except (TypeError, ValueError):
+                            conf_str = "—"
+                        ftable.add_row(
+                            f"[{color}]{sev[:4].upper()}[/{color}]",
+                            str(f.get("vuln_type") or f.get("type") or "")[:24],
+                            str(f.get("target") or "")[:70],
+                            conf_str,
+                        )
+                else:
+                    ftable.add_row(
+                        "[dim]—[/dim]",
+                        "[dim]Waiting for findings...[/dim]",
+                        "[dim]—[/dim]",
+                        "[dim]—[/dim]",
+                    )
+
+                findings_panel = Panel(
+                    ftable,
+                    title="[bold cyan]Live Findings[/bold cyan]",
+                    border_style="dim",
+                    padding=(0, 0),
+                )
+
+                # ── Progress ──────────────────────────────────────────────────
+                progress_panel = Panel(
+                    progress_bar,
+                    border_style="dim",
+                    padding=(0, 1),
+                )
+
+                # ── Activity log ──────────────────────────────────────────────
+                log_panel = Panel(
+                    Text("\n".join(log_lines[-5:]), style="dim"),
+                    title="[dim]Activity[/dim]",
+                    border_style="dim",
+                    padding=(0, 1),
+                )
+
                 layout = Layout()
                 layout.split_column(
-                    Layout(progress_bar, name="progress", size=3),
-                    Layout(table, name="findings"),
-                    Layout(log_text, name="log", size=10),
+                    Layout(stats_panel,    name="stats",    size=4),
+                    Layout(findings_panel, name="findings"),
+                    Layout(progress_panel, name="progress", size=4),
+                    Layout(log_panel,      name="log",      size=7),
                 )
                 return layout
 
-            def progress_callback(progress):
+            def progress_callback(progress) -> None:
                 pct = progress.progress_pct
-                progress_bar.update(scan_task, completed=pct,
-                                    description=f"[{progress.phase.value.upper()}]")
-                log_lines.append(f"[{_time.strftime('%H:%M:%S')}] {progress.current_task}")
+                phase = progress.phase.value.upper()
+                progress_bar.update(scan_task, completed=pct, description=phase)
+                task_name = progress.current_task
+                if task_name:
+                    ts = _time.strftime("%H:%M:%S")
+                    log_lines.append(f"{ts}  ✓ {task_name}")
+
+            def finding_callback(finding: dict) -> None:
+                findings_log.append(finding)
+                sev = (finding.get("severity") or "info").lower()
+                if sev in sev_counts:
+                    sev_counts[sev] += 1
 
             with Live(build_layout(), refresh_per_second=4, screen=False) as live:
                 def _on_progress(p):
                     progress_callback(p)
                     live.update(build_layout())
                 orch.on_progress(_on_progress)
+                orch.on_finding(finding_callback)
                 try:
                     summary = asyncio.run(orch.run())
                 except KeyboardInterrupt:

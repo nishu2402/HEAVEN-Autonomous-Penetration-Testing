@@ -164,9 +164,12 @@ def export_burp_xml(findings: Iterable[dict],
         ct = (response_headers.get("Content-Type", "")
               or response_headers.get("content-type", "")).split(";")[0].strip()
         mimetype = "HTML"
-        if "json" in ct.lower(): mimetype = "JSON"
-        elif "xml" in ct.lower(): mimetype = "XML"
-        elif "text" in ct.lower(): mimetype = "text"
+        if "json" in ct.lower():
+            mimetype = "JSON"
+        elif "xml" in ct.lower():
+            mimetype = "XML"
+        elif "text" in ct.lower():
+            mimetype = "text"
 
         comment = (
             f"HEAVEN finding: {f.get('id', '')}  "

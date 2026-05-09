@@ -358,8 +358,6 @@ class ScanOrchestrator:
             for port_info in host.get("open_ports", []):
                 port = port_info.get("port", 0)
                 service = (port_info.get("service") or "").lower()
-                banner = (port_info.get("banner") or "").lower()
-
                 task_key = f"dynamic_{ip}_{port}"
                 if task_key in self._injected_service_keys:
                     continue

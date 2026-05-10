@@ -361,6 +361,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
         return findings
 
     async def _try(user: str, passwd: str) -> None:
+        nonlocal lockout_detected
         async with sem:
             if found or lockout_detected:
                 return
@@ -372,7 +373,6 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
                                         timeout=aiohttp.ClientTimeout(total=10)) as r:
                     body = await r.text()
                     if r.status == 429 or "too many" in body.lower():
-                        nonlocal lockout_detected
                         lockout_detected = True
                         return
                     # Heuristic: significantly different response = success

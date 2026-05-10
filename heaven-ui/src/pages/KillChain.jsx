@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Engagement, KillChain as KillChainApi } from '../api'
+import { Engagement } from '../api'
 
 const PHASES = [
   { name: 'Recon',       icon: '🔍', keys: ['scan', 'enum', 'recon', 'fingerprint', 'osint', 'shodan'] },

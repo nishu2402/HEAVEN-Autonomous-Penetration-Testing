@@ -480,6 +480,83 @@ class CredentialSprayer:
 
         return findings
 
+    @classmethod
+    async def spray_ssh(cls, host: str, port: int = 22) -> list[AdvancedFinding]:
+        """Try common SSH credentials using asyncssh (if available) or socket probing."""
+        findings: list[AdvancedFinding] = []
+        try:
+            import asyncssh  # optional dependency
+        except ImportError:
+            logger.debug("asyncssh not installed — SSH spray skipped")
+            return findings
+
+        ssh_creds = [
+            ("root", "root"), ("root", "toor"), ("root", "password"), ("root", ""),
+            ("admin", "admin"), ("admin", "password"), ("admin", ""),
+            ("user", "user"), ("test", "test"), ("guest", "guest"),
+            ("ubuntu", "ubuntu"), ("pi", "raspberry"), ("vagrant", "vagrant"),
+            ("deploy", "deploy"), ("ansible", "ansible"),
+        ]
+
+        for username, password in ssh_creds:
+            try:
+                async with asyncssh.connect(
+                    host, port=port,
+                    username=username, password=password,
+                    known_hosts=None,
+                    connect_timeout=6,
+                ) as conn:  # noqa: F841
+                    findings.append(AdvancedFinding(
+                        target=f"ssh://{host}:{port}",
+                        vuln_type="default_credentials",
+                        severity="critical",
+                        title=f"SSH Default Credentials: {username}:{password or '(empty)'}",
+                        description=f"SSH service accepts weak/default credentials",
+                        confidence=1.0,
+                        evidence={"username": username, "password": password, "port": port},
+                        remediation="Disable password authentication; use SSH keys only. Rotate credentials.",
+                        cwe="CWE-798",
+                    ))
+                    break  # one confirmed cred is enough
+            except Exception:
+                continue
+
+        return findings
+
+    @classmethod
+    async def spray(cls, session, url: str, service_hint: str = "") -> dict:
+        """Dispatch credential spraying based on URL scheme.
+
+        Returns a dict with a 'findings' key (list of AdvancedFinding dicts).
+        """
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        scheme = (parsed.scheme or "http").lower()
+        host = parsed.hostname or ""
+        port = parsed.port or (22 if scheme == "ssh" else 80)
+
+        if scheme == "ssh":
+            raw = await cls.spray_ssh(host, port)
+        else:
+            raw = await cls.spray_web_login(session, url, service_hint=service_hint)
+
+        return {
+            "findings": [
+                {
+                    "target": f.target,
+                    "vuln_type": f.vuln_type,
+                    "severity": f.severity,
+                    "title": f.title,
+                    "description": f.description,
+                    "confidence": f.confidence,
+                    "evidence": f.evidence,
+                    "remediation": f.remediation,
+                    "cwe": f.cwe,
+                }
+                for f in raw
+            ]
+        }
+
 
 # ═══════════════════════════════════════════
 # MASTER ADVANCED SCANNER

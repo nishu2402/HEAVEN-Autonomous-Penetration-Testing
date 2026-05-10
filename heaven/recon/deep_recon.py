@@ -174,7 +174,8 @@ async def _check_wildcard_dns(domain: str) -> Optional[set[str]]:
     Detect wildcard DNS by resolving two random non-existent labels.
     Returns the wildcard IP set if wildcard exists, None otherwise.
     """
-    import random, string
+    import random
+    import string
     wildcard_ips: Optional[set[str]] = None
     for _ in range(2):
         rand_label = "".join(random.choices(string.ascii_lowercase, k=16))

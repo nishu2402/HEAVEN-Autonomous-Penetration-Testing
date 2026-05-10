@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-import re
-import time
 import urllib.parse
-from typing import Any, Optional
+from typing import Optional
 
 try:
     import aiohttp
@@ -102,7 +100,7 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
                             if dangerous:
                                 findings.append(_finding(
                                     url, "dangerous_methods_allowed", "medium",
-                                    f"Server Advertises Dangerous Methods via OPTIONS",
+                                    "Server Advertises Dangerous Methods via OPTIONS",
                                     f"Allow header includes: {', '.join(dangerous)}. "
                                     f"Restrict to GET, POST, HEAD only if unused.",
                                     confidence=0.75,
@@ -199,7 +197,6 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as r:
             if r.status != 403:
                 return findings
-            baseline_len = int(r.headers.get("Content-Length", 0))
     except Exception:
         return findings
 
@@ -333,9 +330,6 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
     Uses timing differentials — a definitive PoC requires a proxy chain.
     """
     findings: list[dict] = []
-    parsed = urllib.parse.urlparse(url)
-    host = parsed.hostname or url
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
     # Check if server accepts Transfer-Encoding: chunked alongside Content-Length (CL.TE indicator)
     try:

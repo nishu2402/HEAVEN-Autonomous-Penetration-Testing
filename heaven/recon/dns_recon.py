@@ -11,7 +11,6 @@ import ipaddress
 import re
 import socket
 import time
-from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
@@ -91,7 +90,7 @@ def _resolve(name: str, rdtype: str, nameservers: Optional[list[str]] = None,
     if not HAS_DNSPYTHON:
         try:
             if rdtype == "A":
-                return [r[4][0] for r in socket.getaddrinfo(name, None, socket.AF_INET)]
+                return [str(r[4][0]) for r in socket.getaddrinfo(name, None, socket.AF_INET)]
         except Exception:
             return []
         return []
@@ -281,8 +280,8 @@ async def _scan_email_security(domain: str) -> list[dict]:
         findings.append(_finding(
             domain, "spf_soft_fail", "medium",
             "SPF Uses SoftFail (~all) Instead of HardFail (-all)",
-            f"Softfail allows unauthorized senders but marks them as suspicious. "
-            f"Many mail servers still deliver softfail messages. Use '-all' instead.",
+            "Softfail allows unauthorized senders but marks them as suspicious. "
+            "Many mail servers still deliver softfail messages. Use '-all' instead.",
             confidence=0.95,
             evidence={"spf": spf},
         ))
@@ -350,8 +349,8 @@ async def _scan_email_security(domain: str) -> list[dict]:
         findings.append(_finding(
             domain, "dkim_not_found", "medium",
             "No DKIM Record Found (Common Selectors)",
-            f"Could not find DKIM records for common selectors. Without DKIM, "
-            f"email integrity cannot be verified and spoofing is easier.",
+            "Could not find DKIM records for common selectors. Without DKIM, "
+            "email integrity cannot be verified and spoofing is easier.",
             confidence=0.65,
         ))
     else:
@@ -445,8 +444,8 @@ def _analyze_soa(domain: str) -> list[dict]:
         findings.append(_finding(
             domain, "dnssec_zone_walking", "medium",
             "DNSSEC Zone Walking via NSEC Records",
-            f"Domain uses NSEC (not NSEC3). An attacker can walk the entire "
-            f"zone and enumerate all DNS names without brute-forcing.",
+            "Domain uses NSEC (not NSEC3). An attacker can walk the entire "
+            "zone and enumerate all DNS names without brute-forcing.",
             confidence=0.88,
             evidence={"nsec_sample": nsec_records[:3]},
         ))

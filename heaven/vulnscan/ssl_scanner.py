@@ -176,12 +176,20 @@ def _get_certificate(host: str, port: int, timeout: float = 8.0) -> Optional[Cer
 
         ci = CertInfo()
 
-        # Subject
-        subj = dict(x[0] for x in cert_dict.get("subject", []))
+        # Subject — ssl cert dicts use nested tuple structures; extract via iteration
+        subj: dict[str, str] = {}
+        for rdns in (cert_dict.get("subject") or ()):
+            for attr in rdns:
+                if len(attr) == 2:
+                    subj[str(attr[0])] = str(attr[1])
         ci.subject = subj.get("commonName", "")
 
         # Issuer
-        iss = dict(x[0] for x in cert_dict.get("issuer", []))
+        iss: dict[str, str] = {}
+        for rdns in (cert_dict.get("issuer") or ()):
+            for attr in rdns:
+                if len(attr) == 2:
+                    iss[str(attr[0])] = str(attr[1])
         ci.issuer = iss.get("organizationName", iss.get("commonName", ""))
         ci.is_self_signed = ci.subject == ci.issuer or (
             subj.get("commonName", "a") == iss.get("commonName", "b")
@@ -189,8 +197,8 @@ def _get_certificate(host: str, port: int, timeout: float = 8.0) -> Optional[Cer
 
         # Validity
         fmt = "%b %d %H:%M:%S %Y %Z"
-        nb_str = cert_dict.get("notBefore", "")
-        na_str = cert_dict.get("notAfter", "")
+        nb_str = str(cert_dict.get("notBefore") or "")
+        na_str = str(cert_dict.get("notAfter") or "")
         try:
             not_after = datetime.datetime.strptime(na_str, fmt)
             ci.not_after = na_str
@@ -201,13 +209,13 @@ def _get_certificate(host: str, port: int, timeout: float = 8.0) -> Optional[Cer
         except ValueError:
             pass
 
-        # SANs
-        ci.san = [v for t, v in cert_dict.get("subjectAltName", []) if t == "DNS"]
+        # SANs — ssl cert dict has heterogeneous types; cast via Any to avoid mypy noise
+        san_raw: Any = cert_dict.get("subjectAltName") or []
+        ci.san = [str(v) for t, v in san_raw if str(t) == "DNS"]
 
         # Signature algorithm (best effort via der)
         if der:
             try:
-                import hashlib
                 # Simple heuristic: look for sha1WithRSA OID bytes
                 sha1_oid = bytes([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x05])
                 md5_oid  = bytes([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x04])
@@ -236,7 +244,7 @@ def _get_ciphers(host: str, port: int, timeout: float = 5.0) -> tuple[list[str],
 
     # Get all ciphers this Python ssl build knows
     try:
-        all_ciphers = [c[0] for c in ctx.get_ciphers()]
+        all_ciphers = [str(c["name"]) for c in ctx.get_ciphers() if "name" in c]
     except Exception:
         all_ciphers = []
 

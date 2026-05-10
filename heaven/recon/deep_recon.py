@@ -169,6 +169,29 @@ class DiscoveredAsset:
 
 # ── Subdomain Enumeration ──
 
+async def _check_wildcard_dns(domain: str) -> Optional[set[str]]:
+    """
+    Detect wildcard DNS by resolving two random non-existent labels.
+    Returns the wildcard IP set if wildcard exists, None otherwise.
+    """
+    import random, string
+    wildcard_ips: Optional[set[str]] = None
+    for _ in range(2):
+        rand_label = "".join(random.choices(string.ascii_lowercase, k=16))
+        probe = f"{rand_label}.{domain}"
+        try:
+            loop = asyncio.get_event_loop()
+            addrs = await loop.getaddrinfo(probe, None)
+            ips = {a[4][0] for a in addrs}
+            if wildcard_ips is None:
+                wildcard_ips = ips
+            else:
+                wildcard_ips &= ips  # only keep IPs consistent across both probes
+        except Exception:
+            return None  # at least one probe didn't resolve → no wildcard
+    return wildcard_ips if wildcard_ips else None
+
+
 async def enumerate_subdomains(domain: str, session: aiohttp.ClientSession,
                                 wordlist: list[str] = None,
                                 concurrency: int = 100) -> list[DiscoveredAsset]:
@@ -176,22 +199,35 @@ async def enumerate_subdomains(domain: str, session: aiohttp.ClientSession,
     discovered = []
     words = wordlist or SUBDOMAIN_WORDLIST
 
+    # 0. Wildcard DNS detection — suppress false positives from brute force
+    wildcard_ips = await _check_wildcard_dns(domain)
+    if wildcard_ips:
+        logger.warning(f"Wildcard DNS detected for {domain} → IPs {wildcard_ips}; "
+                       "brute-force results will be filtered")
+
     # 1. Passive — Certificate Transparency Logs
     ct_subs = await _ct_log_search(domain, session)
     for sub in ct_subs:
         discovered.append(DiscoveredAsset(
             asset_type="subdomain", value=sub, host=domain,
             source="certificate_transparency", confidence=1.0,
+            metadata={"wildcard_domain": wildcard_ips is not None},
         ))
 
-    # 2. Active — DNS brute force
+    # 2. Active — DNS brute force (filtered against wildcard IPs)
     sem = asyncio.Semaphore(concurrency)
     tasks = [_resolve_subdomain(f"{word}.{domain}", sem) for word in words]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for result in results:
-        if isinstance(result, DiscoveredAsset):
-            discovered.append(result)
+        if not isinstance(result, DiscoveredAsset):
+            continue
+        # Skip results that resolve to wildcard addresses
+        if wildcard_ips:
+            resolved_ip = result.metadata.get("ip", "")
+            if resolved_ip in wildcard_ips:
+                continue
+        discovered.append(result)
 
     # Deduplicate
     seen = set()
@@ -201,7 +237,8 @@ async def enumerate_subdomains(domain: str, session: aiohttp.ClientSession,
             seen.add(a.value)
             unique.append(a)
 
-    logger.info(f"Subdomain enumeration: {len(unique)} found for {domain}")
+    logger.info(f"Subdomain enumeration: {len(unique)} found for {domain}"
+                + (" (wildcard filtered)" if wildcard_ips else ""))
     return unique
 
 
@@ -385,23 +422,179 @@ async def discover_vhosts(session: aiohttp.ClientSession, ip: str,
 # ── API Endpoint Fuzzing ──
 
 COMMON_API_PATHS = [
-    "/api", "/api/v1", "/api/v2", "/api/v3",
-    "/graphql", "/graphiql", "/__graphql",
-    "/swagger", "/swagger.json", "/swagger-ui", "/api-docs",
-    "/openapi.json", "/openapi.yaml",
-    "/.env", "/config", "/config.json", "/.git/config",
-    "/robots.txt", "/sitemap.xml", "/.well-known/security.txt",
-    "/wp-json", "/wp-admin", "/wp-login.php",
-    "/admin", "/administrator", "/panel", "/dashboard", "/console",
-    "/debug", "/trace", "/status", "/health", "/healthz", "/ready",
-    "/metrics", "/prometheus", "/actuator", "/actuator/health",
-    "/info", "/server-info", "/server-status",
-    "/.git/HEAD", "/.svn/entries", "/.hg/store",
-    "/backup", "/backup.zip", "/db.sql", "/dump.sql",
-    "/phpinfo.php", "/test.php", "/info.php",
-    "/elmah.axd", "/trace.axd",  # .NET
-    "/WEB-INF/web.xml",  # Java
+    # ── Core API versioning ──
+    "/api", "/api/v1", "/api/v2", "/api/v3", "/api/v4",
+    "/api/v1/", "/api/v2/", "/api/v3/",
+    "/v1", "/v2", "/v3", "/v4",
+    "/rest", "/rest/v1", "/rest/v2",
+    "/rpc", "/jsonrpc", "/xmlrpc", "/xmlrpc.php",
+    "/soap", "/wsdl", "/service.wsdl",
+    # ── GraphQL ──
+    "/graphql", "/graphiql", "/__graphql", "/graph",
+    "/graphql/console", "/graphql/playground",
+    "/api/graphql", "/v1/graphql", "/v2/graphql",
+    # ── API documentation ──
+    "/swagger", "/swagger.json", "/swagger.yaml",
+    "/swagger-ui", "/swagger-ui.html", "/swagger-ui/index.html",
+    "/swagger/v1/swagger.json", "/swagger/v2/swagger.json",
+    "/api-docs", "/api-docs.json", "/api-docs.yaml",
+    "/openapi.json", "/openapi.yaml", "/openapi/v3/api-docs",
+    "/api/swagger.json", "/api/swagger.yaml",
+    "/redoc", "/docs", "/apidoc", "/apidocs",
+    "/api/schema", "/api/schema.json",
+    "/.well-known/openapi",
+    # ── Health / status / readiness ──
+    "/health", "/healthz", "/health/live", "/health/ready",
+    "/health/startup", "/livez", "/readyz", "/startupz",
+    "/status", "/status.json", "/ping", "/pong",
+    "/actuator", "/actuator/health", "/actuator/info",
+    "/actuator/env", "/actuator/beans", "/actuator/mappings",
+    "/actuator/metrics", "/actuator/loggers", "/actuator/threaddump",
+    "/actuator/heapdump", "/actuator/httptrace", "/actuator/auditevents",
+    "/actuator/shutdown", "/actuator/refresh",
+    "/manage", "/manage/health", "/manage/info",
+    # ── Metrics & monitoring ──
+    "/metrics", "/metrics.json", "/prometheus",
+    "/stats", "/stats.json", "/monitor", "/monitoring",
+    "/info", "/server-info", "/server-status", "/server-state",
+    "/_status", "/_health", "/_ping", "/_info",
+    "/__status__", "/__health__",
+    # ── Admin & management interfaces ──
+    "/admin", "/administrator", "/admin/", "/admin/login",
+    "/admin/dashboard", "/admin/panel", "/admin/console",
+    "/admin/config", "/admin/settings", "/admin/users",
+    "/administration", "/admincp", "/adm", "/acp",
+    "/backend", "/manage", "/management", "/superuser",
+    "/control", "/controlpanel", "/cp", "/cpanel",
+    "/siteadmin", "/site-admin", "/portal", "/portal/admin",
+    "/manager", "/manager/html",  # Tomcat
+    "/jmx-console", "/web-console",  # JBoss
+    "/solr/admin", "/solr/#/",  # Solr
+    "/kibana", "/_plugin/kibana",  # Kibana
+    "/phpmyadmin", "/pma", "/phpmyadmin/", "/myadmin",
+    "/adminer", "/adminer.php", "/db-admin",
+    # ── Debug / trace / profiling ──
+    "/debug", "/debug/", "/debug/vars", "/debug/pprof",
+    "/debug/pprof/heap", "/debug/pprof/goroutine",  # Go
+    "/trace", "/trace.axd",  # .NET
+    "/console", "/rails/info/properties",  # Rails
+    "/__debug__/", "/flask-debug",
+    "/phpinfo.php", "/info.php", "/test.php",
+    "/php-info.php", "/?phpinfo=1", "/php/info.php",
+    "/elmah.axd", "/elmah/", "/error.log",
+    "/_profiler", "/_profiler/phpinfo",  # Symfony
+    "/django-admin/",
+    # ── Git / VCS exposure ──
+    "/.git/HEAD", "/.git/config", "/.git/index",
+    "/.git/COMMIT_EDITMSG", "/.git/packed-refs",
+    "/.git/refs/heads/main", "/.git/refs/heads/master",
+    "/.gitignore", "/.gitmodules", "/.gitattributes",
+    "/.svn/entries", "/.svn/wc.db", "/.svn/",
+    "/.hg/", "/.hg/store", "/.hg/requires",
+    "/.bzr/branch/format", "/.fossil",
+    "/CVS/Root", "/CVS/Entries",
+    # ── Environment & configuration files ──
+    "/.env", "/.env.local", "/.env.development",
+    "/.env.production", "/.env.staging", "/.env.backup",
+    "/.env.example", "/.env.sample", "/.env.bak", "/.env.old",
+    "/config", "/config.json", "/config.yaml", "/config.yml",
+    "/config.xml", "/config.php", "/config.ini",
+    "/configuration.php", "/configuration.yml",
+    "/settings.py", "/settings.json", "/settings.yaml",
+    "/application.yml", "/application.yaml", "/application.properties",
+    "/appsettings.json", "/appsettings.Development.json",
+    "/web.config", "/app.config", "/local.xml",
+    "/parameters.yml", "/parameters.yaml",  # Symfony
+    "/database.yml", "/database.yaml",
+    "/secrets.json", "/secrets.yaml", "/.secrets",
+    "/.aws/credentials", "/.aws/config",
+    "/credentials", "/credentials.json", "/credentials.xml",
+    "/.npmrc", "/.yarnrc", "/.cargo/credentials",
+    "/composer.json", "/package.json", "/requirements.txt",
+    "/Gemfile", "/Gemfile.lock", "/Pipfile", "/Pipfile.lock",
+    "/go.sum", "/go.mod", "/yarn.lock", "/package-lock.json",
+    # ── CMS & frameworks ──
+    "/wp-json", "/wp-admin", "/wp-login.php", "/wp-config.php",
+    "/wp-content/debug.log", "/wp-includes/",
+    "/xmlrpc.php",  # WordPress XML-RPC
+    "/administrator", "/administrator/index.php",  # Joomla
+    "/user/login", "/user/register",  # Drupal
+    "/index.php?option=com_users",  # Joomla
+    "/typo3", "/typo3/backend.php",
+    "/_ah/admin", "/_ah/api",  # Google App Engine
+    "/rails/info", "/rails/mailers",
+    "/telescope", "/telescope/api/requests",  # Laravel
+    "/horizon", "/nova",  # Laravel
+    "/clockwork", "/clockwork/app",  # Clockwork profiler
+    "/batty",
+    # ── Cloud metadata & SSRF ──
+    "/latest/meta-data/",  # AWS EC2 metadata (SSRF)
+    "/metadata/v1/", "/opc/v1/",
+    "/computeMetadata/v1/",  # GCP
+    "/.netlify/functions/",
+    "/.firebase/",
+    # ── Backup & archive files ──
+    "/backup", "/backup/", "/backups/",
+    "/backup.zip", "/backup.tar.gz", "/backup.sql",
+    "/backup.tar", "/backup.bz2",
+    "/db.sql", "/dump.sql", "/database.sql",
+    "/db_backup.sql", "/mysql.sql", "/schema.sql",
+    "/data.sql", "/export.sql",
+    "/site.zip", "/website.zip", "/www.zip",
+    "/files.tar.gz", "/public.tar.gz",
+    "/old", "/old/", "/bak", "/bak/",
+    "/~backup", "/~old",
+    # ── Log files ──
+    "/logs", "/log", "/logs/",
+    "/access.log", "/error.log", "/debug.log",
+    "/application.log", "/server.log", "/app.log",
+    "/var/log/apache2/access.log",
+    # ── Common sensitive paths ──
+    "/robots.txt", "/sitemap.xml", "/sitemap_index.xml",
+    "/.well-known/security.txt", "/.well-known/change-password",
+    "/.well-known/host-meta", "/.well-known/assetlinks.json",
+    "/.well-known/apple-app-site-association",
     "/crossdomain.xml", "/clientaccesspolicy.xml",
+    "/humans.txt", "/security.txt",
+    # ── Java / JVM specifics ──
+    "/WEB-INF/web.xml", "/WEB-INF/classes/",
+    "/WEB-INF/lib/", "/META-INF/MANIFEST.MF",
+    "/jmx-console/", "/jmx-console/HtmlAdaptor",
+    "/invoker/JMXInvokerServlet",
+    "/struts/webconsole.html",
+    # ── .NET specifics ──
+    "/elmah.axd", "/trace.axd", "/ScriptResource.axd",
+    "/WebResource.axd", "/Telerik.Web.UI.WebResource.axd",
+    "/_api/contextinfo",  # SharePoint
+    "/_layouts/15/start.aspx",
+    "/umbraco", "/umbraco/backoffice",  # Umbraco CMS
+    # ── Docker / container ──
+    "/v2/", "/v2/_catalog",  # Docker Registry API
+    "/v2/tags/list",
+    # ── Authentication endpoints ──
+    "/login", "/logout", "/signin", "/signout",
+    "/register", "/signup", "/auth", "/auth/login",
+    "/oauth", "/oauth2", "/oauth/authorize", "/oauth/token",
+    "/openid", "/openid-connect", "/saml",
+    "/api/auth", "/api/login", "/api/register",
+    "/api/token", "/api/refresh", "/api/me",
+    "/api/user", "/api/users", "/api/profile",
+    "/api/admin", "/api/settings",
+    "/api/keys", "/api/secrets", "/api/tokens",
+    # ── Internal / private ──
+    "/internal", "/internal/", "/private", "/private/",
+    "/_internal", "/_private", "/_api", "/_admin",
+    "/local", "/dev", "/development", "/staging",
+    "/test", "/testing", "/sandbox",
+    # ── Misc sensitive ──
+    "/cgi-bin/", "/cgi-bin/phpinfo.php",
+    "/server-status", "/server-info",  # Apache
+    "/.DS_Store", "/Thumbs.db", "/desktop.ini",
+    "/id_rsa", "/id_dsa", "/id_ecdsa", "/id_ed25519",
+    "/.ssh/known_hosts", "/.ssh/authorized_keys",
+    "/proc/self/environ", "/proc/version",
+    "/etc/passwd", "/etc/shadow", "/etc/hosts",
+    "/web.xml", "/context.xml",
 ]
 
 

@@ -1,52 +1,121 @@
+# ☠️ HEAVEN — AUTONOMOUS PENETRATION TESTING FRAMEWORK
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20112%20Tests%20Passing&descAlignY=65&descSize=18"/>
+</p>
+
+<p align="center">
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+JWT+%C2%B7+Race+Conditions+%C2%B7+Smuggling;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;26+Live+Modules+%C2%B7+112+Tests+%C2%B7+FastAPI+%2B+React+HUD"/>
+</p>
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=6&color=0:A8FF3E,25:00CFFF,50:7B2FBE,75:FF073A,100:FFF176"/>
+</p>
+
+---
+
 <div align="center">
 
-```
-╔══════════════════════════════════════════════════════════════════╗
-║                                                                  ║
-║       ██╗  ██╗███████╗ █████╗ ██╗   ██╗███████╗███╗   ██╗        ║
-║       ██║  ██║██╔════╝██╔══██╗██║   ██║██╔════╝████╗  ██║        ║
-║       ███████║█████╗  ███████║██║   ██║█████╗  ██╔██╗ ██║        ║
-║       ██╔══██║██╔══╝  ██╔══██║╚██╗ ██╔╝██╔══╝  ██║╚██╗██║        ║
-║       ██║  ██║███████╗██║  ██║ ╚████╔╝ ███████╗██║ ╚████║        ║
-║       ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝        ║
-║                                                                  ║
-╚══════════════════════════════════════════════════════════════════╝
-```
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.11+-A8FF3E?style=for-the-badge&logo=python&logoColor=black" alt="Python"/>
+    <img src="https://img.shields.io/badge/API-FastAPI-7B2FBE?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+    <img src="https://img.shields.io/badge/Tests-112_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
+    <img src="https://img.shields.io/badge/MITRE-ATT%26CK_Mapped-FF073A?style=for-the-badge&logo=cncf&logoColor=white" alt="MITRE"/>
+    <img src="https://img.shields.io/badge/OWASP-Top_10_%2B_API_Top_10-00CFFF?style=for-the-badge&logo=owasp&logoColor=black" alt="OWASP"/>
+  </p>
 
-# HEAVEN — Autonomous Penetration Testing Framework
+  <p>
+    <img src="https://img.shields.io/badge/Modules-26_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
+    <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-7B2FBE?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
+    <img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-FF073A?style=flat-square" alt="Platform"/>
+    <img src="https://img.shields.io/badge/Vault-AES--256--GCM-00CFFF?style=flat-square&logo=letsencrypt&logoColor=black" alt="Vault"/>
+    <img src="https://img.shields.io/badge/License-MIT-FFF176?style=flat-square&logo=opensourceinitiative&logoColor=black" alt="License"/>
+  </p>
 
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-00ff41?style=flat-square&logo=python&logoColor=black)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-00d4ff?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-112%20passing-00ff41?style=flat-square&logo=pytest&logoColor=black)](tests/)
-[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-6366f1?style=flat-square)]()
-[![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK%20Mapped-ff003c?style=flat-square)](https://attack.mitre.org)
-[![OWASP](https://img.shields.io/badge/OWASP-Top%2010%20%2B%20API%20Top%2010-0088cc?style=flat-square)](https://owasp.org)
-
-**Real-world autonomous penetration testing — not a simulation.**
-
-*Find it. Confirm it. Report it. So you can focus on what only humans can do.*
+  <p>
+    <img src="https://img.shields.io/badge/Stars-★_Give_a_Star-A8FF3E?style=flat-square&logo=github&logoColor=black" alt="Stars"/>
+    <img src="https://img.shields.io/badge/Forks-Share_This_Project-7B2FBE?style=flat-square&logo=git&logoColor=white" alt="Forks"/>
+    <img src="https://img.shields.io/badge/Issues-Report_a_Bug-FF073A?style=flat-square&logo=quicklook&logoColor=white" alt="Issues"/>
+  </p>
 
 </div>
 
 ---
 
-## What is HEAVEN?
+<a id="authors"></a>
+## 👾 Authors
 
-HEAVEN is a **production-grade autonomous penetration testing platform** that automates the repeatable, time-consuming parts of a professional engagement:
+### Nisarg Chasmawala · Alias: **HEAVEN**
 
-- **Reconnaissance** — nmap port scanning, web crawling, DNS brute-force, cert transparency, Shodan enrichment, Active Directory enumeration
-- **Vulnerability detection** — Nuclei template scanning + custom validation engines for SQLi, XSS, SSRF, XXE, CORS, CRLF, open redirect, JWT attacks, race conditions, request smuggling, GraphQL introspection, and more
-- **False-positive suppression** — every "finding" goes through a two-stage confirmation pass before it enters the report; sub-0.40-confidence results are automatically discarded
-- **Risk scoring** — CVSS v3 prediction via a calibrated ML model (R²=0.9925) trained on NVD data, enriched with EPSS exploit-probability and CISA KEV membership
-- **MITRE ATT&CK mapping** — every finding is mapped to ATT&CK techniques and Lockheed Cyber Kill Chain phases
-- **Report generation** — Markdown, CSV, JSON, SARIF, Burp XML, proxy JSONL, and compliance-mapped HTML (OWASP Top 10 / NIST CSF)
+<div align="center">
 
-The result: a professional-grade finding list with evidence packages, curl reproduction commands, triage workflow, and remediation patches — ready for your report in minutes, not days.
+| | Detail |
+|---|---|
+| 🔗 **LinkedIn** | [linkedin.com/in/nisarg-chasmawala](https://www.linkedin.com/in/nisarg-chasmawala) |
+| 🐙 **GitHub** | [github.com/nishu2402](https://github.com/nishu2402) |
+| 🎯 **Role** | Offensive Security Engineer · Penetration Tester |
+
+</div>
 
 ---
 
-## Architecture
+## 📋 Table of Contents
+
+- [👾 Authors](#authors)
+- [🧠 What is HEAVEN?](#what-is-heaven)
+- [⚙️ Architecture](#architecture)
+- [📦 Feature Status](#feature-status)
+- [🚀 Quick Start](#quick-start)
+- [🔧 Installation (Detailed)](#installation-detailed)
+- [⌨️ CLI Reference](#cli-reference)
+- [🖥️ Web UI](#web-ui)
+- [🌐 API](#api)
+- [🔌 Integrations](#integrations)
+- [📊 CVSS & Risk Scoring](#cvss-risk-scoring)
+- [🏢 Active Directory](#active-directory)
+- [🛡️ False-Positive Handling](#false-positive-handling)
+- [🔒 Security Controls](#security)
+- [🔧 Troubleshooting](#troubleshooting)
+- [🛠️ Development](#development)
+- [📁 Project Structure](#project-structure)
+- [⚠️ Legal & Disclaimer](#legal)
+
+---
+
+<a id="what-is-heaven"></a>
+## 🧠 What is HEAVEN?
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,50:7B2FBE,100:FF073A"/>
+</p>
+
+HEAVEN is a **production-grade autonomous penetration testing platform** that automates the repeatable, time-consuming parts of a professional engagement — so you can focus on what only humans can do.
+
+<div align="center">
+
+| Capability | Detail |
+|---|---|
+| 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud enum (AWS/GCP/Azure) · IoT/SCADA · wireless · Git secrets · email OSINT · honeypot detection |
+| 🎯 **Vulnerability Detection** | Nuclei templates + custom engines for SQLi · XSS · SSRF · XXE · CORS · CRLF · open redirect · JWT attacks · race conditions · HTTP request smuggling · GraphQL introspection · default credentials · subdomain takeover |
+| 🔇 **False-Positive Suppression** | Two-stage confirmation pass — sub-0.40-confidence results automatically discarded |
+| 📊 **Risk Scoring** | CVSS v3 ML predictor (R²=0.9925) · EPSS exploit-probability · CISA KEV membership |
+| 🗺️ **MITRE ATT&CK** | Every finding mapped to ATT&CK techniques + Lockheed Cyber Kill Chain phases |
+| 📄 **Report Generation** | Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
+| 🔢 **Tests** | **112 pytest tests passing** |
+| 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · SQLite engagement storage |
+
+</div>
+
+> *Find it. Confirm it. Report it. So you can focus on what only humans can do.*
+
+---
+
+<a id="architecture"></a>
+## ⚙️ Architecture
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:00CFFF,50:A8FF3E,100:FFF176"/>
+</p>
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -73,7 +142,7 @@ The result: a professional-grade finding list with evidence packages, curl repro
 │   • Reproducibility checks (time-based: 2/3 passes, boolean: stdev)    │
 │   • Confidence buckets: strong ≥0.95, high ≥0.80, discarded <0.40     │
 ├─────────────────────────────────────────────────────────────────────────┤
-│                    ORCHESTRATOR (async DAG)                              │
+│                    ORCHESTRATOR (async DAG)                             │
 │   • Dependency-aware parallel task execution                            │
 │   • Dynamic task injection (services → SSH/SMB/RDP scanners)           │
 │   • Resumable scans — checkpoint saved per phase                        │
@@ -89,10 +158,17 @@ The result: a professional-grade finding list with evidence packages, curl repro
 
 ---
 
-## Feature Status
+<a id="feature-status"></a>
+## 📦 Feature Status
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF073A,50:7B2FBE,100:A8FF3E"/>
+</p>
+
+<div align="center">
 
 | Module | Status | What it does |
-|--------|:------:|--------------|
+|---|:---:|---|
 | `recon/network_scanner.py` | ✅ Live | Real nmap execution, XML parsing, OS detection, honeypot avoidance |
 | `recon/web_crawler.py` | ✅ Live | BFS crawler, form/param discovery, JS endpoint extraction, auth support |
 | `recon/deep_recon.py` | ✅ Live | DNS brute-force, cert transparency, OSINT enrichment |
@@ -120,15 +196,22 @@ The result: a professional-grade finding list with evidence packages, curl repro
 | `api/server.py` | ✅ Live | FastAPI + JWT RBAC + WebSocket + rate limiting |
 | Web UI | ✅ Live | Dark matrix theme, scan launcher, live findings, kill chain |
 
+</div>
+
 ---
 
-## Quick Start
+<a id="quick-start"></a>
+## 🚀 Quick Start
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,50:00CFFF,100:7B2FBE"/>
+</p>
 
 ### Requirements
 
 - **Python 3.11+**
 - **Git**
-- `nmap` (highly recommended) — `apt install nmap` / `brew install nmap`
+- `nmap` — `apt install nmap` / `brew install nmap`
 - `nuclei` (recommended) — [projectdiscovery.io/open-source/nuclei](https://projectdiscovery.io/open-source/nuclei)
 
 ### 1. Install
@@ -145,7 +228,7 @@ The installer:
 3. Writes a global `heaven` wrapper to `/usr/local/bin` (system-wide) or `~/.local/bin` (user)
 4. Builds the React web UI (if npm is available)
 
-> **Linux users:** If the installer placed `heaven` in `~/.local/bin`, run `source ~/.bashrc` (or `~/.zshrc`) **once** after install, or open a new terminal. All future terminals will have `heaven` in PATH automatically.
+> **Linux users:** If the installer placed `heaven` in `~/.local/bin`, run `source ~/.bashrc` (or `~/.zshrc`) **once** after install. All future terminals will have `heaven` in PATH automatically.
 
 To uninstall:
 ```bash
@@ -168,7 +251,7 @@ export HEAVEN_MSF_PORT="55553"
 export HEAVEN_MSF_PASSWORD="msf-rpc-password"
 ```
 
-Add these to your `~/.bashrc` or `~/.zshrc` to persist them.
+Add to `~/.bashrc` or `~/.zshrc` to persist.
 
 ### 3. Scan
 
@@ -191,19 +274,22 @@ heaven scan -u https://app.example.com -t 10.0.0.1 -m full \
 
 # Start the web UI
 heaven serve
-# → Open http://localhost:8443 in your browser
+# → Open http://localhost:8443
 ```
 
 ---
 
-## Installation (Detailed)
+<a id="installation-detailed"></a>
+## 🔧 Installation (Detailed)
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7B2FBE,50:FF073A,100:FFF176"/>
+</p>
 
 ### macOS
 
 ```bash
-# Install Python 3.11+ via Homebrew (if needed)
 brew install python@3.12
-
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git
 cd HEAVEN-Autonomous-Penetration-Testing
 chmod +x install.sh && ./install.sh
@@ -212,17 +298,12 @@ chmod +x install.sh && ./install.sh
 ### Linux (Ubuntu / Debian)
 
 ```bash
-# Install system dependencies
 sudo apt update
 sudo apt install -y python3 python3-venv nmap git
-
-# Clone and install
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git
 cd HEAVEN-Autonomous-Penetration-Testing
 chmod +x install.sh && ./install.sh
-
-# Activate PATH for current terminal (one-time only)
-source ~/.bashrc
+source ~/.bashrc   # activate PATH for current terminal (one-time only)
 ```
 
 ### Linux (Fedora / RHEL / CentOS)
@@ -247,41 +328,46 @@ docker run -it --rm \
 
 ---
 
-## CLI Reference
+<a id="cli-reference"></a>
+## ⌨️ CLI Reference
 
-```
-heaven --help                              # list all commands
-heaven --version                           # show version
-```
-
-### Engagement management
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,33:00CFFF,66:7B2FBE,100:FF073A"/>
+</p>
 
 ```bash
-heaven engage init <name>                  # create a new engagement
-heaven engage list                         # list all engagements
-heaven scope add <target>                  # add target to scope
-heaven scope list                          # show scope
+heaven --help        # list all commands
+heaven --version     # show version
+```
+
+### Engagement Management
+
+```bash
+heaven engage init <name>      # create a new engagement
+heaven engage list             # list all engagements
+heaven scope add <target>      # add target to scope
+heaven scope list              # show scope
 ```
 
 ### Scanning
 
 ```bash
 heaven scan \
-    -u <url>          \   # web target (URL)
-    -t <ip/cidr>      \   # network target (IP or CIDR)
-    -m <mode>         \   # web | network | full | ad | cloud
-    --stealth <1-5>   \   # 1=ghost … 5=loud
-    --engagement <name>\  # engagement context
-    --ports <spec>    \   # port range e.g. "1-1024" or "22,80,443"
-    --i-have-authorization   # required — confirms written permission
+    -u <url>               \   # web target (URL)
+    -t <ip/cidr>           \   # network target (IP or CIDR)
+    -m <mode>              \   # web | network | full | ad | cloud
+    --stealth <1-5>        \   # 1=ghost … 5=loud
+    --engagement <name>    \   # engagement context
+    --ports <spec>         \   # port range e.g. "1-1024" or "22,80,443"
+    --i-have-authorization     # required — confirms written permission
 
-heaven resume --engagement <name> --i-have-authorization  # resume interrupted scan
+heaven resume --engagement <name> --i-have-authorization   # resume interrupted scan
 ```
 
 **Scan modes:**
 
-| Mode | Modules activated |
-|------|-------------------|
+| Mode | Modules Activated |
+|---|---|
 | `web` | Crawl → Nuclei → SQLi/XSS/SSRF/JWT/race/smuggling/GraphQL → FP suppress |
 | `network` | nmap → service enum → dynamic injection (SSH/SMB/RDP) → CVE lookup |
 | `full` | web + network + deep recon + Shodan + cloud enum |
@@ -291,39 +377,38 @@ heaven resume --engagement <name> --i-have-authorization  # resume interrupted s
 **Stealth levels:**
 
 | Level | Description |
-|-------|-------------|
+|---|---|
 | 1 — Ghost | Very slow, maximum evasion, randomized timing |
 | 2 — Cautious | Slow, randomized, honeypot avoidance |
 | 3 — Normal | Balanced speed / stealth |
 | 4 — Aggressive | Faster, minimal evasion |
-| 5 — Loud | Full speed, no evasion (lab use) |
+| 5 — Loud | Full speed, no evasion (lab use only) |
 
 ### Findings
 
 ```bash
-heaven findings list                        # list all findings
-heaven findings list --severity critical    # filter by severity
-heaven findings list --min-confidence 0.8  # filter by confidence
-heaven findings show <id>                   # full evidence + curl repro
-heaven findings mark <id> verified          # triage workflow
-heaven findings mark <id> false_positive    # dismiss
-heaven findings replay <id>                 # print curl command to re-test
+heaven findings list                         # list all findings
+heaven findings list --severity critical     # filter by severity
+heaven findings list --min-confidence 0.8   # filter by confidence
+heaven findings show <id>                    # full evidence + curl repro
+heaven findings mark <id> verified           # triage workflow
+heaven findings mark <id> false_positive     # dismiss
+heaven findings replay <id>                  # print curl command to re-test
 ```
 
 ### Reporting
 
 ```bash
-# Export findings in various formats
-heaven export -o report.md --format markdown
-heaven export -o report.csv --format csv
-heaven export -o report.json --format json
-heaven export -o report.sarif --format sarif         # for GitHub code scanning
-heaven export -o report.xml --format burp             # import into Burp Suite
-heaven export -o history.jsonl --format proxy-jsonl  # for mitmproxy / Caido
+heaven export -o report.md     --format markdown
+heaven export -o report.csv    --format csv
+heaven export -o report.json   --format json
+heaven export -o report.sarif  --format sarif          # GitHub code scanning
+heaven export -o report.xml    --format burp            # import into Burp Suite
+heaven export -o history.jsonl --format proxy-jsonl    # mitmproxy / Caido
 
 # Compliance-mapped HTML report
 heaven report --framework OWASP_TOP10 -o compliance.html
-heaven report --framework NIST_CSF -o compliance.html
+heaven report --framework NIST_CSF    -o compliance.html
 
 # MITRE ATT&CK kill chain coverage
 heaven kill-chain
@@ -333,36 +418,50 @@ heaven kill-chain -o kill-chain.json
 ### Server
 
 ```bash
-heaven serve                               # start API + web UI on :8443
-heaven serve --host 0.0.0.0 --port 8443   # bind to all interfaces
-heaven self-audit                          # security baseline check
+heaven serve                                # start API + web UI on :8443
+heaven serve --host 0.0.0.0 --port 8443    # bind to all interfaces
+heaven self-audit                           # security baseline check
 ```
 
 ### Model
 
 ```bash
-heaven train-model                         # retrain CVSS predictor on NVD data
+heaven train-model    # retrain CVSS predictor on NVD data
 ```
 
 ---
 
-## Web UI
+<a id="web-ui"></a>
+## 🖥️ Web UI
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FFF176,50:A8FF3E,100:00CFFF"/>
+</p>
 
 Start with `heaven serve`, then open `http://localhost:8443`.
 
+<div align="center">
+
 | Page | Description |
-|------|-------------|
+|---|---|
 | **Dashboard** | Engagement stats, severity distribution, MITRE ATT&CK coverage heat-map |
 | **Scans** | Launch scans, view history, live progress with phase indicators |
 | **Findings** | Full finding list — filter by severity, confidence, status, vuln type |
-| **Finding Detail** | Evidence package, request/response, curl repro, triage controls, notes |
+| **Finding Detail** | Evidence package, request/response, curl repro, triage controls, operator notes |
 | **Kill Chain** | Cyber Kill Chain phase coverage, chained attack path summary |
 | **Engagement** | Scope management, target list, configuration |
-| **API Docs** | OpenAPI/Swagger interactive docs at `/docs` |
+| **API Docs** | OpenAPI / Swagger interactive docs at `/docs` |
+
+</div>
 
 ---
 
-## API
+<a id="api"></a>
+## 🌐 API
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7B2FBE,50:FF073A,100:A8FF3E"/>
+</p>
 
 HEAVEN exposes a REST + WebSocket API on port 8443. All write endpoints require JWT auth.
 
@@ -408,9 +507,14 @@ WebSocket live feed: `ws://localhost:8443/ws/scans/<scan_id>`
 
 ---
 
-## Integrations
+<a id="integrations"></a>
+## 🔌 Integrations
 
-### Nuclei (template-based scanning)
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:00CFFF,50:FFF176,100:7B2FBE"/>
+</p>
+
+### Nuclei
 
 HEAVEN runs nuclei automatically when it is in PATH. Keep templates up to date:
 
@@ -419,16 +523,16 @@ nuclei -update-templates
 which nuclei   # must be in PATH
 ```
 
-### sqlmap (SQLi confirmation)
+### sqlmap
 
-sqlmap runs automatically on findings where HEAVEN confirms a SQLi candidate at HIGH severity or above:
+Runs automatically on findings where HEAVEN confirms a SQLi candidate at HIGH severity or above:
 
 ```bash
 which sqlmap   # must be in PATH
-# Install: pip install sqlmap  or  apt install sqlmap
+# pip install sqlmap  or  apt install sqlmap
 ```
 
-### Shodan (passive recon)
+### Shodan
 
 ```bash
 export SHODAN_API_KEY="your-key"
@@ -436,7 +540,7 @@ heaven scan -t example.com -m full --i-have-authorization
 # Shodan data is automatically merged into RECON results
 ```
 
-### Metasploit (exploitation)
+### Metasploit
 
 ```bash
 # 1. Start msfrpcd
@@ -451,7 +555,7 @@ export HEAVEN_MSF_PASSWORD=your-password
 heaven scan -t 10.0.0.1 --enable-exploitation --i-have-authorization
 ```
 
-### Webhook alerting (Slack / Teams / custom)
+### Webhook Alerting (Slack / Teams / Custom)
 
 ```bash
 export HEAVEN_WEBHOOK_URL="https://hooks.slack.com/services/..."
@@ -460,16 +564,25 @@ export HEAVEN_WEBHOOK_URL="https://hooks.slack.com/services/..."
 
 ---
 
-## CVSS & Risk Scoring
+<a id="cvss-risk-scoring"></a>
+## 📊 CVSS & Risk Scoring
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF073A,50:A8FF3E,100:00CFFF"/>
+</p>
 
 HEAVEN computes realistic severity scores using a four-layer pipeline:
 
+<div align="center">
+
 | Layer | Source | Detail |
-|-------|--------|--------|
-| 1 | **Vuln-type rules** | `docker_socket_exposed`→9.8, `sqli`→9.0, `xss`→6.1, etc. |
+|---|---|---|
+| 1 | **Vuln-type rules** | `docker_socket_exposed`→9.8 · `sqli`→9.0 · `xss`→6.1 etc. |
 | 2 | **CVSS vector** | Parsed from finding evidence if available |
-| 3 | **ML predictor** | `NVD_model.pkl` — ExtraTreesRegressor, R²=0.9925, 13 features |
+| 3 | **ML predictor** | `NVD_model.pkl` — ExtraTreesRegressor · R²=0.9925 · 13 features |
 | 4 | **NVD enrichment** | Real CVE CVSS score when a CVE ID is known |
+
+</div>
 
 The final **priority score** combines: CVSS base + EPSS percentile + KEV flag + asset exposure + attack chain potential.
 
@@ -480,7 +593,12 @@ heaven train-model
 
 ---
 
-## Active Directory
+<a id="active-directory"></a>
+## 🏢 Active Directory
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,50:7B2FBE,100:FF073A"/>
+</p>
 
 HEAVEN performs full AD attack-path enumeration:
 
@@ -488,7 +606,8 @@ HEAVEN performs full AD attack-path enumeration:
 heaven scan -t 192.168.1.10 -m ad --i-have-authorization
 ```
 
-What it produces:
+**Output includes:**
+
 - **Kerberoastable accounts** → `$krb5tgs$` hashes, ready for hashcat
 - **AS-REP roastable accounts** → `$krb5asrep$` hashes (no credentials needed)
 - **Domain users / computers / groups** enumerated via impacket
@@ -497,76 +616,90 @@ What it produces:
 
 ---
 
-## False-Positive Handling
+<a id="false-positive-handling"></a>
+## 🛡️ False-Positive Handling
 
-Every confirmed or likely finding goes through a two-stage process before it reaches the report:
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FFF176,50:FF073A,100:A8FF3E"/>
+</p>
+
+Every finding goes through a two-stage process before it reaches the report:
 
 1. **Primary validator** — sends real payloads, checks for evidence signals (error patterns, timing delays, reflection, header injection)
 2. **FP suppressor** — re-sends benign probes to establish a noise baseline, then checks whether the original signal is reproducible above the noise floor
 
-Confidence buckets and their meaning:
+<div align="center">
 
 | Bucket | Range | Interpretation |
-|--------|-------|----------------|
+|---|---|---|
 | `strong` | ≥0.95 | Two independent signals confirmed |
 | `high` | ≥0.80 | One confirmed signal, reproducible |
 | `medium` | ≥0.60 | One signal, not fully reproducible |
 | `low` | ≥0.40 | Probable FP — heavily caveated |
-| `discarded` | <0.40 | Automatically suppressed, never reported |
+| `discarded` | <0.40 | Automatically suppressed — never reported |
 
-Time-based SQLi is confirmed only when the delay is reproducible in ≥2/3 independent requests AND at least 2.5 s above the mean baseline ± 5× baseline stdev.
+</div>
+
+> Time-based SQLi is confirmed only when the delay is reproducible in ≥2/3 independent requests AND at least 2.5 s above the mean baseline ± 5× baseline stdev.
 
 ---
 
-## Security
+<a id="security"></a>
+## 🔒 Security Controls
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7B2FBE,50:00CFFF,100:FFF176"/>
+</p>
+
+<div align="center">
 
 | Control | Implementation |
-|---------|---------------|
-| Authentication | JWT (HS256), 8-hour expiry, refresh token support |
-| Brute-force protection | 5 failed attempts → 15-minute lockout |
-| Audit log | HMAC-SHA256 signed, append-only, all operator actions recorded |
-| Credential storage | AES-256-GCM vault, master key from environment |
-| API authorization | Role-based: `vuln.read`, `vuln.create`, `scan.run`, `admin` |
-| HTTP security headers | X-Frame-Options, X-Content-Type-Options, HSTS, Referrer-Policy, CSP |
-| Scope enforcement | Every scan target validated against declared engagement scope |
-| Authorization gate | `--i-have-authorization` required on every scan; interactive confirm on TTY |
+|---|---|
+| **Authentication** | JWT (HS256), 8-hour expiry, refresh token support |
+| **Brute-force protection** | 5 failed attempts → 15-minute lockout |
+| **Audit log** | HMAC-SHA256 signed, append-only, all operator actions recorded |
+| **Credential storage** | AES-256-GCM vault, master key from environment |
+| **API authorization** | Role-based: `vuln.read` · `vuln.create` · `scan.run` · `admin` |
+| **HTTP security headers** | X-Frame-Options · X-Content-Type-Options · HSTS · Referrer-Policy · CSP |
+| **Scope enforcement** | Every scan target validated against declared engagement scope |
+| **Authorization gate** | `--i-have-authorization` required on every scan; interactive confirm on TTY |
+
+</div>
 
 ---
 
-## Troubleshooting
+<a id="troubleshooting"></a>
+## 🔧 Troubleshooting
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF073A,50:FFF176,100:A8FF3E"/>
+</p>
 
 ### `heaven: command not found` after install
 
 **Cause:** `~/.local/bin` was not yet in your PATH for the current terminal session.
 
-**Fix:**
 ```bash
-source ~/.bashrc      # bash users
-# or
-source ~/.zshrc       # zsh users
-# or simply open a new terminal window
+source ~/.bashrc      # bash
+source ~/.zshrc       # zsh
+# or open a new terminal
 ```
 
-If that does not work, use the full path directly:
+If that doesn't work, use the full path directly:
 ```bash
 /path/to/HEAVEN-Autonomous-Penetration-Testing/venv/bin/python -m heaven.main --version
 ```
 
 ### `nmap: command not found`
 
-Network scanning requires nmap. Install it:
 ```bash
-# Linux
 sudo apt install nmap        # Debian/Ubuntu
 sudo dnf install nmap        # Fedora/RHEL
-
-# macOS
-brew install nmap
+brew install nmap            # macOS
 ```
 
 ### Nuclei not finding vulnerabilities
 
-Ensure nuclei is installed and templates are up to date:
 ```bash
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 nuclei -update-templates
@@ -574,14 +707,12 @@ nuclei -update-templates
 
 ### Web scan shows no findings
 
-Check that:
-1. The target URL is reachable: `curl -I https://target`
-2. You passed `--i-have-authorization`
-3. The web crawler found pages: check scan logs with `heaven status --engagement <name>`
+1. Confirm the target URL is reachable: `curl -I https://target`
+2. Confirm you passed `--i-have-authorization`
+3. Check scan logs: `heaven status --engagement <name>`
 
 ### ImportError on startup
 
-A dependency may have failed to install. Reinstall in the venv:
 ```bash
 cd HEAVEN-Autonomous-Penetration-Testing
 venv/bin/pip install -r requirements.txt
@@ -590,7 +721,6 @@ venv/bin/pip install -e .
 
 ### `HEAVEN_ADMIN_PASSWORD` not set
 
-The API server requires this env var. Set it and restart:
 ```bash
 export HEAVEN_ADMIN_PASSWORD="your-strong-password"
 heaven serve
@@ -598,7 +728,12 @@ heaven serve
 
 ---
 
-## Development
+<a id="development"></a>
+## 🛠️ Development
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:00CFFF,50:A8FF3E,100:7B2FBE"/>
+</p>
 
 ```bash
 # Clone and set up dev environment
@@ -621,48 +756,70 @@ cd heaven-ui && npm install --legacy-peer-deps && npm run build
 ruff check heaven/
 ```
 
-### Project Structure
+---
+
+<a id="project-structure"></a>
+## 📁 Project Structure
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,50:FF073A,100:FFF176"/>
+</p>
 
 ```
 HEAVEN-Autonomous-Penetration-Testing/
-├── heaven/                 # Python package
-│   ├── api/                # FastAPI server + WebSocket
-│   ├── recon/              # Reconnaissance modules
-│   ├── vulnscan/           # Vulnerability detection + FP suppression
-│   ├── ml/                 # Risk scoring + ML pipeline
-│   ├── mitre/              # ATT&CK mapping + kill chain
-│   ├── devsecops/          # Reporting + alerting + compliance
-│   ├── security/           # Auth, vault, audit log
-│   ├── main.py             # CLI entry point (Click)
-│   ├── orchestrator.py     # Async DAG scan engine
-│   ├── engagement.py       # Finding + engagement storage (SQLite)
-│   └── config.py           # Configuration + env vars
-├── heaven-ui/              # React frontend (Vite)
-│   └── dist/               # Pre-built, served by FastAPI
-├── tests/                  # 112 pytest tests
-├── NVD_model.pkl           # Trained CVSS predictor (13-feature ExtraTrees)
-├── nvd_data/               # NVD feature names + dataset
-├── install.sh              # One-command installer
-├── uninstall.sh            # Clean uninstaller
-├── Dockerfile              # Container support
-└── docker-compose.yml      # Optional PostgreSQL stack
+│
+├── 🐍 heaven/                      ← Python package
+│   ├── api/                        ← FastAPI server + WebSocket
+│   ├── recon/                      ← Reconnaissance modules (7 modules)
+│   ├── vulnscan/                   ← Vulnerability detection + FP suppression (7 modules)
+│   ├── ml/                         ← Risk scoring + ML pipeline
+│   ├── mitre/                      ← ATT&CK mapping + kill chain
+│   ├── devsecops/                  ← Reporting + alerting + compliance
+│   ├── security/                   ← Auth · vault · audit log
+│   ├── main.py                     ← CLI entry point (Click)
+│   ├── orchestrator.py             ← Async DAG scan engine
+│   ├── engagement.py               ← Finding + engagement storage (SQLite)
+│   └── config.py                   ← Configuration + env vars
+│
+├── ⚛️  heaven-ui/                   ← React frontend (Vite)
+│   └── dist/                       ← Pre-built, served by FastAPI
+│
+├── 🧪 tests/                       ← 112 pytest tests
+├── 🤖 NVD_model.pkl                ← Trained CVSS predictor (13-feature ExtraTrees, R²=0.9925)
+├── 📊 nvd_data/                    ← NVD feature names + dataset
+├── 🔧 install.sh                   ← One-command installer
+├── 🗑️  uninstall.sh                 ← Clean uninstaller
+├── 🐳 Dockerfile                   ← Container support
+└── 🐳 docker-compose.yml           ← Optional PostgreSQL stack
 ```
 
 ---
 
-## Legal
+<a id="legal"></a>
+## ⚠️ Legal & Disclaimer
 
-> HEAVEN includes a mandatory authorization gate.
-> `--i-have-authorization` is required on every scan invocation.
-> Only use HEAVEN against systems you own or have **explicit written permission** to test.
-> Unauthorized use is illegal and unethical. All scan activity is HMAC-audited.
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF073A,50:FFF176,100:FF073A"/>
+</p>
+
+> **HEAVEN is a defensive and authorized-offensive security tool.**
+>
+> `--i-have-authorization` is **required** on every scan invocation. Only use HEAVEN against systems you own or have **explicit written permission** to test. Unauthorized use is illegal, unethical, and a criminal offence in most jurisdictions. All scan activity is HMAC-audited.
+>
+> The CVSS predictions, EPSS enrichments, and MITRE ATT&CK mappings are heuristic — they augment but do not replace qualified human security review. Findings should be validated by a certified penetration tester before remediation actions are taken in production.
 
 ---
 
-<div align="center">
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=waving&height=200&color=0:05070F,20:080F08,40:0A1F0A,60:1A3A00,80:A8FF3E,100:05070F&section=footer&text=Made%20with%20%F0%9F%94%90%20by%20Nisarg%20Chasmawala%20(HEAVEN)&fontSize=22&fontAlignY=65&fontColor=A8FF3E&animation=twinkling"/>
+</p>
 
-**112 tests · MIT License · Built for real-world pen-testing engagements**
+<p align="center">
+<strong>112 tests · MIT License · Built for real-world pen-testing engagements</strong>
+</p>
 
-Developed by [Nisarg Chasmawala (Shroff)](https://github.com/nishu2402)
-
-</div>
+<p align="center">
+<img src="https://img.shields.io/github/stars/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social" alt="Stars"/>
+<img src="https://img.shields.io/github/forks/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social" alt="Forks"/>
+<img src="https://img.shields.io/github/watchers/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social" alt="Watchers"/>
+</p>

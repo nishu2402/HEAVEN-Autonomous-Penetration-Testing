@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import string
 import urllib.parse
 from typing import Optional
 
@@ -20,6 +21,18 @@ except ImportError:
 from heaven.utils.logger import get_logger
 
 logger = get_logger("web_fuzzer")
+
+
+def _dedup(findings: list[dict]) -> list[dict]:
+    """Deduplicate by (target, vuln_type) — one finding per unique combination."""
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for f in findings:
+        key = (str(f.get("target", "")), str(f.get("vuln_type", "")))
+        if key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out
 
 
 def _finding(target: str, vuln_type: str, severity: str, title: str,
@@ -57,32 +70,39 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
     except Exception:
         allow_hdr = ""
 
+    # Canary for TRACE echo verification — must appear in echoed request headers
+    _xst_canary = "HVNXST" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     sem = asyncio.Semaphore(5)
 
     async def _try_method(method: str) -> None:
         async with sem:
             try:
-                async with session.request(method, url,
+                req_headers = ({"X-HEAVEN-Probe": _xst_canary} if method == "TRACE" else {})
+                async with session.request(method, url, headers=req_headers,
                                            timeout=aiohttp.ClientTimeout(total=8)) as r:
                     if r.status < 405:   # Not "Method Not Allowed"
                         if method == "TRACE":
                             body = await r.text()
-                            if "cookie" in body.lower() or "authorization" in body.lower():
+                            # True XST: server echoed our unique canary header back
+                            if _xst_canary in body:
+                                has_sensitive = ("cookie" in body.lower()
+                                                 or "authorization" in body.lower())
                                 findings.append(_finding(
-                                    url, "xst_trace_enabled", "high",
-                                    "Cross-Site Tracing (XST) — HTTP TRACE Enabled",
-                                    "TRACE method echoes request headers including Cookie/Authorization. "
-                                    "Combined with XSS, an attacker can steal HttpOnly cookies.",
-                                    confidence=0.90,
-                                    evidence={"method": "TRACE", "status": r.status, "echo": body[:300]},
-                                ))
-                            else:
-                                findings.append(_finding(
-                                    url, "http_trace_enabled", "medium",
-                                    "HTTP TRACE Method Enabled",
-                                    "TRACE method is accepted. Disable it in server config.",
-                                    confidence=0.85,
-                                    evidence={"method": "TRACE", "status": r.status},
+                                    url,
+                                    "xst_trace_enabled" if has_sensitive else "http_trace_enabled",
+                                    "high" if has_sensitive else "medium",
+                                    "Cross-Site Tracing (XST) — HTTP TRACE Echoes Request Headers"
+                                    if has_sensitive else "HTTP TRACE Method Enabled",
+                                    (
+                                        "TRACE method echoes request headers including Cookie/Authorization. "
+                                        "Combined with XSS an attacker can steal HttpOnly cookies."
+                                        if has_sensitive else
+                                        "TRACE method is accepted and echoes request headers. "
+                                        "Disable TRACE in server configuration."
+                                    ),
+                                    confidence=0.95 if has_sensitive else 0.88,
+                                    evidence={"method": "TRACE", "status": r.status,
+                                              "canary_echoed": True, "echo": body[:400]},
                                 ))
                         elif method in ("PUT", "DELETE"):
                             findings.append(_finding(
@@ -192,11 +212,13 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
     """
     findings: list[dict] = []
 
-    # Check if URL returns 403 first
+    # Check if URL returns 403 first; capture the 403 body for comparison
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as r:
             if r.status != 403:
                 return findings
+            forbidden_body = await r.text()
+            forbidden_len = len(forbidden_body)
     except Exception:
         return findings
 
@@ -209,7 +231,12 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
                 async with session.get(url, headers=hdrs,
                                        timeout=aiohttp.ClientTimeout(total=8)) as r:
                     if r.status in (200, 201, 204):
-                        bypassed.append({"type": "header", "headers": hdrs, "status": r.status})
+                        body = await r.text()
+                        # Confirm actual resource access: body must be meaningfully
+                        # different from the 403 response and non-trivial in size
+                        if len(body) > 100 and abs(len(body) - forbidden_len) > 50:
+                            bypassed.append({"type": "header", "headers": hdrs,
+                                             "status": r.status, "body_len": len(body)})
             except Exception:
                 pass
 
@@ -220,7 +247,10 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
                 async with session.get(bypass_url,
                                        timeout=aiohttp.ClientTimeout(total=8)) as r:
                     if r.status in (200, 201, 204):
-                        bypassed.append({"type": "path", "suffix": suffix, "status": r.status})
+                        body = await r.text()
+                        if len(body) > 100 and abs(len(body) - forbidden_len) > 50:
+                            bypassed.append({"type": "path", "suffix": suffix,
+                                             "status": r.status, "body_len": len(body)})
             except Exception:
                 pass
 
@@ -572,20 +602,35 @@ async def _fuzz_method_override(session: "aiohttp.ClientSession",
         "_method",
     ]
 
+    # Baseline plain POST — method override only matters if it changes the response
+    try:
+        async with session.post(url, timeout=aiohttp.ClientTimeout(total=8)) as base_r:
+            base_status = base_r.status
+            base_body_len = len(await base_r.text())
+    except Exception:
+        return findings
+
     for override in override_headers:
         for method in ("DELETE", "PUT", "PATCH"):
             try:
                 hdrs = {override: method}
                 async with session.post(url, headers=hdrs,
                                         timeout=aiohttp.ClientTimeout(total=8)) as r:
-                    if r.status not in (404, 405, 501):
+                    body = await r.text()
+                    # Only report if: not a "not allowed" status AND response differs from baseline
+                    if (r.status not in (404, 405, 501)
+                            and (r.status != base_status
+                                 or abs(len(body) - base_body_len) > 200)):
                         findings.append(_finding(
                             url, "method_override_accepted", "medium",
                             f"HTTP Method Override Accepted ({override}: {method})",
-                            f"Server accepted {override}: {method} header in POST request. "
+                            f"Server accepted {override}: {method} header in POST request "
+                            f"and returned a different response than a plain POST "
+                            f"(status {r.status} vs baseline {base_status}). "
                             f"Firewall/WAF rules for {method} may be bypassable.",
-                            confidence=0.75,
-                            evidence={"header": override, "method": method, "status": r.status},
+                            confidence=0.78,
+                            evidence={"header": override, "method": method,
+                                      "status": r.status, "baseline_status": base_status},
                         ))
                         break  # Only report once per override header
             except Exception:
@@ -637,6 +682,7 @@ async def fuzz_url(url: str, aggressive: bool = False) -> dict:
             elif isinstance(r, Exception):
                 logger.debug(f"fuzzer subtask error: {r}")
 
+    all_findings = _dedup(all_findings)
     crit = sum(1 for f in all_findings if f.get("severity") == "critical")
     high = sum(1 for f in all_findings if f.get("severity") == "high")
     logger.info(f"Web fuzz {url} → {len(all_findings)} issues ({crit}C {high}H)")

@@ -946,6 +946,111 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="web", timeout=600,
     )
 
+    # ═══ Phase: INJECTION DISCOVERY (XSS + SQLi first-pass) ═══
+    async def _injection_scan(**kw):
+        try:
+            from heaven.vulnscan.injection_scanner import scan_for_injections
+            urls = list(targets.get("urls", []))
+            crawl_data: dict = {}
+            forms_by_url: dict = {}
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                # Collect additional crawled URLs
+                for ep in data.get("endpoints", []):
+                    ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                    if ep_url and ep_url not in urls:
+                        urls.append(ep_url)
+                # Collect forms keyed by URL
+                for url_str, forms in data.get("url_forms", {}).items():
+                    forms_by_url.setdefault(url_str, []).extend(forms)
+                # Also top-level forms list
+                for form in data.get("forms", []):
+                    action = form.get("action", "")
+                    if action:
+                        forms_by_url.setdefault(action, []).append(form)
+                if data.get("pages"):
+                    crawl_data["pages"] = crawl_data.get("pages", []) + data["pages"]
+            if not urls:
+                return {"skipped": True, "reason": "no URLs for injection scanning"}
+            return await scan_for_injections(
+                urls, crawl_data=crawl_data, forms_by_url=forms_by_url,
+                stealth_level=stealth,
+            )
+        except ImportError:
+            return {}
+
+    inject_id = orch.add_task(
+        "Injection Discovery (XSS/SQLi)", _injection_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        concurrency_group="web", timeout=600,
+    )
+
+    # ═══ Phase: DIRECTORY & FILE FUZZING ═══
+    async def _dir_fuzz(**kw):
+        try:
+            from heaven.vulnscan.dir_fuzzer import fuzz_directories
+            from urllib.parse import urlparse
+            urls = list(targets.get("urls", []))
+            # Strip query strings — we fuzz paths, not params
+            base_urls: list[str] = []
+            seen_bases: set[str] = set()
+            for url in urls:
+                p = urlparse(url)
+                base = f"{p.scheme}://{p.netloc}"
+                if base not in seen_bases:
+                    seen_bases.add(base)
+                    base_urls.append(base)
+            if not base_urls:
+                return {"skipped": True, "reason": "no base URLs for dir fuzzing"}
+            # Collect tech hints from adaptive profile / crawler
+            tech_hints: list[str] = []
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                for p in data.get("profiles", []):
+                    tech_hints.extend(p.get("tech", []))
+                tech_hints.extend(data.get("technologies", []))
+            return await fuzz_directories(base_urls, stealth_level=stealth, tech_hints=tech_hints)
+        except ImportError:
+            return {}
+
+    dir_fuzz_id = orch.add_task(
+        "Directory & File Fuzzing", _dir_fuzz,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        concurrency_group="web", timeout=900,
+    )
+
+    # ═══ Phase: IDOR SCANNING ═══
+    async def _idor_scan(**kw):
+        try:
+            from heaven.vulnscan.idor_scanner import scan_for_idor
+            urls = list(targets.get("urls", []))
+            forms_by_url: dict = {}
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                for ep in data.get("endpoints", []):
+                    ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                    if ep_url and ep_url not in urls:
+                        urls.append(ep_url)
+                for url_str, forms in data.get("url_forms", {}).items():
+                    forms_by_url.setdefault(url_str, []).extend(forms)
+            if not urls:
+                return {"skipped": True, "reason": "no URLs for IDOR scanning"}
+            return await scan_for_idor(urls, forms_by_url=forms_by_url, stealth_level=stealth)
+        except ImportError:
+            return {}
+
+    idor_id = orch.add_task(
+        "IDOR & Privilege Escalation Scan", _idor_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, inject_id],
+        concurrency_group="web", timeout=600,
+    )
+
     # ═══ Phase: DNS RECONNAISSANCE ═══
     async def _dns_recon(**kw):
         try:
@@ -1029,7 +1134,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     val_id = orch.add_task(
         "PoC Validation", _validate_findings,
         phase=ScanPhase.VALIDATION,
-        depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, dns_id, cve_map_id],
+        depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, inject_id, dir_fuzz_id, idor_id, dns_id, cve_map_id],
     )
 
     # ═══ Phase: SQLMAP (confirmed SQLi targets only) ═══

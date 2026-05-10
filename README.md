@@ -118,11 +118,11 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 </p>
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          HEAVEN Platform                                │
-├──────────────────┬─────────────────────────┬────────────────────────────┤
-│   RECON          │   VULNERABILITY DETECTION│   AI / RISK SCORING        │
-│                  │                         │                            │
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          HEAVEN Platform                                 │
+├──────────────────┬──────────────────────────┬────────────────────────────┤
+│   RECON          │ VULNERABILITY DETECTION  │   AI / RISK SCORING        │
+│                  │                          │                            │
 │ • nmap (XML)     │ • Nuclei templates       │ • CVSS 3.x ML predictor    │
 │ • Web crawler    │ • SQLi (boolean/time/    │   (ExtraTreesRegressor,    │
 │ • DNS brute-force│   error/union)           │   R²=0.9925, 13 features)  │
@@ -136,24 +136,24 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 │ • Git secrets    │ • GraphQL introspection  │                            │
 │ • Email OSINT    │ • Default credentials    │                            │
 │ • Honeypot detect│ • Subdomain takeover     │                            │
-├──────────────────┴─────────────────────────┴────────────────────────────┤
-│              FALSE-POSITIVE SUPPRESSION (2-stage verification)          │
-│   • Baseline noise measurement (timing / content-length jitter)        │
-│   • Reproducibility checks (time-based: 2/3 passes, boolean: stdev)    │
-│   • Confidence buckets: strong ≥0.95, high ≥0.80, discarded <0.40     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                    ORCHESTRATOR (async DAG)                             │
-│   • Dependency-aware parallel task execution                            │
-│   • Dynamic task injection (services → SSH/SMB/RDP scanners)           │
-│   • Resumable scans — checkpoint saved per phase                        │
-│   • Stealth timing levels 1–5 with randomized delays                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│              FastAPI + JWT RBAC + WebSocket live feed                   │
-│   • React web UI — dark matrix aesthetic                                │
-│   • Scan launcher  ·  Live findings feed  ·  3D topology                │
-│   • Kill chain view  ·  Triage workflow  ·  Operator notes              │
-│   • AES-256-GCM credential vault  ·  HMAC-signed audit log             │
-└─────────────────────────────────────────────────────────────────────────┘
+├──────────────────┴──────────────────────────┴────────────────────────────┤
+│              FALSE-POSITIVE SUPPRESSION (2-stage verification)           │
+│   • Baseline noise measurement (timing / content-length jitter)          │
+│   • Reproducibility checks (time-based: 2/3 passes, boolean: stdev)      │
+│   • Confidence buckets: strong ≥0.95, high ≥0.80, discarded <0.40        │
+├──────────────────────────────────────────────────────────────────────────┤
+│                    ORCHESTRATOR (async DAG)                              │
+│   • Dependency-aware parallel task execution                             │
+│   • Dynamic task injection (services → SSH/SMB/RDP scanners)             │
+│   • Resumable scans — checkpoint saved per phase                         │
+│   • Stealth timing levels 1–5 with randomized delays                     │
+├──────────────────────────────────────────────────────────────────────────┤
+│              FastAPI + JWT RBAC + WebSocket live feed                    │
+│   • React web UI — dark matrix aesthetic                                 │
+│   • Scan launcher  ·  Live findings feed  ·  3D topology                 │
+│   • Kill chain view  ·  Triage workflow  ·  Operator notes               │
+│   • AES-256-GCM credential vault  ·  HMAC-signed audit log               │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---

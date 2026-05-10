@@ -423,10 +423,11 @@ class ScanOrchestrator:
                 elif port == 3389 or "rdp" in service or "ms-wbt-server" in service:
                     async def _rdp_check(ip=ip, port=port, **kw):
                         try:
-                            from heaven.vulnscan.advanced_attacks import test_default_credentials
+                            from heaven.vulnscan.advanced_attacks import CredentialSprayer
                             import aiohttp
                             async with aiohttp.ClientSession() as session:
-                                return await test_default_credentials(session, f"http://{ip}:{port}")
+                                sprayer = CredentialSprayer()
+                                return await sprayer.spray(session, f"http://{ip}:{port}")
                         except Exception:
                             return {}
                     self.add_task(f"RDP Default Credentials {ip}", _rdp_check,
@@ -850,33 +851,31 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _ssl_scan(**kw):
         try:
             from heaven.vulnscan.ssl_scanner import scan_ssl_targets
-            import aiohttp
             from urllib.parse import urlparse
-            # Build host:port list from URLs + discovered hosts
-            ssl_targets: list[tuple[str, int]] = []
+            # Build "host:port" string list — scan_ssl_targets accepts list[str]
+            ssl_targets: list[str] = []
             for url in targets.get("urls", []):
                 parsed = urlparse(url)
                 host = parsed.hostname or ""
                 port = parsed.port or (443 if parsed.scheme == "https" else 80)
-                if host and port:
-                    ssl_targets.append((host, port))
-            # Also check HTTPS on discovered open ports from network scan
+                if host:
+                    ssl_targets.append(f"{host}:{port}")
+            # Also probe TLS ports found during network scan
             net_res = orch.results.get(orch.net_task_id or "")
             if net_res and net_res.data and isinstance(net_res.data, dict):
-                for host in net_res.data.get("hosts", []):
-                    ip = host.get("ip", "")
-                    for port_info in host.get("open_ports", []):
+                for h in net_res.data.get("hosts", []):
+                    ip = h.get("ip", "")
+                    for port_info in h.get("open_ports", []):
                         port = port_info.get("port", 0)
                         svc = (port_info.get("service") or "").lower()
-                        if port == 443 or "https" in svc or "ssl" in svc or "tls" in svc:
-                            ssl_targets.append((ip, port))
+                        if port in (443, 8443) or "https" in svc or "ssl" in svc or "tls" in svc:
+                            target_str = f"{ip}:{port}"
+                            if target_str not in ssl_targets:
+                                ssl_targets.append(target_str)
             if not ssl_targets:
                 return {"skipped": True, "reason": "no HTTPS/TLS targets found"}
-            findings = await scan_ssl_targets(ssl_targets)
-            return {
-                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in findings],
-                "total": len(findings),
-            }
+            # scan_ssl_targets returns {"findings": [...], "vulnerabilities": [...], "total": int, ...}
+            return await scan_ssl_targets(ssl_targets)
         except ImportError:
             return {}
 
@@ -890,26 +889,26 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _auth_scan(**kw):
         try:
             from heaven.vulnscan.auth_scanner import scan_auth_targets
-            # Gather URLs + crawl data (forms) from previous recon
+            # Gather URLs; build crawl_data keyed by URL (scan_auth_targets expects {url: {"forms":[...]}})
             urls = list(targets.get("urls", []))
-            crawl_data: dict = {"forms": [], "endpoints": []}
+            crawl_data: dict = {}
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
                     continue
                 data = res.data if isinstance(res.data, dict) else {}
-                crawl_data["forms"].extend(data.get("forms", []))
-                crawl_data["endpoints"].extend(data.get("endpoints", []))
+                # Merge per-URL form data from crawler results
+                for url_forms in data.get("url_forms", {}).items():
+                    base_url, forms = url_forms
+                    crawl_data.setdefault(base_url, {}).setdefault("forms", []).extend(forms)
+                # Also collect extra endpoint URLs
                 for ep in data.get("endpoints", []):
                     ep_url = ep if isinstance(ep, str) else ep.get("url", "")
                     if ep_url and ep_url not in urls:
                         urls.append(ep_url)
             if not urls:
                 return {"skipped": True, "reason": "no URLs to auth-scan"}
-            findings = await scan_auth_targets(urls, crawl_data=crawl_data)
-            return {
-                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in findings],
-                "total": len(findings),
-            }
+            # scan_auth_targets returns {"findings": [...], "vulnerabilities": [...], "total": int}
+            return await scan_auth_targets(urls, crawl_data=crawl_data)
         except ImportError:
             return {}
 
@@ -936,11 +935,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             if not urls:
                 return {"skipped": True, "reason": "no URLs to fuzz"}
             aggressive = stealth not in ("stealth", "paranoid")
-            findings = await fuzz_targets(urls, aggressive=aggressive)
-            return {
-                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in findings],
-                "total": len(findings),
-            }
+            # fuzz_targets returns {"findings": [...], "vulnerabilities": [...], "total": int}
+            return await fuzz_targets(urls, aggressive=aggressive)
         except ImportError:
             return {}
 
@@ -979,11 +975,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                                 domains.append(d)
             if not domains:
                 return {"skipped": True, "reason": "no domains for DNS recon"}
-            results = await dns_recon_targets(domains)
-            return {
-                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in results],
-                "total": len(results),
-            }
+            # dns_recon_targets returns {"findings": [...], "vulnerabilities": [...], "total": int}
+            return await dns_recon_targets(domains)
         except ImportError:
             return {}
 

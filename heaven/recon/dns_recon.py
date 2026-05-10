@@ -17,6 +17,18 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("dns_recon")
 
+
+def _dedup(findings: list[dict]) -> list[dict]:
+    """Deduplicate findings by (target, vuln_type)."""
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for f in findings:
+        key = (str(f.get("target", "")), str(f.get("vuln_type", "")))
+        if key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out
+
 try:
     import dns.resolver
     import dns.zone
@@ -208,18 +220,23 @@ async def _check_subdomain_takeover(subdomain: str) -> Optional[dict]:
 
     for service, patterns in _TAKEOVER_FINGERPRINTS.items():
         if service in final_cname:
-            # Try to fetch the page and look for the unclaimed fingerprint
-            try:
-                import urllib.request
-                import urllib.error
-                req = urllib.request.Request(
-                    f"http://{subdomain}",
-                    headers={"User-Agent": "HEAVEN-TakeoverScanner/2.0"},
-                )
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    body = resp.read(4096).decode("utf-8", errors="ignore")
-            except Exception as e:
-                body = str(e)
+            # Fetch the subdomain and look for the unclaimed-resource fingerprint.
+            # Try HTTP first, then HTTPS. Only use the actual response body —
+            # never use str(exception) as the body because error messages may
+            # contain the service name and trigger false positives.
+            import urllib.request
+            body = ""
+            for scheme in ("http", "https"):
+                try:
+                    req = urllib.request.Request(
+                        f"{scheme}://{subdomain}",
+                        headers={"User-Agent": "HEAVEN-TakeoverScanner/2.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        body = resp.read(8192).decode("utf-8", errors="ignore")
+                    break  # Use first successful fetch
+                except Exception:
+                    continue
 
             for pattern in patterns:
                 if pattern.lower() in body.lower():
@@ -605,6 +622,7 @@ async def dns_recon(domain: str, enumerate_subdomains: bool = False,
     except Exception:
         pass
 
+    all_findings = _dedup(all_findings)
     crit = sum(1 for f in all_findings if f.get("severity") == "critical")
     high = sum(1 for f in all_findings if f.get("severity") == "high")
     logger.info(f"DNS recon {domain} → {len(all_findings)} issues ({crit}C {high}H)")

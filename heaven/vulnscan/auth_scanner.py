@@ -21,6 +21,18 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("auth_scanner")
 
+
+def _dedup(findings: list[dict]) -> list[dict]:
+    """Deduplicate by (target, vuln_type) — one finding per unique combination."""
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for f in findings:
+        key = (str(f.get("target", "")), str(f.get("vuln_type", "")))
+        if key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out
+
 # ── Common credential lists ────────────────────────────────────────────────────
 _COMMON_PASSWORDS = [
     "password", "Password1", "admin", "Admin1", "123456", "12345678",
@@ -266,7 +278,8 @@ async def _brute_http_basic(session: "aiohttp.ClientSession",
                 auth = aiohttp.BasicAuth(user, passwd)
                 async with session.get(url, auth=auth,
                                        timeout=aiohttp.ClientTimeout(total=6)) as r:
-                    if r.status < 400:
+                    # Require 200 only — redirects (3xx) are not confirmed logins
+                    if r.status == 200:
                         found.append((user, passwd))
             except Exception:
                 pass
@@ -372,13 +385,14 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
                     if r.status == 429 or "too many" in body.lower():
                         lockout_detected = True
                         return
-                    # Heuristic: significantly different response = success
+                    # Heuristic: post-login keywords present AND response meaningfully differs
                     body_len = len(body)
-                    if (r.status != fail_status or
-                            abs(body_len - fail_len) > 200 and
-                            any(kw in body.lower() for kw in
-                                ("logout", "dashboard", "welcome", "account",
-                                 "profile", "signout", "sign out"))):
+                    success_kw = any(kw in body.lower() for kw in
+                                     ("logout", "dashboard", "welcome", "account",
+                                      "profile", "signout", "sign out", "my account"))
+                    response_differs = (r.status != fail_status
+                                        or abs(body_len - fail_len) > 300)
+                    if success_kw and response_differs:
                         found.append((user, passwd))
             except Exception:
                 pass
@@ -654,6 +668,7 @@ async def scan_auth(url: str, forms: Optional[list[dict]] = None,
             elif isinstance(r, Exception):
                 logger.debug(f"auth scan subtask error: {r}")
 
+    all_findings = _dedup(all_findings)
     crit = sum(1 for f in all_findings if f.get("severity") == "critical")
     high = sum(1 for f in all_findings if f.get("severity") == "high")
     logger.info(

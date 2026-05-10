@@ -8,10 +8,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
-import time
 import urllib.parse
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 try:
     import aiohttp
@@ -86,7 +84,6 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
     findings: list[dict] = []
     try:
         async with session.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            cookies = resp.cookies
             raw_hdrs = resp.headers.getall("Set-Cookie", [])
 
             for raw in raw_hdrs:
@@ -102,8 +99,8 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                     findings.append(_make_finding(
                         url, "cookie_no_secure", severity,
                         f"Cookie '{name}' Missing Secure Flag",
-                        f"Cookie transmitted over HTTP. An attacker on the network can steal "
-                        f"it via passive sniffing. Add the Secure attribute.",
+                        "Cookie transmitted over HTTP. An attacker on the network can steal "
+                        "it via passive sniffing. Add the Secure attribute.",
                         confidence=0.97,
                         evidence={"cookie_name": name, "raw": raw[:200]},
                     ))
@@ -111,8 +108,8 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                     findings.append(_make_finding(
                         url, "cookie_no_httponly", severity,
                         f"Cookie '{name}' Missing HttpOnly Flag",
-                        f"Cookie accessible via JavaScript (document.cookie). Enables XSS-based "
-                        f"session hijacking. Add HttpOnly attribute.",
+                        "Cookie accessible via JavaScript (document.cookie). Enables XSS-based "
+                        "session hijacking. Add HttpOnly attribute.",
                         confidence=0.97,
                         evidence={"cookie_name": name, "raw": raw[:200]},
                     ))
@@ -120,8 +117,8 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                     findings.append(_make_finding(
                         url, "cookie_no_samesite", "medium",
                         f"Cookie '{name}' Missing SameSite Attribute",
-                        f"No SameSite attribute — cookie is sent on cross-site requests, "
-                        f"enabling CSRF attacks. Set SameSite=Strict or Lax.",
+                        "No SameSite attribute — cookie is sent on cross-site requests, "
+                        "enabling CSRF attacks. Set SameSite=Strict or Lax.",
                         confidence=0.92,
                         evidence={"cookie_name": name},
                     ))
@@ -281,8 +278,8 @@ async def _brute_http_basic(session: "aiohttp.ClientSession",
         findings.append(_make_finding(
             url, "weak_http_auth_credentials", "critical",
             f"Weak HTTP {auth_type} Credentials ({user}:{passwd})",
-            f"Successfully authenticated with default credentials. "
-            f"An unauthenticated attacker can gain access.",
+            "Successfully authenticated with default credentials. "
+            "An unauthenticated attacker can gain access.",
             confidence=0.99,
             evidence={"username": user, "password": passwd, "auth_type": auth_type},
         ))

@@ -302,7 +302,6 @@ async def scan_host(
                         # Fallback: infer from TTL in host element
                         host_elem = xml_root.find(".//host")
                         if host_elem is not None:
-                            distance = host_elem.find(".//distance")
                             # nmap reports TTL in <distance> under <os>; try host ttl attr
                             ttl_val = 0
                             for dist in xml_root.findall(".//distance"):

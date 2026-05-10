@@ -540,6 +540,7 @@ def _host_to_dict(host: HostResult) -> dict:
     """Convert HostResult to serialisable dict."""
     return {
         "host": host.host,
+        "ip": host.host,  # alias so orchestrator service-task injection finds the right key
         "is_alive": host.is_alive,
         "os_guess": host.os_guess,
         "scan_time_ms": round(host.scan_time_ms, 1),

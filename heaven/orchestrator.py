@@ -846,6 +846,176 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         timeout=1800,
     )
 
+    # ═══ Phase: SSL/TLS AUDIT ═══
+    async def _ssl_scan(**kw):
+        try:
+            from heaven.vulnscan.ssl_scanner import scan_ssl_targets
+            import aiohttp
+            from urllib.parse import urlparse
+            # Build host:port list from URLs + discovered hosts
+            ssl_targets: list[tuple[str, int]] = []
+            for url in targets.get("urls", []):
+                parsed = urlparse(url)
+                host = parsed.hostname or ""
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                if host and port:
+                    ssl_targets.append((host, port))
+            # Also check HTTPS on discovered open ports from network scan
+            net_res = orch.results.get(orch.net_task_id or "")
+            if net_res and net_res.data and isinstance(net_res.data, dict):
+                for host in net_res.data.get("hosts", []):
+                    ip = host.get("ip", "")
+                    for port_info in host.get("open_ports", []):
+                        port = port_info.get("port", 0)
+                        svc = (port_info.get("service") or "").lower()
+                        if port == 443 or "https" in svc or "ssl" in svc or "tls" in svc:
+                            ssl_targets.append((ip, port))
+            if not ssl_targets:
+                return {"skipped": True, "reason": "no HTTPS/TLS targets found"}
+            findings = await scan_ssl_targets(ssl_targets)
+            return {
+                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in findings],
+                "total": len(findings),
+            }
+        except ImportError:
+            return {}
+
+    ssl_id = orch.add_task(
+        "SSL/TLS Audit", _ssl_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id, web_id],
+        concurrency_group="network", timeout=300,
+    )
+
+    # ═══ Phase: AUTH SCANNER ═══
+    async def _auth_scan(**kw):
+        try:
+            from heaven.vulnscan.auth_scanner import scan_auth_targets
+            # Gather URLs + crawl data (forms) from previous recon
+            urls = list(targets.get("urls", []))
+            crawl_data: dict = {"forms": [], "endpoints": []}
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                crawl_data["forms"].extend(data.get("forms", []))
+                crawl_data["endpoints"].extend(data.get("endpoints", []))
+                for ep in data.get("endpoints", []):
+                    ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                    if ep_url and ep_url not in urls:
+                        urls.append(ep_url)
+            if not urls:
+                return {"skipped": True, "reason": "no URLs to auth-scan"}
+            findings = await scan_auth_targets(urls, crawl_data=crawl_data)
+            return {
+                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in findings],
+                "total": len(findings),
+            }
+        except ImportError:
+            return {}
+
+    auth_id = orch.add_task(
+        "Authentication Security Audit", _auth_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        concurrency_group="web", timeout=600,
+    )
+
+    # ═══ Phase: WEB FUZZER ═══
+    async def _web_fuzz(**kw):
+        try:
+            from heaven.vulnscan.web_fuzzer import fuzz_targets
+            urls = list(targets.get("urls", []))
+            # Include endpoints discovered during deep recon
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                for ep in data.get("endpoints", []):
+                    ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                    if ep_url and ep_url not in urls:
+                        urls.append(ep_url)
+            if not urls:
+                return {"skipped": True, "reason": "no URLs to fuzz"}
+            aggressive = stealth not in ("stealth", "paranoid")
+            findings = await fuzz_targets(urls, aggressive=aggressive)
+            return {
+                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in findings],
+                "total": len(findings),
+            }
+        except ImportError:
+            return {}
+
+    fuzz_id = orch.add_task(
+        "Web Application Fuzzing", _web_fuzz,
+        phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        concurrency_group="web", timeout=600,
+    )
+
+    # ═══ Phase: DNS RECONNAISSANCE ═══
+    async def _dns_recon(**kw):
+        try:
+            from heaven.recon.dns_recon import dns_recon_targets
+            from urllib.parse import urlparse
+            domains: list[str] = list(targets.get("domains", []))
+            for url in targets.get("urls", []):
+                host = urlparse(url).hostname or ""
+                if host and host not in domains:
+                    parts = host.split(".")
+                    if len(parts) >= 2:
+                        domain = ".".join(parts[-2:])
+                        if domain not in domains:
+                            domains.append(domain)
+            # Also gather domains from subdomain enumeration results
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                for sub in data.get("subdomains", []):
+                    sub_str = sub if isinstance(sub, str) else sub.get("value", "")
+                    if sub_str:
+                        parts = sub_str.split(".")
+                        if len(parts) >= 2:
+                            d = ".".join(parts[-2:])
+                            if d not in domains:
+                                domains.append(d)
+            if not domains:
+                return {"skipped": True, "reason": "no domains for DNS recon"}
+            results = await dns_recon_targets(domains)
+            return {
+                "findings": [f.__dict__ if hasattr(f, "__dict__") else f for f in results],
+                "total": len(results),
+            }
+        except ImportError:
+            return {}
+
+    dns_id = orch.add_task(
+        "DNS Security Reconnaissance", _dns_recon,
+        phase=ScanPhase.VULN_SCAN, depends_on=[deep_id],
+        concurrency_group="network", timeout=300,
+    )
+
+    # ═══ Phase: CVE MAPPING (inline DB + NVD) ═══
+    async def _cve_map(**kw):
+        try:
+            from heaven.vulnscan.cve_mapper import map_vulnerabilities
+            host_results: list[dict] = []
+            for tid, res in orch.results.items():
+                if res.state != TaskState.COMPLETED or not res.data:
+                    continue
+                data = res.data if isinstance(res.data, dict) else {}
+                host_results.extend(data.get("hosts", []))
+            if not host_results:
+                return {"skipped": True, "reason": "no host results for CVE mapping"}
+            vulns = await map_vulnerabilities(host_results)
+            return {"vulnerabilities": vulns, "total": len(vulns)}
+        except ImportError:
+            return {}
+
+    cve_map_id = orch.add_task(
+        "CVE Mapping (Inline + NVD)", _cve_map,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id],
+        timeout=120,
+    )
+
     # ═══ Phase: VALIDATION ═══
     async def _validate_findings(**kw):
         try:
@@ -866,7 +1036,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     val_id = orch.add_task(
         "PoC Validation", _validate_findings,
         phase=ScanPhase.VALIDATION,
-        depends_on=[vuln_id, zday_id, adv_id, nuclei_id],
+        depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, dns_id, cve_map_id],
     )
 
     # ═══ Phase: SQLMAP (confirmed SQLi targets only) ═══

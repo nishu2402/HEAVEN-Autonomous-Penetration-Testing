@@ -50,6 +50,7 @@ python-nmap>=0.7.1
 dnspython>=2.6.0
 python-whois>=0.9.4
 shodan>=1.31.0
+asyncssh>=2.14.0        # SSH credential testing (CredentialSprayer.spray_ssh)
 
 # ─── Web Reconnaissance & Parsing ────────────────────────────────────
 beautifulsoup4>=4.12.0

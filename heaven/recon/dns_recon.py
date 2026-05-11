@@ -232,7 +232,7 @@ async def _check_subdomain_takeover(subdomain: str) -> Optional[dict]:
                         f"{scheme}://{subdomain}",
                         headers={"User-Agent": "HEAVEN-TakeoverScanner/2.0"},
                     )
-                    with urllib.request.urlopen(req, timeout=8) as resp:
+                    with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310 — scheme limited to http/https
                         body = resp.read(8192).decode("utf-8", errors="ignore")
                     break  # Use first successful fetch
                 except Exception:

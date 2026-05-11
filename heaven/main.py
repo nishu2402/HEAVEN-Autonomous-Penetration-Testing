@@ -761,7 +761,7 @@ if HAS_CLICK:
         print_banner()
         _print(f"[cyan]Starting HEAVEN API server on {host}:{port}[/cyan]")
 
-        if host == "0.0.0.0":
+        if host == "0.0.0.0":  # nosec B104 — intentional, user is warned below
             _print("[yellow]⚠  Binding to 0.0.0.0 — make sure you are behind a reverse proxy with TLS.[/yellow]")
 
         try:

@@ -511,7 +511,7 @@ class CredentialSprayer:
                         vuln_type="default_credentials",
                         severity="critical",
                         title=f"SSH Default Credentials: {username}:{password or '(empty)'}",
-                        description=f"SSH service accepts weak/default credentials",
+                        description="SSH service accepts weak/default credentials",
                         confidence=1.0,
                         evidence={"username": username, "password": password, "port": port},
                         remediation="Disable password authentication; use SSH keys only. Rotate credentials.",

@@ -21,7 +21,7 @@ import asyncio
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
 try:
@@ -501,10 +501,10 @@ class DirectoryFuzzer:
         connector = aiohttp.TCPConnector(ssl=False, limit=80)
         async with aiohttp.ClientSession(connector=connector) as session:
             tasks = [self._scan_target(session, url) for url in targets]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            raw: list[Any] = list(await asyncio.gather(*tasks, return_exceptions=True))
 
         all_findings = []
-        for r in results:
+        for r in raw:
             if isinstance(r, list):
                 all_findings.extend(r)
 

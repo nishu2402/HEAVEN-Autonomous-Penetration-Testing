@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+JWT+%C2%B7+Race+Conditions+%C2%B7+Smuggling;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;26+Live+Modules+%C2%B7+112+Tests+%C2%B7+FastAPI+%2B+React+HUD"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;29+Live+Modules+%C2%B7+112+Tests+%C2%B7+FastAPI+%2B+React+HUD"/>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-26_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-29_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-7B2FBE?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
     <img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-FF073A?style=flat-square" alt="Platform"/>
     <img src="https://img.shields.io/badge/Vault-AES--256--GCM-00CFFF?style=flat-square&logo=letsencrypt&logoColor=black" alt="Vault"/>
@@ -96,11 +96,11 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | Capability | Detail |
 |---|---|
 | 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud enum (AWS/GCP/Azure) · IoT/SCADA · wireless · Git secrets · email OSINT · honeypot detection |
-| 🎯 **Vulnerability Detection** | Nuclei templates + custom engines for SQLi · XSS · SSRF · XXE · CORS · CRLF · open redirect · JWT attacks · race conditions · HTTP request smuggling · GraphQL introspection · default credentials · subdomain takeover |
+| 🎯 **Vulnerability Detection** | Nuclei templates + custom engines for SQLi (error/boolean/time-based blind) · XSS · SSRF · XXE · CORS · CRLF · open redirect · IDOR · mass assignment · directory/file fuzzing · JWT attacks · race conditions · HTTP request smuggling · GraphQL introspection · default credentials · subdomain takeover |
 | 🔇 **False-Positive Suppression** | Two-stage confirmation pass — sub-0.40-confidence results automatically discarded |
 | 📊 **Risk Scoring** | CVSS v3 ML predictor (R²=0.9925) · EPSS exploit-probability · CISA KEV membership |
 | 🗺️ **MITRE ATT&CK** | Every finding mapped to ATT&CK techniques + Lockheed Cyber Kill Chain phases |
-| 📄 **Report Generation** | Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
+| 📄 **Report Generation** | Professional PDF/HTML pentest report (cover page · CVSS v3.1 vectors · MITRE ATT&CK mapping · remediation roadmap · SLA) · Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
 | 🔢 **Tests** | **112 pytest tests passing** |
 | 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · SQLite engagement storage |
 
@@ -124,18 +124,23 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 │   RECON          │ VULNERABILITY DETECTION  │   AI / RISK SCORING        │
 │                  │                          │                            │
 │ • nmap (XML)     │ • Nuclei templates       │ • CVSS 3.x ML predictor    │
-│ • Web crawler    │ • SQLi (boolean/time/    │   (ExtraTreesRegressor,    │
-│ • DNS brute-force│   error/union)           │   R²=0.9925, 13 features)  │
-│ • Cert transp.   │ • XSS (reflected/stored) │ • EPSS exploit probability │
-│ • Shodan API     │ • SSRF + cloud metadata  │ • CISA KEV flag            │
-│ • AD enumeration │ • XXE / CRLF injection   │ • Bayesian host priority   │
-│ • Cloud enum     │ • CORS misconfiguration  │ • Cross-scan belief update │
-│   (AWS/GCP/Azure)│ • JWT (none/weak secret) │                            │
-│ • IoT/SCADA      │ • Race conditions        │                            │
-│ • Wireless recon │ • HTTP request smuggling │                            │
-│ • Git secrets    │ • GraphQL introspection  │                            │
-│ • Email OSINT    │ • Default credentials    │                            │
-│ • Honeypot detect│ • Subdomain takeover     │                            │
+│ • Web crawler    │ • SQLi (error-based,     │   (ExtraTreesRegressor,    │
+│ • DNS brute-force│   boolean-blind,         │   R²=0.9925, 13 features)  │
+│ • Cert transp.   │   time-based blind)      │ • EPSS exploit probability │
+│ • Shodan API     │ • XSS (reflected/stored) │ • CISA KEV flag            │
+│ • AD enumeration │ • IDOR + mass assignment │ • Bayesian host priority   │
+│ • Cloud enum     │ • Dir/file fuzzing       │ • Cross-scan belief update │
+│   (AWS/GCP/Azure)│   (250+ paths + ffuf)    │                            │
+│ • IoT/SCADA      │ • SSRF + cloud metadata  │                            │
+│ • Wireless recon │ • XXE / CRLF injection   │                            │
+│ • Git secrets    │ • CORS misconfiguration  │                            │
+│ • Email OSINT    │ • JWT (none/weak secret) │                            │
+│ • Honeypot detect│ • Race conditions        │                            │
+│                  │ • HTTP request smuggling │                            │
+│                  │ • GraphQL introspection  │                            │
+│                  │ • Default credentials    │                            │
+│                  │   (web + SSH via asyncssh│                            │
+│                  │ • Subdomain takeover     │                            │
 ├──────────────────┴──────────────────────────┴────────────────────────────┤
 │              FALSE-POSITIVE SUPPRESSION (2-stage verification)           │
 │   • Baseline noise measurement (timing / content-length jitter)          │
@@ -177,8 +182,11 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | `recon/cloud_enum.py` | ✅ AWS | GCP/Azure stubs present; AWS full |
 | `recon/honeypot_detector.py` | ✅ Live | Heuristic honeypot scoring, automatic target skip |
 | `vulnscan/nuclei_scanner.py` | ✅ Live | Real nuclei binary execution, JSONL output parsed |
+| `vulnscan/injection_scanner.py` | ✅ Live | First-pass XSS + SQLi discovery: error-based, boolean-blind, time-based blind across all crawled input vectors |
+| `vulnscan/dir_fuzzer.py` | ✅ Live | Directory & file fuzzing — 250+ curated paths, ffuf integration, wildcard-response filtering, tech-aware extensions |
+| `vulnscan/idor_scanner.py` | ✅ Live | IDOR detection — path/param ID enumeration, UUID probing, horizontal privilege escalation, mass assignment |
 | `vulnscan/safe_validator.py` | ✅ Live | SQLi / XSS / SSRF / XXE / CORS / CRLF / open redirect |
-| `vulnscan/advanced_attacks.py` | ✅ Live | JWT forging, race conditions, request smuggling, GraphQL |
+| `vulnscan/advanced_attacks.py` | ✅ Live | JWT forging, race conditions, request smuggling, GraphQL, SSH credential spray |
 | `vulnscan/fp_suppress.py` | ✅ Live | Two-stage FP suppression with baseline noise measurement |
 | `vulnscan/zeroday_engine.py` | ✅ Live | Behavioural fuzzing: buffer overflow, format string, auth bypass |
 | `vulnscan/api_scanner.py` | ✅ Live | BOLA/IDOR, GraphQL, REST parameter fuzzing |
@@ -188,7 +196,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | `ml/ai_brain.py` | ✅ Live | Bayesian host prioritisation with cross-scan memory |
 | `mitre/attack_mapper.py` | ✅ Live | ATT&CK technique mapping per finding |
 | `mitre/kill_chain.py` | ✅ Live | Cyber Kill Chain coverage + attack path summary |
-| `devsecops/pdf_report.py` | ✅ Live | Professional HTML/PDF report generation |
+| `devsecops/pdf_report.py` | ✅ Live | Professional HTML/PDF report — cover page, executive summary, CVSS v3.1 vectors, MITRE ATT&CK mapping, remediation roadmap, SLA per finding |
 | `devsecops/compliance_report.py` | ✅ Live | OWASP Top 10 / NIST CSF compliance mapping |
 | `devsecops/alerting.py` | ✅ Live | Webhook alerting (Slack, Teams, custom) via aiohttp |
 | `security/vault.py` | ✅ Live | AES-256-GCM credential vault |
@@ -213,6 +221,8 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 - **Git**
 - `nmap` — `apt install nmap` / `brew install nmap`
 - `nuclei` (recommended) — [projectdiscovery.io/open-source/nuclei](https://projectdiscovery.io/open-source/nuclei)
+- `ffuf` (optional, faster dir fuzzing) — [github.com/ffuf/ffuf](https://github.com/ffuf/ffuf)
+- `sqlmap` (optional, deep SQLi exploitation) — `pip install sqlmap`
 
 ### 1. Install
 
@@ -368,7 +378,7 @@ heaven resume --engagement <name> --i-have-authorization   # resume interrupted 
 
 | Mode | Modules Activated |
 |---|---|
-| `web` | Crawl → Nuclei → SQLi/XSS/SSRF/JWT/race/smuggling/GraphQL → FP suppress |
+| `web` | Crawl → Nuclei → SQLi (error/boolean/time-blind) · XSS · SSRF · IDOR · Dir fuzzing · JWT · race · smuggling · GraphQL → FP suppress → sqlmap |
 | `network` | nmap → service enum → dynamic injection (SSH/SMB/RDP) → CVE lookup |
 | `full` | web + network + deep recon + Shodan + cloud enum |
 | `ad` | AD enum → Kerberoasting → AS-REP roasting → privilege path analysis |
@@ -771,7 +781,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 ├── 🐍 heaven/                      ← Python package
 │   ├── api/                        ← FastAPI server + WebSocket
 │   ├── recon/                      ← Reconnaissance modules (7 modules)
-│   ├── vulnscan/                   ← Vulnerability detection + FP suppression (7 modules)
+│   ├── vulnscan/                   ← Vulnerability detection + FP suppression (10 modules)
 │   ├── ml/                         ← Risk scoring + ML pipeline
 │   ├── mitre/                      ← ATT&CK mapping + kill chain
 │   ├── devsecops/                  ← Reporting + alerting + compliance
@@ -815,7 +825,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 </p>
 
 <p align="center">
-<strong>112 tests · MIT License · Built for real-world pen-testing engagements</strong>
+<strong>112 tests · 29 live modules · MIT License · Built for real-world pen-testing engagements</strong>
 </p>
 
 <p align="center">

@@ -207,7 +207,7 @@ async def _audit_session_fixation(session: "aiohttp.ClientSession",
     """
     findings: list[dict] = []
     try:
-        fake_sid = "HEAVEN_PROBE_" + hashlib.md5(url.encode()).hexdigest()[:16]
+        fake_sid = "HEAVEN_PROBE_" + hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:16]
 
         # Find likely login URL
         login_form = next(

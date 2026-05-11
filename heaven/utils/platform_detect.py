@@ -10,6 +10,7 @@ import os
 import platform
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -86,10 +87,10 @@ def detect_platform() -> PlatformInfo:
         temp_dir = Path(os.environ.get("TEMP", "C:\\Windows\\Temp")) / "heaven"
     elif os_name == "darwin":
         data_dir = Path.home() / "Library" / "Application Support" / "HEAVEN"
-        temp_dir = Path("/tmp/heaven")
+        temp_dir = Path(tempfile.gettempdir()) / "heaven"
     else:
         data_dir = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "heaven"
-        temp_dir = Path("/tmp/heaven")
+        temp_dir = Path(tempfile.gettempdir()) / "heaven"
 
     # Event loop policy
     loop_policy = "default"

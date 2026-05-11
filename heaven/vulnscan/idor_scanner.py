@@ -85,7 +85,7 @@ SEQUENTIAL_UUIDS = [
 # ─────────────────────────────────────────────────────────────────
 
 def _body_hash(body: str) -> str:
-    return hashlib.md5(body.encode(errors="replace")).hexdigest()
+    return hashlib.md5(body.encode(errors="replace"), usedforsecurity=False).hexdigest()
 
 
 def _body_differs(a: str, b: str, min_size: int = 50) -> bool:

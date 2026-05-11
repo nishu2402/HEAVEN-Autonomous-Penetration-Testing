@@ -18,7 +18,6 @@ Key features
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import shutil
 import tempfile
 from pathlib import Path

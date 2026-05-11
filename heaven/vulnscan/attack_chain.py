@@ -348,7 +348,8 @@ class AttackChainEngine:
                 if path and len(path) >= 2:
                     chain = AttackChain(
                         chain_id=hashlib.md5(
-                            f"{entry.node_id}-{crown.node_id}".encode()
+                            f"{entry.node_id}-{crown.node_id}".encode(),
+                            usedforsecurity=False,
                         ).hexdigest()[:8],
                         name=f"{entry.description[:30]} → {crown.description[:30]}",
                         nodes=path,
@@ -397,7 +398,8 @@ class AttackChainEngine:
             if len(chain_nodes) >= 2:
                 chains.append(AttackChain(
                     chain_id=hashlib.md5(
-                        f"{pattern['name']}-{entry.node_id}".encode()
+                        f"{pattern['name']}-{entry.node_id}".encode(),
+                        usedforsecurity=False,
                     ).hexdigest()[:8],
                     name=f"{pattern['name']} via {entry.host}",
                     nodes=chain_nodes,

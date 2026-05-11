@@ -206,7 +206,7 @@ class RaceConditionDetector:
                 async with session.request(method, url, data=data,
                                             timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     body = await resp.text()
-                    return {"status": resp.status, "length": len(body), "body_hash": hashlib.md5(body.encode()).hexdigest()[:8]}
+                    return {"status": resp.status, "length": len(body), "body_hash": hashlib.md5(body.encode(), usedforsecurity=False).hexdigest()[:8]}
             except Exception:
                 return None
 

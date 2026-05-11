@@ -243,7 +243,7 @@ async def scan_host(
 
             if stdout:
                 try:
-                    xml_root = ET.fromstring(stdout)
+                    xml_root = ET.fromstring(stdout)  # nosec B314 — nmap subprocess output
 
                     # ── Host liveness ─────────────────────────────────────────
                     status = xml_root.find(".//status")

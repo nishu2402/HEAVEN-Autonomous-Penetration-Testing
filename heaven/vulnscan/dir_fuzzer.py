@@ -424,7 +424,8 @@ class DirectoryFuzzer:
             wf.write("\n".join(WORDLIST))
             wf_path = wf.name
 
-        out_file = tempfile.mktemp(suffix=".json")
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+            out_file = tf.name
         cmd = [
             "ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ",
             "-w", wf_path,

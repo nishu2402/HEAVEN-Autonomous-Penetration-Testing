@@ -64,6 +64,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "black>=24.0.0",
     "ruff>=0.2.0",
+    "aiosqlite>=0.19.0",
 ]
 cloud-gcp = ["google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0"]
 cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]

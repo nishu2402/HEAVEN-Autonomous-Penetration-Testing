@@ -809,7 +809,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 │   │   ├── schema.sql              ← PostgreSQL schema (23 tables, 9 views, 4 functions, partitioned audit log)
 │   │   ├── models.py               ← SQLAlchemy 2.0 async ORM models
 │   │   ├── connection.py           ← asyncpg pool + ORM engine + SQLite fallback + health check
-│   │   └── repository.py          ← Typed async DAL — 8 repository classes
+│   │   └── repository.py           ← Typed async DAL — 8 repository classes
 │   ├── main.py                     ← CLI entry point (Click)
 │   ├── orchestrator.py             ← Async DAG scan engine
 │   ├── engagement.py               ← Finding + engagement storage (SQLite)
@@ -822,7 +822,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 ├── 🤖 NVD_model.pkl                ← Trained CVSS predictor (13-feature ExtraTrees, R²=0.9925)
 ├── 📊 nvd_data/                    ← NVD feature names + dataset
 ├── 🔧 install.sh                   ← One-command installer
-├── 🗑️  uninstall.sh                 ← Clean uninstaller
+├── 🗑️  uninstall.sh                ← Clean uninstaller
 ├── 🐳 Dockerfile                   ← Container support
 └── 🐳 docker-compose.yml           ← Optional PostgreSQL stack
 ```

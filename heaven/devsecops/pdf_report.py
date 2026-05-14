@@ -599,7 +599,7 @@ _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
 def _enrich_findings(findings: list[dict]) -> list[dict]:
-    """Add sort key and effort estimate to each finding."""
+    """Add sort key, effort estimate, and template-required defaults to each finding."""
     out = []
     for f in findings:
         f = dict(f)
@@ -615,6 +615,13 @@ def _enrich_findings(findings: list[dict]) -> list[dict]:
             f["_effort"] = "Low"
         else:
             f["_effort"] = "Medium"
+        # Ensure all keys accessed unconditionally in the HTML template are present
+        # so Jinja2 never returns Undefined (Undefined * 100 raises UndefinedError).
+        f.setdefault("confidence", 0.0)
+        f.setdefault("cwe", "")
+        f.setdefault("description", "")
+        f.setdefault("evidence", {})
+        f.setdefault("remediation", "")
         out.append(f)
     return sorted(out, key=lambda x: x["_sev_order"])
 

@@ -7,13 +7,11 @@ pure-Python unit tests where no DB is needed.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -35,7 +33,7 @@ class TestModelsImport:
 
     def test_all_models_importable(self):
         from heaven.db.models import (
-            Asset, AuditLog, Base, CloudResource, Credential,
+            Asset, CloudResource, Credential,
             DnsRecord, Engagement, EngagementScope, FindingTag,
             MitreTechnique, NetworkTopology, Notification,
             OperatorNote, Port, Report, RiskScore, Scan,
@@ -138,10 +136,7 @@ class TestConnectionPublicAPI:
 
     def test_all_connection_symbols_exported(self):
         from heaven.db import (
-            bulk_insert, close_all, close_pool, execute_query,
-            execute_scalar, get_backend, get_connection, get_engine,
-            get_pool, get_session, get_session_factory,
-            get_sqlite_connection, get_transaction, health_check,
+            health_check,
             init_db, init_sqlite, is_connected,
         )
         # If we get here without ImportError, the exports exist
@@ -180,20 +175,14 @@ class TestSQLiteOfflineStore:
         return str(tmp_path / "test_heaven.db")
 
     async def test_init_creates_file(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import init_sqlite
         await init_sqlite(db_path)
         assert Path(db_path).exists()
 
     async def test_init_is_idempotent(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import init_sqlite
         await init_sqlite(db_path)
@@ -201,10 +190,7 @@ class TestSQLiteOfflineStore:
         await init_sqlite(db_path)
 
     async def test_core_tables_created(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import get_sqlite_connection, init_sqlite
         await init_sqlite(db_path)
@@ -227,10 +213,7 @@ class TestSQLiteOfflineStore:
             assert tbl in existing, f"SQLite table missing: {tbl}"
 
     async def test_insert_and_query_scan(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import get_sqlite_connection, init_sqlite
         await init_sqlite(db_path)
@@ -253,10 +236,7 @@ class TestSQLiteOfflineStore:
         assert row["status"] == "pending"
 
     async def test_insert_asset_with_fk(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import get_sqlite_connection, init_sqlite
         await init_sqlite(db_path)
@@ -281,10 +261,7 @@ class TestSQLiteOfflineStore:
         assert row["value"] == "10.0.0.1"
 
     async def test_audit_log_insert(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import get_sqlite_connection, init_sqlite
         await init_sqlite(db_path)
@@ -302,10 +279,7 @@ class TestSQLiteOfflineStore:
         assert row[0] == 1
 
     async def test_notifications_unread_default(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import get_sqlite_connection, init_sqlite
         await init_sqlite(db_path)
@@ -325,10 +299,7 @@ class TestSQLiteOfflineStore:
         assert row["is_read"] == 0  # default unread
 
     async def test_tag_unique_constraint(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import get_sqlite_connection, init_sqlite
         await init_sqlite(db_path)
@@ -346,10 +317,7 @@ class TestSQLiteOfflineStore:
                 await db.commit()
 
     async def test_health_check_sqlite(self, db_path):
-        try:
-            import aiosqlite
-        except ImportError:
-            pytest.skip("aiosqlite not installed")
+        pytest.importorskip("aiosqlite")
 
         from heaven.db.connection import health_check, init_sqlite
         await init_sqlite(db_path)
@@ -367,10 +335,6 @@ class TestSQLiteOfflineStore:
 class TestRepositoryImports:
     def test_all_repos_importable(self):
         from heaven.db.repository import (
-            AssetRepository, AuditRepository, BaseRepository,
-            EngagementRepository, NotificationRepository,
-            ReportRepository, ScanRepository,
-            VulnerabilityRepository, WebPathRepository,
             get_repository_factory,
         )
         assert callable(get_repository_factory)
@@ -436,9 +400,8 @@ class TestScanRepositoryUnit:
         session.refresh = AsyncMock()
 
         try:
-            from heaven.db.models import Scan
             # If SQLAlchemy is available, create returns a model instance
-            instance = await repo.create(name="Test", scan_type="web", status="pending")
+            _ = await repo.create(name="Test", scan_type="web", status="pending")
             session.add.assert_called_once()
             session.flush.assert_called_once()
         except Exception:

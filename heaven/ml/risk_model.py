@@ -224,7 +224,7 @@ class HeavenRiskModel:
         """Extract feature importances from the ensemble."""
         try:
             # Get importances from each estimator
-            ensemble = self.model.named_steps["classifier"]
+            ensemble = self.model.named_steps["classifier"]  # type: ignore[union-attr]
             all_importances = np.zeros(X.shape[1])
 
             for name, estimator in ensemble.estimators_:
@@ -247,7 +247,7 @@ class HeavenRiskModel:
         """Get calibrated exploit probability predictions."""
         if self.model is None:
             self._load_or_build_default()
-        return self.model.predict_proba(X)[:, 1]
+        return self.model.predict_proba(X)[:, 1]  # type: ignore[union-attr]
 
     def compute_risk_scores(self, vuln_list: list[dict]) -> list[dict]:
         """
@@ -496,7 +496,7 @@ def _extract_nvd_features(finding: dict) -> dict:
     }
 
 
-async def score_vulnerabilities(scan_id: str = "", findings: list[dict] = None, **kwargs) -> dict[str, Any]:
+async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[Any, Any]]] = None, **kwargs) -> dict[str, Any]:
     """Score vulnerabilities with the NVD CVSS prediction model (called by orchestrator)."""
     logger.info("Running ML risk scoring with NVD CVSS model...")
     model = get_model()

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 from heaven.utils.logger import get_logger
@@ -16,7 +16,7 @@ from heaven.utils.logger import get_logger
 logger = get_logger("devsecops.aggregator")
 
 
-def compile_json_report(scan_data: dict, output_path: str = None) -> dict:
+def compile_json_report(scan_data: dict, output_path: Optional[str] = None) -> dict:
     """Compile all findings into a structured JSON report."""
     report = {
         "schema_version": "1.0",
@@ -120,7 +120,7 @@ def _severity_to_sarif_level(severity: str) -> str:
             "low": "note", "info": "note"}.get(severity.lower(), "note")
 
 
-async def generate_report(scan_id: str = "", scan_data: dict = None, **kwargs) -> dict[str, Any]:
+async def generate_report(scan_id: str = "", scan_data: Optional[dict[Any, Any]] = None, **kwargs) -> dict[str, Any]:
     """Main entry point (called by orchestrator)."""
     logger.info("Generating scan reports...")
     scan_data = scan_data or {}

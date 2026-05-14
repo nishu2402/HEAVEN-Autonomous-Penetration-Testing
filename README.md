@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20112%20Tests%20Passing&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20163%20Tests%20Passing&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;31+Live+Modules+%C2%B7+112+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;31+Live+Modules+%C2%B7+163+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-A8FF3E?style=for-the-badge&logo=python&logoColor=black" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI-7B2FBE?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/badge/Tests-112_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
+    <img src="https://img.shields.io/badge/Tests-163_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
     <img src="https://img.shields.io/badge/MITRE-ATT%26CK_Mapped-FF073A?style=for-the-badge&logo=cncf&logoColor=white" alt="MITRE"/>
     <img src="https://img.shields.io/badge/OWASP-Top_10_%2B_API_Top_10-00CFFF?style=for-the-badge&logo=owasp&logoColor=black" alt="OWASP"/>
   </p>
@@ -101,7 +101,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | 📊 **Risk Scoring** | CVSS v3 ML predictor (R²=0.9925) · EPSS exploit-probability · CISA KEV membership |
 | 🗺️ **MITRE ATT&CK** | Every finding mapped to ATT&CK techniques + Lockheed Cyber Kill Chain phases |
 | 📄 **Report Generation** | Professional PDF/HTML pentest report (cover page · CVSS v3.1 vectors · MITRE ATT&CK mapping · remediation roadmap · SLA) · Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
-| 🔢 **Tests** | **112 pytest tests passing** |
+| 🔢 **Tests** | **163 pytest tests passing** |
 | 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · PostgreSQL (23-table schema, partitioned audit log, 9 analytical views) · SQLite offline fallback (zero-config, same interface) |
 
 </div>
@@ -160,7 +160,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 │   • AES-256-GCM credential vault  ·  HMAC-signed audit log               │
 ├──────────────────────────────────────────────────────────────────────────┤
 │              DATABASE LAYER (Ultra Edition)                              │
-│   • PostgreSQL: 23 tables · 9 views · partitioned audit log (by quarter)│
+│   • PostgreSQL: 23 tables · 9 views · partitioned audit log (by quarter) │
 │   • SQLite: offline fallback — same interface, zero config               │
 │   • Repository / DAL pattern — typed async CRUD for all entities         │
 │   • Alembic migrations (0001 bootstrap → 0002 extended schema)           │
@@ -338,12 +338,21 @@ source ~/.bashrc
 
 ### Docker
 
+The Dockerfile is a **3-stage build**: Node 20 compiles the React UI → Python 3.12 installs all packages → a lean runtime image bundles both. The API server at `:8443` serves the compiled UI automatically.
+
 ```bash
+# Build (requires Docker 20+ with BuildKit)
 docker build -t heaven .
+
+# Quick single-container run (SQLite offline mode, no Postgres needed)
 docker run -it --rm \
     -e HEAVEN_ADMIN_PASSWORD=yourpassword \
-    -p 8443:8443 \
-    heaven serve
+    -p 127.0.0.1:8443:8443 \
+    heaven
+
+# Full stack with PostgreSQL (recommended for persistent engagements)
+cp .env.example .env          # fill in HEAVEN_DB_PASSWORD + HEAVEN_ADMIN_PASSWORD
+docker compose up -d
 ```
 
 ---
@@ -809,7 +818,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 ├── ⚛️  heaven-ui/                   ← React frontend (Vite)
 │   └── dist/                       ← Pre-built, served by FastAPI
 │
-├── 🧪 tests/                       ← 112 pytest tests
+├── 🧪 tests/                       ← 163 pytest tests
 ├── 🤖 NVD_model.pkl                ← Trained CVSS predictor (13-feature ExtraTrees, R²=0.9925)
 ├── 📊 nvd_data/                    ← NVD feature names + dataset
 ├── 🔧 install.sh                   ← One-command installer
@@ -840,7 +849,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 </p>
 
 <p align="center">
-<strong>112 tests · 31 live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
+<strong>163 tests · 31 live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
 </p>
 
 <p align="center">

@@ -21,7 +21,7 @@ import hmac
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import aiohttp
@@ -195,7 +195,7 @@ class RaceConditionDetector:
 
     @staticmethod
     async def test_race(session: aiohttp.ClientSession, url: str,
-                         method: str = "POST", data: dict = None,
+                         method: str = "POST", data: Optional[dict[Any, Any]] = None,
                          concurrent_requests: int = 20) -> Optional[AdvancedFinding]:
         """Send concurrent requests to detect race conditions."""
         if data is None:
@@ -563,7 +563,7 @@ class CredentialSprayer:
 # ═══════════════════════════════════════════
 
 async def run_advanced_tests(session: aiohttp.ClientSession, url: str,
-                              scan_data: dict = None) -> list[AdvancedFinding]:
+                              scan_data: Optional[dict[Any, Any]] = None) -> list[AdvancedFinding]:
     """Run all advanced exploitation tests on a target."""
     all_findings = []
 

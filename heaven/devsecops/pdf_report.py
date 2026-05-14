@@ -740,6 +740,8 @@ class PDFReportGenerator:
         }
 
     def _render_html(self, data: dict[str, Any]) -> str:
+        if self._jinja2 is None:
+            raise ImportError("jinja2 is required for HTML report rendering. pip install jinja2")
         ctx = self._build_context(data)
         env = self._jinja2.Environment(undefined=self._jinja2.Undefined)
 

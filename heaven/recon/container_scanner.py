@@ -303,7 +303,7 @@ class ContainerScanner:
         }
 
 
-async def scan_containers(hosts: list[str] = None, **kwargs) -> dict:
+async def scan_containers(hosts: Optional[list[str]] = None, **kwargs) -> dict:
     """Entry point from orchestrator."""
     targets = hosts or kwargs.get("container_hosts", ["localhost"])
     scanner = ContainerScanner()

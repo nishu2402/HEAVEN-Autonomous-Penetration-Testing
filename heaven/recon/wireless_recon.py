@@ -10,7 +10,7 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
 
@@ -74,10 +74,12 @@ def parse_pcap(pcap_path: str) -> dict:
             continue
 
         dot11 = pkt.getlayer(Dot11)
+        if dot11 is None:
+            continue
         signal = -100
         if pkt.haslayer(RadioTap):
             try:
-                signal = int(pkt.getlayer(RadioTap).dBm_AntSignal or -100)
+                signal = int(pkt.getlayer(RadioTap).dBm_AntSignal or -100)  # type: ignore[union-attr]
             except (AttributeError, TypeError):
                 pass
 
@@ -111,7 +113,7 @@ def parse_pcap(pcap_path: str) -> dict:
                     net.encryption = "WPA"
                 elt = elt.payload.getlayer(Dot11Elt) if hasattr(elt.payload, "getlayer") else None
 
-            cap = pkt.getlayer(Dot11Beacon).cap
+            cap = pkt.getlayer(Dot11Beacon).cap  # type: ignore[union-attr]
             if hasattr(cap, "privacy") and cap.privacy and net.encryption == "Open":
                 net.encryption = "WEP"
 
@@ -123,9 +125,9 @@ def parse_pcap(pcap_path: str) -> dict:
                     clients[client_mac] = WirelessClient(mac=client_mac, vendor=_lookup_vendor(client_mac))
                 if pkt.haslayer(Dot11Elt):
                     elt = pkt.getlayer(Dot11Elt)
-                    if elt.ID == 0 and elt.info:
+                    if elt.ID == 0 and elt.info:  # type: ignore[union-attr]
                         try:
-                            ssid = elt.info.decode("utf-8", errors="replace")
+                            ssid = elt.info.decode("utf-8", errors="replace")  # type: ignore[union-attr]
                             if ssid and ssid not in clients[client_mac].probe_ssids:
                                 clients[client_mac].probe_ssids.append(ssid)
                         except Exception:
@@ -165,7 +167,7 @@ def parse_pcap(pcap_path: str) -> dict:
     }
 
 
-async def scan_wireless(pcap_files: list[str] = None, **kwargs) -> dict[str, Any]:
+async def scan_wireless(pcap_files: Optional[list[str]] = None, **kwargs) -> dict[str, Any]:
     """Async entry point for wireless reconnaissance (called by orchestrator)."""
     if not pcap_files:
         logger.info("No PCAP files provided — skipping wireless scan")

@@ -353,7 +353,7 @@ class CredentialVault:
 
         self._vault_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if HAS_CRYPTO and self._master_key:
+        if HAS_CRYPTO and self._master_key and self._salt:
             encrypted = self._encrypt_data(vault_data)
             self._vault_path.write_bytes(self._salt + encrypted)
         else:

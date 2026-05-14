@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
+from typing import Optional
 
 from heaven.utils.logger import get_logger
 
@@ -319,7 +320,7 @@ class EmailSecurityScanner:
         }
 
 
-async def scan_email_domains(domains: list[str] = None, **kwargs) -> dict:
+async def scan_email_domains(domains: Optional[list[str]] = None, **kwargs) -> dict:
     """Entry point from orchestrator."""
     target_domains = domains or kwargs.get("email_domains", [])
     if not target_domains:

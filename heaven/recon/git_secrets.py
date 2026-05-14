@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
 
@@ -68,7 +68,7 @@ class SecretFinding:
     author: str = ""
 
 
-def scan_file(file_path: Path, base_dir: Path = None) -> list[SecretFinding]:
+def scan_file(file_path: Path, base_dir: Optional[Path] = None) -> list[SecretFinding]:
     """Scan a single file for secrets."""
     findings: list[SecretFinding] = []
     if file_path.suffix in IGNORE_EXTENSIONS:
@@ -190,7 +190,7 @@ async def scan_repository(repo_path: str, include_history: bool = True) -> list[
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-async def scan_repositories(repos: list[str] = None, **kwargs) -> dict[str, Any]:
+async def scan_repositories(repos: Optional[list[str]] = None, **kwargs) -> dict[str, Any]:
     """Main entry point (called by orchestrator)."""
     if not repos:
         logger.info("No repositories specified — skipping secret scan")

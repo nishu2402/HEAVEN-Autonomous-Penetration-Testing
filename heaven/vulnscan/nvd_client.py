@@ -185,7 +185,7 @@ class NVDClient:
             self._client = None
 
 
-async def lookup_vulnerabilities(scan_id: str = "", cpes: list[str] = None, **kwargs) -> dict[str, Any]:
+async def lookup_vulnerabilities(scan_id: str = "", cpes: Optional[list[str]] = None, **kwargs) -> dict[str, Any]:
     """Main entry point (called by orchestrator after recon phase)."""
     cpes = cpes or []
     logger.info(f"Starting vulnerability mapping for {len(cpes)} CPEs via NVD...")

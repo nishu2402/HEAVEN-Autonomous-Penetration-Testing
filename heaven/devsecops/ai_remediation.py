@@ -6,7 +6,7 @@ Uses Google Gemini API to automatically generate patch code for vulnerabilities.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
 
@@ -15,7 +15,7 @@ logger = get_logger("devsecops.ai_remediation")
 class AIRemediationEngine:
     """Generates remediation code using Google Gemini."""
     
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.available = False
         

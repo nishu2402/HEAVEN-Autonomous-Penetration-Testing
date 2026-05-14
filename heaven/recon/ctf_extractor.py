@@ -175,6 +175,8 @@ class CTFFlagExtractor:
                         continue
                     if re.search(pattern, decoded, re.IGNORECASE):
                         flag_match = re.search(pattern, decoded, re.IGNORECASE)
+                        if flag_match is None:
+                            continue
                         flag_text = flag_match.group(1)
                         if flag_text not in self.seen_flags:
                             self.seen_flags.add(flag_text)
@@ -197,6 +199,8 @@ class CTFFlagExtractor:
                         continue
                     if re.search(pattern, decoded, re.IGNORECASE):
                         flag_match = re.search(pattern, decoded, re.IGNORECASE)
+                        if flag_match is None:
+                            continue
                         flag_text = flag_match.group(1)
                         if flag_text not in self.seen_flags:
                             self.seen_flags.add(flag_text)

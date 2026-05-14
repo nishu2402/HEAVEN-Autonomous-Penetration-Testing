@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
 
@@ -164,7 +164,7 @@ async def enumerate_azure() -> list[CloudAsset]:
     return assets
 
 
-async def enumerate_cloud(providers: list[str] = None, **kwargs) -> dict[str, Any]:
+async def enumerate_cloud(providers: Optional[list[str]] = None, **kwargs) -> dict[str, Any]:
     """Main entry point for cloud enumeration (called by orchestrator)."""
     if not providers:
         logger.info("No cloud providers specified — skipping cloud enumeration")

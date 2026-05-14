@@ -84,7 +84,7 @@ class WebhookAlerter:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    self.webhook_url,
+                    self.webhook_url,  # type: ignore[arg-type]
                     json=payload,
                     headers={"Content-Type": "application/json"},
                     timeout=aiohttp.ClientTimeout(total=10),

@@ -194,7 +194,7 @@ async def _check_wildcard_dns(domain: str) -> Optional[set[str]]:
 
 
 async def enumerate_subdomains(domain: str, session: aiohttp.ClientSession,
-                                wordlist: list[str] = None,
+                                wordlist: Optional[list[str]] = None,
                                 concurrency: int = 100) -> list[DiscoveredAsset]:
     """Discover subdomains via DNS brute force and passive sources."""
     discovered = []
@@ -304,7 +304,7 @@ JS_SECRET_PATTERNS = [
 
 
 async def extract_js_secrets(session: aiohttp.ClientSession, url: str,
-                              js_urls: list[str] = None) -> list[DiscoveredAsset]:
+                              js_urls: Optional[list[str]] = None) -> list[DiscoveredAsset]:
     """Extract secrets, API keys, and tokens from JavaScript files."""
     secrets = []
 
@@ -381,7 +381,7 @@ async def _discover_js_files(session: aiohttp.ClientSession, url: str) -> list[s
 # ── Virtual Host Discovery ──
 
 async def discover_vhosts(session: aiohttp.ClientSession, ip: str,
-                           domain: str, wordlist: list[str] = None) -> list[DiscoveredAsset]:
+                           domain: str, wordlist: Optional[list[str]] = None) -> list[DiscoveredAsset]:
     """Discover virtual hosts by sending requests with different Host headers."""
     discovered: list[DiscoveredAsset] = []
     words = wordlist or SUBDOMAIN_WORDLIST[:30]
@@ -600,7 +600,7 @@ COMMON_API_PATHS = [
 
 
 async def fuzz_endpoints(session: aiohttp.ClientSession, base_url: str,
-                          paths: list[str] = None,
+                          paths: Optional[list[str]] = None,
                           concurrency: int = 50) -> list[DiscoveredAsset]:
     """Discover hidden API endpoints and sensitive files."""
     discovered = []

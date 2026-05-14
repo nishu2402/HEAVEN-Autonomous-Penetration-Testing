@@ -254,6 +254,8 @@ class ScanOrchestrator:
 
             while retry_count <= MAX_RETRIES:
                 try:
+                    if task.coro_factory is None:
+                        raise RuntimeError(f"Task '{task.name}' has no coro_factory")
                     result_data = await asyncio.wait_for(
                         task.coro_factory(**task.kwargs),
                         timeout=task.timeout,

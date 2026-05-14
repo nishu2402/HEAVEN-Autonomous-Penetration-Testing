@@ -350,7 +350,7 @@ class IoTScanner:
         }
 
 
-async def scan_iot_targets(targets: list[str] = None, **kwargs) -> dict:
+async def scan_iot_targets(targets: Optional[list[str]] = None, **kwargs) -> dict:
     """Entry point for IoT scanning from the orchestrator."""
     hosts = targets or kwargs.get("iot_targets", [])
     if not hosts:

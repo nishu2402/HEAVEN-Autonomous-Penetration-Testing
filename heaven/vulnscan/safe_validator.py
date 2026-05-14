@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 try:
     import aiohttp
@@ -42,8 +42,8 @@ class ValidationResult:
 # ── Evasion-Aware Request Helper ──
 
 async def _evasive_request(session: aiohttp.ClientSession, method: str, url: str,
-                            params: dict = None, data: dict = None,
-                            headers: dict = None, timeout: float = 10.0,
+                            params: Optional[dict[Any, Any]] = None, data: Optional[dict[Any, Any]] = None,
+                            headers: Optional[dict[Any, Any]] = None, timeout: float = 10.0,
                             allow_redirects: bool = True) -> tuple[int, str, dict]:
     """Send a request with evasive headers (User-Agent rotation, etc.)."""
     try:
@@ -432,7 +432,7 @@ ALL_VALIDATORS = {
 }
 
 
-async def validate_findings(scan_id: str = "", findings: list[dict] = None, **kwargs) -> dict[str, Any]:
+async def validate_findings(scan_id: str = "", findings: Optional[list[dict[Any, Any]]] = None, **kwargs) -> dict[str, Any]:
     """Run all safe validation checks on discovered input vectors."""
     findings = findings or []
     logger.info(f"Starting advanced PoC validation for {len(findings)} findings...")

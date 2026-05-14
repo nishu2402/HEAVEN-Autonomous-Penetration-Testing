@@ -12,10 +12,11 @@ aiohttp>=3.9.0
 aiofiles>=23.2.0
 asyncio-throttle>=1.0.2
 
-# ─── Database (PostgreSQL) ───────────────────────────────────────────
+# ─── Database (PostgreSQL + SQLite offline fallback) ─────────────────
 asyncpg>=0.29.0
 sqlalchemy[asyncio]>=2.0.0
 alembic>=1.13.0
+aiosqlite>=0.19.0          # SQLite offline store (no PostgreSQL required)
 
 # ─── API Server (FastAPI + WebSocket) ────────────────────────────────
 fastapi>=0.110.0

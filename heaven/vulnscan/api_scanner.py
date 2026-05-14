@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
+from typing import Optional
 
 from heaven.utils.logger import get_logger
 
@@ -409,7 +410,7 @@ class APISecurityScanner:
         }
 
 
-async def scan_api_targets(urls: list[str] = None, **kwargs) -> dict:
+async def scan_api_targets(urls: Optional[list[str]] = None, **kwargs) -> dict:
     """Entry point for API scanning from the orchestrator."""
     target_urls = urls or kwargs.get("api_urls", [])
     if not target_urls:

@@ -33,7 +33,7 @@ try:
     console = Console(theme=HEAVEN_THEME, stderr=True)
     HAS_RICH = True
 except ImportError:
-    console = None
+    console = None  # type: ignore[assignment]
     HAS_RICH = False
 
 

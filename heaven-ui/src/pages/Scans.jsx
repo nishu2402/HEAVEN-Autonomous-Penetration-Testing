@@ -3,11 +3,10 @@ import { Scans as ScansApi } from "../api";
 
 const MODES = ["web", "network", "full", "ad", "cloud"];
 const STEALTH = [
-  { value: "1", label: "1 — Ghost (very slow)" },
-  { value: "2", label: "2 — Cautious" },
-  { value: "3", label: "3 — Normal" },
-  { value: "4", label: "4 — Aggressive" },
-  { value: "5", label: "5 — Loud (fast)" },
+  { value: "1", label: "1 — Paranoid (very slow, evasive)" },
+  { value: "2", label: "2 — Stealth (slow, low noise)" },
+  { value: "3", label: "3 — Normal (balanced)" },
+  { value: "4", label: "4 — Aggressive (fast, loud)" },
 ];
 
 export default function Scans() {

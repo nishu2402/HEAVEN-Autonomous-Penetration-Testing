@@ -368,7 +368,7 @@ class RequestSmugglingDetector:
             writer.close()
 
             # If response was delayed significantly → potential smuggling
-            if elapsed > timeout * 800:  # 80% of timeout
+            if elapsed > timeout * 0.8:  # 80% of timeout
                 return AdvancedFinding(
                     target=url, vuln_type="request_smuggling", severity="critical",
                     title="HTTP Request Smuggling (CL.TE) Detected",

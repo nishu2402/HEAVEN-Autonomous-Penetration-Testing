@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;29+Live+Modules+%C2%B7+112+Tests+%C2%B7+FastAPI+%2B+React+HUD"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;31+Live+Modules+%C2%B7+112+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-29_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-31_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-7B2FBE?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
     <img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-FF073A?style=flat-square" alt="Platform"/>
     <img src="https://img.shields.io/badge/Vault-AES--256--GCM-00CFFF?style=flat-square&logo=letsencrypt&logoColor=black" alt="Vault"/>
@@ -102,7 +102,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | 🗺️ **MITRE ATT&CK** | Every finding mapped to ATT&CK techniques + Lockheed Cyber Kill Chain phases |
 | 📄 **Report Generation** | Professional PDF/HTML pentest report (cover page · CVSS v3.1 vectors · MITRE ATT&CK mapping · remediation roadmap · SLA) · Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
 | 🔢 **Tests** | **112 pytest tests passing** |
-| 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · SQLite engagement storage |
+| 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · PostgreSQL (23-table schema, partitioned audit log, 9 analytical views) · SQLite offline fallback (zero-config, same interface) |
 
 </div>
 
@@ -158,6 +158,13 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 │   • Scan launcher  ·  Live findings feed  ·  3D topology                 │
 │   • Kill chain view  ·  Triage workflow  ·  Operator notes               │
 │   • AES-256-GCM credential vault  ·  HMAC-signed audit log               │
+├──────────────────────────────────────────────────────────────────────────┤
+│              DATABASE LAYER (Ultra Edition)                              │
+│   • PostgreSQL: 23 tables · 9 views · partitioned audit log (by quarter)│
+│   • SQLite: offline fallback — same interface, zero config               │
+│   • Repository / DAL pattern — typed async CRUD for all entities         │
+│   • Alembic migrations (0001 bootstrap → 0002 extended schema)           │
+│   • Health check endpoint · bulk insert · SSL mode · retry + backoff     │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -202,6 +209,9 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | `security/vault.py` | ✅ Live | AES-256-GCM credential vault |
 | `security/audit.py` | ✅ Live | HMAC-signed append-only audit log |
 | `api/server.py` | ✅ Live | FastAPI + JWT RBAC + WebSocket + rate limiting |
+| `db/connection.py` | ✅ Live | PostgreSQL (asyncpg pool + SQLAlchemy ORM) · SQLite offline fallback · SSL · retry/backoff · health check · bulk insert |
+| `db/models.py` | ✅ Live | 23-table SQLAlchemy 2.0 async ORM (engagements, DNS, SSL, web paths, credentials, MITRE, topology, cloud, reports, audit, tags, notes) |
+| `db/repository.py` | ✅ Live | Typed async repository / DAL — ScanRepo · AssetRepo · VulnRepo · EngagementRepo · WebPathRepo · AuditRepo · ReportRepo |
 | Web UI | ✅ Live | Dark matrix theme, scan launcher, live findings, kill chain |
 
 </div>
@@ -786,6 +796,11 @@ HEAVEN-Autonomous-Penetration-Testing/
 │   ├── mitre/                      ← ATT&CK mapping + kill chain
 │   ├── devsecops/                  ← Reporting + alerting + compliance
 │   ├── security/                   ← Auth · vault · audit log
+│   ├── db/                         ← Database layer (Ultra Edition)
+│   │   ├── schema.sql              ← PostgreSQL schema (23 tables, 9 views, 4 functions, partitioned audit log)
+│   │   ├── models.py               ← SQLAlchemy 2.0 async ORM models
+│   │   ├── connection.py           ← asyncpg pool + ORM engine + SQLite fallback + health check
+│   │   └── repository.py          ← Typed async DAL — 8 repository classes
 │   ├── main.py                     ← CLI entry point (Click)
 │   ├── orchestrator.py             ← Async DAG scan engine
 │   ├── engagement.py               ← Finding + engagement storage (SQLite)
@@ -825,7 +840,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 </p>
 
 <p align="center">
-<strong>112 tests · 29 live modules · MIT License · Built for real-world pen-testing engagements</strong>
+<strong>112 tests · 31 live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
 </p>
 
 <p align="center">

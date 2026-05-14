@@ -181,6 +181,9 @@ async def require_user(
         admin = next((u for u in get_auth_manager()._users.values() if u.role == Role.ADMIN), None)
         if admin:
             return admin
+        # No admin account exists yet — synthesise one so auth-disabled mode always works
+        from heaven.security.auth import User as _User
+        return _User(id="ci-admin", username="ci-admin", role=Role.ADMIN)
 
     auth = get_auth_manager()
     if x_api_key:
@@ -904,7 +907,9 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                 "repositories": req.repositories,
                 "cloud_providers": req.cloud_providers,
                 "ports": req.ports,
-                "stealth_level": req.stealth_level or 3,
+                "stealth_level": {1: "paranoid", 2: "stealth", 3: "normal", 4: "aggressive"}.get(
+                    req.stealth_level or 3, "normal"
+                ),
             },
             cfg,
             checkpoint_store=store,
@@ -914,7 +919,7 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         persisted_finding_keys: set[str] = set()
 
         async def progress_update(progress):
-            pct = getattr(progress, "percent", None)
+            pct = getattr(progress, "progress_pct", None)
             if pct is not None:
                 active_scans[scan_id]["progress_pct"] = round(pct)
             active_scans[scan_id]["progress"] = progress.to_dict() if hasattr(progress, "to_dict") else {}

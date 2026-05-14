@@ -24,6 +24,22 @@ COPY pyproject.toml requirements.txt ./
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 COPY . .
+
+# NVD_model.pkl is gitignored (48 MB binary). When building in CI or from a fresh
+# clone it won't be present, so generate a valid stub ExtraTreesRegressor so the
+# COPY in the runtime stage always succeeds. The stub predicts a flat CVSS of 5.0;
+# replace it with the real model by running: heaven train-model
+RUN if [ ! -f NVD_model.pkl ]; then \
+        PYTHONPATH=/install/lib/python3.12/site-packages \
+        python3 -c "\
+import joblib, numpy as np; \
+from sklearn.ensemble import ExtraTreesRegressor; \
+m = ExtraTreesRegressor(n_estimators=10, random_state=42); \
+m.fit(np.zeros((20, 13)), np.linspace(0.0, 10.0, 20)); \
+joblib.dump(m, 'NVD_model.pkl')" \
+        && echo 'Stub NVD_model.pkl generated (run heaven train-model for real accuracy)'; \
+    fi
+
 RUN pip install --no-cache-dir --prefix=/install -e .
 
 # ── Stage 3: Runtime image ───────────────────────────────────────────

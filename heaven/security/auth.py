@@ -37,11 +37,11 @@ class Role(str, Enum):
 
 # Permission matrix: role → allowed actions
 PERMISSIONS = {
-    Role.ADMIN: {"scan.create", "scan.cancel", "scan.view", "vuln.view", "vuln.validate", "vuln.update",
-                 "config.modify", "user.manage", "vault.access", "audit.view", "audit.export",
+    Role.ADMIN: {"scan.create", "scan.cancel", "scan.view", "vuln.view", "vuln.create", "vuln.validate",
+                 "vuln.update", "config.modify", "user.manage", "vault.access", "audit.view", "audit.export",
                  "report.generate", "report.view", "ad.scan", "mitre.view"},
-    Role.OPERATOR: {"scan.create", "scan.cancel", "scan.view", "vuln.view", "vuln.validate", "vuln.update",
-                    "report.generate", "report.view", "ad.scan", "mitre.view"},
+    Role.OPERATOR: {"scan.create", "scan.cancel", "scan.view", "vuln.view", "vuln.create", "vuln.validate",
+                    "vuln.update", "report.generate", "report.view", "ad.scan", "mitre.view"},
     Role.VIEWER: {"scan.view", "vuln.view", "report.view", "mitre.view"},
     Role.AUDITOR: {"scan.view", "vuln.view", "audit.view", "audit.export", "report.view", "mitre.view"},
 }

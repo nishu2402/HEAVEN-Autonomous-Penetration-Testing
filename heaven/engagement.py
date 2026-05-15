@@ -163,9 +163,15 @@ class EngagementStore:
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        # timeout=30 + WAL: the API flushes findings on every scan-progress
+        # callback while record_scan_complete writes concurrently. Without
+        # these, concurrent writers hit "database is locked" and findings
+        # are lost. WAL allows a reader + writer without blocking.
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 30000")
         try:
             yield conn
             conn.commit()

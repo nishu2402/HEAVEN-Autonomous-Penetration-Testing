@@ -18,6 +18,16 @@ async def scan_nuclei(targets: list[str], severity: str = "low,medium,high,criti
     if not targets:
         return {"findings": [], "total": 0}
 
+    # Nuclei is an external binary — skip gracefully if it isn't installed
+    # instead of letting FileNotFoundError abort the whole scan pipeline.
+    import shutil
+    if shutil.which("nuclei") is None:
+        logger.warning(
+            "Nuclei binary not found on PATH — skipping Nuclei scan. "
+            "Install: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+        )
+        return {"findings": [], "total": 0, "skipped": "nuclei not installed"}
+
     findings = []
     
     # We write targets to a temporary file to pass to nuclei

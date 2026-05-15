@@ -185,7 +185,17 @@ class CredentialVault:
         if self.is_locked:
             raise PermissionError("Vault is locked — unlock first")
 
-        encrypted = self._encrypt_value(value) if HAS_CRYPTO and self._master_key else value.encode()
+        if HAS_CRYPTO and self._master_key:
+            encrypted = self._encrypt_value(value)
+        else:
+            # Loud warning every store: a pentester must never assume a
+            # credential is encrypted when it is being written as plaintext.
+            logger.warning(
+                f"PLAINTEXT vault write for '{key}' — 'cryptography' not installed "
+                f"or vault not initialized. Credential is NOT encrypted on disk. "
+                f"Install: pip install cryptography"
+            )
+            encrypted = value.encode()
 
         rotation_due = None
         if rotation_days:

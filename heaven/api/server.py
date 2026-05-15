@@ -145,17 +145,33 @@ ws_manager = ConnectionManager()
 
 
 class WebSocketLogHandler(logging.Handler):
-    """Broadcast log records to connected WebSockets."""
+    """Broadcast log records to connected WebSockets.
+
+    Log records may be emitted from the event-loop thread (API requests) or
+    from worker threads (sync scan tasks). We cache the loop on first sight
+    and use run_coroutine_threadsafe for cross-thread emits so log frames
+    from background scans still reach connected clients.
+    """
+
+    _loop = None  # type: ignore[var-annotated]
 
     def emit(self, record):
         msg = self.format(record)
         try:
             loop = asyncio.get_running_loop()
+            WebSocketLogHandler._loop = loop
+            same_thread = True
         except RuntimeError:
+            loop = WebSocketLogHandler._loop
+            same_thread = False
+        if loop is None:
             return
         for ws in list(log_ws_connections):
             try:
-                loop.create_task(ws.send_text(msg))
+                if same_thread:
+                    loop.create_task(ws.send_text(msg))
+                else:
+                    asyncio.run_coroutine_threadsafe(ws.send_text(msg), loop)
             except Exception:
                 # Drop dead WebSockets silently
                 if ws in log_ws_connections:

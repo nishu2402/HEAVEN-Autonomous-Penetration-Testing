@@ -133,8 +133,10 @@ class HeavenRiskModel:
                     vec = np.array([raw[:n_expected]])
                 score = float(self._regressor.predict(vec)[0])
                 return max(0.0, min(10.0, score))
-            except Exception:
-                pass
+            except Exception as e:
+                # Don't silently mask model failures — operators need to know
+                # a finding's CVSS came from the fallback, not the model.
+                logger.warning(f"CVSS regressor prediction failed, using fallback: {e}")
         return float(vuln_features.get("cvss_base_score", 5.0))
 
     def _build_ensemble(self) -> Pipeline:

@@ -96,7 +96,7 @@ export default function Findings() {
             <div className="card-title" style={{ marginBottom: 0 }}>
               {data.count} finding{data.count !== 1 ? "s" : ""}
             </div>
-            <div style={{ fontSize: 10, color: "rgba(0,255,65,0.35)" }}>
+            <div style={{ fontSize: 11, color: "rgba(0,255,65,0.62)" }}>
               Click column headers to sort
             </div>
           </div>

@@ -63,12 +63,12 @@ export default function KillChain() {
                           textShadow: `0 0 30px currentColor`, lineHeight: 1 }}>
               {pct}
             </div>
-            <div style={{ fontSize: 10, color: 'rgba(0,255,65,0.4)', letterSpacing: '0.1em' }}>
+            <div style={{ fontSize: 11, color: 'rgba(0,255,65,0.68)', letterSpacing: '0.1em' }}>
               COVERAGE SCORE
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ marginBottom: 6, fontSize: 11, color: 'rgba(0,255,65,0.5)' }}>
+            <div style={{ marginBottom: 6, fontSize: 12, color: 'rgba(0,255,65,0.72)' }}>
               {totalScore}/{maxScore} phases · {findings.length} finding{findings.length !== 1 ? 's' : ''}
             </div>
             <div className="progress-bar" style={{ height: 6 }}>
@@ -78,7 +78,7 @@ export default function KillChain() {
                      background: pct > 60 ? '#FF003C' : pct > 30 ? '#FFB800' : '#00FF41',
                    }} />
             </div>
-            <div style={{ marginTop: 6, fontSize: 10, color: 'rgba(0,255,65,0.3)' }}>
+            <div style={{ marginTop: 6, fontSize: 11, color: 'rgba(0,255,65,0.65)' }}>
               {pct > 60 ? '⚠ HIGH COVERAGE — attacker has a clear path' :
                pct > 30 ? '⚡ PARTIAL COVERAGE — gaps exist' :
                '✓ LOW COVERAGE — limited attack surface observed'}
@@ -104,7 +104,7 @@ export default function KillChain() {
         {phases.map((phase, i) => {
           const hasFindings = phase.findings.length > 0
           const topSev = phase.findings[0]?.severity || 'info'
-          const color  = hasFindings ? (SEV_COLORS[topSev] || '#00FF41') : 'rgba(0,255,65,0.15)'
+          const color  = hasFindings ? (SEV_COLORS[topSev] || '#00FF41') : 'rgba(0,255,65,0.42)'
           return (
             <motion.div
               key={i}
@@ -122,7 +122,7 @@ export default function KillChain() {
                 {phase.findings.length}
               </div>
               {hasFindings && (
-                <div style={{ marginTop: 4, fontSize: 9, color, opacity: 0.7 }}>
+                <div style={{ marginTop: 4, fontSize: 10, color, opacity: 0.85 }}>
                   {topSev.toUpperCase()}
                 </div>
               )}
@@ -178,16 +178,16 @@ export default function KillChain() {
                       background: `${color}11`,
                     }}
                   >
-                    <div style={{ fontSize: 9, opacity: 0.6, marginBottom: 2 }}>
+                    <div style={{ fontSize: 10, opacity: 0.75, marginBottom: 2 }}>
                       [{phase.name.toUpperCase()}]
                     </div>
                     <div>{phase.findings[0]?.title || phase.findings[0]?.vuln_type}</div>
-                    <div style={{ fontSize: 9, opacity: 0.5, marginTop: 2 }}>
+                    <div style={{ fontSize: 10, opacity: 0.68, marginTop: 2 }}>
                       {phase.findings[0]?.target}
                     </div>
                   </motion.div>
                   {i < attackPath.length - 1 && (
-                    <span style={{ color: 'rgba(0,255,65,0.3)', fontSize: 16, padding: '0 4px' }}>→</span>
+                    <span style={{ color: 'rgba(0,255,65,0.68)', fontSize: 16, padding: '0 4px' }}>→</span>
                   )}
                 </div>
               )

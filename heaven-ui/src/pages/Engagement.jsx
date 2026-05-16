@@ -62,7 +62,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
 
         <div className="card">
           <div className="card-title">Why per-engagement SQLite?</div>
-          <div style={{ color: 'rgba(0,255,65,0.55)', lineHeight: 1.8, fontSize: 12 }}>
+          <div style={{ color: 'rgba(0,255,65,0.80)', lineHeight: 1.8, fontSize: 13 }}>
             <p>Each engagement gets an isolated database file. No cross-contamination of findings,
             no shared state between clients. The file lives next to your notes — hand it to a
             colleague or archive it after the engagement ends.</p>
@@ -95,7 +95,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
           {Object.entries(stats.by_severity || {}).map(([sev, count]) => (
             <div key={sev} style={{ textAlign: 'center', minWidth: 60 }}>
               <div style={{ fontSize: 24, fontWeight: 700 }} className={`sev-${sev}`}>{count}</div>
-              <div style={{ fontSize: 9, color: 'rgba(0,255,65,0.4)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>{sev}</div>
+              <div style={{ fontSize: 10, color: 'rgba(0,255,65,0.68)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>{sev}</div>
             </div>
           ))}
         </div>
@@ -107,7 +107,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
 heaven scope add 10.0.0.0/24 --kind cidr
 heaven scope import scope.txt
 heaven scope list`}</pre>
-        <p className="dim" style={{ marginTop: 10, fontSize: 11 }}>
+        <p className="dim" style={{ marginTop: 10, fontSize: 12 }}>
           Scope changes are CLI-only. The UI is for triage, not for expanding attack surface.
         </p>
       </div>

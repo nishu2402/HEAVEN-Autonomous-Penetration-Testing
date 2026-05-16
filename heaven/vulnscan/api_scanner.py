@@ -221,35 +221,55 @@ class RESTAPIScanner:
     @classmethod
     async def test_bola(cls, session: aiohttp.ClientSession,
                          url: str) -> list[APIFinding]:
-        """Test for Broken Object Level Authorization (BOLA/IDOR)."""
+        """Test for Broken Object Level Authorization (BOLA/IDOR).
+
+        True BOLA confirmation needs two identities. From a single session we
+        only flag the *signal*: an object endpoint that serves DISTINCT data
+        for multiple sequential IDs with no auth. A single 200 (a public
+        endpoint, a landing page) is NOT reported — that was a false positive.
+        Severity is 'high' + needs-manual-verification, never 'critical'.
+        """
         findings = []
-        test_ids = ["1", "2", "0", "999999", "admin"]
+        test_ids = ["1", "2", "3", "0", "999999"]
+        err_words = ("not found", "unauthorized", "forbidden", "error", "denied")
 
         for pattern in BOLA_PATTERNS:
+            distinct_objects: dict[str, str] = {}
             for test_id in test_ids:
                 endpoint = f"{url}{pattern.replace('{id}', test_id)}"
                 try:
                     async with session.get(
                         endpoint, timeout=aiohttp.ClientTimeout(total=5),
                     ) as resp:
-                        if resp.status == 200:
-                            body = await resp.text()
-                            if len(body) > 50 and not any(err in body.lower()
-                                for err in ["not found", "unauthorized", "forbidden", "error"]):
-                                findings.append(APIFinding(
-                                    target=url, vuln_type="bola",
-                                    severity="critical", endpoint=endpoint,
-                                    title=f"BOLA/IDOR: {endpoint}",
-                                    description=f"Object accessed with sequential ID {test_id} without auth.",
-                                    confidence=0.70,
-                                    evidence={"status": resp.status, "body_length": len(body)},
-                                    remediation="Implement object-level authorization checks.",
-                                    cwe="CWE-639",
-                                    owasp_api="API1:2023 Broken Object Level Authorization",
-                                ))
-                                return findings  # One finding per pattern is enough
+                        if resp.status != 200:
+                            continue
+                        body = await resp.text()
+                        if len(body) > 50 and not any(e in body.lower() for e in err_words):
+                            distinct_objects[test_id] = body
                 except Exception:
                     continue
+
+            # Require >=2 IDs returning 200 with DIFFERENT bodies — proves the
+            # endpoint serves per-object data keyed on a raw ID. Identical
+            # bodies = a static page, not an object store → no finding.
+            unique_bodies = {len(b): b for b in distinct_objects.values()}
+            if len(distinct_objects) >= 2 and len(unique_bodies) >= 2:
+                ids = ",".join(distinct_objects.keys())
+                findings.append(APIFinding(
+                    target=url, vuln_type="bola",
+                    severity="high", endpoint=pattern,
+                    title=f"Potential BOLA/IDOR: {pattern}",
+                    description=(f"Endpoint returned distinct objects for IDs [{ids}] "
+                                 f"with no authentication. Manually verify whether "
+                                 f"object-level authorization is required."),
+                    confidence=0.55,
+                    evidence={"ids_returning_objects": list(distinct_objects.keys()),
+                              "needs_manual_auth_check": True},
+                    remediation="Implement object-level authorization checks.",
+                    cwe="CWE-639",
+                    owasp_api="API1:2023 Broken Object Level Authorization",
+                ))
+                return findings
         return findings
 
     @classmethod

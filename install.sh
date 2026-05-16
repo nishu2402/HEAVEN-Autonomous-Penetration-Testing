@@ -171,25 +171,69 @@ check_tool "nmap"    "nmap"    "apt install nmap  |  brew install nmap"
 check_tool "nuclei"  "nuclei"  "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
 check_tool "sqlmap"  "sqlmap"  "pip install sqlmap  |  apt install sqlmap"
 
-# ── 7. Frontend build (optional) ──────────────────────────────────────────────
+# ── 7. Frontend build ─────────────────────────────────────────────────────────
 echo ""
 step "Step 7/8 — Building web UI..."
 
-if [ -d "$INSTALL_DIR/heaven-ui" ]; then
-    if ! command -v npm >/dev/null 2>&1; then
-        warn "npm not found — skipping frontend build"
-        echo -e "  ${DIM}Install Node.js 18+ then: cd heaven-ui && npm install --legacy-peer-deps && npm run build${NC}"
+# Attempt to install Node.js via the system package manager when it is missing.
+# Without a built UI, 'heaven serve' only exposes the API + a placeholder page.
+install_nodejs() {
+    if command -v apt-get >/dev/null 2>&1; then
+        info "Installing Node.js via apt-get..."
+        sudo apt-get update -qq && sudo apt-get install -y nodejs npm >/dev/null 2>&1
+    elif command -v dnf >/dev/null 2>&1; then
+        info "Installing Node.js via dnf..."
+        sudo dnf install -y nodejs npm >/dev/null 2>&1
+    elif command -v pacman >/dev/null 2>&1; then
+        info "Installing Node.js via pacman..."
+        sudo pacman -Sy --noconfirm nodejs npm >/dev/null 2>&1
+    elif command -v brew >/dev/null 2>&1; then
+        info "Installing Node.js via Homebrew..."
+        brew install node >/dev/null 2>&1
     else
-        NODE_VER=$(node --version 2>/dev/null || echo "?")
-        info "Node $NODE_VER detected"
-        if ( cd "$INSTALL_DIR/heaven-ui" && npm install --legacy-peer-deps -q 2>/dev/null && npm run build -q 2>/dev/null ); then
-            ok "Frontend built → heaven-ui/dist/"
+        return 1
+    fi
+}
+
+if [ ! -d "$INSTALL_DIR/heaven-ui" ]; then
+    warn "heaven-ui directory not found — skipping frontend build"
+else
+    # Ensure npm is available — try to auto-install if not.
+    if ! command -v npm >/dev/null 2>&1; then
+        warn "npm not found — attempting to install Node.js automatically..."
+        if install_nodejs && command -v npm >/dev/null 2>&1; then
+            ok "Node.js installed"
         else
-            warn "Frontend build failed — UI unavailable but CLI works fine"
+            warn "Could not auto-install Node.js — skipping frontend build"
+            echo -e "  ${DIM}Install Node.js 18+ manually, then:${NC}"
+            echo -e "  ${DIM}cd heaven-ui && npm install --legacy-peer-deps && npm run build${NC}"
+            echo -e "  ${DIM}The CLI works fully without the UI; 'heaven serve' shows a${NC}"
+            echo -e "  ${DIM}placeholder page until the UI is built.${NC}"
         fi
     fi
-else
-    warn "heaven-ui directory not found — skipping frontend build"
+
+    if command -v npm >/dev/null 2>&1; then
+        NODE_VER=$(node --version 2>/dev/null || echo "?")
+        NODE_MAJOR=$(echo "$NODE_VER" | sed 's/[^0-9.]//g' | cut -d. -f1)
+        info "Node $NODE_VER detected"
+        if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -lt 18 ] 2>/dev/null; then
+            warn "Node.js $NODE_VER is too old — version 18+ recommended. Build may fail."
+        fi
+        # Build with errors visible in a log so a failure is diagnosable
+        # (the old version hid every error behind 2>/dev/null).
+        BUILD_LOG="$INSTALL_DIR/heaven-ui/build.log"
+        if ( cd "$INSTALL_DIR/heaven-ui" \
+             && npm install --legacy-peer-deps >"$BUILD_LOG" 2>&1 \
+             && npm run build >>"$BUILD_LOG" 2>&1 ) \
+           && [ -f "$INSTALL_DIR/heaven-ui/dist/index.html" ]; then
+            ok "Frontend built → heaven-ui/dist/"
+            rm -f "$BUILD_LOG"
+        else
+            warn "Frontend build failed — see $BUILD_LOG"
+            echo -e "  ${DIM}UI unavailable but the CLI and API work fine.${NC}"
+            echo -e "  ${DIM}Retry: cd heaven-ui && npm install --legacy-peer-deps && npm run build${NC}"
+        fi
+    fi
 fi
 
 # ── 8. Smoke test ─────────────────────────────────────────────────────────────

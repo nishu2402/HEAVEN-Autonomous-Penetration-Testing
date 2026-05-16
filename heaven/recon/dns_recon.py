@@ -149,7 +149,7 @@ async def _scan_zone_transfer(domain: str) -> list[dict]:
     if not ns_records:
         return findings
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for ns in ns_records:
         ns_clean = ns.rstrip(".")
         try:
@@ -404,7 +404,7 @@ async def _enumerate_ptr(cidr: str, max_hosts: int = 256) -> list[dict]:
 
     async def _lookup(ip_str: str) -> None:
         async with sem:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             try:
                 hostname = await loop.run_in_executor(
                     None, socket.gethostbyaddr, ip_str
@@ -533,7 +533,7 @@ async def dns_recon(domain: str, enumerate_subdomains: bool = False,
     all_findings.extend(zt_findings)
 
     # ── DNSSEC ───────────────────────────────────────────────────────────────
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     dnssec = await loop.run_in_executor(None, _check_dnssec, domain)
     dns_data["dnssec"] = dnssec
     if not dnssec.get("enabled"):

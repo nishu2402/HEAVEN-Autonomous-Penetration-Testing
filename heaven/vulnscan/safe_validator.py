@@ -88,6 +88,18 @@ async def validate_sqli(session: aiohttp.ClientSession, url: str, param: str,
     except ImportError:
         obfuscate = False
 
+    # Baseline: a benign request the payloads are compared against. A genuine
+    # boolean SQLi makes the TRUE payload behave like the baseline while the
+    # FALSE payload diverges. Comparing the two payloads only to each other
+    # produces false positives on any dynamic page (ads, tokens, timestamps).
+    base_status, base_body, _ = await _evasive_request(
+        session, method, url, params={param: "1"} if method == "GET" else None,
+        data={param: "1"} if method != "GET" else None, timeout=timeout)
+    base_len = len(base_body)
+
+    def _len_similar(a: int, b: int) -> bool:
+        return abs(a - b) / max(a, b, 1) < 0.05  # within 5 %
+
     # 1. Boolean-based inference
     boolean_pairs = [
         ("' AND '1'='1", "' AND '1'='2"),
@@ -112,16 +124,20 @@ async def validate_sqli(session: aiohttp.ClientSession, url: str, param: str,
                 session, method, url, params={param: fv} if method == "GET" else None,
                 data={param: fv} if method != "GET" else None, timeout=timeout)
 
-            len_diff = abs(len(true_body) - len(false_body))
-            status_diff = true_status != false_status
+            # TRUE payload must look like the baseline AND the FALSE payload
+            # must diverge from it — both conditions, or it is not SQLi.
+            true_like_base = (true_status == base_status) and _len_similar(len(true_body), base_len)
+            false_unlike_base = (false_status != base_status) or not _len_similar(len(false_body), base_len)
+            payloads_differ = (true_status != false_status) or abs(len(true_body) - len(false_body)) > 50
 
-            if status_diff or len_diff > 50:
-                result.result = "confirmed" if len_diff > 200 or status_diff else "likely"
-                result.confidence = 0.92 if status_diff else min(len_diff / 500, 0.85)
+            if true_like_base and false_unlike_base and payloads_differ:
+                result.result = "confirmed"
+                result.confidence = 0.90
                 result.evidence = {
                     "technique": "boolean_inference", "payload": tv,
-                    "true_status": true_status, "false_status": false_status,
-                    "length_diff": len_diff,
+                    "baseline_status": base_status, "baseline_len": base_len,
+                    "true_status": true_status, "true_len": len(true_body),
+                    "false_status": false_status, "false_len": len(false_body),
                 }
                 result.evasion_technique = "obfuscated" if tv != true_payload else "direct"
                 result.patch = ("Use parameterised queries. Never concatenate user input into SQL.\n"
@@ -160,20 +176,33 @@ async def validate_sqli(session: aiohttp.ClientSession, url: str, param: str,
         "' AND (SELECT * FROM (SELECT(SLEEP(3)))a)--",
     ]
 
-    for payload in time_payloads:
+    # Baseline timing — a naturally slow endpoint must not be flagged. Take the
+    # max of two benign requests so a single slow sample doesn't lower the bar.
+    async def _timed_request(value: str) -> float:
         t0 = time.time()
         await _evasive_request(session, method, url,
-                                params={param: payload} if method == "GET" else None,
-                                data={param: payload} if method != "GET" else None,
-                                timeout=15)
-        elapsed = (time.time() - t0) * 1000
-        if elapsed > 2800:  # ~3 second delay
-            result.result = "confirmed"
-            result.confidence = 0.85
-            result.evidence = {"technique": "time_based_blind", "payload": payload,
-                               "response_ms": elapsed}
-            result.patch = "Use parameterised queries. Implement query timeout limits."
-            break
+                               params={param: value} if method == "GET" else None,
+                               data={param: value} if method != "GET" else None,
+                               timeout=15)
+        return (time.time() - t0) * 1000
+
+    baseline_ms = max(await _timed_request("1"), await _timed_request("1"))
+
+    for payload in time_payloads:
+        elapsed = await _timed_request(payload)
+        # Delay must clearly exceed the baseline (the SLEEP is 3 s).
+        if elapsed > baseline_ms + 2500:
+            # Reproduce once — a one-off slow response is not a vuln.
+            elapsed2 = await _timed_request(payload)
+            if elapsed2 > baseline_ms + 2500:
+                result.result = "confirmed"
+                result.confidence = 0.88
+                result.evidence = {"technique": "time_based_blind", "payload": payload,
+                                   "baseline_ms": round(baseline_ms),
+                                   "response_ms": round(elapsed),
+                                   "reproduce_ms": round(elapsed2)}
+                result.patch = "Use parameterised queries. Implement query timeout limits."
+                break
 
     result.duration_ms = (time.time() - start) * 1000
     return result

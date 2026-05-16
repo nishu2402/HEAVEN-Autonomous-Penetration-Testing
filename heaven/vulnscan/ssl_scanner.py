@@ -318,6 +318,45 @@ def _check_heartbleed(host: str, port: int, timeout: float = 8.0) -> bool:
     return False
 
 
+def _probe_sslv3(host: str, port: int, timeout: float = 6.0) -> bool:
+    """Detect SSLv3 support (POODLE precondition) via a raw SSLv3 ClientHello.
+
+    Python's ssl module cannot speak SSLv3, so we craft the handshake on a
+    plain socket. Returns True only on a clear SSLv3 ServerHello — any alert,
+    a higher negotiated version, or an error yields False (no false positive).
+    """
+    try:
+        # SSLv3 ClientHello body (record version + client_version = 0x0300).
+        body = (
+            b"\x03\x00"                       # client_version = SSLv3
+            + b"\x00" * 32                    # random (32 bytes)
+            + b"\x00"                         # session_id length = 0
+            + b"\x00\x08"                     # cipher_suites length = 8 bytes
+            + b"\x00\x2f\x00\x35\x00\x0a\x00\x05"  # 4 classic SSLv3 ciphers
+            + b"\x01\x00"                     # compression: 1 method, null
+        )
+        handshake = b"\x01" + struct.pack(">I", len(body))[1:] + body  # ClientHello
+        record = b"\x16\x03\x00" + struct.pack(">H", len(handshake)) + handshake
+
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall(record)
+        resp = s.recv(8192)
+        s.close()
+
+        if len(resp) < 6:
+            return False
+        # resp[0]=0x16 handshake, resp[1:3]=record version, resp[5]=handshake type.
+        # A ServerHello (0x02) at record version 0x0300 == SSLv3 accepted.
+        # A 0x15 alert == SSLv3 refused (the secure, expected outcome).
+        if resp[0] == 0x16 and resp[1] == 0x03 and resp[2] == 0x00 and resp[5] == 0x02:
+            return True
+        return False
+    except Exception as e:
+        logger.debug(f"SSLv3 probe failed for {host}:{port}: {e}")
+        return False
+
+
 def _check_hsts(host: str, port: int = 443, timeout: float = 8.0) -> tuple[bool, int, bool, bool]:
     """
     Fetch HTTPS response and parse Strict-Transport-Security header.
@@ -390,18 +429,11 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     except Exception as e:
         logger.debug(f"protocol version check error: {e}")
 
-    # SSLv3 / SSLv2 — try connecting with minimum version forced to ancient values
-    for ver_name, min_ver in [("SSLv3", 0x0300), ("SSLv2", 0x0200)]:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        try:
-            ctx.minimum_version = ssl.TLSVersion.TLSv1
-            ctx.maximum_version = ssl.TLSVersion.TLSv1
-            # Try to set to SSLv3 — will raise on modern Python (which is correct)
-            ctx.options &= ~(ssl.OP_NO_SSLv3 | ssl.OP_NO_SSLv2)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+    # SSLv3 detection — modern Python's ssl module cannot negotiate SSLv3 at
+    # all, so the only reliable way is a raw SSLv3 ClientHello on a plain
+    # socket. (The previous loop built a context and discarded it, leaving
+    # ssl3 permanently False → POODLE was never detected.)
+    result.ssl3 = _probe_sslv3(host, port)
 
     # ── 2. Certificate ────────────────────────────────────────────────────────
     result.cert = _get_certificate(host, port)
@@ -423,7 +455,9 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     result.forward_secrecy = any(k in c for c in supported for k in _FORWARD_SECRECY_KEXES)
 
     # ── 6. Derived vulnerabilities ────────────────────────────────────────────
-    result.poodle = result.ssl3          # POODLE = SSLv3 + CBC
+    result.poodle = result.ssl3          # POODLE = SSLv3 (now actively probed)
+    # DROWN requires an SSLv2-speaking server. SSLv2 is extinct and uses a
+    # pre-TLS handshake the ssl module cannot generate; result.ssl2 stays False.
     result.drown  = result.ssl2
     result.beast  = result.tls10 and any("CBC" in c for c in supported)
     result.crime  = False                # compression: Python ssl doesn't expose this easily

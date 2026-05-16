@@ -441,6 +441,21 @@ class CredentialSprayer:
                 c for c in cls.DEFAULT_CREDS if service_hint.lower() in c[0].lower()
             ] or cls.DEFAULT_CREDS[:10]
 
+        # Baseline: where does a definitely-WRONG credential land? Some apps
+        # redirect failed logins to /home too — without this baseline that
+        # would be a false "default credentials" finding.
+        baseline_location = ""
+        try:
+            async with session.post(url,
+                data={"username": "heaven_invalid_x9", "password": "heaven_invalid_x9",
+                      "user": "heaven_invalid_x9", "pass": "heaven_invalid_x9",
+                      "login": "heaven_invalid_x9", "passwd": "heaven_invalid_x9"},
+                timeout=aiohttp.ClientTimeout(total=10),
+                allow_redirects=False) as bresp:
+                baseline_location = bresp.headers.get("Location", "")
+        except Exception:
+            pass
+
         for service, username, password in relevant_creds[:15]:
             try:
                 async with session.post(url,
@@ -462,7 +477,11 @@ class CredentialSprayer:
 
                     if success and status in (302, 303):
                         location = resp.headers.get("Location", "")
-                        if any(x in location.lower() for x in ["dashboard", "admin", "home", "panel"]):
+                        # Must redirect to an authed area AND differ from where
+                        # a known-bad credential lands.
+                        if (location != baseline_location and
+                                any(x in location.lower()
+                                    for x in ["dashboard", "admin", "home", "panel"])):
                             findings.append(AdvancedFinding(
                                 target=url, vuln_type="default_credentials", severity="critical",
                                 title=f"Default Credentials: {username}:{password}",

@@ -20,7 +20,7 @@ try:
     from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Depends, Header, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
-    from fastapi.responses import JSONResponse, FileResponse
+    from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, Response
     from pydantic import BaseModel, Field
     from contextlib import asynccontextmanager
     HAS_FASTAPI = True
@@ -114,6 +114,9 @@ class DashboardData(BaseModel):
 active_scans: dict[str, Any] = {}
 ws_connections: list = []
 log_ws_connections: list = []
+# Strong references to background scan tasks. Kept OUT of active_scans because
+# that dict is JSON-serialised by the API — an asyncio.Task is not serialisable.
+_background_scan_tasks: set = set()
 
 
 class ConnectionManager:
@@ -538,7 +541,26 @@ def create_app() -> FastAPI:
             req.engagement = os.environ.get("HEAVEN_ENGAGEMENT")
 
         active_scans[scan_id]["scan_id"] = scan_id
-        asyncio.create_task(_run_scan_background(scan_id, req))
+        # Keep a strong reference to the task in a module-level set. Without it,
+        # asyncio only holds a weak ref and the GC can kill a running scan
+        # mid-flight. The ref must NOT live in active_scans — that dict is
+        # JSON-serialised by the API and a Task object is not serialisable.
+        task = asyncio.create_task(_run_scan_background(scan_id, req))
+        _background_scan_tasks.add(task)
+
+        def _scan_done(t: asyncio.Task):
+            _background_scan_tasks.discard(t)
+            try:
+                exc = t.exception()
+            except asyncio.CancelledError:
+                exc = None
+            if exc is not None:
+                logger.error(f"Background scan {scan_id} crashed: {exc}")
+                if scan_id in active_scans:
+                    active_scans[scan_id]["status"] = "failed"
+                    active_scans[scan_id]["error"] = str(exc)
+
+        task.add_done_callback(_scan_done)
         return ScanResponse(scan_id=scan_id, status="pending", message="Scan queued")
 
     @app.get("/api/scans")
@@ -880,18 +902,72 @@ def create_app() -> FastAPI:
     ws_handler.setFormatter(logging.Formatter("%(message)s"))
     logging.getLogger("heaven").addHandler(ws_handler)
 
-    # Serve static frontend
+    # Serve static frontend.
+    # ui_dist may be missing for two reasons: (1) pip/site-packages install where
+    # the repo layout differs, (2) the React UI was never built (no Node.js at
+    # install time). In both cases, instead of letting "/" fall through to a bare
+    # {"detail":"Not Found"} 404, serve a readable placeholder that tells the
+    # operator exactly how to build the UI and where the API + docs live.
     ui_dist = Path(__file__).parent.parent.parent / "heaven-ui" / "dist"
-    if ui_dist.exists():
+    if ui_dist.exists() and (ui_dist / "index.html").exists():
         app.mount("/", StaticFiles(directory=str(ui_dist), html=True), name="frontend")
 
         @app.exception_handler(404)
         async def custom_404_handler(request, exc):
             if request.url.path.startswith("/api/"):
-                return JSONResponse({"detail": "Not Found"}, status_code=404)
+                # Preserve the real message (e.g. "Scan not found") instead of
+                # flattening every API 404 to a generic string.
+                detail = getattr(exc, "detail", None) or "Not Found"
+                return JSONResponse({"detail": detail}, status_code=404)
             return FileResponse(ui_dist / "index.html")
+    else:
+        logger.warning(
+            "Web UI not built (heaven-ui/dist missing) — serving placeholder at '/'. "
+            "Build it with: cd heaven-ui && npm install && npm run build"
+        )
+
+        @app.get("/", include_in_schema=False)
+        async def _ui_placeholder():
+            return HTMLResponse(_UI_NOT_BUILT_HTML)
+
+        @app.get("/favicon.ico", include_in_schema=False)
+        async def _favicon():
+            return Response(status_code=204)
 
     return app
+
+
+_UI_NOT_BUILT_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>HEAVEN — API running</title>
+<style>
+ body{background:#05070f;color:#00FF41;font-family:monospace;margin:0;
+   display:flex;align-items:center;justify-content:center;min-height:100vh}
+ .box{max-width:620px;padding:40px;border:1px solid rgba(0,255,65,.35);
+   box-shadow:0 0 40px rgba(0,255,65,.12)}
+ h1{font-size:34px;letter-spacing:.2em;margin:0 0 4px}
+ .sub{color:rgba(0,255,65,.45);letter-spacing:.3em;font-size:11px;margin-bottom:24px}
+ code{background:rgba(0,255,65,.08);padding:2px 6px}
+ pre{background:rgba(0,255,65,.05);border:1px solid rgba(0,255,65,.2);
+   padding:12px;overflow:auto}
+ a{color:#00FF41}
+ .ok{color:#00FF41}.warn{color:#FFB800}
+</style></head><body><div class="box">
+ <h1>&#9889; HEAVEN</h1>
+ <div class="sub">AUTONOMOUS PENETRATION TESTING</div>
+ <p class="ok">&#10003; API server is running.</p>
+ <p class="warn">&#9888; The web UI has not been built yet.</p>
+ <p>Build the React UI, then restart this server:</p>
+ <pre>cd heaven-ui
+npm install --legacy-peer-deps
+npm run build</pre>
+ <p>Meanwhile the full API is live:</p>
+ <ul>
+   <li><a href="/api/docs">/api/docs</a> &mdash; interactive API documentation</li>
+   <li><a href="/api/health">/api/health</a> &mdash; health check</li>
+ </ul>
+ <p>Or drive HEAVEN entirely from the CLI: <code>heaven scan --help</code></p>
+</div></body></html>"""
 
 
 async def _run_scan_background(scan_id: str, req: ScanRequest):

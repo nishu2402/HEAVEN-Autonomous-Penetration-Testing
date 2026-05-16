@@ -169,23 +169,25 @@ class EmailSecurityScanner:
                     txt = str(rdata).strip('"')
                     if "v=DKIM1" in txt or "p=" in txt:
                         key_length = "unknown"
+                        found_selectors.append({
+                            "selector": selector, "key_length": key_length,
+                        })
                         if "p=" in txt:
                             key_data = txt.split("p=")[1].split(";")[0].strip()
                             key_bits = len(key_data) * 6  # Approximate
                             key_length = f"~{key_bits} bits"
-                        found_selectors.append({
-                            "selector": selector, "key_length": key_length,
-                        })
-                        # Check key strength
-                        if key_bits < 1024:
-                            self._findings.append(EmailFinding(
-                                target=domain, vuln_type="dkim_weak_key",
-                                severity="high",
-                                title=f"DKIM Weak Key: {selector} ({key_length})",
-                                description=f"DKIM key for selector '{selector}' is too short.",
-                                confidence=0.80,
-                                remediation="Use 2048-bit RSA keys minimum for DKIM.",
-                            ))
+                            found_selectors[-1]["key_length"] = key_length
+                            # Weak-key check only when an actual key is present.
+                            # key_data == "" means a revoked selector, not a weak key.
+                            if key_data and key_bits < 1024:
+                                self._findings.append(EmailFinding(
+                                    target=domain, vuln_type="dkim_weak_key",
+                                    severity="high",
+                                    title=f"DKIM Weak Key: {selector} ({key_length})",
+                                    description=f"DKIM key for selector '{selector}' is too short.",
+                                    confidence=0.80,
+                                    remediation="Use 2048-bit RSA keys minimum for DKIM.",
+                                ))
             except Exception:
                 continue
 

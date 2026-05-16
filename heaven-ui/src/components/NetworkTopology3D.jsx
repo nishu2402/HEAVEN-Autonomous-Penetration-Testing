@@ -8,18 +8,6 @@ const SEV_COLORS = {
   low: '#00D4FF', info: '#00FF41', unknown: '#00FF41',
 }
 
-// Demo data for when no real hosts exist
-const DEMO_HOSTS = [
-  { ip: '10.0.0.1', severity: 'critical', open_ports: [80, 443, 22, 3306], type: 'web' },
-  { ip: '10.0.0.2', severity: 'high', open_ports: [22, 8080], type: 'server' },
-  { ip: '10.0.0.3', severity: 'medium', open_ports: [443, 8443], type: 'web' },
-  { ip: '10.0.0.4', severity: 'low', open_ports: [22], type: 'server' },
-  { ip: '10.0.0.5', severity: 'info', open_ports: [80], type: 'web' },
-  { ip: '10.0.0.10', severity: 'high', open_ports: [445, 139, 3389], type: 'windows' },
-  { ip: '10.0.0.11', severity: 'critical', open_ports: [1433], type: 'database' },
-  { ip: '192.168.1.1', severity: 'medium', open_ports: [80, 23], type: 'network' },
-]
-
 function Edge({ start, end, color }) {
   const ref = useRef()
   const points = useMemo(() => [
@@ -170,27 +158,27 @@ function Scene({ hosts, onSelect }) {
   )
 }
 
-export default function NetworkTopology3D({ hosts = [], isDemo = false }) {
+export default function NetworkTopology3D({ hosts = [] }) {
   const [selected, setSelected] = useState(null)
-  const displayHosts = hosts.length > 0 ? hosts : DEMO_HOSTS
+  const hasHosts = hosts.length > 0
 
   return (
     <div className="topology-container">
-      {isDemo || hosts.length === 0 ? (
+      {hasHosts ? (
         <div style={{
           position: 'absolute', top: 8, right: 10, zIndex: 10,
-          fontSize: 9, color: 'rgba(0,255,65,0.3)',
-          letterSpacing: '0.1em', textTransform: 'uppercase',
+          fontSize: 11, color: 'rgba(0,255,65,0.65)',
+          letterSpacing: '0.1em',
         }}>
-          ◌ DEMO — no active scan
+          ● {hosts.length} host{hosts.length !== 1 ? 's' : ''} mapped
         </div>
       ) : (
         <div style={{
           position: 'absolute', top: 8, right: 10, zIndex: 10,
-          fontSize: 9, color: 'rgba(0,255,65,0.5)',
-          letterSpacing: '0.1em',
+          fontSize: 10, color: 'rgba(0,255,65,0.55)',
+          letterSpacing: '0.1em', textTransform: 'uppercase',
         }}>
-          ● {displayHosts.length} hosts
+          ○ no hosts — run a scan
         </div>
       )}
 
@@ -199,7 +187,7 @@ export default function NetworkTopology3D({ hosts = [], isDemo = false }) {
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
       >
-        <Scene hosts={displayHosts} onSelect={setSelected} />
+        <Scene hosts={hosts} onSelect={setSelected} />
       </Canvas>
 
       {selected && (

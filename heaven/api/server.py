@@ -108,6 +108,7 @@ class DashboardData(BaseModel):
     recent_scans: list[dict] = Field(default_factory=list)
     top_vulns: list[dict] = Field(default_factory=list)
     severity_trend: list[dict] = Field(default_factory=list)
+    assets: list[dict] = Field(default_factory=list)
 
 
 # ── Active scan tracking ──
@@ -453,7 +454,7 @@ def create_app() -> FastAPI:
                             "id": sid,
                             "name": s.get("name", "HEAVEN Scan"),
                             "status": s.get("status", "completed"),
-                            "vulns": s.get("n_findings", 0),
+                            "vulns": s.get("findings_count", 0),
                             "date": s.get("started_at", ""),
                         })
             except Exception:
@@ -480,9 +481,36 @@ def create_app() -> FastAPI:
 
         top_vulns = sorted(vulns, key=lambda f: float(f.get("priority_score") or f.get("predicted_cvss_score") or 0), reverse=True)[:5]
 
+        # Real host topology — aggregated from actual findings. Each node is a
+        # host that a scan actually touched; severity is the worst finding on
+        # it. No demo/placeholder data.
+        from heaven.engagement import _host_key
+        _sev_rank = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+        host_map: dict[str, dict] = {}
+        for f in vulns:
+            tgt = f.get("target", "") or f.get("host", "")
+            if not tgt:
+                continue
+            host = _host_key(tgt)
+            if not host:
+                continue
+            node = host_map.get(host)
+            if node is None:
+                node = {"host": host, "ip": host, "severity": "info",
+                        "open_ports": [], "finding_count": 0}
+                host_map[host] = node
+            node["finding_count"] += 1
+            sev_l = (f.get("severity") or "info").lower()
+            if _sev_rank.get(sev_l, 0) > _sev_rank.get(node["severity"], 0):
+                node["severity"] = sev_l
+            for p in (f.get("evidence") or {}).get("open_ports", []) or []:
+                if p not in node["open_ports"]:
+                    node["open_ports"].append(p)
+        assets = list(host_map.values())
+
         return DashboardData(
             total_scans=len(all_scans),
-            total_assets=len(set(f.get("target", "") for f in vulns if f.get("target"))),
+            total_assets=len(host_map),
             total_vulns=len(vulns),
             critical=sev["critical"],
             high=sev["high"],
@@ -494,6 +522,7 @@ def create_app() -> FastAPI:
             recent_scans=all_scans,
             top_vulns=top_vulns,
             severity_trend=[],
+            assets=assets,
         )
 
     # ── Scans ──
@@ -1035,10 +1064,11 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                                     persisted_finding_keys.add(fkey)
                                     try:
                                         store.upsert_finding(scan_id, f)
-                                        count = active_scans[scan_id].get("findings_count", 0) + 1
-                                        active_scans[scan_id]["findings_count"] = count
                                     except Exception:
                                         pass
+                    # Live count = real deduped rows in the store, so the scan
+                    # list and the engagement view never disagree.
+                    active_scans[scan_id]["findings_count"] = store.count_findings(scan_id)
                 except Exception:
                     pass
 
@@ -1056,8 +1086,13 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             try:
                 for finding in findings:
                     store.upsert_finding(scan_id, finding)
+                # Authoritative finding count = deduped rows actually in the
+                # store, so the scan list, kill chain and engagement view all
+                # report the same number.
+                persisted_count = store.count_findings(scan_id)
+                active_scans[scan_id]["findings_count"] = persisted_count
                 store.record_scan_complete(scan_id, summary={
-                    "total": len(findings),
+                    "total": persisted_count,
                     "elapsed_seconds": result.get("elapsed_seconds", 0),
                     "severity": {
                         s: sum(1 for f in findings if (f.get("severity") or "info").lower() == s)

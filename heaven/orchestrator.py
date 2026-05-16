@@ -570,14 +570,24 @@ class ScanOrchestrator:
             if res.state != TaskState.COMPLETED or not res.data:
                 continue
             data = res.data if isinstance(res.data, dict) else {}
-            for f in (data.get("vulnerabilities", []) + data.get("findings", [])
-                      + data.get("candidates", []) + data.get("validated_findings", [])):
-                all_vulns.append(f)
-                sev = (f.get("severity") or "info").lower()
-                if sev in sev_counts:
-                    sev_counts[sev] += 1
+            all_vulns.extend(data.get("vulnerabilities", []))
+            all_vulns.extend(data.get("findings", []))
+            all_vulns.extend(data.get("candidates", []))
+            all_vulns.extend(data.get("validated_findings", []))
             all_assets.extend(data.get("hosts", []))
             all_assets.extend(data.get("endpoints", []))
+
+        # One vuln flows through the pipeline as candidate -> validated ->
+        # scored, and a single scanner emits it under both "findings" and
+        # "vulnerabilities". Summing all of those double-counts. Collapse to
+        # one entry per stable identity so the report, scan list, kill chain
+        # and engagement store all agree on the finding count.
+        from heaven.engagement import dedup_findings
+        all_vulns = dedup_findings(all_vulns)
+        for f in all_vulns:
+            sev = (f.get("severity") or "info").lower()
+            if sev in sev_counts:
+                sev_counts[sev] += 1
 
         summary = {
             "scan_id": self.scan_id,

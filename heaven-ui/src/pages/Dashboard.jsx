@@ -56,7 +56,7 @@ export default function Dashboard() {
       <div className="dashboard-left">
         {/* 3D Topology */}
         <div style={{ position: 'relative', overflow: 'hidden' }}>
-          <NetworkTopology3D hosts={hosts} isDemo={noEng} />
+          <NetworkTopology3D hosts={hosts} />
 
           {/* Overlay info */}
           {noEng && (

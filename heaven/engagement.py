@@ -100,16 +100,129 @@ CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
 """
 
 
+# Vuln types that are a property of a whole host/domain, not a single URL
+# path. A server sends (or fails to send) a security header the same way on
+# every page; TLS config and request-smuggling behaviour belong to the
+# host:port pair; SPF/DMARC belong to the domain. Reporting "CSP missing"
+# once per crawled page is noise — a real pentester reports it once per host.
+# These dedup on host, ignoring the path/param/endpoint.
+HOST_LEVEL_VULN_TYPES = frozenset({
+    # missing / weak HTTP security headers (server-wide)
+    "csp_missing", "missing_csp", "clickjacking_no_xfo", "x_frame_options_missing",
+    "hsts_missing", "missing_hsts", "x_content_type_missing", "missing_security_headers",
+    "referrer_policy_missing", "permissions_policy_missing", "cors_misconfig",
+    "cookie_security", "insecure_cookie",
+    # TLS / certificate (property of host:port)
+    "weak_cipher", "ssl_weak", "weak_tls", "tls_version", "ssl_expired",
+    "ssl_self_signed", "sslv3_enabled", "heartbleed", "ssl_misconfiguration",
+    # request smuggling (front-end/back-end pair — host level)
+    "request_smuggling", "http_smuggling", "http_smuggling_indicator",
+    # email / DNS posture (domain level)
+    "spf_analysis", "spf_missing", "spf_weak", "dmarc_missing", "dmarc_weak",
+    "dkim_missing", "dkim_weak", "dns_misconfig",
+    # server-wide config disclosure
+    "dangerous_http_method", "directory_listing", "server_banner",
+    "version_disclosure",
+})
+
+
+def _host_key(target: str) -> str:
+    """
+    Reduce a target to ``scheme://host[:port]`` (or bare ``host[:port]``).
+
+    Drops path + query so site-wide findings collapse to one host.
+    """
+    t = (target or "").strip()
+    if "://" in t:
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(t)
+            host = (p.hostname or "").lower()
+            if p.port:
+                host = f"{host}:{p.port}"
+            scheme = (p.scheme or "https").lower()
+            if host:
+                return f"{scheme}://{host}"
+        except Exception:
+            pass
+    # bare host / host:port / host/path
+    return t.split("/")[0].lower()
+
+
+def is_host_level(vuln_type: str) -> bool:
+    """True when a vuln type dedups per host rather than per URL."""
+    return (vuln_type or "").strip().lower() in HOST_LEVEL_VULN_TYPES
+
+
 def _finding_hash(target: str, vuln_type: str, param: str = "",
                   endpoint: str = "") -> str:
     """
     Stable hash that identifies a finding across re-scans.
 
-    Two scans of the same SQLi on the same parameter and endpoint will produce
-    identical hashes — they get deduped, not duplicated.
+    Two scans of the same SQLi on the same parameter and endpoint produce
+    identical hashes — they dedup, not duplicate. Host-level vuln types
+    (missing headers, TLS, smuggling, SPF/DMARC) dedup per host, ignoring the
+    URL path, so "CSP missing" reports once per host instead of once per
+    crawled page.
     """
-    key = f"{target.lower()}|{vuln_type.lower()}|{endpoint.lower()}|{param.lower()}"
+    vt = (vuln_type or "").strip().lower()
+    if vt in HOST_LEVEL_VULN_TYPES:
+        key = f"{_host_key(target)}|{vt}"
+    else:
+        key = f"{target.lower()}|{vt}|{endpoint.lower()}|{param.lower()}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def _finding_identity(f: dict) -> tuple[str, str, str, str]:
+    """Pull (target, vuln_type, param, endpoint) out of a raw finding dict."""
+    target = f.get("target", "") or f.get("target_url", "") or f.get("host", "")
+    vuln_type = f.get("vuln_type", "") or f.get("type", "") or "unknown"
+    param = f.get("param", "") or ""
+    endpoint = f.get("endpoint", "") or f.get("url", "") or ""
+    return str(target), str(vuln_type), str(param), str(endpoint)
+
+
+def _richer_finding(a: dict, b: dict) -> dict:
+    """
+    When two findings dedup to the same identity, keep the one carrying more
+    signal: higher confidence wins; ties break toward the larger evidence
+    blob (a validated/scored finding is richer than a raw candidate).
+    """
+    ca = float(a.get("confidence", 0.0) or 0.0)
+    cb = float(b.get("confidence", 0.0) or 0.0)
+    if cb > ca:
+        return b
+    if ca > cb:
+        return a
+    return b if len(str(b.get("evidence", ""))) >= len(str(a.get("evidence", ""))) else a
+
+
+def dedup_findings(findings: list) -> list:
+    """
+    Collapse findings that refer to the same vulnerability.
+
+    One vuln flows through the pipeline as a candidate, then a validated
+    finding, then a scored finding — and a single scanner emits it under both
+    the ``findings`` and ``vulnerabilities`` keys. Summing all of those
+    double-counts. This collapses them to one entry per stable identity (the
+    same key :func:`_finding_hash` uses), keeping the richest copy, and
+    normalises host-level targets so the UI shows one row per host.
+    """
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        target, vuln_type, param, endpoint = _finding_identity(f)
+        key = _finding_hash(target, vuln_type, param, endpoint)
+        if key not in best:
+            best[key] = dict(f)
+            order.append(key)
+        else:
+            best[key] = _richer_finding(best[key], dict(f))
+        if is_host_level(vuln_type):
+            best[key]["target"] = _host_key(target)
+    return [best[k] for k in order]
 
 
 @dataclass
@@ -288,9 +401,14 @@ class EngagementStore:
             )
 
     def list_scans(self, limit: int = 50) -> list[dict]:
+        """List scans, each annotated with its deduped finding count."""
         with self._conn() as c:
             rows = c.execute(
-                "SELECT * FROM scans ORDER BY started_at DESC LIMIT ?", (limit,)
+                "SELECT *, "
+                "(SELECT COUNT(*) FROM findings WHERE findings.scan_id = scans.id) "
+                "AS findings_count "
+                "FROM scans ORDER BY started_at DESC LIMIT ?",
+                (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
 
@@ -387,7 +505,15 @@ class EngagementStore:
         vuln_type = finding.get("vuln_type", "") or finding.get("type", "") or "unknown"
         param = finding.get("param", "")
         endpoint = finding.get("endpoint", "") or finding.get("url", "") or ""
-        fid = finding.get("id") or _finding_hash(target, vuln_type, param, endpoint)
+        # Always derive the id from content. A scanner-supplied "id" is not a
+        # stable cross-scan identifier and would defeat dedup — the content
+        # hash IS the canonical id.
+        fid = _finding_hash(target, vuln_type, param, endpoint)
+        # Host-level findings (missing headers, TLS, smuggling, SPF/DMARC)
+        # store the host as the target so the UI shows one row per host, not
+        # one per crawled path.
+        if is_host_level(vuln_type):
+            target = _host_key(target)
 
         now = datetime.now(timezone.utc).isoformat()
 
@@ -442,6 +568,23 @@ class EngagementStore:
                     ),
                 )
         return fid
+
+    def count_findings(self, scan_id: Optional[str] = None) -> int:
+        """
+        Number of distinct (deduped) findings in the store.
+
+        Scoped to one scan when *scan_id* is given. This is the authoritative
+        finding count — the scan list, kill chain and engagement view all read
+        it so they never disagree.
+        """
+        with self._conn() as c:
+            if scan_id:
+                row = c.execute(
+                    "SELECT COUNT(*) FROM findings WHERE scan_id = ?", (scan_id,)
+                ).fetchone()
+            else:
+                row = c.execute("SELECT COUNT(*) FROM findings").fetchone()
+            return int(row[0]) if row else 0
 
     def get_finding(self, finding_id: str) -> Optional[Finding]:
         with self._conn() as c:

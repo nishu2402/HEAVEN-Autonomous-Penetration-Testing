@@ -13,6 +13,7 @@ export default function Scans() {
   const [scans, setScans]   = useState(null);
   const [error, setError]   = useState(null);
   const [selected, setSelected] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Launcher form
   const [targets, setTargets]   = useState("");
@@ -24,10 +25,17 @@ export default function Scans() {
   const [launchError, setLaunchError] = useState(null);
   const [launchSuccess, setLaunchSuccess] = useState(null);
 
-  function load() {
-    ScansApi.list(50)
-      .then((d) => { setScans(d.scans || []); setError(null); })
-      .catch((e) => setError(e.message));
+  async function load() {
+    setRefreshing(true);
+    try {
+      const d = await ScansApi.list(50);
+      setScans(d.scans || []);
+      setError(null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   useEffect(() => {
@@ -218,7 +226,9 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
             <div className="card-title" style={{ marginBottom: 0 }}>
               {scans.length === 0 ? "No scans yet" : `${scans.length} scan${scans.length !== 1 ? "s" : ""}`}
             </div>
-            <button className="btn-small" onClick={load}>↻ Refresh</button>
+            <button className="btn-small" onClick={load} disabled={refreshing}>
+              {refreshing ? "⏳ Refreshing…" : "↻ Refresh"}
+            </button>
           </div>
 
           {scans.length === 0 ? (

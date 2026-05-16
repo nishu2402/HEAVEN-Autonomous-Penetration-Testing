@@ -24,7 +24,7 @@ INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}${BOLD}║            HEAVEN Uninstaller v2.0                          ║${NC}"
+echo -e "${CYAN}${BOLD}║                    HEAVEN Uninstaller v2.0                   ║${NC}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 info "Project directory: ${BOLD}${INSTALL_DIR}${NC}"

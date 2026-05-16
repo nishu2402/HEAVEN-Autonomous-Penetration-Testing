@@ -89,6 +89,12 @@
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,50:7B2FBE,100:FF073A"/>
 </p>
 
+<div align="center">
+
+<img width="540" height="258" alt="SCR-20260516-coss" src="https://github.com/user-attachments/assets/76d75a34-463f-4063-b4c5-97d759bb0219" />
+
+</div>
+  
 HEAVEN is a **production-grade autonomous penetration testing platform** that automates the repeatable, time-consuming parts of a professional engagement — so you can focus on what only humans can do.
 
 <div align="center">
@@ -296,7 +302,7 @@ heaven scan -u https://app.example.com -t 10.0.0.1 -m full \
 heaven serve
 # → Open http://localhost:8443
 ```
-
+  
 ---
 
 <a id="installation-detailed"></a>
@@ -363,6 +369,12 @@ docker compose up -d
 <p align="center">
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,33:00CFFF,66:7B2FBE,100:FF073A"/>
 </p>
+
+<div align="center">
+
+<img width="1299" height="747" alt="SCR-20260514-nynf" src="https://github.com/user-attachments/assets/8f475f01-1f7f-461b-843f-2d36352474a5" />
+
+</div>
 
 ```bash
 heaven --help        # list all commands
@@ -466,6 +478,12 @@ heaven train-model    # retrain CVSS predictor on NVD data
 <p align="center">
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FFF176,50:A8FF3E,100:00CFFF"/>
 </p>
+
+<div align="center">
+
+<img width="1701" height="929" alt="image" src="https://github.com/user-attachments/assets/64828917-609e-4ef0-971d-e09c14438ec1" />
+
+</div>
 
 Start with `heaven serve`, then open `http://localhost:8443`.
 

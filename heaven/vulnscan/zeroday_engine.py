@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import re
 import string
-import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -358,25 +357,42 @@ class WebZeroDayScanner:
                 baseline_time = (time.time() - t0) * 1000
                 await resp.text()
 
-            # Time-based probe: inject sleep command
-            sleep_payload = "; sleep 5" if not sys.platform.startswith("win") else "& timeout 5"
-            t1 = time.time()
-            async with session.request(method, url, params={param: f"test{sleep_payload}"},
-                                        timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                probe_time = (time.time() - t1) * 1000
-                await resp.text()
+            # The TARGET OS is unknown — the scanner's own platform is
+            # irrelevant. Try both a Unix and a Windows sleep so a Linux
+            # target scanned from Windows (or vice-versa) is not missed.
+            sleep_payloads = [
+                ("; sleep 5", "unix"),
+                ("| sleep 5", "unix_pipe"),
+                ("& timeout /t 5", "windows"),
+                ("& ping -n 6 127.0.0.1", "windows_ping"),
+            ]
+            for sleep_payload, os_kind in sleep_payloads:
+                t1 = time.time()
+                async with session.request(method, url, params={param: f"test{sleep_payload}"},
+                                            timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    probe_time = (time.time() - t1) * 1000
+                    await resp.text()
 
-            # If response took significantly longer → command injection likely
-            if probe_time > baseline_time + 4000:
-                return ZeroDayCandidate(
-                    target=url, category="command_injection",
-                    confidence=0.85, severity="critical",
-                    description=f"Time-based command injection on param '{param}' (delta={probe_time - baseline_time:.0f}ms)",
-                    evidence={"param": param, "baseline_ms": baseline_time, "probe_ms": probe_time,
-                              "technique": "time_based"},
-                    remediation="Sanitise all user inputs. Use parameterised system calls. Avoid shell=True.",
-                    cwe_id="CWE-78", technique="time_based_cmdi",
-                )
+                if probe_time <= baseline_time + 4000:
+                    continue
+                # Reproduce — a one-off slow response is not an injection.
+                t2 = time.time()
+                async with session.request(method, url, params={param: f"test{sleep_payload}"},
+                                            timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    probe_time2 = (time.time() - t2) * 1000
+                    await resp.text()
+                if probe_time2 > baseline_time + 4000:
+                    return ZeroDayCandidate(
+                        target=url, category="command_injection",
+                        confidence=0.85, severity="critical",
+                        description=(f"Time-based command injection on param '{param}' "
+                                     f"({os_kind} payload, delta={probe_time - baseline_time:.0f}ms)"),
+                        evidence={"param": param, "baseline_ms": baseline_time,
+                                  "probe_ms": probe_time, "reproduce_ms": probe_time2,
+                                  "os_kind": os_kind, "technique": "time_based"},
+                        remediation="Sanitise all user inputs. Use parameterised system calls. Avoid shell=True.",
+                        cwe_id="CWE-78", technique="time_based_cmdi",
+                    )
         except Exception:
             pass
         return None
@@ -841,15 +857,18 @@ class WebZeroDayScanner:
             async with session.request(method, url, params={param: "1"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                 baseline_status = resp.status
-                baseline_len = len(await resp.text())
+                await resp.text()  # drain the baseline response body
 
             for payload in payloads:
                 async with session.request(method, url, params={param: payload},
                                             timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
-                    body = await resp.text()
+                    await resp.text()  # drain body
                     status = resp.status
 
-                    # Server error with overflow value → potential integer overflow
+                    # Server error with overflow value → potential integer overflow.
+                    # NOTE: a same-status response that merely differs in length is
+                    # NOT a signal — every dynamic page varies >100 bytes per
+                    # request. That branch was removed: it produced pure-noise FPs.
                     if status >= 500 and baseline_status < 500:
                         return ZeroDayCandidate(
                             target=url, category="integer_overflow",
@@ -857,15 +876,6 @@ class WebZeroDayScanner:
                             description=f"Server error with integer boundary value '{payload}' on param '{param}'",
                             evidence={"param": param, "payload": payload,
                                       "baseline_status": baseline_status, "error_status": status},
-                            remediation="Validate numeric inputs. Use appropriate data types with bounds checking.",
-                            cwe_id="CWE-190", technique="integer_boundary_testing",
-                        )
-                    elif status == baseline_status and abs(len(body) - baseline_len) > 100:
-                        return ZeroDayCandidate(
-                            target=url, category="integer_overflow",
-                            confidence=0.4, severity="medium",
-                            description=f"Significant response size anomaly with integer boundary value '{payload}' on param '{param}'",
-                            evidence={"param": param, "payload": payload, "baseline_len": baseline_len, "body_len": len(body)},
                             remediation="Validate numeric inputs. Use appropriate data types with bounds checking.",
                             cwe_id="CWE-190", technique="integer_boundary_testing",
                         )

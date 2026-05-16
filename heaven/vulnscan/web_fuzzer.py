@@ -537,7 +537,9 @@ async def _fuzz_content_type(session: "aiohttp.ClientSession",
             timeout=aiohttp.ClientTimeout(total=8),
         ) as resp:
             body = await resp.text()
-            if resp.status < 400 and ("heaven_probe" in body or '"admin"' in body):
+            # Only the unique probe token confirms the server echoed OUR JSON.
+            # The old '"admin"' clause matched countless normal responses → FP.
+            if resp.status < 400 and "heaven_probe" in body:
                 findings.append(_finding(
                     url, "content_type_confusion", "medium",
                     "Content-Type Confusion — JSON Accepted as Form Data",

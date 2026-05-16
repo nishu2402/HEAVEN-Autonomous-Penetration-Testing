@@ -107,6 +107,27 @@ XSS_PROBES: list[tuple[str, str]] = [
     (f"&#x3C;{_XSS_CANARY}&#x3E;", "html_encoded"),
 ]
 
+
+def _xss_is_executable(payload: str, body: str) -> bool:
+    """True only when the XSS payload reflects in a form that can EXECUTE.
+
+    The plain canary appearing in the body proves input reaches output, but a
+    correctly-escaping app reflects `&lt;script&gt;...h3av3n...` — the canary is
+    still present yet nothing executes. Flagging that is a false positive.
+    A finding requires the payload's raw markup (intact `<`,`>`) to survive.
+    """
+    if _XSS_CANARY not in body:
+        return False
+    low = body.lower()
+    # Dangerous fragments that, reflected verbatim (unescaped), can execute.
+    markers = [
+        f'<script>alert("{_XSS_CANARY}")'.lower(),
+        f"<{_XSS_CANARY}>".lower(),
+        "<img src=x onerror=",
+        "<svg/onload=",
+    ]
+    return any(m in low for m in markers)
+
 # Headers worth injecting into for reflected XSS / header injection
 INJECTABLE_HEADERS = ["Referer", "X-Forwarded-For", "User-Agent", "X-Original-URL"]
 
@@ -277,36 +298,54 @@ class InjectionScanner:
                 return
 
     async def _test_sqli_time_param(self, session, url: str, param: str) -> None:
-        """Time-based blind SQLi: inject SLEEP/WAITFOR and measure response time."""
-        for payload, sleep_secs, probe_name in SQLI_TIME_PROBES:
-            injected_url = _inject_param(url, param, payload)
-            timeout = float(sleep_secs + 6)
-            t_start = time.monotonic()
-            async with self._sem:
-                status, body = await _get(session, injected_url, self._headers, timeout=timeout)
-            elapsed = time.monotonic() - t_start
+        """Time-based blind SQLi: inject SLEEP/WAITFOR and measure response time.
 
-            threshold = sleep_secs * _TIME_THRESHOLD_FACTOR
-            if elapsed >= threshold and status != 0:
-                self._add_finding(
-                    target=injected_url,
-                    vuln_type="sqli",
-                    title=f"SQL Injection (time-based blind) — param '{param}'",
-                    severity="critical",
-                    confidence=0.88,
-                    evidence={
-                        "param": param,
-                        "payload": payload,
-                        "probe": probe_name,
-                        "technique": "time_blind",
-                        "elapsed_sec": round(elapsed, 2),
-                        "sleep_secs": sleep_secs,
-                        "url": url,
-                    },
-                    remediation="Use parameterised queries / prepared statements.",
-                    cwe="CWE-89",
-                )
-                return
+        A naturally slow endpoint must not be flagged — the injected delay is
+        compared against a measured baseline, and every hit is reproduced once.
+        """
+        async def _timed(value: str, timeout: float) -> tuple[int, float]:
+            t0 = time.monotonic()
+            async with self._sem:
+                status, _ = await _get(session, _inject_param(url, param, value),
+                                       self._headers, timeout=timeout)
+            return status, time.monotonic() - t0
+
+        # Baseline = slower of two benign requests, so one slow sample
+        # doesn't drag the bar down.
+        _, b1 = await _timed("1", 15.0)
+        _, b2 = await _timed("1", 15.0)
+        baseline = max(b1, b2)
+
+        for payload, sleep_secs, probe_name in SQLI_TIME_PROBES:
+            timeout = float(sleep_secs + 8)
+            margin = sleep_secs * _TIME_THRESHOLD_FACTOR  # required extra delay
+            status, elapsed = await _timed(payload, timeout)
+
+            if status != 0 and elapsed >= baseline + margin:
+                # Reproduce — a transient slow response is not an injection.
+                status2, elapsed2 = await _timed(payload, timeout)
+                if status2 != 0 and elapsed2 >= baseline + margin:
+                    self._add_finding(
+                        target=_inject_param(url, param, payload),
+                        vuln_type="sqli",
+                        title=f"SQL Injection (time-based blind) — param '{param}'",
+                        severity="critical",
+                        confidence=0.88,
+                        evidence={
+                            "param": param,
+                            "payload": payload,
+                            "probe": probe_name,
+                            "technique": "time_blind",
+                            "baseline_sec": round(baseline, 2),
+                            "elapsed_sec": round(elapsed, 2),
+                            "reproduce_sec": round(elapsed2, 2),
+                            "sleep_secs": sleep_secs,
+                            "url": url,
+                        },
+                        remediation="Use parameterised queries / prepared statements.",
+                        cwe="CWE-89",
+                    )
+                    return
 
     async def _test_sqli_post(self, session, url: str, param: str,
                                baseline_body: str, other_fields: dict) -> None:
@@ -380,7 +419,7 @@ class InjectionScanner:
                     await asyncio.sleep(self._delay)
                 status, body = await _get(session, injected_url, self._headers)
 
-            if _XSS_CANARY in body or (payload.replace('"', "") in body):
+            if _xss_is_executable(payload, body):
                 self._add_finding(
                     target=injected_url,
                     vuln_type="xss",
@@ -408,7 +447,7 @@ class InjectionScanner:
                     await asyncio.sleep(self._delay)
                 status, body = await _post(session, url, data, self._headers)
 
-            if _XSS_CANARY in body or (payload.replace('"', "") in body):
+            if _xss_is_executable(payload, body):
                 self._add_finding(
                     target=url,
                     vuln_type="xss",

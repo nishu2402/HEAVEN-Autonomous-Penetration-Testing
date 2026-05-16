@@ -256,7 +256,12 @@ async def scan_host(
                         if state_elem is None or state_elem.get("state") != "open":
                             continue
 
-                        portid   = int(port_elem.get("portid", 0))
+                        # Malformed nmap XML can carry portid="" — int("") raises
+                        # ValueError and would abort parsing the remaining ports.
+                        try:
+                            portid = int(port_elem.get("portid") or 0)
+                        except (ValueError, TypeError):
+                            continue
                         protocol = port_elem.get("protocol", "tcp")
 
                         svc = port_elem.find("service")
@@ -382,6 +387,10 @@ async def scan_network(
     profile = EvasionProfile(stealth_level=stealth_map.get(stealth_level, StealthLevel.NORMAL))
     engine = EvasionEngine(profile)
 
+    # Pre-init so a NON-ImportError failure below (e.g. a runtime bug in the
+    # honeypot module) degrades gracefully instead of raising NameError later.
+    hp_engine = None
+    ctf = None
     try:
         from heaven.recon.evasion_engine import get_profile, HoneypotEvasionEngine
         from heaven.recon.ctf_extractor import CTFFlagExtractor
@@ -391,9 +400,8 @@ async def scan_network(
         engine = EvasionEngine(profile)
         hp_engine = HoneypotEvasionEngine(threshold=profile.honeypot_threshold)
         ctf = CTFFlagExtractor()
-    except ImportError:
-        hp_engine = None
-        ctf = None
+    except Exception as e:
+        logger.warning(f"Honeypot/CTF evasion modules unavailable — continuing without: {e}")
 
     # Expand CIDR targets
     expanded_targets = expand_targets(targets)

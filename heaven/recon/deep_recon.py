@@ -252,7 +252,13 @@ async def _ct_log_search(domain: str, session: aiohttp.ClientSession) -> list[st
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             if resp.status == 200:
                 data = await resp.json(content_type=None)
+                # crt.sh returns a JSON list normally, but a dict/error object
+                # on rate-limit — iterating that would yield keys then crash.
+                if not isinstance(data, list):
+                    data = []
                 for entry in data:
+                    if not isinstance(entry, dict):
+                        continue
                     name = entry.get("name_value", "")
                     for sub in name.split("\n"):
                         sub = sub.strip().lower()

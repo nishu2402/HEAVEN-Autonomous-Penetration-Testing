@@ -606,7 +606,8 @@ if HAS_CLICK:
                     )
                 if HAS_RICH:
                     from heaven.utils.logger import console
-                    console.print(ft)
+                    if console:
+                        console.print(ft)
 
         except ImportError:
             # Fallback when Rich is not available
@@ -621,8 +622,14 @@ if HAS_CLICK:
                 try:
                     summary = asyncio.run(orch.run())
                 except RuntimeError:
-                    loop = asyncio.get_event_loop()
-                    summary = loop.run_until_complete(orch.run())
+                    # asyncio.run() already closed its loop — get_event_loop()
+                    # on 3.12+ with no current loop errors. Use a fresh loop.
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        summary = loop.run_until_complete(orch.run())
+                    finally:
+                        loop.close()
             except KeyboardInterrupt:
                 _print("\n[bold yellow]⚠ Scan aborted by user (KeyboardInterrupt).[/bold yellow]")
                 _print("Cleaning up active processes and exiting safely...")
@@ -731,16 +738,24 @@ if HAS_CLICK:
 
             run_scan_job()  # Run once immediately
 
-            scheduler = AsyncIOScheduler()
+            # Create the loop BEFORE starting the scheduler — AsyncIOScheduler
+            # binds to the current loop on start(). get_event_loop() is
+            # deprecated on 3.12+ when no loop is running.
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            scheduler = AsyncIOScheduler(event_loop=loop)
             scheduler.add_job(run_scan_job, "interval", minutes=interval_minutes)
             scheduler.start()
 
             _print("[green]Scheduler started. Press Ctrl+C to exit.[/green]")
-            loop = asyncio.get_event_loop()
             try:
                 loop.run_forever()
             except (KeyboardInterrupt, SystemExit):
                 pass
+            finally:
+                scheduler.shutdown(wait=False)
+                loop.close()
         except ImportError:
             _print("[red]Error: apscheduler required. Install with: pip install apscheduler[/red]")
 
@@ -909,8 +924,13 @@ if HAS_CLICK:
             try:
                 summary = asyncio.run(orch.run())
             except RuntimeError:
-                loop = asyncio.get_event_loop()
-                summary = loop.run_until_complete(orch.run())
+                # asyncio.run() already closed its loop — use a fresh one.
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    summary = loop.run_until_complete(orch.run())
+                finally:
+                    loop.close()
         except KeyboardInterrupt:
             _print("\n[yellow]Resume aborted — checkpoints saved, run again to continue.[/yellow]")
             sys.exit(0)

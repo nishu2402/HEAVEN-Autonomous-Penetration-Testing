@@ -356,6 +356,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
     sem = asyncio.Semaphore(3)
     found: list[tuple[str, str]] = []
     lockout_detected = False
+    errored_attempts = 0  # timeouts / connection drops — often an IP-level block
 
     # Measure baseline response for failed login (length / status)
     try:
@@ -371,7 +372,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
         return findings
 
     async def _try(user: str, passwd: str) -> None:
-        nonlocal lockout_detected
+        nonlocal lockout_detected, errored_attempts
         async with sem:
             if found or lockout_detected:
                 return
@@ -382,7 +383,16 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
                 async with session.post(action, data=payload,
                                         timeout=aiohttp.ClientTimeout(total=10)) as r:
                     body = await r.text()
-                    if r.status == 429 or "too many" in body.lower():
+                    # Broad lockout / anti-automation signals — not just HTTP 429.
+                    # A site that blocks via 403/423, CAPTCHA, or a lock message
+                    # DOES throttle; the old check missed all of these and then
+                    # falsely reported "no account lockout".
+                    blow = body.lower()
+                    if (r.status in (429, 423) or
+                            any(s in blow for s in
+                                ("too many", "rate limit", "rate-limit", "captcha",
+                                 "try again later", "temporarily locked", "account locked",
+                                 "account is locked", "has been locked", "blocked"))):
                         lockout_detected = True
                         return
                     # Heuristic: post-login keywords present AND response meaningfully differs
@@ -395,7 +405,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
                     if success_kw and response_differs:
                         found.append((user, passwd))
             except Exception:
-                pass
+                errored_attempts += 1
 
     pairs = [(u, p) for u in _COMMON_USERNAMES[:6] for p in _COMMON_PASSWORDS[:8]]
     await asyncio.gather(*[_try(u, p) for u, p in pairs])
@@ -418,13 +428,28 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
             confidence=0.80,
         ))
     elif not found and not lockout_detected:
-        findings.append(_make_finding(
-            action, "no_account_lockout", "medium",
-            "No Account Lockout / Rate Limiting on Login",
-            "Login endpoint does not throttle repeated attempts. "
-            "Vulnerable to online password brute-force attacks.",
-            confidence=0.72,
-        ))
+        # Only claim "no lockout" if the endpoint kept answering normally for
+        # ALL attempts. Many errored requests = the endpoint likely blocked us
+        # (IP ban / connection drop) — reporting "no lockout" then is a false
+        # positive, so the result is inconclusive instead.
+        if errored_attempts > len(pairs) // 3:
+            findings.append(_make_finding(
+                action, "lockout_inconclusive", "info",
+                "Account Lockout — Inconclusive",
+                f"{errored_attempts}/{len(pairs)} brute-force attempts failed to "
+                f"complete (timeouts/drops). The endpoint may be blocking "
+                f"automated logins. Verify the lockout policy manually.",
+                confidence=0.50,
+            ))
+        else:
+            findings.append(_make_finding(
+                action, "no_account_lockout", "medium",
+                "No Account Lockout / Rate Limiting on Login",
+                "Login endpoint accepted repeated failed attempts without "
+                "throttling, lockout, or CAPTCHA. Vulnerable to online "
+                "password brute-force attacks.",
+                confidence=0.72,
+            ))
 
     return findings
 

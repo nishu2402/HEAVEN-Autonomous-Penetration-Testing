@@ -148,7 +148,7 @@ export default function LoginPage() {
               fontFamily: "monospace",
             }}>⚡ HEAVEN</div>
             <div style={{
-              fontSize: 10, color: "rgba(0,255,65,0.45)", letterSpacing: "0.35em",
+              fontSize: 11, color: "rgba(0,255,65,0.68)", letterSpacing: "0.35em",
               marginTop: 6, textTransform: "uppercase",
             }}>
               Autonomous Penetration Testing
@@ -158,7 +158,7 @@ export default function LoginPage() {
 
           {/* Status bar */}
           <div style={{
-            fontSize: 9, color: "rgba(0,255,65,0.3)", letterSpacing: "0.15em",
+            fontSize: 11, color: "rgba(0,255,65,0.62)", letterSpacing: "0.15em",
             marginBottom: 24, fontFamily: "monospace",
           }}>
             OPERATOR AUTH REQUIRED · AES-256 ENCRYPTED SESSION
@@ -167,7 +167,7 @@ export default function LoginPage() {
           {/* Username */}
           <div style={{ marginBottom: 16 }}>
             <div style={{
-              fontSize: 9, color: "rgba(0,255,65,0.5)", letterSpacing: "0.2em",
+              fontSize: 11, color: "rgba(0,255,65,0.72)", letterSpacing: "0.2em",
               marginBottom: 6, fontFamily: "monospace",
             }}>OPERATOR ID</div>
             <div style={{
@@ -198,7 +198,7 @@ export default function LoginPage() {
           {/* Password */}
           <div style={{ marginBottom: 24 }}>
             <div style={{
-              fontSize: 9, color: "rgba(0,255,65,0.5)", letterSpacing: "0.2em",
+              fontSize: 11, color: "rgba(0,255,65,0.72)", letterSpacing: "0.2em",
               marginBottom: 6, fontFamily: "monospace",
             }}>ACCESS KEY</div>
             <div style={{
@@ -264,7 +264,7 @@ export default function LoginPage() {
 
           {/* Hint */}
           <div style={{
-            marginTop: 20, fontSize: 9, color: "rgba(0,255,65,0.2)",
+            marginTop: 20, fontSize: 11, color: "rgba(0,255,65,0.58)",
             fontFamily: "monospace", textAlign: "center", lineHeight: 1.6,
           }}>
             Set HEAVEN_ADMIN_PASSWORD on the server to configure access credentials.

@@ -21,7 +21,7 @@ function StatCard({ label, value, color, sub }) {
       <div className="stat-value" style={{ color, textShadow: `0 0 20px ${color}55` }}>
         {value ?? '—'}
       </div>
-      {sub && <div style={{ fontSize: 9, color: 'rgba(0,255,65,0.3)', marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 10, color: 'rgba(0,255,65,0.62)', marginTop: 4 }}>{sub}</div>}
     </motion.div>
   )
 }
@@ -71,10 +71,10 @@ export default function Dashboard() {
                 textAlign: 'center',
                 backdropFilter: 'blur(4px)',
               }}>
-                <div style={{ color: '#00D4FF', fontSize: 11, letterSpacing: '0.1em', marginBottom: 4 }}>
+                <div style={{ color: '#00D4FF', fontSize: 12, letterSpacing: '0.1em', marginBottom: 4 }}>
                   NO ACTIVE ENGAGEMENT
                 </div>
-                <div style={{ color: 'rgba(0,255,65,0.4)', fontSize: 10 }}>
+                <div style={{ color: 'rgba(0,255,65,0.72)', fontSize: 11 }}>
                   heaven engage init &lt;name&gt;
                 </div>
               </div>
@@ -110,8 +110,8 @@ export default function Dashboard() {
           fontSize: 11,
         }}>
           {noEng ? (
-            <div style={{ color: 'rgba(0,255,65,0.3)', fontSize: 10 }}>
-              <div style={{ marginBottom: 6, color: '#00D4FF', letterSpacing: '0.1em', fontSize: 9 }}>QUICK START</div>
+            <div style={{ color: 'rgba(0,255,65,0.72)', fontSize: 12 }}>
+              <div style={{ marginBottom: 6, color: '#00D4FF', letterSpacing: '0.1em', fontSize: 11 }}>QUICK START</div>
               <div style={{ lineHeight: 1.8 }}>
                 <div>$ heaven engage init my-eng</div>
                 <div>$ heaven scope add 10.0.0.0/24 --kind cidr</div>
@@ -120,18 +120,18 @@ export default function Dashboard() {
             </div>
           ) : (
             <div>
-              <div style={{ color: 'rgba(0,255,65,0.4)', fontSize: 9, letterSpacing: '0.1em', marginBottom: 4 }}>
+              <div style={{ color: 'rgba(0,255,65,0.68)', fontSize: 10, letterSpacing: '0.1em', marginBottom: 4 }}>
                 ENGAGEMENT
               </div>
               <div style={{ color: '#00FF41', fontWeight: 700, marginBottom: 2 }}>
                 {eng.engagement?.name}
               </div>
-              <div style={{ color: 'rgba(0,255,65,0.45)', fontSize: 10 }}>
+              <div style={{ color: 'rgba(0,255,65,0.72)', fontSize: 11 }}>
                 {totalFindings} findings · {stats.scope_targets} targets in scope
               </div>
               <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
                 {Object.entries(SEV_COLORS).map(([s, c]) => (
-                  <span key={s} style={{ fontSize: 10, color: c }}>
+                  <span key={s} style={{ fontSize: 11, color: c }}>
                     {stats.by_severity?.[s] ?? 0} {s.charAt(0).toUpperCase()}
                   </span>
                 ))}

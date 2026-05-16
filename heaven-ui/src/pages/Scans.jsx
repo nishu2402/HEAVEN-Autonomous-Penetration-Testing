@@ -273,7 +273,7 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                       </td>
                       <td>
                         {s.findings_count != null
-                          ? <span style={{ color: s.findings_count > 0 ? "#FFB800" : "rgba(0,255,65,0.35)" }}>
+                          ? <span style={{ color: s.findings_count > 0 ? "#FFB800" : "rgba(0,255,65,0.62)" }}>
                               {s.findings_count}
                             </span>
                           : "—"

@@ -14,35 +14,35 @@ import pytest
 # ── Target validation regex tests ────────────────────────────────────
 
 def test_ip_regex_accepts_valid_ipv4():
-    from heaven.main import _IP_REGEX
+    from heaven.cli._helpers import _IP_REGEX
     assert _IP_REGEX.match("192.168.1.1")
     assert _IP_REGEX.match("10.0.0.0/24")
     assert _IP_REGEX.match("172.16.0.1/16")
 
 
 def test_ip_regex_rejects_invalid():
-    from heaven.main import _IP_REGEX
+    from heaven.cli._helpers import _IP_REGEX
     assert not _IP_REGEX.match("not_an_ip")
     assert not _IP_REGEX.match("999.999.999.999/x")
     assert not _IP_REGEX.match("")
 
 
 def test_url_regex_accepts_valid_urls():
-    from heaven.main import _URL_REGEX
+    from heaven.cli._helpers import _URL_REGEX
     assert _URL_REGEX.match("http://example.com")
     assert _URL_REGEX.match("https://example.com/path?q=1")
     assert _URL_REGEX.match("HTTPS://EXAMPLE.COM")
 
 
 def test_url_regex_rejects_invalid():
-    from heaven.main import _URL_REGEX
+    from heaven.cli._helpers import _URL_REGEX
     assert not _URL_REGEX.match("not a url")
     assert not _URL_REGEX.match("ftp://example.com")
     assert not _URL_REGEX.match("")
 
 
 def test_validate_target_string():
-    from heaven.main import _validate_target_string
+    from heaven.cli._helpers import _validate_target_string
     ok, kind = _validate_target_string("192.168.1.1")
     assert ok and kind == "ip"
     ok, kind = _validate_target_string("example.com")
@@ -56,29 +56,29 @@ def test_validate_target_string():
 def test_auth_gate_blocks_without_ack(monkeypatch):
     monkeypatch.delenv("HEAVEN_AUTHORIZED_SCOPE", raising=False)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    from heaven.main import _verify_authorization
+    from heaven.cli._helpers import _verify_authorization
     assert not _verify_authorization({"urls": ["https://x.example"]}, ack_flag=False)
 
 
 def test_auth_gate_allows_with_flag():
-    from heaven.main import _verify_authorization
+    from heaven.cli._helpers import _verify_authorization
     assert _verify_authorization({"urls": ["https://x.example"]}, ack_flag=True)
 
 
 def test_auth_gate_allows_with_env_var(monkeypatch):
     monkeypatch.setenv("HEAVEN_AUTHORIZED_SCOPE", "https://x.example,10.0.0.5")
-    from heaven.main import _verify_authorization
+    from heaven.cli._helpers import _verify_authorization
     assert _verify_authorization({"urls": ["https://x.example"]}, ack_flag=False)
 
 
 def test_auth_gate_rejects_target_outside_env_allowlist(monkeypatch):
     monkeypatch.setenv("HEAVEN_AUTHORIZED_SCOPE", "https://x.example")
-    from heaven.main import _verify_authorization
+    from heaven.cli._helpers import _verify_authorization
     assert not _verify_authorization({"urls": ["https://other.example"]}, ack_flag=False)
 
 
 def test_auth_gate_passes_when_no_targets():
-    from heaven.main import _verify_authorization
+    from heaven.cli._helpers import _verify_authorization
     # Empty targets shouldn't trigger the gate
     assert _verify_authorization({}, ack_flag=False)
 

@@ -1,0 +1,22 @@
+# HEAVEN benchmark — DVWA target stack
+#
+# Brings up DVWA on http://localhost:8080. The image bundles MariaDB so
+# no separate DB service is needed.
+#
+# Pinned to `vulnerables/web-dvwa` — the canonical DockerHub image, used
+# in every academic DVWA-based study since 2017. For reproducibility,
+# the GitHub Actions workflow resolves the @sha256 digest and pins it.
+
+services:
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    container_name: heaven-bench-dvwa
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/login.php"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: "no"

@@ -1,11 +1,20 @@
 """
-HEAVEN — Zero-Day Vulnerability Discovery Engine
-Algorithmic detection of potential zero-day vulnerabilities through:
-- Behavioural anomaly analysis (response fingerprinting)
-- Differential fuzzing with mutation strategies
-- Protocol conformance testing
-- Memory corruption heuristics (timing-based)
+HEAVEN — Anomaly-Based Vulnerability Probe
+Behavioural fuzzing heuristics that flag *candidate* vulnerabilities for
+analyst triage. NOT a zero-day discovery engine — this is pre-classified
+anomaly detection:
+
+- Response-fingerprint anomaly analysis
+- Differential fuzzing with mutation strategies (buffer overflow, format
+  string, NOP-sled patterns)
+- Protocol conformance probes
+- Timing-based memory-corruption heuristics
 - Version regression analysis
+
+For real zero-day discovery you need coverage-guided fuzzing (AFL++,
+libFuzzer), crash deduplication, and symbolic execution. This module
+does none of those — it flags candidates that an analyst should triage.
+
 Cross-platform: Linux, macOS, Windows.
 """
 
@@ -26,12 +35,12 @@ except ImportError:
 
 from heaven.utils.logger import get_logger
 
-logger = get_logger("vulnscan.zeroday")
+logger = get_logger("vulnscan.anomaly_probe")
 
 
 @dataclass
-class ZeroDayCandidate:
-    """A potential zero-day vulnerability candidate."""
+class AnomalyCandidate:
+    """A behavioural-anomaly candidate that needs analyst triage. NOT a confirmed 0-day."""
     target: str
     port: int = 0
     service: str = ""
@@ -174,9 +183,9 @@ class ProtocolFuzzer:
 
     def __init__(self, timeout: float = 5.0):
         self.timeout = timeout
-        self.candidates: list[ZeroDayCandidate] = []
+        self.candidates: list[AnomalyCandidate] = []
 
-    async def fuzz_tcp_service(self, host: str, port: int, service: str = "") -> list[ZeroDayCandidate]:
+    async def fuzz_tcp_service(self, host: str, port: int, service: str = "") -> list[AnomalyCandidate]:
         """Fuzz a TCP service with mutation payloads and monitor for anomalies."""
         candidates = []
         mutation = MutationEngine()
@@ -240,11 +249,11 @@ class ProtocolFuzzer:
         except Exception:
             return None
 
-    def _analyze_response_anomaly(self, result: dict, category: str, payload_len: int) -> Optional[ZeroDayCandidate]:
+    def _analyze_response_anomaly(self, result: dict, category: str, payload_len: int) -> Optional[AnomalyCandidate]:
         """Detect anomalous responses that may indicate memory corruption."""
         # Connection reset after large payload → possible crash
         if result["connection_reset"] and payload_len > 1024:
-            return ZeroDayCandidate(
+            return AnomalyCandidate(
                 target="", category="buffer_overflow",
                 confidence=0.6, severity="critical",
                 description=f"Service reset after {payload_len}-byte payload (potential buffer overflow)",
@@ -255,7 +264,7 @@ class ProtocolFuzzer:
 
         # Abnormally long response time → possible CPU exhaustion
         if result["response_time_ms"] > 5000:
-            return ZeroDayCandidate(
+            return AnomalyCandidate(
                 target="", category="resource_exhaustion",
                 confidence=0.4, severity="high",
                 description=f"Abnormal response delay ({result['response_time_ms']:.0f}ms) after probe",
@@ -266,7 +275,7 @@ class ProtocolFuzzer:
 
         return None
 
-    def _analyze_format_string_response(self, result: dict, payload: str) -> Optional[ZeroDayCandidate]:
+    def _analyze_format_string_response(self, result: dict, payload: str) -> Optional[AnomalyCandidate]:
         """Detect format string vulnerability indicators."""
         response_text = result["response"].decode("utf-8", errors="replace")
 
@@ -275,7 +284,7 @@ class ProtocolFuzzer:
         pointer_pattern = re.findall(r"(?:0x)?[0-9a-fA-F]{8,16}(?:\.[0-9a-fA-F]{8,16})+", response_text)
 
         if len(hex_pattern) > 3 or len(pointer_pattern) > 2:
-            return ZeroDayCandidate(
+            return AnomalyCandidate(
                 target="", category="format_string",
                 confidence=0.7, severity="critical",
                 description="Potential format string vulnerability — memory addresses leaked in response",
@@ -286,18 +295,18 @@ class ProtocolFuzzer:
         return None
 
 
-# ── Web Application Zero-Day Scanner ──
+# ── Web Application Anomaly Probe ──
 
-class WebZeroDayScanner:
-    """Discover zero-day vulnerabilities in web applications."""
+class WebAnomalyProbe:
+    """Flag candidate vulnerabilities in web apps via behavioural anomaly probes."""
 
     def __init__(self, timeout: float = 10.0):
         self.timeout = timeout
         self.mutation = MutationEngine()
 
     async def scan_endpoint(self, session: Any, url: str,
-                            params: list[str], method: str = "GET") -> list[ZeroDayCandidate]:
-        """Scan a web endpoint for zero-day vulnerabilities."""
+                            params: list[str], method: str = "GET") -> list[AnomalyCandidate]:
+        """Scan a web endpoint for anomalous behaviours that warrant analyst triage."""
         candidates = []
 
         for param in params:
@@ -347,7 +356,7 @@ class WebZeroDayScanner:
         return candidates
 
     async def _test_command_injection(self, session: Any, url: str,
-                                       param: str, method: str) -> Optional[ZeroDayCandidate]:
+                                       param: str, method: str) -> Optional[AnomalyCandidate]:
         """Detect command injection via time-based differential analysis."""
         try:
             # Baseline request
@@ -382,7 +391,7 @@ class WebZeroDayScanner:
                     probe_time2 = (time.time() - t2) * 1000
                     await resp.text()
                 if probe_time2 > baseline_time + 4000:
-                    return ZeroDayCandidate(
+                    return AnomalyCandidate(
                         target=url, category="command_injection",
                         confidence=0.85, severity="critical",
                         description=(f"Time-based command injection on param '{param}' "
@@ -398,7 +407,7 @@ class WebZeroDayScanner:
         return None
 
     async def _test_ssti(self, session: Any, url: str,
-                          param: str, method: str) -> Optional[ZeroDayCandidate]:
+                          param: str, method: str) -> Optional[AnomalyCandidate]:
         """
         Detect SSTI with two-round math confirmation to eliminate false positives.
 
@@ -425,7 +434,7 @@ class WebZeroDayScanner:
                                                     timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                             body2 = await r.text()
                         if "42" in body2 and "42" not in baseline and "{{6*7}}" not in body2:
-                            return ZeroDayCandidate(
+                            return AnomalyCandidate(
                                 target=url, category="ssti",
                                 confidence=0.96, severity="critical",
                                 description=(
@@ -468,7 +477,7 @@ class WebZeroDayScanner:
                                                 timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                         body = await r.text()
                         if expected in body and payload not in body and expected not in baseline:
-                            return ZeroDayCandidate(
+                            return AnomalyCandidate(
                                 target=url, category="ssti",
                                 confidence=0.90, severity="critical",
                                 description=(
@@ -491,7 +500,7 @@ class WebZeroDayScanner:
         return None
 
     async def _test_ldap_injection(self, session: Any, url: str,
-                                    param: str, method: str) -> Optional[ZeroDayCandidate]:
+                                    param: str, method: str) -> Optional[AnomalyCandidate]:
         """
         Detect LDAP Injection (blind via error-based and boolean differential).
         CWE-90.
@@ -524,7 +533,7 @@ class WebZeroDayScanner:
                     ]
                     for err in ldap_errors:
                         if err.lower() in body.lower() and err.lower() not in base_body.lower():
-                            return ZeroDayCandidate(
+                            return AnomalyCandidate(
                                 target=url, category="ldap_injection",
                                 confidence=0.85, severity="high",
                                 description=(
@@ -553,7 +562,7 @@ class WebZeroDayScanner:
 
             # If wildcard produces significantly more content → boolean LDAP injection
             if wild_len > false_len + 200 and wild_len > base_len:
-                return ZeroDayCandidate(
+                return AnomalyCandidate(
                     target=url, category="ldap_injection",
                     confidence=0.72, severity="high",
                     description=(
@@ -569,7 +578,7 @@ class WebZeroDayScanner:
         return None
 
     async def _test_nosql_injection(self, session: Any, url: str,
-                                     param: str, method: str) -> list[ZeroDayCandidate]:
+                                     param: str, method: str) -> list[AnomalyCandidate]:
         """
         Detect NoSQL injection in MongoDB, Redis, Elasticsearch.
         Tests JSON operator injection and type confusion.
@@ -600,7 +609,7 @@ class WebZeroDayScanner:
                         body = await r.text()
                         # If MongoDB operator returns MORE data than a specific value → injection
                         if r.status == 200 and len(body) > base_len + 100:
-                            candidates.append(ZeroDayCandidate(
+                            candidates.append(AnomalyCandidate(
                                 target=url, category="nosql_injection",
                                 confidence=0.80, severity="critical",
                                 description=(
@@ -639,7 +648,7 @@ class WebZeroDayScanner:
                         ) as r:
                             body = await r.text()
                             if r.status == 200 and len(body) > base_len + 50:
-                                candidates.append(ZeroDayCandidate(
+                                candidates.append(AnomalyCandidate(
                                     target=url, category="nosql_injection",
                                     confidence=0.82, severity="critical",
                                     description=(
@@ -659,7 +668,7 @@ class WebZeroDayScanner:
         return candidates
 
     async def _test_prototype_pollution(self, session: Any, url: str,
-                                         param: str, method: str) -> Optional[ZeroDayCandidate]:
+                                         param: str, method: str) -> Optional[AnomalyCandidate]:
         """
         Detect server-side prototype pollution in Node.js applications.
         Injects __proto__ and constructor.prototype keys and checks for
@@ -693,7 +702,7 @@ class WebZeroDayScanner:
                         if ("heaven_proto_probe" in body
                                 and "heaven_proto_probe" not in proto_baseline
                                 and r.status == 200):
-                            return ZeroDayCandidate(
+                            return AnomalyCandidate(
                                 target=url, category="prototype_pollution",
                                 confidence=0.88, severity="high",
                                 description=(
@@ -725,7 +734,7 @@ class WebZeroDayScanner:
                         body = await r.text()
                         if ("heaven_proto_probe" in body
                                 and "heaven_proto_probe" not in proto_baseline):
-                            return ZeroDayCandidate(
+                            return AnomalyCandidate(
                                 target=url, category="prototype_pollution",
                                 confidence=0.90, severity="high",
                                 description=(
@@ -744,7 +753,7 @@ class WebZeroDayScanner:
         return None
 
     async def _test_xxe(self, session: Any,
-                         url: str) -> Optional[ZeroDayCandidate]:
+                         url: str) -> Optional[AnomalyCandidate]:
         """
         Test for XML External Entity injection via multiple attack vectors.
         CWE-611.
@@ -791,7 +800,7 @@ class WebZeroDayScanner:
                 ) as r:
                     body = await r.text()
                     if indicator in body and indicator not in xxe_baseline:
-                        return ZeroDayCandidate(
+                        return AnomalyCandidate(
                             target=url, category="xxe",
                             confidence=0.95, severity="critical",
                             description=(
@@ -813,7 +822,7 @@ class WebZeroDayScanner:
         return None
 
     async def _test_path_traversal(self, session: Any, url: str,
-                                    param: str, method: str) -> Optional[ZeroDayCandidate]:
+                                    param: str, method: str) -> Optional[AnomalyCandidate]:
         """Detect path traversal / local file inclusion."""
         from heaven.recon.evasion_engine import PayloadObfuscator
 
@@ -834,7 +843,7 @@ class WebZeroDayScanner:
                     body = await resp.text()
                     for indicator in indicators:
                         if indicator in body:
-                            return ZeroDayCandidate(
+                            return AnomalyCandidate(
                                 target=url, category="path_traversal",
                                 confidence=0.9, severity="high",
                                 description=f"Path traversal on param '{param}' — file contents exposed",
@@ -848,7 +857,7 @@ class WebZeroDayScanner:
         return None
 
     async def _test_integer_overflow(self, session: Any, url: str,
-                                      param: str, method: str) -> Optional[ZeroDayCandidate]:
+                                      param: str, method: str) -> Optional[AnomalyCandidate]:
         """Detect integer overflow/underflow vulnerabilities."""
         payloads = MutationEngine.integer_overflow_payloads()
 
@@ -870,7 +879,7 @@ class WebZeroDayScanner:
                     # NOT a signal — every dynamic page varies >100 bytes per
                     # request. That branch was removed: it produced pure-noise FPs.
                     if status >= 500 and baseline_status < 500:
-                        return ZeroDayCandidate(
+                        return AnomalyCandidate(
                             target=url, category="integer_overflow",
                             confidence=0.5, severity="high",
                             description=f"Server error with integer boundary value '{payload}' on param '{param}'",
@@ -884,7 +893,7 @@ class WebZeroDayScanner:
         return None
 
     async def _test_header_injection(self, session: Any,
-                                      url: str) -> list[ZeroDayCandidate]:
+                                      url: str) -> list[AnomalyCandidate]:
         """Test for HTTP header-based vulnerabilities."""
         candidates = []
         header_payloads = MutationEngine.header_injection_payloads()
@@ -904,7 +913,7 @@ class WebZeroDayScanner:
                     # Different content with Host header change → host header injection
                     key = list(headers.keys())[0]
                     if key == "Host" and body != baseline_body and status == 200:
-                        candidates.append(ZeroDayCandidate(
+                        candidates.append(AnomalyCandidate(
                             target=url, category="host_header_injection",
                             confidence=0.7, severity="medium",
                             description=f"Host header injection — different response with Host: {headers['Host']}",
@@ -917,7 +926,7 @@ class WebZeroDayScanner:
 
                     # IP bypass: different status with X-Forwarded-For
                     if key.startswith("X-") and status != baseline_status:
-                        candidates.append(ZeroDayCandidate(
+                        candidates.append(AnomalyCandidate(
                             target=url, category="ip_restriction_bypass",
                             confidence=0.6, severity="high",
                             description=f"IP restriction bypass via {key}: {headers[key]}",
@@ -964,7 +973,7 @@ class VersionRegressionAnalyzer:
     }
 
     @classmethod
-    def check(cls, service: str, version: str) -> list[ZeroDayCandidate]:
+    def check(cls, service: str, version: str) -> list[AnomalyCandidate]:
         """Check a service version against the regression database."""
         candidates = []
         service_key = service.lower().replace("-", "").replace("_", "")
@@ -975,7 +984,7 @@ class VersionRegressionAnalyzer:
             for reg in regressions:
                 for affected_ver in reg["affected"]:
                     if version.startswith(affected_ver) or version == affected_ver:
-                        candidates.append(ZeroDayCandidate(
+                        candidates.append(AnomalyCandidate(
                             target="", category="version_regression",
                             confidence=0.95, severity=reg["severity"],
                             description=f"{reg['name']}: {reg['desc']} ({reg['cve']})",

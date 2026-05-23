@@ -1,0 +1,229 @@
+# HEAVEN Benchmark Ground Truth — DVWA (Damn Vulnerable Web Application)
+#
+# Source app: https://github.com/digininja/DVWA
+# Image used: vulnerables/web-dvwa (DockerHub) — the most-pulled DVWA image.
+# Difficulty levels covered: low + medium (high is hardened; impossible should
+# yield zero findings).
+#
+# To add an entry: pick a documented DVWA vulnerability, identify the
+# endpoint + parameter, set `category` to a canonical type from
+# tests/benchmarks/metrics.py::CANONICAL_CATEGORIES.
+
+target_app: dvwa
+version: "1.10"
+docker_image: vulnerables/web-dvwa:latest   # pin to @sha256:... in CI
+base_url: http://localhost:8080
+auth:
+  method: form_login
+  url: /login.php
+  username_field: username
+  password_field: password
+  credentials:
+    username: admin
+    password: password
+  setup_url: /setup.php          # one-time DB init click
+  security_url: /security.php    # difficulty toggle
+
+vulnerabilities:
+
+  # ── SQL Injection ───────────────────────────────────────────────────────
+
+  - id: dvwa-sqli-low-id
+    endpoint: /vulnerabilities/sqli/
+    method: GET
+    parameter: id
+    category: sqli
+    subtypes_ok: [sqli_error, sqli_union, sqli_boolean, sqli_time]
+    owasp: A03_2021
+    cwe: CWE-89
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Direct $_GET['id'] interpolated into mysqli_query, no escaping."
+
+  - id: dvwa-sqli-medium-id
+    endpoint: /vulnerabilities/sqli/
+    method: POST
+    parameter: id
+    category: sqli
+    subtypes_ok: [sqli_error, sqli_union, sqli_boolean, sqli_time]
+    owasp: A03_2021
+    cwe: CWE-89
+    severity: critical
+    difficulty: medium
+    detection_required: true
+    notes: "Numeric-only client-side check + mysql_real_escape_string — bypassable by integer payloads."
+
+  - id: dvwa-sqli-blind-low-id
+    endpoint: /vulnerabilities/sqli_blind/
+    method: GET
+    parameter: id
+    category: sqli
+    subtypes_ok: [sqli_blind, sqli_boolean, sqli_time]
+    owasp: A03_2021
+    cwe: CWE-89
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Blind SQLi — output suppressed but boolean/time-based payloads work."
+
+  # ── Cross-Site Scripting ────────────────────────────────────────────────
+
+  - id: dvwa-xss-reflected-low-name
+    endpoint: /vulnerabilities/xss_r/
+    method: GET
+    parameter: name
+    category: xss
+    subtypes_ok: [xss_reflected]
+    owasp: A03_2021
+    cwe: CWE-79
+    severity: high
+    difficulty: low
+    detection_required: true
+    notes: "Reflected XSS — name parameter echoed unescaped into HTML."
+
+  - id: dvwa-xss-reflected-medium-name
+    endpoint: /vulnerabilities/xss_r/
+    method: GET
+    parameter: name
+    category: xss
+    subtypes_ok: [xss_reflected]
+    owasp: A03_2021
+    cwe: CWE-79
+    severity: high
+    difficulty: medium
+    detection_required: true
+    notes: "str_replace('<script>') filter — bypassable by case variation or other tags."
+
+  - id: dvwa-xss-stored-low-message
+    endpoint: /vulnerabilities/xss_s/
+    method: POST
+    parameter: mtxMessage
+    category: xss
+    subtypes_ok: [xss_stored]
+    owasp: A03_2021
+    cwe: CWE-79
+    severity: high
+    difficulty: low
+    # Stored XSS detection requires GET-back to confirm — harder for unauthenticated scanners
+    detection_required: false
+    notes: "Stored XSS in guestbook — payload persists across sessions."
+
+  # ── Command Injection ───────────────────────────────────────────────────
+
+  - id: dvwa-cmdi-low-ip
+    endpoint: /vulnerabilities/exec/
+    method: POST
+    parameter: ip
+    category: cmdi
+    subtypes_ok: [command_injection, rce]
+    owasp: A03_2021
+    cwe: CWE-78
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "shell_exec($_REQUEST['ip']) — direct OS command injection via ; or && separators."
+
+  - id: dvwa-cmdi-medium-ip
+    endpoint: /vulnerabilities/exec/
+    method: POST
+    parameter: ip
+    category: cmdi
+    subtypes_ok: [command_injection, rce]
+    owasp: A03_2021
+    cwe: CWE-78
+    severity: critical
+    difficulty: medium
+    detection_required: true
+    notes: "Blacklist of ;,&&,| — bypassable with backticks, |, newline."
+
+  # ── File Inclusion ──────────────────────────────────────────────────────
+
+  - id: dvwa-lfi-low-page
+    endpoint: /vulnerabilities/fi/
+    method: GET
+    parameter: page
+    category: lfi
+    subtypes_ok: [local_file_inclusion, path_traversal]
+    owasp: A03_2021
+    cwe: CWE-22
+    severity: high
+    difficulty: low
+    detection_required: true
+    notes: "include($_GET['page']) — full LFI, /etc/passwd readable."
+
+  - id: dvwa-lfi-medium-page
+    endpoint: /vulnerabilities/fi/
+    method: GET
+    parameter: page
+    category: lfi
+    subtypes_ok: [local_file_inclusion, path_traversal]
+    owasp: A03_2021
+    cwe: CWE-22
+    severity: high
+    difficulty: medium
+    detection_required: true
+    notes: "str_replace('../') applied — bypassable by ....// or absolute paths."
+
+  # ── File Upload ─────────────────────────────────────────────────────────
+
+  - id: dvwa-upload-low
+    endpoint: /vulnerabilities/upload/
+    method: POST
+    parameter: uploaded
+    category: file_upload
+    subtypes_ok: [unrestricted_file_upload]
+    owasp: A04_2021
+    cwe: CWE-434
+    severity: critical
+    difficulty: low
+    # Unrestricted upload requires multipart payload + post-upload retrieval — hard for unauth scanners
+    detection_required: false
+    notes: "No filename / content-type validation — direct PHP shell upload possible."
+
+  # ── CSRF ────────────────────────────────────────────────────────────────
+
+  - id: dvwa-csrf-low
+    endpoint: /vulnerabilities/csrf/
+    method: GET
+    parameter: password_new
+    category: csrf
+    subtypes_ok: [csrf]
+    owasp: A01_2021
+    cwe: CWE-352
+    severity: high
+    difficulty: low
+    detection_required: true
+    notes: "Password change accepts GET request, no anti-CSRF token."
+
+  # ── Open Redirect ───────────────────────────────────────────────────────
+
+  - id: dvwa-open-redirect-low
+    endpoint: /vulnerabilities/open_redirect/source/low.php
+    method: GET
+    parameter: redirect
+    category: open_redirect
+    subtypes_ok: [open_redirect, unvalidated_redirect]
+    owasp: A01_2021
+    cwe: CWE-601
+    severity: medium
+    difficulty: low
+    # Open redirect is opportunistic — many scanners don't probe for it
+    detection_required: false
+    notes: "header('Location: ' . $_GET['redirect']) — arbitrary external redirect."
+
+  # ── Weak Login (Brute-Forceable) ────────────────────────────────────────
+
+  - id: dvwa-brute-low
+    endpoint: /vulnerabilities/brute/
+    method: GET
+    parameter: password
+    category: weak_auth
+    subtypes_ok: [weak_credentials, default_credentials, no_rate_limit]
+    owasp: A07_2021
+    cwe: CWE-307
+    severity: high
+    difficulty: low
+    # Brute-force detection requires the scanner to attempt enumeration — opt-in for most
+    detection_required: false
+    notes: "No login throttling — admin/password works without any backoff."

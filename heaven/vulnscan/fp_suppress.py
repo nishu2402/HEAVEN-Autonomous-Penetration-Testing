@@ -395,3 +395,23 @@ def apply_verdict(finding: dict, verdict: SuppressionVerdict) -> dict:
     if not verdict.keep:
         finding["result"] = "false_positive"
     return finding
+
+
+async def llm_review_if_borderline(finding: dict) -> dict:
+    """Optional Layer-E pass: ask the LLM gateway to second-opinion a borderline
+    finding (default band 0.4-0.7). No-op when the AI namespace / API key are
+    unavailable. Returns the finding (possibly mutated) so callers can chain.
+
+    Late-imported on purpose so vulnscan/* stays independent of heaven.ai.
+    """
+    try:
+        from heaven.ai.fp_review import FPReviewer
+    except ImportError:
+        return finding
+    reviewer = FPReviewer()
+    if not reviewer.available:
+        return finding
+    verdict = await reviewer.review(finding)
+    if verdict is None:
+        return finding
+    return reviewer.apply(finding, verdict)

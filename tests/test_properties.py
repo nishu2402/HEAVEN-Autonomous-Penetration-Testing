@@ -107,7 +107,7 @@ def test_parse_port_range_normalizes_reversed_range():
 @given(text=st.text(min_size=1, max_size=100, alphabet=string.printable))
 def test_target_validation_never_crashes(text):
     """Validator must return a tuple without crashing on any string."""
-    from heaven.main import _validate_target_string
+    from heaven.cli._helpers import _validate_target_string
     ok, kind = _validate_target_string(text)
     assert isinstance(ok, bool)
     assert kind in ("ip", "host", "invalid")
@@ -121,7 +121,7 @@ def test_target_validation_never_crashes(text):
     c=st.integers(0, 255), d=st.integers(0, 255),
 )
 def test_valid_ipv4_always_accepted(a, b, c, d):
-    from heaven.main import _validate_target_string
+    from heaven.cli._helpers import _validate_target_string
     ok, kind = _validate_target_string(f"{a}.{b}.{c}.{d}")
     assert ok and kind == "ip"
 

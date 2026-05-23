@@ -777,12 +777,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         depends_on=[net_id, web_id, cloud_id, hp_id],
     )
 
-    # ═══ Phase: ZERO-DAY DISCOVERY ═══
-    async def _zeroday_scan(**kw):
+    # ═══ Phase: ANOMALY PROBE (behavioural fuzzing — not 0-day discovery) ═══
+    async def _anomaly_probe(**kw):
         try:
-            from heaven.vulnscan.zeroday_engine import WebZeroDayScanner
+            from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
             import aiohttp
-            scanner = WebZeroDayScanner()
+            scanner = WebAnomalyProbe()
             candidates = []
             async with aiohttp.ClientSession() as session:
                 for url in targets.get("urls", []):
@@ -797,7 +797,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             return {}
 
     zday_id = orch.add_task(
-        "Zero-Day Discovery", _zeroday_scan,
+        "Anomaly Probe", _anomaly_probe,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id],
         timeout=600,
     )

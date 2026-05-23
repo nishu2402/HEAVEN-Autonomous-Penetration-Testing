@@ -1,25 +1,130 @@
 """
 HEAVEN — AI Decision Engine (The Autonomous Brain)
-Neural-network-driven decision making that replaces human pentester judgment:
-- Bayesian target prioritisation (which host to attack next)
-- Reinforcement-learned scan strategy (explore vs exploit)
-- NLP-based vulnerability correlation (connects CVE descriptions to exploits)
-- Anomaly scoring with isolation forests
-- Confidence calibration across all findings
-- Self-learning from scan history (gets smarter over time)
+Decision-layer heuristics + classical statistics that drive scan ordering,
+payload selection, and confidence calibration:
+
+- Bayesian target prioritisation with UCB explore/exploit (BayesianPrioritiser)
+- Isotonic-style confidence calibration with multi-source corroboration
+  (ConfidenceCalibrator)
+- Payload selector with effectiveness priors per tech stack
+  (SmartPayloadSelector)
+- Multi-armed-bandit scan strategy that adapts from observed rewards
+  (ScanStrategyOptimizer)
+
+The numeric priors (service vuln rates, payload effectiveness, calibration
+curve, etc.) are loaded from `data/models/priors_bootstrap.json` at import
+time. The shipped file is hand-curated bootstrap data, not trained from
+scans — replace it with the output of `heaven train-priors` once you have
+enough engagement history (see `data/models/priors_bootstrap.json` for the
+schema). If the file is missing or invalid, the in-code _DEFAULTS fall back
+in so the engine never crashes on a fresh install.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from heaven.utils.logger import get_logger
 
 logger = get_logger("ai.brain")
+
+
+# ═══════════════════════════════════════════
+# PRIORS LOADER
+# Loads the bootstrap priors from disk; falls back to in-code defaults
+# (which are kept in sync with the shipped JSON file) on any error.
+# ═══════════════════════════════════════════
+
+_PRIORS_LEARNED_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "priors_learned.json"
+_PRIORS_BOOTSTRAP_PATH = Path(__file__).resolve().parents[2] / "data" / "models" / "priors_bootstrap.json"
+
+_PRIORS_DEFAULTS: dict[str, Any] = {
+    "service_priors": {
+        "http": 0.7, "https": 0.65, "ssh": 0.3, "ftp": 0.6,
+        "smb": 0.55, "rdp": 0.4, "mysql": 0.5, "postgres": 0.45,
+        "redis": 0.7, "mongodb": 0.65, "elasticsearch": 0.6,
+        "telnet": 0.8, "vnc": 0.5, "ldap": 0.4, "snmp": 0.6,
+        "smtp": 0.35, "dns": 0.25, "nfs": 0.5, "docker": 0.7,
+        "kubernetes": 0.6, "jenkins": 0.75, "grafana": 0.5,
+    },
+    "value_weights": {
+        "database": 3.0, "admin_panel": 2.5, "api": 2.0,
+        "file_server": 1.5, "mail": 1.3, "dns": 1.0,
+        "web": 1.8, "auth": 2.2, "cicd": 2.8,
+    },
+    "calibration_curve": [
+        [0.0, 0.02], [0.1, 0.04], [0.2, 0.08], [0.3, 0.15],
+        [0.4, 0.25], [0.5, 0.40], [0.6, 0.58], [0.7, 0.72],
+        [0.8, 0.85], [0.9, 0.94], [1.0, 0.99],
+    ],
+    "source_weights": {
+        "validated_poc": 1.0, "time_based_blind": 0.85,
+        "boolean_inference": 0.80, "error_based": 0.88,
+        "banner_version": 0.70, "heuristic": 0.50,
+        "fuzzing_anomaly": 0.40, "default_cred": 0.95,
+    },
+    "effectiveness_matrix": {
+        "php":    {"sqli_union": 0.8, "sqli_boolean": 0.7, "ssti_twig": 0.6, "lfi": 0.9, "rce_system": 0.5},
+        "python": {"ssti_jinja2": 0.8, "sqli_boolean": 0.6, "cmdi_subprocess": 0.5, "pickle_deser": 0.4},
+        "java":   {"ssti_spring": 0.5, "deser_java": 0.6, "xxe": 0.7, "log4shell": 0.3, "sqli_prepared": 0.4},
+        "node":   {"prototype_pollution": 0.5, "ssti_pug": 0.4, "nosql_injection": 0.7, "ssrf": 0.6},
+        "asp.net":{"sqli_mssql": 0.6, "deser_viewstate": 0.5, "path_traversal": 0.5, "xxe": 0.4},
+        "ruby":   {"ssti_erb": 0.6, "deser_marshal": 0.5, "cmdi": 0.5, "sqli_activerecord": 0.4},
+    },
+    "waf_bypass_priority": {
+        "cloudflare":  ["unicode_normalize", "chunked_encoding", "case_alternation"],
+        "aws_waf":     ["double_url_encode", "json_content_type", "unicode_normalize"],
+        "modsecurity": ["comment_injection", "null_byte", "case_alternation"],
+        "imperva":     ["whitespace_manipulation", "unicode_normalize", "comment_injection"],
+    },
+}
+
+
+def _load_priors() -> dict[str, Any]:
+    """Load priors from disk with preference: learned > bootstrap > in-code defaults.
+
+    `priors_learned.json` is produced by `heaven train-priors` and contains
+    empirical service vuln rates derived from past engagement data.
+    `priors_bootstrap.json` is the hand-curated starter file. If neither
+    is on disk (or both are corrupt), fall back to the in-code defaults
+    so the engine never crashes.
+    """
+    for path, label in (
+        (_PRIORS_LEARNED_PATH, "learned"),
+        (_PRIORS_BOOTSTRAP_PATH, "bootstrap"),
+    ):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            merged = {**_PRIORS_DEFAULTS}
+            for key in _PRIORS_DEFAULTS:
+                if key in data:
+                    merged[key] = data[key]
+            merged["calibration_curve"] = [tuple(p) for p in merged["calibration_curve"]]
+            if label == "learned":
+                prov = data.get("_provenance", {})
+                logger.info(
+                    f"loaded learned priors (n_engagements={prov.get('engagement_count', '?')}, "
+                    f"n_findings={prov.get('finding_count', '?')})"
+                )
+            else:
+                logger.info(f"loaded bootstrap priors from {path}")
+            return merged
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"priors file at {path} is invalid ({e}) — trying next")
+
+    logger.info("no priors file on disk — using in-code bootstrap defaults")
+    return _PRIORS_DEFAULTS
+
+
+_PRIORS = _load_priors()
 
 
 # ═══════════════════════════════════════════
@@ -54,22 +159,13 @@ class BayesianPrioritiser:
     Updates beliefs as scan data comes in — like a pentester's intuition.
     """
 
-    # Prior probabilities by service type (from 15 years of pentesting data)
-    SERVICE_PRIORS = {
-        "http": 0.7, "https": 0.65, "ssh": 0.3, "ftp": 0.6,
-        "smb": 0.55, "rdp": 0.4, "mysql": 0.5, "postgres": 0.45,
-        "redis": 0.7, "mongodb": 0.65, "elasticsearch": 0.6,
-        "telnet": 0.8, "vnc": 0.5, "ldap": 0.4, "snmp": 0.6,
-        "smtp": 0.35, "dns": 0.25, "nfs": 0.5, "docker": 0.7,
-        "kubernetes": 0.6, "jenkins": 0.75, "grafana": 0.5,
-    }
+    # Prior P(vulnerable | service). Loaded from data/models/priors_bootstrap.json
+    # so it can be retrained without code changes. Shipped defaults are
+    # hand-curated, not learned — see module docstring.
+    SERVICE_PRIORS = _PRIORS["service_priors"]
 
-    # Value multipliers (how important is compromising this service)
-    VALUE_WEIGHTS = {
-        "database": 3.0, "admin_panel": 2.5, "api": 2.0,
-        "file_server": 1.5, "mail": 1.3, "dns": 1.0,
-        "web": 1.8, "auth": 2.2, "cicd": 2.8,
-    }
+    # Value multiplier per service category (impact if compromised).
+    VALUE_WEIGHTS = _PRIORS["value_weights"]
 
     def __init__(self):
         self.beliefs: dict[str, TargetBelief] = {}
@@ -212,28 +308,18 @@ class BayesianPrioritiser:
 
 class ConfidenceCalibrator:
     """
-    Calibrates confidence scores across all findings to achieve 99%+ accuracy.
-    Uses isotonic regression on historical true/false positive data.
+    Calibrates raw scanner confidence scores into probability estimates.
+    Uses piecewise-linear interpolation over a calibration curve, then
+    boosts on independent-source corroboration.
+
+    The curve and per-source weights are loaded from
+    `data/models/priors_bootstrap.json`. The shipped values are hand-curated
+    bootstrap data; the real calibration curve will be fit from labeled
+    historical findings once `heaven train-priors` is implemented.
     """
 
-    # Calibration curve from analysis of 50,000+ real-world findings
-    CALIBRATION_CURVE = [
-        (0.0, 0.02), (0.1, 0.04), (0.2, 0.08), (0.3, 0.15),
-        (0.4, 0.25), (0.5, 0.40), (0.6, 0.58), (0.7, 0.72),
-        (0.8, 0.85), (0.9, 0.94), (1.0, 0.99),
-    ]
-
-    # Source reliability weights (from empirical testing)
-    SOURCE_WEIGHTS = {
-        "validated_poc": 1.0,       # Confirmed with proof-of-concept
-        "time_based_blind": 0.85,   # Time-based detection
-        "boolean_inference": 0.80,  # Boolean-based detection
-        "error_based": 0.88,       # Error message detection
-        "banner_version": 0.70,    # Version-based detection
-        "heuristic": 0.50,         # Heuristic/pattern match
-        "fuzzing_anomaly": 0.40,   # Fuzzing-detected anomaly
-        "default_cred": 0.95,      # Default credential found
-    }
+    CALIBRATION_CURVE = _PRIORS["calibration_curve"]
+    SOURCE_WEIGHTS = _PRIORS["source_weights"]
 
     @classmethod
     def calibrate(cls, raw_confidence: float, source: str = "heuristic",
@@ -306,22 +392,10 @@ class SmartPayloadSelector:
     to succeed based on technology stack, WAF, and past results.
     """
 
-    # Payload effectiveness matrix: tech → payload_type → success_rate
-    EFFECTIVENESS_MATRIX = {
-        "php": {"sqli_union": 0.8, "sqli_boolean": 0.7, "ssti_twig": 0.6, "lfi": 0.9, "rce_system": 0.5},
-        "python": {"ssti_jinja2": 0.8, "sqli_boolean": 0.6, "cmdi_subprocess": 0.5, "pickle_deser": 0.4},
-        "java": {"ssti_spring": 0.5, "deser_java": 0.6, "xxe": 0.7, "log4shell": 0.3, "sqli_prepared": 0.4},
-        "node": {"prototype_pollution": 0.5, "ssti_pug": 0.4, "nosql_injection": 0.7, "ssrf": 0.6},
-        "asp.net": {"sqli_mssql": 0.6, "deser_viewstate": 0.5, "path_traversal": 0.5, "xxe": 0.4},
-        "ruby": {"ssti_erb": 0.6, "deser_marshal": 0.5, "cmdi": 0.5, "sqli_activerecord": 0.4},
-    }
-
-    WAF_BYPASS_PRIORITY = {
-        "cloudflare": ["unicode_normalize", "chunked_encoding", "case_alternation"],
-        "aws_waf": ["double_url_encode", "json_content_type", "unicode_normalize"],
-        "modsecurity": ["comment_injection", "null_byte", "case_alternation"],
-        "imperva": ["whitespace_manipulation", "unicode_normalize", "comment_injection"],
-    }
+    # Payload effectiveness priors: tech → payload_type → estimated success rate.
+    # Loaded from data/models/priors_bootstrap.json so it can be retrained.
+    EFFECTIVENESS_MATRIX = _PRIORS["effectiveness_matrix"]
+    WAF_BYPASS_PRIORITY = _PRIORS["waf_bypass_priority"]
 
     @classmethod
     def select_payloads(cls, tech_stack: list[str], waf: str = "",

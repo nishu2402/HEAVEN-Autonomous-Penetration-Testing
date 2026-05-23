@@ -28,7 +28,7 @@
     <img src="https://img.shields.io/badge/Modules-31_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-7B2FBE?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
     <img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-FF073A?style=flat-square" alt="Platform"/>
-    <img src="https://img.shields.io/badge/Vault-AES--256--GCM-00CFFF?style=flat-square&logo=letsencrypt&logoColor=black" alt="Vault"/>
+    <img src="https://img.shields.io/badge/Vault-AES--256--GCM-00CFFF?style=flat-square&logo=vault&logoColor=black" alt="Vault"/>
     <img src="https://img.shields.io/badge/License-MIT-FFF176?style=flat-square&logo=opensourceinitiative&logoColor=black" alt="License"/>
   </p>
 

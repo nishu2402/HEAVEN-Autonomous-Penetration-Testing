@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Engagement, ExploitProof, AI } from "../api";
+import { Engagement, ExploitProof, AI, ExploitDB } from "../api";
 
 const STATUSES = ["open", "verified", "false_positive", "accepted_risk", "fixed"];
 const STATUS_COLORS = {
@@ -109,6 +109,9 @@ export default function FindingDetail() {
 
       {/* Active confirmation — Gap 4 + Gap 6 */}
       <ExploitAndReviewActions id={id} finding={f} onChange={load} />
+
+      {/* Exploit-DB lookup (only when finding has a CVE) */}
+      {f.cve_id && <ExploitDBLookup cve={f.cve_id} />}
 
       {/* Operator workflow */}
       <div className="card">
@@ -310,6 +313,83 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
             </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-component: Exploit-DB lookup widget ──
+
+function ExploitDBLookup({ cve }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  async function lookup() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await ExploitDB.lookup(cve);
+      setData(r);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">Exploit-DB Lookup</div>
+      <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
+        Search Exploit-DB for public PoCs matching <code>{cve}</code>.
+        Tries local <code>searchsploit</code> first, falls back to the CSV mirror.
+      </div>
+      <button className="btn-small" onClick={lookup} disabled={loading}>
+        {loading ? "Searching…" : `Look up ${cve}`}
+      </button>
+
+      {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
+      {data && data.count === 0 && (
+        <div className="dim" style={{ marginTop: 10 }}>
+          No Exploit-DB entries found for {data.cve}.
+        </div>
+      )}
+      {data && data.best && (
+        <div style={{ marginTop: 10 }}>
+          <div>
+            <strong>Best match:</strong>{" "}
+            <a href={data.best.url} target="_blank" rel="noopener noreferrer"
+               style={{ color: "#00D4FF" }}>
+              EDB-{data.best.edb_id}
+            </a>{" "}
+            <span style={{ color: data.best.verified ? "#00FF41" : "#FFB800" }}>
+              {data.best.verified ? "✓ verified" : "unverified"}
+            </span>
+          </div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            {data.best.title}
+          </div>
+          <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+            Platform: {data.best.platform} · Source: {data.best.source}
+          </div>
+        </div>
+      )}
+      {data && data.entries && data.entries.length > 1 && (
+        <details style={{ marginTop: 10 }}>
+          <summary className="dim" style={{ cursor: "pointer" }}>
+            {data.entries.length} total entries
+          </summary>
+          <ul style={{ paddingLeft: 18, lineHeight: 1.6, fontSize: 12 }}>
+            {data.entries.map((e) => (
+              <li key={e.edb_id}>
+                <a href={e.url} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "#00D4FF" }}>EDB-{e.edb_id}</a>{" "}
+                <span className="dim">[{e.platform}]</span> {e.title}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

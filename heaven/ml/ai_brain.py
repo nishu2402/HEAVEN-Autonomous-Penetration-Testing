@@ -471,12 +471,18 @@ class ScanStrategyOptimizer:
         self.total_tries = 0
 
     def select_action(self, epsilon: float = 0.1) -> str:
-        """Select next scan action using epsilon-greedy strategy."""
+        """Select next scan action using epsilon-greedy strategy.
+
+        Reads from the project-wide seedable RNG so scans become
+        deterministic when HEAVEN_SEED is set (heaven scan --seed N).
+        """
+        from heaven.utils.seeding import get_random
+        rng = get_random()
         self.total_tries += 1
 
         # Explore with probability epsilon
-        if random.random() < epsilon:
-            return random.choice(list(self.arms.keys()))
+        if rng.random() < epsilon:
+            return rng.choice(list(self.arms.keys()))
 
         # Exploit: choose action with highest average reward
         best_action = max(

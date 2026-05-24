@@ -201,6 +201,35 @@ def _classify(vuln_type: str) -> Optional[str]:
     return _VULN_TO_OWASP.get(head) or _VULN_TO_OWASP.get(vuln_type.lower())
 
 
+def _target_host(target: str) -> str:
+    """Extract a canonical hostname from a finding's target string.
+
+    Handles three cases:
+      - URLs (`http://host[:port]/path?...`) → host
+      - host:port (`10.0.0.5:22`)            → 10.0.0.5
+      - bare host or IP                      → unchanged
+
+    Note: deliberately does NOT use `.split(":")[0]` naively — that breaks
+    on URLs because the scheme ends with `://`.
+    """
+    from urllib.parse import urlparse
+    if not target:
+        return ""
+    s = target.strip()
+    if "://" in s:
+        try:
+            parsed = urlparse(s)
+            return (parsed.hostname or "").lower()
+        except ValueError:
+            return s.lower()
+    # host:port — strip last colon-delimited token IF it's numeric
+    if ":" in s:
+        head, _, tail = s.rpartition(":")
+        if tail.isdigit():
+            return head.lower()
+    return s.lower()
+
+
 def grade_engagement_rule_based(engagement_store) -> CoverageReport:
     """Build a CoverageReport from an EngagementStore. Always available."""
     name = ""
@@ -229,12 +258,21 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
         for code in OWASP_API_2023
     ]
 
-    # Scope coverage — a target counts as "scanned" if any finding mentions it
+    # Scope coverage — a target counts as "scanned" if any finding's target's
+    # hostname matches the scope entry. The previous version did
+    # `f.target.split(":")[0]`, which catastrophically collapsed every
+    # URL to "http"/"https" because "://" contains a colon. Use urlparse
+    # for URLs and explicit equality (not substring) so "example.com"
+    # doesn't spuriously match a scope of "badexample.com".
     scope_targets = {s.target for s in scope}
-    scanned_targets = {f.target.split("?")[0].split(":")[0] for f in findings if f.target}
+    scanned_hosts: set[str] = set()
+    for f in findings:
+        h = _target_host(f.target or "")
+        if h:
+            scanned_hosts.add(h)
     untested = sorted(
         t for t in scope_targets
-        if not any(t in st for st in scanned_targets)
+        if _target_host(t) not in scanned_hosts and t not in scanned_hosts
     )
 
     # Heuristics for auth / prove / postex from scan config_json

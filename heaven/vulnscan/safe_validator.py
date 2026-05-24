@@ -475,8 +475,11 @@ async def validate_findings(scan_id: str = "", findings: Optional[list[dict[Any,
     
     tasks = []
     # Identify which findings are actually web input vectors (from crawler or advanced_attacks)
+    from heaven.recon.auth_session import aiohttp_session_kwargs
+    _auth_kw = aiohttp_session_kwargs()
     async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=False, limit=50)
+        connector=aiohttp.TCPConnector(ssl=False, limit=50),
+        **_auth_kw,
     ) as session:
         for f in findings:
             vuln_type = f.get("type", f.get("category", "")).lower()

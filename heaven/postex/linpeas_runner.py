@@ -93,9 +93,7 @@ class LinpeasRunner:
             ) as conn:
                 # Load script: from disk if provided, else fetch via curl on target
                 if script_path:
-                    with open(script_path, "rb") as f:
-                        script_bytes = f.read()
-                    # Upload to a temp location on the target
+                    # scp the local script directly; no need to slurp its bytes first
                     await asyncssh.scp(  # type: ignore[attr-defined]
                         (script_path,), (conn, "/tmp/linpeas.sh"),
                     )

@@ -1275,7 +1275,9 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             "findings": kill_chain_findings,
         }
 
-    ai_plan_id = orch.add_task(
+    # ai_plan_id intentionally unbound — no downstream task depends on it,
+    # but the registration is what schedules the AI_PLAN phase.
+    orch.add_task(
         "AI Attack-Chain Planning", _ai_plan,
         phase=ScanPhase.AI_PLAN, depends_on=[ai_triage_id, ai_parse_id],
         timeout=300,

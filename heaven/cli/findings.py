@@ -241,7 +241,7 @@ def report(engagement: Optional[str], output: str, framework: str) -> None:
     _print(f"[green]Report written:[/green] {output} ({len(finding_dicts)} findings)")
     sev: dict[str, int] = {}
     for f in finding_dicts:
-        s = f.get("severity", "info").lower()
+        s = str(f.get("severity") or "info").lower()
         sev[s] = sev.get(s, 0) + 1
     for s, n in sorted(sev.items()):
         _print(f"  {s:10}: {n}")

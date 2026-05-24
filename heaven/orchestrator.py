@@ -32,12 +32,15 @@ class TaskState(str, Enum):
 class ScanPhase(str, Enum):
     INIT = "init"
     RECON = "recon"
+    AI_PARSE = "ai_parse"               # Layer B: LLM digests raw recon → AssetProfile
     AD_RECON = "ad_recon"
     IOT_SCAN = "iot_scan"
     VULN_SCAN = "vuln_scan"
     API_SCAN = "api_scan"
     CONTAINER_SCAN = "container_scan"
     VALIDATION = "validation"
+    AI_TRIAGE = "ai_triage"             # Layer E: LLM borderline FP review
+    AI_PLAN = "ai_plan"                 # Layer D: LLM proposes attack chains from confirmed findings
     ML_SCORING = "ml_scoring"
     MITRE_MAPPING = "mitre_mapping"
     REPORTING = "reporting"
@@ -527,12 +530,15 @@ class ScanOrchestrator:
         phase_order = [
             ScanPhase.INIT,
             ScanPhase.RECON,
+            ScanPhase.AI_PARSE,         # Layer B: LLM digests raw recon → AssetProfile
             ScanPhase.AD_RECON,
             ScanPhase.IOT_SCAN,
             ScanPhase.VULN_SCAN,
             ScanPhase.API_SCAN,
             ScanPhase.CONTAINER_SCAN,
             ScanPhase.VALIDATION,
+            ScanPhase.AI_TRIAGE,        # Layer E: LLM second-opinion on borderline findings
+            ScanPhase.AI_PLAN,          # Layer D: LLM proposes attack chains from confirmed findings
             ScanPhase.ML_SCORING,
             ScanPhase.MITRE_MAPPING,
             ScanPhase.REPORTING,
@@ -746,6 +752,51 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     adapt_id = orch.add_task(
         "Adaptive Target Profiling", _adaptive_profile,
         phase=ScanPhase.RECON, depends_on=[web_id],
+    )
+
+    # ═══ Phase: AI_PARSE (Layer B — agentic recon parser) ═══
+    # Feeds raw recon output through an LLM with tool use to produce
+    # structured AssetProfile records. No-op when LLM gateway is
+    # unavailable — the deterministic adaptive_intel.py stays the
+    # primary path.
+    async def _ai_parse_recon(**kw):
+        try:
+            from heaven.ai.recon_agent import ReconAgent
+        except ImportError:
+            return {"skipped": True, "reason": "heaven.ai not importable"}
+        agent = ReconAgent()
+        if not agent.available:
+            return {"skipped": True, "reason": "LLM gateway unavailable"}
+
+        # Collect raw recon from completed upstream tasks
+        recon_inputs: list[dict] = []
+        for tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for host in data.get("hosts", []):
+                recon_inputs.append(host)
+            for prof in data.get("profiles", []):
+                recon_inputs.append(prof)
+
+        if not recon_inputs:
+            return {"asset_profiles": [], "skipped": True, "reason": "no recon inputs"}
+
+        profiles = []
+        for recon in recon_inputs[:25]:  # cap LLM-call budget per scan
+            try:
+                profile = await agent.parse(recon)
+                profiles.append(profile.model_dump() if hasattr(profile, "model_dump")
+                                else profile.__dict__)
+            except Exception as e:
+                logger.warning(f"recon_agent failed on input: {e}")
+        return {"asset_profiles": profiles, "count": len(profiles)}
+
+    ai_parse_id = orch.add_task(
+        "AI Recon Parsing", _ai_parse_recon,
+        phase=ScanPhase.AI_PARSE,
+        depends_on=[net_id, web_id, adapt_id, hp_id],
+        timeout=300,
     )
 
     # ═══ Phase: VULN_SCAN ═══
@@ -1147,6 +1198,87 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "PoC Validation", _validate_findings,
         phase=ScanPhase.VALIDATION,
         depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, inject_id, dir_fuzz_id, idor_id, dns_id, cve_map_id],
+    )
+
+    # ═══ Phase: AI_TRIAGE (Layer E — LLM borderline FP review) ═══
+    # Reviews findings whose confidence sits in the 0.4-0.7 band.
+    # No-op when LLM gateway is unavailable.
+    async def _ai_triage(**kw):
+        try:
+            from heaven.ai.fp_review import review_borderline_findings
+        except ImportError:
+            return {"skipped": True, "reason": "heaven.ai not importable"}
+        # Collect candidate findings produced upstream
+        candidates: list[dict] = []
+        for tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            candidates.extend(data.get("validated_findings", []))
+            candidates.extend(data.get("findings", []))
+            candidates.extend(data.get("candidates", []))
+        if not candidates:
+            return {"reviewed": 0, "skipped": True, "reason": "no findings"}
+        reviewed = await review_borderline_findings(candidates)
+        kept = sum(1 for f in reviewed if not f.get("suppressed"))
+        return {"reviewed": len(reviewed), "kept": kept,
+                "suppressed": len(reviewed) - kept}
+
+    ai_triage_id = orch.add_task(
+        "AI Triage (borderline FPs)", _ai_triage,
+        phase=ScanPhase.AI_TRIAGE, depends_on=[val_id],
+        timeout=300,
+    )
+
+    # ═══ Phase: AI_PLAN (Layer D — LLM attack-chain planner) ═══
+    # Uses the AssetProfile records from AI_PARSE + confirmed findings
+    # post-triage to propose chains. Wires through plan_to_killchain_findings
+    # so the kill-chain analyzer can score the planner's output.
+    async def _ai_plan(**kw):
+        try:
+            from heaven.ai.attack_chain_planner import (
+                AttackChainPlanner, plan_to_killchain_findings,
+            )
+        except ImportError:
+            return {"skipped": True, "reason": "heaven.ai not importable"}
+        planner = AttackChainPlanner()
+        if not planner.available:
+            return {"skipped": True, "reason": "LLM gateway unavailable"}
+
+        findings: list[dict] = []
+        asset_profiles: list[dict] = []
+        for tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            findings.extend(data.get("validated_findings", []))
+            findings.extend(data.get("findings", []))
+            asset_profiles.extend(data.get("asset_profiles", []))
+
+        # Keep only findings that survived triage
+        findings = [f for f in findings if not f.get("suppressed")]
+        if not findings:
+            return {"skipped": True, "reason": "no findings post-triage"}
+
+        out = await planner.plan(findings=findings, assets=asset_profiles)
+        plans_dump = []
+        kill_chain_findings: list[dict] = []
+        if hasattr(out, "plans"):
+            for p in out.plans:
+                plans_dump.append(p.model_dump() if hasattr(p, "model_dump") else p.__dict__)
+                kill_chain_findings.extend(plan_to_killchain_findings(p))
+        return {
+            "plans": plans_dump,
+            "no_chain_possible": getattr(out, "no_chain_possible", False),
+            "reasoning": getattr(out, "reasoning", ""),
+            # Surfaced as findings so the kill-chain analyzer picks them up
+            "findings": kill_chain_findings,
+        }
+
+    ai_plan_id = orch.add_task(
+        "AI Attack-Chain Planning", _ai_plan,
+        phase=ScanPhase.AI_PLAN, depends_on=[ai_triage_id, ai_parse_id],
+        timeout=300,
     )
 
     # ═══ Phase: SQLMAP (confirmed SQLi targets only) ═══

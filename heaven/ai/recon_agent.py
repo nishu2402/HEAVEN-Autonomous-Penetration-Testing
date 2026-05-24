@@ -33,7 +33,10 @@ try:
 except ImportError:  # pragma: no cover — pydantic is a hard dep, but be safe
     HAS_PYDANTIC = False
     BaseModel = object  # type: ignore[misc,assignment]
-    Field = lambda *a, **kw: None  # type: ignore[misc,assignment]
+
+    def Field(*_a, **_kw):  # type: ignore[no-redef,misc,assignment]
+        """Stub used when pydantic is not installed; returns None."""
+        return None
 
 from heaven.ai.llm_gateway import LLMGateway, LLMRequest, get_gateway
 from heaven.utils.logger import get_logger
@@ -261,7 +264,7 @@ class ReconAgent:
         try:
             from heaven.ml.risk_model import HeavenRiskModel
             model = HeavenRiskModel()
-            score = await asyncio.to_thread(model.predict_cvss, features)
+            score = await asyncio.to_thread(model.predict_cvss_score, features)
             return {"predicted_cvss": float(score)}
         except Exception as e:
             return {"error": str(e), "predicted_cvss": None}

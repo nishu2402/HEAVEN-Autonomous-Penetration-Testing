@@ -138,7 +138,7 @@ def _entry_to_bh_doc(entry: Any, kind: str, domain: str) -> dict[str, Any]:
     member_of = [str(m) for m in (getattr(entry, "memberOf", []) or [])]
     members = [str(m) for m in (getattr(entry, "member", []) or [])]
 
-    base = {
+    base: dict[str, Any] = {
         "Properties": {
             "name": f"{name}@{domain.upper()}",
             "domain": domain.upper(),

@@ -11,7 +11,6 @@ contract — every reporter consumes BenchmarkResult, every adapter
 from __future__ import annotations
 
 import json
-import math
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path

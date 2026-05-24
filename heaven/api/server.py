@@ -1079,29 +1079,29 @@ def create_app() -> FastAPI:
             if module == "linpeas":
                 from heaven.postex import LinpeasRunner
                 runner = LinpeasRunner(authorized=True)
-                r = await runner.run(
+                linpeas_res = await runner.run(
                     host=body["host"], username=body["username"],
                     password=body.get("password"),
                     private_key=body.get("private_key"),
                     port=int(body.get("port", 22)),
                 )
                 return {
-                    "success": r.success, "error": r.error,
-                    "privesc_vectors": r.privesc_vectors,
-                    "suid_binaries": r.suid_binaries,
-                    "kernel_version": r.kernel_version,
+                    "success": linpeas_res.success, "error": linpeas_res.error,
+                    "privesc_vectors": linpeas_res.privesc_vectors,
+                    "suid_binaries": linpeas_res.suid_binaries,
+                    "kernel_version": linpeas_res.kernel_version,
                 }
             if module == "bloodhound":
                 from heaven.postex import BloodHoundCollector
                 col = BloodHoundCollector(authorized=True)
-                r = col.collect(
+                bh_res = col.collect(
                     domain=body["domain"], dc_host=body["dc_host"],
                     username=body["username"], password=body["password"],
                     use_ssl=bool(body.get("use_ssl", False)),
                 )
                 return {
-                    "success": r.success, "error": r.error,
-                    "counts": r.counts, "files": r.files,
+                    "success": bh_res.success, "error": bh_res.error,
+                    "counts": bh_res.counts, "files": bh_res.files,
                 }
             if module == "cred-reuse":
                 from heaven.postex import CredentialValidator

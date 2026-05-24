@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20163%20Tests%20Passing&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20220%20Tests%20Passing&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;31+Live+Modules+%C2%B7+163+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;40%2B+Live+Modules+%C2%B7+220+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
 </p>
 
 <p align="center">
@@ -19,13 +19,13 @@
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-A8FF3E?style=for-the-badge&logo=python&logoColor=black" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI-7B2FBE?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/badge/Tests-163_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
+    <img src="https://img.shields.io/badge/Tests-220_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
     <img src="https://img.shields.io/badge/MITRE-ATT%26CK_Mapped-FF073A?style=for-the-badge&logo=cncf&logoColor=white" alt="MITRE"/>
     <img src="https://img.shields.io/badge/OWASP-Top_10_%2B_API_Top_10-00CFFF?style=for-the-badge&logo=owasp&logoColor=black" alt="OWASP"/>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-31_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-40%2B_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-7B2FBE?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
     <img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-FF073A?style=flat-square" alt="Platform"/>
     <img src="https://img.shields.io/badge/Vault-AES--256--GCM-00CFFF?style=flat-square&logo=vault&logoColor=black" alt="Vault"/>
@@ -77,6 +77,8 @@
 - [🔒 Security Controls](#security)
 - [🔧 Troubleshooting](#troubleshooting)
 - [🛠️ Development](#development)
+- [🧪 Benchmarks](#benchmarks)
+- [📐 Methodology Mapping](#methodology)
 - [📁 Project Structure](#project-structure)
 - [⚠️ Legal & Disclaimer](#legal)
 
@@ -107,7 +109,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | 📊 **Risk Scoring** | CVSS v3 ML predictor (R²=0.9925) · EPSS exploit-probability · CISA KEV membership |
 | 🗺️ **MITRE ATT&CK** | Every finding mapped to ATT&CK techniques + Lockheed Cyber Kill Chain phases |
 | 📄 **Report Generation** | Professional PDF/HTML pentest report (cover page · CVSS v3.1 vectors · MITRE ATT&CK mapping · remediation roadmap · SLA) · Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
-| 🔢 **Tests** | **163 pytest tests passing** |
+| 🔢 **Tests** | **220 pytest tests passing** |
 | 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · PostgreSQL (23-table schema, partitioned audit log, 9 analytical views) · SQLite offline fallback (zero-config, same interface) |
 
 </div>
@@ -201,17 +203,29 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | `vulnscan/safe_validator.py` | ✅ Live | SQLi / XSS / SSRF / XXE / CORS / CRLF / open redirect |
 | `vulnscan/advanced_attacks.py` | ✅ Live | JWT forging, race conditions, request smuggling, GraphQL, SSH credential spray |
 | `vulnscan/fp_suppress.py` | ✅ Live | Two-stage FP suppression with baseline noise measurement |
-| `vulnscan/zeroday_engine.py` | ✅ Live | Behavioural fuzzing: buffer overflow, format string, auth bypass |
+| `vulnscan/anomaly_probe.py` | ✅ Live | Behavioural fuzzing: buffer overflow, format string, NOP-sled (renamed from zeroday_engine — no longer overclaims) |
+| `vulnscan/exploit_proof.py` | ✅ Live | Active confirmation: sqlmap dump · RCE canary file · SSRF callback verifier |
 | `vulnscan/api_scanner.py` | ✅ Live | BOLA/IDOR, GraphQL, REST parameter fuzzing |
 | `vulnscan/sqlmap_runner.py` | ✅ Live | Auto-runs sqlmap on confirmed SQLi candidates |
 | `vulnscan/msf_client.py` | ✅ Live | Metasploit RPC (requires `--enable-exploitation` + msfrpcd) |
+| `postex/linpeas_runner.py` | ✅ Live | SSH out → linpeas → parsed privesc vectors (admin-gated) |
+| `postex/bloodhound_collector.py` | ✅ Live | AD enumeration → BloodHound-compatible JSON |
+| `postex/cred_validator.py` | ✅ Live | Credential reuse detection across services |
+| `ai/llm_gateway.py` | ✅ Live | **Layer A** — provider-agnostic LLM (Anthropic / OpenAI / Gemini), secret redaction, prompt caching |
+| `ai/recon_agent.py` | ✅ Live | **Layer B** — agentic LLM with tool use, parses raw recon output |
+| `ai/attack_chain_planner.py` | ✅ Live | **Layer D** — multi-step attack-chain reasoner, MITRE-mapped |
+| `ai/fp_review.py` | ✅ Live | **Layer E** — LLM second-opinion for borderline findings |
 | `ml/risk_model.py` | ✅ Live | CVSS prediction, NVD/EPSS enrichment, KEV flag |
-| `ml/ai_brain.py` | ✅ Live | Bayesian host prioritisation with cross-scan memory |
+| `ml/ai_brain.py` | ✅ Live | Bayesian host prioritisation; priors loaded from disk (`priors_bootstrap.json` → `priors_learned.json`) |
+| `ml/train_priors.py` | ✅ Live | **Layer C** — aggregates engagement DBs into empirical Bayesian priors |
 | `mitre/attack_mapper.py` | ✅ Live | ATT&CK technique mapping per finding |
 | `mitre/kill_chain.py` | ✅ Live | Cyber Kill Chain coverage + attack path summary |
 | `devsecops/pdf_report.py` | ✅ Live | Professional HTML/PDF report — cover page, executive summary, CVSS v3.1 vectors, MITRE ATT&CK mapping, remediation roadmap, SLA per finding |
 | `devsecops/compliance_report.py` | ✅ Live | OWASP Top 10 / NIST CSF compliance mapping |
-| `devsecops/alerting.py` | ✅ Live | Webhook alerting (Slack, Teams, custom) via aiohttp |
+| `devsecops/alerting.py` | ✅ Live | Webhook alerting (Slack, Teams) + SIEM forwarders (Splunk HEC, Elastic) |
+| `utils/seeding.py` | ✅ Live | `--seed` reproducibility for the multi-armed bandit + timing scanners |
+| `tests/benchmarks/` | ✅ Live | DVWA ground truth · precision/recall/F1 · Burp/ZAP/sqlmap comparison adapters |
+| `docs/methodology/` | ✅ Live | OWASP Testing Guide v4 · NIST SP 800-115 · PTES mappings |
 | `security/vault.py` | ✅ Live | AES-256-GCM credential vault |
 | `security/audit.py` | ✅ Live | HMAC-signed append-only audit log |
 | `api/server.py` | ✅ Live | FastAPI + JWT RBAC + WebSocket + rate limiting |
@@ -400,9 +414,11 @@ heaven scan \
     --stealth <1-5>        \   # 1=ghost … 5=loud
     --engagement <name>    \   # engagement context
     --ports <spec>         \   # port range e.g. "1-1024" or "22,80,443"
+    --seed <int>           \   # optional — deterministic mode for reproducibility
     --i-have-authorization     # required — confirms written permission
 
 heaven resume --engagement <name> --i-have-authorization   # resume interrupted scan
+heaven replay <scan-id>   --i-have-authorization           # reproduce a past scan (uses stored seed)
 ```
 
 **Scan modes:**
@@ -464,10 +480,12 @@ heaven serve --host 0.0.0.0 --port 8443    # bind to all interfaces
 heaven self-audit                           # security baseline check
 ```
 
-### Model
+### Model & Priors
 
 ```bash
-heaven train-model    # retrain CVSS predictor on NVD data
+heaven train-model      # retrain CVSS predictor on NVD data
+heaven train-priors     # aggregate engagement DBs into empirical Bayesian priors
+                        # (replaces the hand-curated bootstrap once you have history)
 ```
 
 ---
@@ -497,6 +515,9 @@ Start with `heaven serve`, then open `http://localhost:8443`.
 | **Finding Detail** | Evidence package, request/response, curl repro, triage controls, operator notes |
 | **Kill Chain** | Cyber Kill Chain phase coverage, chained attack path summary |
 | **Engagement** | Scope management, target list, configuration |
+| **AI Plans** | LLM-driven attack-chain reasoner — paste findings, get a ranked multi-step plan with MITRE technique IDs |
+| **Benchmark** | Latest aggregated DVWA benchmark report — precision / recall / F1 (Gap 1) |
+| **Methodology** | OWASP / NIST / PTES mapping viewer for procurement & paper reviewers |
 | **API Docs** | OpenAPI / Swagger interactive docs at `/docs` |
 
 </div>
@@ -551,6 +572,19 @@ curl -X POST http://localhost:8443/api/engagement/findings \
 Full interactive docs: `http://localhost:8443/docs`
 
 WebSocket live feed: `ws://localhost:8443/ws/scans/<scan_id>`
+
+**Publication-gap endpoints** (added with Layers A–E + Gaps 1–11):
+
+| Endpoint | Permission | What it does |
+|---|---|---|
+| `POST /api/scans/{id}/replay` | `scan.create` | Re-execute a stored scan with its original seed (Gap 8) |
+| `POST /api/findings/{id}/prove` | `vuln.validate` | Active exploit proof via sqlmap / RCE canary / SSRF callback (Gap 4) |
+| `POST /api/ai/{kind}/run` | `vuln.validate` | Trigger AI layer: `recon-parse` · `plan` · `fp-review` (Layer B / D / E) |
+| `POST /api/postex/{module}/run` | `config.modify` (admin) | linpeas · bloodhound · cred-reuse (Gap 5) |
+| `POST /api/priors/train` | `config.modify` (admin) | Aggregate engagement DBs → learned priors (Gap 7) |
+| `GET /api/siem/status` | `scan.view` | Which SIEM forwarders are active (Gap 11) |
+| `GET /api/methodology` | `scan.view` | Serve the OWASP / NIST / PTES mapping docs (Gap 9) |
+| `GET /api/benchmark/results` | `scan.view` | Latest aggregated DVWA benchmark report (Gap 1) |
 
 ---
 
@@ -805,6 +839,48 @@ ruff check heaven/
 
 ---
 
+<a id="benchmarks"></a>
+## 🧪 Benchmarks
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7B2FBE,50:A8FF3E,100:00CFFF"/>
+</p>
+
+Reproducible numbers for publication. `tests/benchmarks/` spins up vulnerable-by-design Docker targets (DVWA today; Juice Shop / WebGoat planned), runs HEAVEN, and computes precision / recall / F1 against a labeled ground-truth file. Adapters in `tests/benchmarks/adapters/{burp,zap,sqlmap}.py` parse other scanners' native output into the same shape so head-to-head comparison is one diff.
+
+```bash
+# Unit-test the metrics math (fast, no Docker — runs in normal CI):
+pytest tests/benchmarks/test_metrics.py -v
+
+# Full DVWA benchmark with mean ± stddev over N runs:
+HEAVEN_RUN_BENCHMARKS=1 HEAVEN_BENCH_RUNS=5 \
+  pytest tests/benchmarks/test_dvwa_baseline.py -v -s
+```
+
+Per-run reports land in `tests/benchmarks/reports/` (markdown for the paper, CSV for head-to-head with Burp / ZAP / sqlmap). See `tests/benchmarks/README.md` for the full schema and what the numbers mean.
+
+---
+
+<a id="methodology"></a>
+## 📐 Methodology Mapping
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:00CFFF,50:7B2FBE,100:A8FF3E"/>
+</p>
+
+Every HEAVEN scanner is mapped to the standard test IDs reviewers and procurement teams ask for:
+
+| Standard | Mapping file |
+|---|---|
+| OWASP Testing Guide v4 | [`docs/methodology/owasp_testing_guide.md`](docs/methodology/owasp_testing_guide.md) |
+| NIST SP 800-115 | [`docs/methodology/nist_800_115.md`](docs/methodology/nist_800_115.md) |
+| PTES (Penetration Testing Execution Standard) | [`docs/methodology/ptes.md`](docs/methodology/ptes.md) |
+| MITRE ATT&CK | runtime, via `heaven kill-chain` and `heaven mitre-report` |
+
+The Web UI surfaces these as a tabbed viewer at `/methodology`, served from `GET /api/methodology`.
+
+---
+
 <a id="project-structure"></a>
 ## 📁 Project Structure
 
@@ -816,32 +892,65 @@ ruff check heaven/
 HEAVEN-Autonomous-Penetration-Testing/
 │
 ├── 🐍 heaven/                      ← Python package
-│   ├── api/                        ← FastAPI server + WebSocket
-│   ├── recon/                      ← Reconnaissance modules (7 modules)
-│   ├── vulnscan/                   ← Vulnerability detection + FP suppression (10 modules)
-│   ├── ml/                         ← Risk scoring + ML pipeline
-│   ├── mitre/                      ← ATT&CK mapping + kill chain
-│   ├── devsecops/                  ← Reporting + alerting + compliance
-│   ├── security/                   ← Auth · vault · audit log
-│   ├── db/                         ← Database layer (Ultra Edition)
-│   │   ├── schema.sql              ← PostgreSQL schema (23 tables, 9 views, 4 functions, partitioned audit log)
-│   │   ├── models.py               ← SQLAlchemy 2.0 async ORM models
-│   │   ├── connection.py           ← asyncpg pool + ORM engine + SQLite fallback + health check
-│   │   └── repository.py           ← Typed async DAL — 8 repository classes
-│   ├── main.py                     ← CLI entry point (Click)
-│   ├── orchestrator.py             ← Async DAG scan engine
+│   ├── api/                        ← FastAPI server + WebSocket (28 endpoints)
+│   ├── cli/                        ← Click CLI — one module per command group
+│   │   ├── scan.py · replay.py · train.py · findings.py · engage.py · …
+│   │   └── _helpers.py             ← Authorization gate · target validators · _print
+│   ├── ai/                         ← Agentic AI namespace (Layers A-E)
+│   │   ├── llm_gateway.py          ← Anthropic / OpenAI / Gemini · prompt caching · redaction
+│   │   ├── recon_agent.py          ← LLM with tool use — parses raw nmap/banner output
+│   │   ├── attack_chain_planner.py ← Multi-step attack-chain reasoner (MITRE-mapped)
+│   │   └── fp_review.py            ← LLM second-opinion for borderline findings
+│   ├── recon/                      ← Reconnaissance modules
+│   ├── vulnscan/                   ← Detection + FP suppression
+│   │   ├── anomaly_probe.py        ← Behavioural fuzz heuristics (renamed from zeroday_engine)
+│   │   ├── exploit_proof.py        ← sqlmap / RCE canary / SSRF callback verifier
+│   │   └── …
+│   ├── postex/                     ← Post-exploitation (admin-gated)
+│   │   ├── linpeas_runner.py       ← SSH out → linpeas → parsed privesc vectors
+│   │   ├── bloodhound_collector.py ← AD enumeration → BloodHound-compatible JSON
+│   │   └── cred_validator.py       ← Credential reuse across services
+│   ├── ml/                         ← Supervised ML (NVD CVSS model + train_priors)
+│   ├── mitre/                      ← ATT&CK mapping + Cyber Kill Chain
+│   ├── devsecops/                  ← Reporting + alerting + SIEM (Splunk HEC + Elastic)
+│   ├── security/                   ← Auth · vault · audit log · RBAC
+│   ├── db/                         ← SQLAlchemy 2.0 async ORM (23-table schema)
+│   │   ├── schema.sql              ← PostgreSQL DDL (23 tables, 9 views, partitioned audit log)
+│   │   ├── models.py · connection.py · repository.py
+│   ├── utils/                      ← Logger · seeding (--seed reproducibility)
+│   ├── main.py                     ← Thin shim → heaven.cli:cli
+│   ├── orchestrator.py             ← Async DAG engine (AI_PARSE + AI_PLAN phases)
 │   ├── engagement.py               ← Finding + engagement storage (SQLite)
 │   └── config.py                   ← Configuration + env vars
 │
 ├── ⚛️  heaven-ui/                   ← React frontend (Vite)
-│   └── dist/                       ← Pre-built, served by FastAPI
+│   ├── src/pages/                  ← Dashboard · Findings · Scans · KillChain · Engagement
+│   │                                 AIPlans · Benchmark · Methodology
+│   └── dist/                       ← Pre-built bundle, served by FastAPI
 │
-├── 🧪 tests/                       ← 163 pytest tests
+├── 🧪 tests/                       ← 220 pytest tests
+│   └── benchmarks/                 ← Reproducible benchmark suite vs. DVWA + adapters
+│       ├── ground_truth/dvwa.yaml  ← Labeled vulns with OWASP / CWE mappings
+│       ├── adapters/{burp,zap,sqlmap}.py ← Head-to-head comparison adapters
+│       ├── metrics.py              ← Precision · recall · F1 · per-category
+│       └── reporters/              ← Markdown + CSV publication outputs
+│
+├── 📚 docs/                        ← Documentation
+│   ├── methodology/                ← OWASP Testing Guide v4 · NIST 800-115 · PTES mappings
+│   ├── runbooks/                   ← Operational runbooks
+│   └── screenshots/                ← UI captures
+│
+├── 📊 data/                        ← Runtime data
+│   └── models/
+│       ├── priors_bootstrap.json   ← Hand-curated priors (fallback)
+│       ├── priors_learned.json     ← Output of `heaven train-priors` (preferred)
+│       └── NVD_model.MODEL_CARD.md ← Model card (Google "Model Cards" format)
+│
 ├── 🤖 NVD_model.pkl                ← Trained CVSS predictor (13-feature ExtraTrees, R²=0.9925)
 ├── 📊 nvd_data/                    ← NVD feature names + dataset
-├── 🔧 install.sh                   ← One-command installer
+├── 🔧 install.sh                   ← One-command installer (venv + npm + UI build)
 ├── 🗑️  uninstall.sh                ← Clean uninstaller
-├── 🐳 Dockerfile                   ← Container support
+├── 🐳 Dockerfile                   ← Multi-stage container build
 └── 🐳 docker-compose.yml           ← Optional PostgreSQL stack
 ```
 
@@ -867,7 +976,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 </p>
 
 <p align="center">
-<strong>163 tests · 31 live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
+<strong>220 tests · 40+ live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
 </p>
 
 <p align="center">

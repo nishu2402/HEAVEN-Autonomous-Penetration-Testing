@@ -30,7 +30,10 @@ try:
 except ImportError:  # pragma: no cover
     HAS_PYDANTIC = False
     BaseModel = object  # type: ignore[misc,assignment]
-    Field = lambda *a, **kw: None  # type: ignore[misc,assignment]
+
+    def Field(*_a, **_kw):  # type: ignore[no-redef,misc,assignment]
+        """Stub used when pydantic is not installed; returns None."""
+        return None
 
 from heaven.ai.llm_gateway import LLMGateway, LLMRequest, get_gateway
 from heaven.utils.logger import get_logger

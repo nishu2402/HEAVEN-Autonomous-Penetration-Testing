@@ -12,7 +12,6 @@ The relevant XPath is /issues/issue with fields:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from tests.benchmarks.metrics import Finding
 

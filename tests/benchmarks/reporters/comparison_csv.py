@@ -60,12 +60,9 @@ def render_findings_csv(
         "scanner", "url", "vuln_type", "category", "parameter",
         "confidence", "severity", "matched_gt",
     ])
-    # We don't have a per-finding match flag stored directly; recompute by
-    # comparing matched_finding_count vs unmatched_findings.
-    unmatched_set = {(f.url, f.vuln_type, f.parameter) for f in result.unmatched_findings}
-    # Caller is expected to pass the full finding list separately if they want
-    # every finding in the CSV — we only have access to unmatched here.
-    # Emit just the unmatched (potential FP) findings.
+    # We only have access to the unmatched-findings list on BenchmarkResult,
+    # so this CSV is the FP candidate list. Callers wanting every finding
+    # should retain the original list[Finding] before calling evaluate().
     for f in result.unmatched_findings:
         w.writerow([
             scanner_name, f.url, f.vuln_type, f.category, f.parameter,

@@ -586,7 +586,11 @@ class InjectionScanner:
         logger.info(f"InjectionScanner: testing {len(unique_targets)} URLs")
 
         connector = aiohttp.TCPConnector(ssl=False, limit=50)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        # Pick up the active auth session (cookie jar + headers) if `heaven scan
+        # --cookie-file` or `--auth` was used. Otherwise this is a no-op.
+        from heaven.recon.auth_session import aiohttp_session_kwargs
+        _auth_kw = aiohttp_session_kwargs()
+        async with aiohttp.ClientSession(connector=connector, **_auth_kw) as session:
             tasks = [
                 self._scan_url(session, url, forms=merged_forms.get(url))
                 for url in unique_targets

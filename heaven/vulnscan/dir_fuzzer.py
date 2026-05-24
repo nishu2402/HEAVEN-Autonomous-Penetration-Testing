@@ -500,7 +500,9 @@ class DirectoryFuzzer:
             return {"findings": [], "urls_tested": 0, "error": "aiohttp not installed"}
 
         connector = aiohttp.TCPConnector(ssl=False, limit=80)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        from heaven.recon.auth_session import aiohttp_session_kwargs
+        _auth_kw = aiohttp_session_kwargs()
+        async with aiohttp.ClientSession(connector=connector, **_auth_kw) as session:
             tasks = [self._scan_target(session, url) for url in targets]
             raw: list[Any] = list(await asyncio.gather(*tasks, return_exceptions=True))
 

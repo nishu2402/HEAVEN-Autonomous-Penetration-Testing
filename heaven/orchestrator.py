@@ -41,6 +41,8 @@ class ScanPhase(str, Enum):
     VALIDATION = "validation"
     AI_TRIAGE = "ai_triage"             # Layer E: LLM borderline FP review
     AI_PLAN = "ai_plan"                 # Layer D: LLM proposes attack chains from confirmed findings
+    EXPLOIT_PROOF = "exploit_proof"     # Auto-confirm high-confidence findings via sqlmap / RCE canary / SSRF callback
+    POST_EX = "post_ex"                 # Auto-chain linpeas / cred-reuse from initial-access findings
     ML_SCORING = "ml_scoring"
     MITRE_MAPPING = "mitre_mapping"
     REPORTING = "reporting"
@@ -539,6 +541,8 @@ class ScanOrchestrator:
             ScanPhase.VALIDATION,
             ScanPhase.AI_TRIAGE,        # Layer E: LLM second-opinion on borderline findings
             ScanPhase.AI_PLAN,          # Layer D: LLM proposes attack chains from confirmed findings
+            ScanPhase.EXPLOIT_PROOF,    # Auto-confirm high-confidence findings (gated by --auto-prove)
+            ScanPhase.POST_EX,          # Auto-chain post-ex (gated by --autonomous)
             ScanPhase.ML_SCORING,
             ScanPhase.MITRE_MAPPING,
             ScanPhase.REPORTING,
@@ -1308,6 +1312,153 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "SQLMap Exploitation", _sqlmap_scan,
         phase=ScanPhase.VALIDATION, depends_on=[val_id],
         timeout=600,
+    )
+
+    # ═══ Phase: EXPLOIT PROOF (Gap 4 — auto-confirm high-confidence findings) ═══
+    # Gated by targets["auto_prove"] flag (set by `heaven scan --auto-prove` or
+    # implied by `--autonomous`). For each finding with confidence >= 0.8 and a
+    # provable category (sqli / cmdi / ssrf), automatically run the matching
+    # prover to capture proof artifacts in evidence.exploit_proof[].
+    async def _auto_exploit_proof(**kw):
+        if not targets.get("auto_prove"):
+            return {"skipped": True, "reason": "--auto-prove flag not set"}
+        try:
+            from heaven.vulnscan.exploit_proof import prove_finding
+        except Exception as e:
+            return {"skipped": True, "reason": f"exploit_proof unimportable: {e}"}
+
+        provable_categories = ("sqli", "cmdi", "rce", "ssrf")
+        candidates = []
+        for tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for f in (data.get("findings", [])
+                      + data.get("vulnerabilities", [])
+                      + data.get("validated_findings", [])):
+                vt = (f.get("vuln_type") or f.get("type") or "").lower()
+                conf = float(f.get("confidence") or 0)
+                if conf >= 0.8 and any(cat in vt for cat in provable_categories):
+                    candidates.append(f)
+        if not candidates:
+            return {"skipped": True, "reason": "no high-confidence findings to prove"}
+
+        proved: list[dict] = []
+        for f in candidates[:20]:  # cap to keep scan-time bounded
+            try:
+                out = await prove_finding(f, authorized=True)
+                if (out.get("evidence") or {}).get("exploit_proof"):
+                    proved.append(out)
+            except Exception as e:
+                logger.warning(f"auto-prove failed on {f.get('id', '?')}: {e}")
+        return {"attempted": len(candidates), "proved_count": len(proved),
+                "findings": proved}
+
+    auto_prove_id = orch.add_task(
+        "Exploit Proof", _auto_exploit_proof,
+        phase=ScanPhase.EXPLOIT_PROOF, depends_on=[val_id],
+        timeout=900,
+    )
+
+    # ═══ Phase: POST-EXPLOITATION CHAIN (Gap 5 — auto-chain after initial access) ═══
+    # Gated by targets["autonomous"]. Walks completed findings looking for:
+    #   - Discovered credentials → fan out cred_validator across known hosts
+    #   - SSH access (proved) → run linpeas to enumerate privesc vectors
+    # All postex modules already require authorized=True; this orchestrator
+    # task is the operator's authorization to chain them autonomously.
+    async def _auto_postex(**kw):
+        if not targets.get("autonomous"):
+            return {"skipped": True, "reason": "--autonomous flag not set"}
+
+        discovered_hosts: set[str] = set()
+        discovered_creds: list[tuple[str, str]] = []
+        ssh_targets: list[dict] = []
+
+        for tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+
+            # Collect host inventory from recon
+            for host_data in data.get("hosts", []):
+                h = host_data.get("host")
+                if h:
+                    discovered_hosts.add(h)
+                for port in host_data.get("open_ports", []):
+                    if int(port.get("port") or 0) == 22:
+                        ssh_targets.append({"host": h, "port": 22})
+
+            # Collect credentials from credential-discovery scanners
+            for cred in data.get("credentials", []):
+                u, p = cred.get("username"), cred.get("password")
+                if u and p:
+                    discovered_creds.append((u, p))
+            for s in data.get("secrets_list", []):
+                if isinstance(s, dict) and s.get("username") and s.get("password"):
+                    discovered_creds.append((s["username"], s["password"]))
+
+        summary: dict[str, Any] = {
+            "skipped": False,
+            "hosts_in_scope": len(discovered_hosts),
+            "creds_discovered": len(discovered_creds),
+            "ssh_targets": len(ssh_targets),
+            "cred_reuse": None, "linpeas": [],
+        }
+
+        # 1. Credential reuse across discovered hosts (only if we have creds)
+        if discovered_creds and discovered_hosts:
+            try:
+                from heaven.postex import CredentialValidator
+                v = CredentialValidator(authorized=True)
+                tgt_tuples = [(h, 22, "ssh") for h in discovered_hosts]
+                reuse = await v.validate(discovered_creds, tgt_tuples)
+                summary["cred_reuse"] = {
+                    "attempted": reuse.attempted,
+                    "hit_count": len(reuse.hits),
+                    "hits": [
+                        {"host": h.host, "port": h.port, "service": h.service,
+                         "username": h.username} for h in reuse.hits[:10]
+                    ],
+                }
+            except Exception as e:
+                summary["cred_reuse"] = {"error": str(e)}
+
+        # 2. Linpeas on every host where we now have valid SSH creds
+        if summary.get("cred_reuse") and summary["cred_reuse"].get("hits"):
+            try:
+                from heaven.postex import LinpeasRunner
+                runner = LinpeasRunner(authorized=True)
+                for hit in summary["cred_reuse"]["hits"][:5]:  # cap fan-out
+                    # cred_validator stores (user, pass) — we need to find which
+                    creds_for_hit = next(
+                        ((u, p) for (u, p) in discovered_creds if u == hit["username"]),
+                        None,
+                    )
+                    if not creds_for_hit:
+                        continue
+                    try:
+                        r = await runner.run(
+                            host=hit["host"], username=creds_for_hit[0],
+                            password=creds_for_hit[1], port=hit["port"],
+                        )
+                        summary["linpeas"].append({
+                            "host": hit["host"], "success": r.success,
+                            "privesc_vectors": r.privesc_vectors[:5],
+                            "kernel_version": r.kernel_version,
+                        })
+                    except Exception as e:
+                        summary["linpeas"].append({
+                            "host": hit["host"], "success": False, "error": str(e),
+                        })
+            except Exception as e:
+                summary["linpeas_error"] = str(e)
+
+        return summary
+
+    orch.add_task(
+        "Post-Exploitation Chain", _auto_postex,
+        phase=ScanPhase.POST_EX, depends_on=[auto_prove_id],
+        timeout=1800,  # 30 min cap for the whole chain
     )
 
     # ═══ Phase: ATTACK CHAIN ANALYSIS ═══

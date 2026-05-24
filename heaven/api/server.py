@@ -877,6 +877,330 @@ def create_app() -> FastAPI:
         ]
         return {"scores": scores}
 
+    # ══════════════════════════════════════════════════════════════════
+    # New API surface — exposes the publication-gap features to the UI
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── Gap 8: Reproducibility — replay a completed scan ──
+
+    @app.post("/api/scans/{scan_id}/replay")
+    async def replay_scan(
+        scan_id: str, request: Request,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Re-execute a stored scan deterministically (uses stored --seed if set).
+
+        Body (optional JSON): {"engagement": "name", "new_engagement": "name"}
+        Returns: {"new_scan_id": "..."}
+        """
+        try:
+            from heaven.engagement import EngagementStore
+            from heaven.orchestrator import build_full_scan
+            from heaven.utils.seeding import set_seed
+            from heaven.config import get_config
+            from heaven.cli._helpers import _engagement_db_path
+        except Exception as e:
+            raise HTTPException(500, f"replay subsystem unavailable: {e}")
+
+        body: dict = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        engagement = body.get("engagement")
+        new_engagement = body.get("new_engagement", "")
+
+        store = _engagement_store_factory(engagement)
+        all_scans = store.list_all_scans()
+        target_scan = next((s for s in all_scans if s["id"].startswith(scan_id)), None)
+        if not target_scan:
+            raise HTTPException(404, f"Scan {scan_id} not found")
+
+        cfg_json = target_scan.get("config_json") or "{}"
+        original_config = json.loads(cfg_json)
+        targets = original_config.get("targets") or {}
+        seed = original_config.get("seed")
+        if seed is not None:
+            set_seed(int(seed))
+        if not (targets.get("ips") or targets.get("urls")):
+            raise HTTPException(422, "Original scan has no replayable targets")
+
+        # Optional: persist into a fresh engagement so the original is preserved
+        if new_engagement:
+            store = EngagementStore(_engagement_db_path(new_engagement))
+            try:
+                store.create_engagement(name=new_engagement,
+                                        client=f"replay of {scan_id[:8]}")
+            except Exception:
+                pass
+
+        cfg = get_config()
+        orch = build_full_scan(targets, cfg, checkpoint_store=store)
+        store.record_scan_start(
+            orch.scan_id, name=f"replay of {target_scan['id'][:8]}",
+            mode=target_scan.get("mode", ""),
+            config={"targets": targets, "seed": seed,
+                    "replayed_from": target_scan["id"]},
+        )
+
+        async def _run():
+            try:
+                summary = await orch.run()
+                for f in summary.get("vulnerabilities", []) + summary.get("findings", []):
+                    try:
+                        store.upsert_finding(orch.scan_id, f)
+                    except Exception:
+                        pass
+                store.record_scan_complete(orch.scan_id, summary)
+            except Exception as e:
+                logger.error(f"replay scan {orch.scan_id} failed: {e}")
+
+        asyncio.create_task(_run())
+        return {"new_scan_id": orch.scan_id, "replayed_from": target_scan["id"], "seed": seed}
+
+    # ── Gap 4: Exploitation proof — actively confirm a finding ──
+
+    @app.post("/api/findings/{finding_id}/prove")
+    async def prove_finding_endpoint(
+        finding_id: str,
+        engagement: Optional[str] = Query(None),
+        external_callback_url: Optional[str] = Query(None),
+        user: User = Depends(require_permission("vuln.validate")),
+    ):
+        """Run the exploit-proof dispatcher on one finding.
+
+        Adds proof artifacts to finding.evidence.exploit_proof[].
+        Refuses to run without vuln.validate permission AND an authorized=True flag
+        (auth gating is built into the prover, the permission check is the second).
+        """
+        try:
+            from heaven.vulnscan.exploit_proof import prove_finding
+        except Exception as e:
+            raise HTTPException(500, f"exploit_proof not importable: {e}")
+
+        store = _engagement_store_factory(engagement)
+        f = store.get_finding(finding_id)
+        if not f:
+            raise HTTPException(404, f"Finding {finding_id} not found")
+        finding_dict = {
+            "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
+            "title": f.title, "severity": f.severity, "confidence": f.confidence,
+            "evidence": f.evidence or {},
+        }
+        # The permission gate above is the operator's authorization — pass through
+        out = await prove_finding(
+            finding_dict, authorized=True,
+            external_callback_url=external_callback_url or "",
+        )
+        store.upsert_finding(scan_id=f.scan_id, finding=out)
+        return {
+            "finding_id": finding_id,
+            "proved": bool(out.get("proved", False)),
+            "exploit_proof": out.get("evidence", {}).get("exploit_proof", []),
+        }
+
+    # ── Gap 6: Agentic AI — manual triggers ──
+
+    @app.post("/api/ai/{kind}/run")
+    async def run_ai_layer(
+        kind: str, request: Request,
+        user: User = Depends(require_permission("vuln.validate")),
+    ):
+        """Trigger an AI layer manually. kind ∈ {recon-parse, plan, fp-review}.
+
+        Body JSON varies by kind:
+          recon-parse: {"recon": {host data}}
+          plan:        {"findings": [...], "assets": [...], "objective_hint": ""}
+          fp-review:   {"finding": {...}}
+
+        Returns the structured AI output (or {"skipped": "..."} when LLM unavailable).
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        try:
+            if kind == "recon-parse":
+                from heaven.ai import ReconAgent
+                agent = ReconAgent()
+                if not agent.available:
+                    return {"skipped": "LLM gateway unavailable"}
+                profile = await agent.parse(body.get("recon", {}))
+                return profile.model_dump() if hasattr(profile, "model_dump") else profile.__dict__
+            if kind == "plan":
+                from heaven.ai import AttackChainPlanner
+                planner = AttackChainPlanner()
+                if not planner.available:
+                    return {"skipped": "LLM gateway unavailable"}
+                out = await planner.plan(
+                    findings=body.get("findings", []),
+                    assets=body.get("assets", []),
+                    objective_hint=body.get("objective_hint", ""),
+                )
+                return out.model_dump() if hasattr(out, "model_dump") else out.__dict__
+            if kind == "fp-review":
+                from heaven.ai import FPReviewer
+                reviewer = FPReviewer()
+                if not reviewer.available:
+                    return {"skipped": "LLM gateway unavailable"}
+                verdict = await reviewer.review(body.get("finding", {}))
+                if verdict is None:
+                    return {"skipped": "finding outside review band"}
+                return verdict.model_dump() if hasattr(verdict, "model_dump") else verdict.__dict__
+        except Exception as e:
+            raise HTTPException(500, f"AI {kind} failed: {e}")
+
+        raise HTTPException(400, f"unknown AI layer kind: {kind!r}")
+
+    # ── Gap 5: Post-exploitation triggers (admin only — destructive) ──
+
+    @app.post("/api/postex/{module}/run")
+    async def run_postex(
+        module: str, request: Request,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """Run a post-exploitation module. module ∈ {linpeas, bloodhound, cred-reuse}.
+
+        Body JSON depends on module:
+          linpeas:    {"host": "...", "username": "...", "password": "..."}
+          bloodhound: {"domain": "...", "dc_host": "...", "username": "...", "password": "..."}
+          cred-reuse: {"credentials": [["u","p"], ...], "targets": [["h", port, "ssh"], ...]}
+
+        These all require explicit authorization — admin permission is the gate.
+        Output is returned synchronously for now (long-running modules log progress).
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        try:
+            if module == "linpeas":
+                from heaven.postex import LinpeasRunner
+                runner = LinpeasRunner(authorized=True)
+                r = await runner.run(
+                    host=body["host"], username=body["username"],
+                    password=body.get("password"),
+                    private_key=body.get("private_key"),
+                    port=int(body.get("port", 22)),
+                )
+                return {
+                    "success": r.success, "error": r.error,
+                    "privesc_vectors": r.privesc_vectors,
+                    "suid_binaries": r.suid_binaries,
+                    "kernel_version": r.kernel_version,
+                }
+            if module == "bloodhound":
+                from heaven.postex import BloodHoundCollector
+                col = BloodHoundCollector(authorized=True)
+                r = col.collect(
+                    domain=body["domain"], dc_host=body["dc_host"],
+                    username=body["username"], password=body["password"],
+                    use_ssl=bool(body.get("use_ssl", False)),
+                )
+                return {
+                    "success": r.success, "error": r.error,
+                    "counts": r.counts, "files": r.files,
+                }
+            if module == "cred-reuse":
+                from heaven.postex import CredentialValidator
+                v = CredentialValidator(authorized=True)
+                creds = [tuple(c) for c in body.get("credentials", [])]
+                targets = [tuple(t) for t in body.get("targets", [])]
+                summary = await v.validate(creds, targets)
+                return {
+                    "attempted": summary.attempted,
+                    "hits": [
+                        {"host": h.host, "port": h.port, "service": h.service,
+                         "username": h.username, "notes": h.notes}
+                        for h in summary.hits
+                    ],
+                    "errors": summary.errors[:20],
+                }
+        except KeyError as e:
+            raise HTTPException(400, f"missing required field: {e}")
+        except Exception as e:
+            raise HTTPException(500, f"postex {module} failed: {e}")
+
+        raise HTTPException(400, f"unknown postex module: {module!r}")
+
+    # ── Gap 7: Trigger train-priors from the UI ──
+
+    @app.post("/api/priors/train")
+    async def trigger_train_priors(
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """Aggregate engagement DBs into learned priors. Long-running but bounded."""
+        try:
+            from heaven.ml.train_priors import discover_engagement_dbs, train_priors
+        except Exception as e:
+            raise HTTPException(500, f"train_priors not importable: {e}")
+
+        dirs = [Path("engagements"), Path("data/engagements")]
+        dbs = discover_engagement_dbs(*dirs)
+        if not dbs:
+            raise HTTPException(422, "No engagement *.db files found")
+        result = train_priors(
+            engagement_paths=dbs,
+            bootstrap_path=Path("data/models/priors_bootstrap.json"),
+            out_path=Path("data/models/priors_learned.json"),
+        )
+        return {
+            "engagement_dbs": len(dbs),
+            "finding_count": result.finding_count,
+            "services_observed": result.services_observed,
+            "service_priors_updated": result.service_priors_updated,
+            "output": str(result.out_path),
+        }
+
+    # ── Gap 11: SIEM / SOC integration status ──
+
+    @app.get("/api/siem/status")
+    async def siem_status(user: User = Depends(require_permission("scan.view"))):
+        """Report which SIEM backends are configured (env-driven)."""
+        from heaven.devsecops.alerting import SIEMNotifier, WebhookAlerter
+        notifier = SIEMNotifier()
+        alerter = WebhookAlerter()
+        return {
+            "siem_backends_active": notifier.configured_backends,
+            "webhook_active": bool(alerter.webhook_url),
+        }
+
+    # ── Gap 9: Methodology mapping docs ──
+
+    @app.get("/api/methodology")
+    async def list_methodology(user: User = Depends(require_permission("scan.view"))):
+        """Return the markdown content of every methodology mapping doc."""
+        docs_dir = Path(__file__).parent.parent.parent / "docs" / "methodology"
+        if not docs_dir.exists():
+            return {"docs": []}
+        out = []
+        for md in sorted(docs_dir.glob("*.md")):
+            try:
+                out.append({"name": md.stem, "content": md.read_text(encoding="utf-8")})
+            except Exception:
+                pass
+        return {"docs": out}
+
+    # ── Gap 1: Latest benchmark results ──
+
+    @app.get("/api/benchmark/results")
+    async def latest_benchmark(user: User = Depends(require_permission("scan.view"))):
+        """Return the most-recent aggregated benchmark report markdown."""
+        reports = Path(__file__).parent.parent.parent / "tests" / "benchmarks" / "reports"
+        agg = reports / "dvwa_aggregated.md"
+        if not agg.exists():
+            return {
+                "available": False,
+                "note": "No benchmark results yet. Run: HEAVEN_RUN_BENCHMARKS=1 pytest tests/benchmarks/",
+            }
+        return {
+            "available": True,
+            "target": "dvwa",
+            "markdown": agg.read_text(encoding="utf-8"),
+        }
+
     # ── WebSocket for real-time updates ──
     @app.websocket("/api/ws/scan/{scan_id}")
     async def scan_websocket(websocket: WebSocket, scan_id: str, token: Optional[str] = Query(None)):

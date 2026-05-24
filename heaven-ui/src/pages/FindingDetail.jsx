@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Engagement } from "../api";
+import { Engagement, ExploitProof, AI } from "../api";
 
 const STATUSES = ["open", "verified", "false_positive", "accepted_risk", "fixed"];
 const STATUS_COLORS = {
@@ -107,6 +107,9 @@ export default function FindingDetail() {
         </table>
       </div>
 
+      {/* Active confirmation — Gap 4 + Gap 6 */}
+      <ExploitAndReviewActions id={id} finding={f} onChange={load} />
+
       {/* Operator workflow */}
       <div className="card">
         <div className="card-title">Triage</div>
@@ -200,6 +203,112 @@ export default function FindingDetail() {
         <div className="card">
           <div className="card-title">Remediation</div>
           <div className="evidence-block">{ev.remediation}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-component: active confirmation + LLM FP review (Gaps 4 + 6) ──
+
+function ExploitAndReviewActions({ id, finding, onChange }) {
+  const [proving, setProving]   = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [result, setResult]     = useState(null);
+
+  async function runProof() {
+    setProving(true);
+    setResult(null);
+    try {
+      const r = await ExploitProof.prove(id);
+      setResult({ kind: "prove", payload: r });
+      if (onChange) onChange();
+    } catch (e) {
+      setResult({ kind: "error", payload: e.message });
+    } finally {
+      setProving(false);
+    }
+  }
+
+  async function runReview() {
+    setReviewing(true);
+    setResult(null);
+    try {
+      const r = await AI.fpReview({
+        id: finding.id, target: finding.target,
+        vuln_type: finding.vuln_type, severity: finding.severity,
+        confidence: finding.confidence, title: finding.title,
+        evidence: finding.evidence,
+      });
+      setResult({ kind: "review", payload: r });
+    } catch (e) {
+      setResult({ kind: "error", payload: e.message });
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">Active Confirmation</div>
+      <div className="dim" style={{ fontSize: 12, marginBottom: 10 }}>
+        Run a controlled exploitation proof against the live target, or ask the
+        LLM reviewer (if configured) to second-opinion the existing rule-based
+        verdict. Both require the operator to have written authorization for the target.
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn" disabled={proving} onClick={runProof}>
+          {proving ? "Proving…" : "Prove via exploit (Gap 4)"}
+        </button>
+        <button className="btn-small" disabled={reviewing} onClick={runReview}>
+          {reviewing ? "Reviewing…" : "LLM FP review (Gap 6)"}
+        </button>
+      </div>
+
+      {result && result.kind === "error" && (
+        <div className="error" style={{ marginTop: 10 }}>{result.payload}</div>
+      )}
+
+      {result && result.kind === "prove" && (
+        <div style={{ marginTop: 12 }}>
+          <div>
+            Proved: <strong style={{ color: result.payload.proved ? "#00FF41" : "#FFB800" }}>
+              {result.payload.proved ? "yes" : "no"}
+            </strong>
+          </div>
+          {result.payload.exploit_proof && result.payload.exploit_proof.length > 0 && (
+            <pre style={{
+              marginTop: 8, padding: 10, background: "rgba(0,0,0,0.4)",
+              border: "1px solid rgba(0,255,65,0.2)", fontSize: 11,
+            }}>
+              {JSON.stringify(result.payload.exploit_proof, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {result && result.kind === "review" && (
+        <div style={{ marginTop: 12 }}>
+          {result.payload.skipped ? (
+            <div className="dim">Skipped: {result.payload.skipped}</div>
+          ) : (
+            <>
+              <div>
+                LLM verdict: <strong style={{ color: result.payload.keep ? "#00FF41" : "#FFB800" }}>
+                  {result.payload.keep ? "keep" : "false positive"}
+                </strong>
+                <span className="dim" style={{ marginLeft: 8 }}>
+                  Δconfidence: {result.payload.confidence_delta?.toFixed?.(2) ?? "0.00"}
+                </span>
+              </div>
+              {result.payload.reasoning && (
+                <div className="dim" style={{ marginTop: 6, fontSize: 12 }}>
+                  {result.payload.reasoning}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

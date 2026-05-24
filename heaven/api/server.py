@@ -1352,6 +1352,64 @@ def create_app() -> FastAPI:
             ],
         }
 
+    # ── Differential scanning ──
+    @app.get("/api/scans/{scan_id}/diff")
+    async def scan_diff(
+        scan_id: str,
+        baseline: str = Query(..., description="baseline scan id"),
+        engagement: Optional[str] = Query(None),
+        include_unchanged: bool = Query(False),
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Compare two scans of the same engagement. Returns bucketed diff."""
+        try:
+            from heaven.devsecops.diff_finder import compute_diff
+        except Exception as e:
+            raise HTTPException(500, f"diff_finder unavailable: {e}")
+        store = _engagement_store_factory(engagement)
+        report = compute_diff(store, baseline, scan_id)
+        out = report.to_dict()
+        if include_unchanged:
+            from heaven.devsecops.diff_finder import _row_dict
+            out["unchanged"] = [_row_dict(r) for r in report.unchanged]
+        return out
+
+    # ── Ticketing (Jira / Linear) ──
+    @app.get("/api/tickets/status")
+    async def tickets_status(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Report which ticketing backends (Jira / Linear) are configured."""
+        from heaven.devsecops.alerting import TicketingDispatcher
+        d = TicketingDispatcher()
+        return {
+            "configured_backends": d.configured_backends,
+            "jira_configured": d.jira.configured,
+            "linear_configured": d.linear.configured,
+        }
+
+    @app.post("/api/tickets/push/{finding_id}")
+    async def tickets_push(
+        finding_id: str,
+        engagement: Optional[str] = Query(None),
+        user: User = Depends(require_permission("vuln.update")),
+    ):
+        """Push one finding to every configured ticketing backend."""
+        from heaven.devsecops.alerting import TicketingDispatcher
+        store = _engagement_store_factory(engagement)
+        f = store.get_finding(finding_id)
+        if not f:
+            raise HTTPException(404, f"finding {finding_id} not found")
+        d = TicketingDispatcher()
+        if not d.has_any:
+            raise HTTPException(412, "No ticketing backends configured")
+        finding_dict = {
+            "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
+            "title": f.title, "severity": f.severity,
+            "confidence": f.confidence, "cve_id": f.cve_id,
+        }
+        return await d.dispatch(finding_dict)
+
     # ── ExploitDB lookup (per-CVE) ──
     @app.get("/api/exploitdb/{cve}")
     async def exploitdb_lookup(

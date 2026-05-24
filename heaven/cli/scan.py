@@ -50,6 +50,9 @@ logger = get_logger("cli.scan")
               help="Acknowledge written authorization to test all targets (required)")
 @click.option("--skip-dep-check", is_flag=True,
               help="Skip nmap/nuclei system-dep check (use only for unit tests)")
+@click.option("--seed", type=int, default=None,
+              help="Integer seed for deterministic scans. Persisted with the engagement "
+                   "so `heaven replay <scan-id>` reproduces the exact same scan.")
 def scan(
     target: tuple[str, ...], url: tuple[str, ...],
     repo: tuple[str, ...], cloud: tuple[str, ...],
@@ -59,9 +62,17 @@ def scan(
     iot: bool, api_scan: bool, container: bool, mitre_map: bool,
     engagement: Optional[str], use_scope: bool,
     i_have_authorization: bool, skip_dep_check: bool,
+    seed: Optional[int],
 ) -> None:
     """Launch a vulnerability scan against specified targets."""
     print_banner()
+
+    # Seed for reproducibility — must be set BEFORE any orchestrator/AI brain
+    # call so all subsequent random.choice / RNG draws come from the same stream.
+    if seed is not None:
+        from heaven.utils.seeding import set_seed
+        set_seed(seed)
+        _print(f"[cyan]Deterministic mode:[/cyan] seed={seed}")
 
     targets: dict[str, Any] = {
         "ips": list(target), "urls": list(url),
@@ -189,7 +200,7 @@ def scan(
     if engagement_store:
         engagement_store.record_scan_start(
             orch.scan_id, name=f"{mode} scan", mode=mode,
-            config={"targets": targets},
+            config={"targets": targets, "seed": seed},
         )
 
     try:

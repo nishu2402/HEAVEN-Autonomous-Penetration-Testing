@@ -379,18 +379,24 @@ async def run_autonomous(
             summary.stop_reason = "time_budget_exhausted"
             break
 
-        # Observe — pull every finding stored so far
+        # Observe — pull every finding stored so far AND remember which IDs
+        # we knew about, so we can diff after the action (engagement DB orders
+        # by severity, not recency, so list[:N] would attribute the wrong
+        # findings as "new").
         if engagement_store is not None:
+            raw_before = engagement_store.list_findings(limit=10000)
             findings = [
                 {
                     "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
                     "title": f.title, "severity": f.severity,
                     "confidence": f.confidence, "evidence": f.evidence,
                 }
-                for f in engagement_store.list_findings(limit=500)
+                for f in raw_before
             ]
+            findings_before_ids = {f.id for f in raw_before}
         else:
             findings = []
+            findings_before_ids = set()
         findings_before = len(findings)
 
         if _objective_met(findings, objective):
@@ -423,14 +429,14 @@ async def run_autonomous(
             err = f"{type(e).__name__}: {e}"
             logger.error(f"autonomous iter {iter_n} action {action.kind} failed: {err}")
 
-        # Score
+        # Score — set-diff on finding IDs gives us the ACTUAL new findings,
+        # not the top-N-by-severity that list_findings happens to return first.
         if engagement_store is not None:
-            new_findings = engagement_store.list_findings(limit=500)
-            findings_after = len(new_findings)
-            new_crit = sum(1 for f in new_findings[:findings_after - findings_before]
-                           if f.severity == "critical")
-            new_high = sum(1 for f in new_findings[:findings_after - findings_before]
-                           if f.severity == "high")
+            raw_after = engagement_store.list_findings(limit=10000)
+            findings_after = len(raw_after)
+            actually_new = [f for f in raw_after if f.id not in findings_before_ids]
+            new_crit = sum(1 for f in actually_new if f.severity == "critical")
+            new_high = sum(1 for f in actually_new if f.severity == "high")
         else:
             findings_after = 0
             new_crit = new_high = 0

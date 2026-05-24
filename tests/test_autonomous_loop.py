@@ -69,6 +69,76 @@ class TestRuleBasedPlanner:
 
 
 # ═══════════════════════════════════════════
+# AUTONOMOUS LOOP — bug-fix regression: new-finding diff math
+# Previous version did `list_findings()[:N]` to attribute new findings, but
+# the engagement store orders by severity, not by recency, so the wrong
+# findings got credited as "new" each iteration.
+# ═══════════════════════════════════════════
+
+
+class TestAutonomousLoopDiffMath:
+    @pytest.mark.asyncio
+    async def test_new_findings_attributed_by_id_diff(self, tmp_path, monkeypatch):
+        """Run a one-iteration loop where _execute_action stubs in two new
+        findings; verify they're correctly counted, not whichever happen to
+        sort high by severity."""
+        from heaven.engagement import EngagementStore
+        from heaven.ai.autonomous_loop import (
+            run_autonomous, AutonomousAction,
+        )
+        from heaven.ai import autonomous_loop as al
+
+        store = EngagementStore(tmp_path / "e.db")
+        store.create_engagement("test")
+        store.record_scan_start("s1", name="seed", mode="full", config={})
+        # Seed with a pre-existing CRITICAL finding so list_findings will
+        # always sort it first. The diff math must NOT count it as "new".
+        store.upsert_finding("s1", {
+            "id": "old-critical", "target": "10.0.0.1",
+            "vuln_type": "sqli_boolean", "title": "Old critical",
+            "severity": "critical", "confidence": 0.95,
+        })
+
+        async def fake_execute_action(action, eng_store, cfg):
+            # Add one NEW high-severity finding
+            eng_store.upsert_finding("s1", {
+                "id": "newly-found-high", "target": "10.0.0.1",
+                "vuln_type": "xss", "title": "New high",
+                "severity": "high", "confidence": 0.9,
+            })
+
+        async def fake_llm_next(*_a, **_kw):
+            return None  # force rule-based path
+
+        def fake_rule(_findings, _i, seed):
+            return AutonomousAction(
+                kind="scan", target="10.0.0.1", mode="full",
+                rationale="test", estimated_value=0.5,
+            )
+
+        monkeypatch.setattr(al, "_execute_action", fake_execute_action)
+        monkeypatch.setattr(al, "_llm_next_action", fake_llm_next)
+        monkeypatch.setattr(al, "_rule_based_next_action", fake_rule)
+
+        summary = await run_autonomous(
+            seed_targets={"ips": ["10.0.0.1"], "urls": []},
+            engagement_store=store, base_config=None,
+            max_iterations=1, time_budget_s=30,
+            use_llm_planner=False,
+        )
+
+        assert len(summary.iterations) == 1
+        it = summary.iterations[0]
+        # The pre-existing critical must NOT be counted as new
+        assert it.new_critical == 0, \
+            f"old critical wrongly attributed as new: {it.new_critical}"
+        # The newly-added high must be counted
+        assert it.new_high == 1, \
+            f"new high finding not detected: {it.new_high}"
+        assert it.new_findings == 1
+
+
+# ═══════════════════════════════════════════
 # KNOWLEDGE GRAPH
 # ═══════════════════════════════════════════
 
@@ -209,6 +279,97 @@ class TestCoverageGrader:
         assert report.total_findings == 1
         # Recommendations should fire for missing auth / auto-prove
         assert any("authenticated" in r.lower() for r in report.recommendations)
+
+    # ── Bug-fix regression: scope coverage on URL findings ──
+    # Previous version did `f.target.split(":")[0]` which collapsed every URL
+    # to "http"/"https" because "://" contains a colon, so every scope target
+    # was flagged "untested" even when a finding actually hit it.
+    def test_url_finding_marks_scope_target_as_scanned(self, tmp_path):
+        from heaven.ai.coverage_grader import grade_engagement_rule_based
+        store = self._store(tmp_path)
+        store.add_scope("app.example.com", kind="host")
+        store.add_scope("other.example.com", kind="host")
+        store.record_scan_start("scan-001", name="t", mode="web",
+                                config={"targets": {"urls": ["https://app.example.com"]}})
+        store.upsert_finding("scan-001", {
+            "id": "f1", "target": "https://app.example.com/login?id=1",
+            "vuln_type": "sqli_boolean", "title": "SQLi",
+            "severity": "high", "confidence": 0.9,
+        })
+        report = grade_engagement_rule_based(store)
+        assert report.scope_target_count == 2
+        # ONLY other.example.com should be untested — app.example.com was scanned
+        assert report.untested_scope_targets == ["other.example.com"], \
+            f"URL parsing bug regression: {report.untested_scope_targets}"
+        assert report.scanned_target_count == 1
+
+    def test_host_port_finding_correctly_attributed(self, tmp_path):
+        from heaven.ai.coverage_grader import grade_engagement_rule_based
+        store = self._store(tmp_path)
+        store.add_scope("10.0.0.5", kind="ip")
+        store.record_scan_start("scan-001", name="t", mode="network",
+                                config={"targets": {"ips": ["10.0.0.5"]}})
+        # host:port style target
+        store.upsert_finding("scan-001", {
+            "id": "f1", "target": "10.0.0.5:22",
+            "vuln_type": "weak_credentials", "title": "Weak SSH password",
+            "severity": "high", "confidence": 0.95,
+        })
+        report = grade_engagement_rule_based(store)
+        assert report.untested_scope_targets == []
+        assert report.scanned_target_count == 1
+
+    def test_substring_does_not_match_different_hostname(self, tmp_path):
+        # "example.com" must NOT match a scope of "badexample.com" — the old
+        # `t in st` substring check was vulnerable to this.
+        from heaven.ai.coverage_grader import grade_engagement_rule_based
+        store = self._store(tmp_path)
+        store.add_scope("badexample.com", kind="host")
+        store.record_scan_start("scan-001", name="t", mode="web",
+                                config={"targets": {"urls": ["https://example.com"]}})
+        store.upsert_finding("scan-001", {
+            "id": "f1", "target": "https://example.com/",
+            "vuln_type": "xss_reflected", "title": "XSS",
+            "severity": "medium", "confidence": 0.8,
+        })
+        report = grade_engagement_rule_based(store)
+        # badexample.com was NOT scanned; example.com was. So untested == ["badexample.com"]
+        assert report.untested_scope_targets == ["badexample.com"]
+
+
+class TestTargetHost:
+    """Standalone tests for the URL/host normaliser — the function the
+    coverage bug regression hinges on."""
+
+    def test_url_strips_scheme_and_port(self):
+        from heaven.ai.coverage_grader import _target_host
+        assert _target_host("https://app.example.com:8443/path?q=1") == "app.example.com"
+
+    def test_ip_with_port(self):
+        from heaven.ai.coverage_grader import _target_host
+        assert _target_host("10.0.0.5:22") == "10.0.0.5"
+
+    def test_bare_ip(self):
+        from heaven.ai.coverage_grader import _target_host
+        assert _target_host("10.0.0.5") == "10.0.0.5"
+
+    def test_bare_hostname(self):
+        from heaven.ai.coverage_grader import _target_host
+        assert _target_host("example.com") == "example.com"
+
+    def test_empty(self):
+        from heaven.ai.coverage_grader import _target_host
+        assert _target_host("") == ""
+        assert _target_host("   ") == ""
+
+    def test_url_without_port(self):
+        from heaven.ai.coverage_grader import _target_host
+        assert _target_host("http://x.example.com/login") == "x.example.com"
+
+    def test_url_with_user_info_handled(self):
+        # urlparse strips user:pass@ from .hostname
+        from heaven.ai.coverage_grader import _target_host
+        assert _target_host("https://user:pass@app.example.com/") == "app.example.com"
 
 
 # ═══════════════════════════════════════════

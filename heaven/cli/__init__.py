@@ -61,9 +61,12 @@ if HAS_CLICK:
 
     # Wire up every subcommand module
     from heaven.cli import (
-        audit, db, engage, findings, info, mitre, replay, scan, server, train,
+        audit, autonomous, coverage, db, engage, findings, info, mitre,
+        replay, scan, server, train,
     )
     audit.register(cli)
+    autonomous.register(cli)
+    coverage.register(cli)
     db.register(cli)
     engage.register(cli)
     findings.register(cli)

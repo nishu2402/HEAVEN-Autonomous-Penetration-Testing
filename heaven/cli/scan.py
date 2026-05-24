@@ -53,6 +53,19 @@ logger = get_logger("cli.scan")
 @click.option("--seed", type=int, default=None,
               help="Integer seed for deterministic scans. Persisted with the engagement "
                    "so `heaven replay <scan-id>` reproduces the exact same scan.")
+@click.option("--cookie-file", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Netscape cookie file (curl/wget -c format) used for authenticated scans.")
+@click.option("--auth", default="", metavar="SPEC",
+              help='Form-login spec: "url=/login,user=admin,pass=password[,csrf_field=token]". '
+                   "HEAVEN logs in once and reuses the session cookies for the whole scan.")
+@click.option("--auto-prove", is_flag=True,
+              help="After detection, automatically run exploit_proof on every high-confidence "
+                   "SQLi/cmdi/SSRF finding. Captures proof artifacts (sqlmap dump, RCE canary, "
+                   "SSRF callback) into evidence.exploit_proof[].")
+@click.option("--autonomous", is_flag=True,
+              help="Full autonomous mode: --auto-prove + chain post-exploitation modules "
+                   "(linpeas / cred-reuse) from initial-access findings. Requires explicit "
+                   "operator authorization.")
 def scan(
     target: tuple[str, ...], url: tuple[str, ...],
     repo: tuple[str, ...], cloud: tuple[str, ...],
@@ -62,7 +75,8 @@ def scan(
     iot: bool, api_scan: bool, container: bool, mitre_map: bool,
     engagement: Optional[str], use_scope: bool,
     i_have_authorization: bool, skip_dep_check: bool,
-    seed: Optional[int],
+    seed: Optional[int], cookie_file: Optional[str], auth: str,
+    auto_prove: bool, autonomous: bool,
 ) -> None:
     """Launch a vulnerability scan against specified targets."""
     print_banner()
@@ -74,6 +88,33 @@ def scan(
         set_seed(seed)
         _print(f"[cyan]Deterministic mode:[/cyan] seed={seed}")
 
+    # Authenticated-scan session — Netscape cookie file or form login.
+    # Activated process-wide so every scanner module picks it up.
+    if cookie_file or auth:
+        from heaven.recon.auth_session import (
+            load_cookie_file, parse_auth_string,
+            perform_form_login, set_active_session,
+        )
+        try:
+            if cookie_file:
+                sess = load_cookie_file(Path(cookie_file))
+                set_active_session(sess)
+                _print(f"[cyan]Authenticated scan:[/cyan] {sess.label}")
+            if auth:
+                spec = parse_auth_string(auth)
+                base = url[0] if url else (target[0] if target else "http://localhost")
+                sess = asyncio.run(perform_form_login(base, spec))
+                set_active_session(sess)
+                _print(f"[cyan]Authenticated scan:[/cyan] {sess.label}")
+        except Exception as e:
+            _print(f"[red]Auth setup failed:[/red] {e}")
+            sys.exit(4)
+
+    # --autonomous implies --auto-prove
+    if autonomous:
+        auto_prove = True
+        _print("[bold magenta]⚙ AUTONOMOUS MODE[/bold magenta] — auto-prove + post-ex chaining enabled")
+
     targets: dict[str, Any] = {
         "ips": list(target), "urls": list(url),
         "repositories": list(repo), "cloud_providers": list(cloud),
@@ -81,6 +122,7 @@ def scan(
         "ad_domain": ad_domain, "ad_dc": ad_dc,
         "enable_iot": iot, "enable_api_scan": api_scan,
         "enable_container": container, "enable_mitre": mitre_map,
+        "auto_prove": auto_prove, "autonomous": autonomous,
     }
 
     # Engagement scope check — second authorization gate

@@ -20,9 +20,15 @@ Authorization gating:
 from heaven.postex.linpeas_runner import LinpeasRunner, LinpeasResult
 from heaven.postex.bloodhound_collector import BloodHoundCollector
 from heaven.postex.cred_validator import CredentialValidator, CredentialHit
+from heaven.postex.lateral import (
+    SSHKeyReuseScanner, SMBLateralExecutor,
+    LateralSummary, LateralHop, run_lateral,
+)
 
 __all__ = [
     "LinpeasRunner", "LinpeasResult",
     "BloodHoundCollector",
     "CredentialValidator", "CredentialHit",
+    "SSHKeyReuseScanner", "SMBLateralExecutor",
+    "LateralSummary", "LateralHop", "run_lateral",
 ]

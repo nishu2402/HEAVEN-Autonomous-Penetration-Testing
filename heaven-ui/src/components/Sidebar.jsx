@@ -2,11 +2,14 @@ import React, { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 
 const ITEMS = [
-  { to: "/",           label: "Dashboard",  icon: "▣" },
-  { to: "/engagement", label: "Engagement", icon: "◈" },
-  { to: "/findings",   label: "Findings",   icon: "⚠" },
-  { to: "/kill-chain", label: "Kill Chain", icon: "⛓" },
-  { to: "/scans",      label: "Scans",      icon: "⚡" },
+  { to: "/",            label: "Dashboard",    icon: "▣" },
+  { to: "/engagement",  label: "Engagement",   icon: "◈" },
+  { to: "/findings",    label: "Findings",     icon: "⚠" },
+  { to: "/kill-chain",  label: "Kill Chain",   icon: "⛓" },
+  { to: "/scans",       label: "Scans",        icon: "⚡" },
+  { to: "/ai-plans",    label: "AI Plans",     icon: "✦" },
+  { to: "/benchmark",   label: "Benchmark",    icon: "≡" },
+  { to: "/methodology", label: "Methodology",  icon: "§" },
 ];
 
 export default function Sidebar() {

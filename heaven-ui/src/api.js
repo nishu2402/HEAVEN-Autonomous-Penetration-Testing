@@ -139,6 +139,74 @@ export const Dashboard = {
   get: () => api("/dashboard"),
 };
 
+// ── New API surface (publication-gap features) ──
+// Mirrors the FastAPI endpoints added in heaven/api/server.py.
+// Each helper degrades gracefully when the backend isn't running new code yet:
+// callers should check for "skipped" / "available: false" in the response.
+
+export const Replay = {
+  // POST /api/scans/{scan_id}/replay
+  scan: (scanId, body = {}) =>
+    api(`/scans/${encodeURIComponent(scanId)}/replay`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+};
+
+export const ExploitProof = {
+  // POST /api/findings/{finding_id}/prove
+  prove: (findingId, opts = {}) => {
+    const q = new URLSearchParams();
+    if (opts.engagement) q.append("engagement", opts.engagement);
+    if (opts.external_callback_url)
+      q.append("external_callback_url", opts.external_callback_url);
+    const tail = q.toString() ? `?${q.toString()}` : "";
+    return api(`/findings/${encodeURIComponent(findingId)}/prove${tail}`, {
+      method: "POST",
+    });
+  },
+};
+
+export const AI = {
+  // POST /api/ai/{kind}/run — kind ∈ {recon-parse, plan, fp-review}
+  reconParse: (recon) =>
+    api(`/ai/recon-parse/run`, { method: "POST", body: JSON.stringify({ recon }) }),
+  plan: (findings, assets = [], objective_hint = "") =>
+    api(`/ai/plan/run`, {
+      method: "POST",
+      body: JSON.stringify({ findings, assets, objective_hint }),
+    }),
+  fpReview: (finding) =>
+    api(`/ai/fp-review/run`, { method: "POST", body: JSON.stringify({ finding }) }),
+};
+
+export const Postex = {
+  linpeas: (body) =>
+    api(`/postex/linpeas/run`, { method: "POST", body: JSON.stringify(body) }),
+  bloodhound: (body) =>
+    api(`/postex/bloodhound/run`, { method: "POST", body: JSON.stringify(body) }),
+  credReuse: (body) =>
+    api(`/postex/cred-reuse/run`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+export const Priors = {
+  train: () => api(`/priors/train`, { method: "POST" }),
+};
+
+export const SIEM = {
+  status: () => api(`/siem/status`),
+};
+
+export const Methodology = {
+  // Returns {"docs": [{"name": "owasp_testing_guide", "content": "..."}, ...]}
+  list: () => api(`/methodology`),
+};
+
+export const Benchmark = {
+  // Returns {"available": bool, "markdown": "..."} for the latest aggregated run
+  latest: () => api(`/benchmark/results`),
+};
+
 // WebSocket helper — token via query string (browsers can't set headers on WS open)
 export function openLogStream(onMessage) {
   if (!authToken) return null;

@@ -12,6 +12,9 @@ import Findings from "./pages/Findings.jsx";
 import FindingDetail from "./pages/FindingDetail.jsx";
 import KillChain from "./pages/KillChain.jsx";
 import Scans from "./pages/Scans.jsx";
+import AIPlans from "./pages/AIPlans.jsx";
+import Benchmark from "./pages/Benchmark.jsx";
+import Methodology from "./pages/Methodology.jsx";
 
 function ProtectedRoute({ children }) {
   const [authed, setAuthed] = useState(isAuthenticated());
@@ -57,6 +60,9 @@ function Shell() {
             <Route path="/findings/:id" element={<FindingDetail />} />
             <Route path="/kill-chain" element={<KillChain />} />
             <Route path="/scans" element={<Scans />} />
+            <Route path="/ai-plans" element={<AIPlans />} />
+            <Route path="/benchmark" element={<Benchmark />} />
+            <Route path="/methodology" element={<Methodology />} />
           </Routes>
         </div>
       </div>

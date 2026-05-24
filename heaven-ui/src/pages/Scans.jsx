@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Scans as ScansApi } from "../api";
+import { Scans as ScansApi, Replay } from "../api";
 
 const MODES = ["web", "network", "full", "ad", "cloud"];
 const STEALTH = [
@@ -246,6 +246,7 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                   <th>Progress</th>
                   <th>Started</th>
                   <th>Findings</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -288,6 +289,31 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                             </span>
                           : "—"
                         }
+                      </td>
+                      <td>
+                        {(s.status === "completed" || s.status === "failed") && (
+                          <button
+                            className="btn-small"
+                            title="Re-execute this scan with the stored seed (Gap 8: reproducibility)"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const r = await Replay.scan(id, {});
+                                alert(
+                                  `Replay started.\nNew scan ID: ${r.new_scan_id}\n` +
+                                  (r.seed != null
+                                    ? `Seed: ${r.seed} (deterministic)`
+                                    : "No seed stored — non-deterministic replay")
+                                );
+                                load();
+                              } catch (err) {
+                                alert(`Replay failed: ${err.message}`);
+                              }
+                            }}
+                          >
+                            ↻ Replay
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

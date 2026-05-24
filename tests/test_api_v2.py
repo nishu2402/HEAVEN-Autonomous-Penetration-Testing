@@ -123,6 +123,72 @@ def test_every_new_route_is_registered(api_client):
         "/api/siem/status",
         "/api/methodology",
         "/api/benchmark/results",
+        # Sync-round-2 endpoints
+        "/api/autonomous/run",
+        "/api/coverage",
+        "/api/lateral/run",
+        "/api/knowledge/stats",
+        "/api/knowledge/rank",
+        "/api/exploitdb/{cve}",
     }
     missing = expected - paths
     assert not missing, f"new API routes missing from app: {missing}"
+
+
+# ═══════════════════════════════════════════
+# Sync-round-2 smoke tests
+# ═══════════════════════════════════════════
+
+
+def test_knowledge_stats_returns_shape(api_client):
+    r = api_client.get("/api/knowledge/stats")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "profiles" in body and "attempts" in body
+    assert isinstance(body["top_techniques"], list)
+
+
+def test_knowledge_rank_with_empty_profile(api_client):
+    r = api_client.get("/api/knowledge/rank?os=linux&ports=22,80")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "fingerprint" in body
+    assert "rankings" in body
+    assert isinstance(body["rankings"], list)
+
+
+def test_knowledge_rank_bad_ports(api_client):
+    r = api_client.get("/api/knowledge/rank?os=linux&ports=not-a-number")
+    assert r.status_code == 422
+
+
+def test_coverage_returns_grade_for_empty_engagement(api_client, tmp_path, monkeypatch):
+    from heaven.engagement import EngagementStore
+    monkeypatch.chdir(tmp_path)
+    # Initialise a brand-new engagement so the store exists
+    EngagementStore(tmp_path / "engagement.db").create_engagement("e", client="c")
+    r = api_client.get("/api/coverage?use_llm=false")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["grade"] in ("A", "B", "C", "D", "F")
+    assert "owasp_top10" in body
+    assert len(body["owasp_top10"]) == 10
+
+
+def test_exploitdb_malformed_cve_returns_error_field(api_client):
+    r = api_client.get("/api/exploitdb/not-a-cve")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["error"], "should return error for malformed CVE"
+
+
+def test_lateral_run_no_targets_succeeds_empty(api_client):
+    r = api_client.post("/api/lateral/run",
+                        json={"ssh_usernames": ["root"], "targets": []})
+    # No targets → run_lateral returns empty summary; endpoint shouldn't 500
+    assert r.status_code == 200
+
+
+def test_autonomous_run_missing_targets(api_client):
+    r = api_client.post("/api/autonomous/run", json={})
+    assert r.status_code == 422

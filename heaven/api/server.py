@@ -1201,6 +1201,191 @@ def create_app() -> FastAPI:
             "markdown": agg.read_text(encoding="utf-8"),
         }
 
+    # ══════════════════════════════════════════════════════════════════
+    # CLI ↔ API sync — every backend capability has a UI-reachable route
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── Autonomous loop (heaven autonomous equivalent) ──
+    @app.post("/api/autonomous/run")
+    async def autonomous_run(
+        request: Request,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Trigger the LLM-driven iterative pen-test loop.
+
+        Body JSON:
+          {"engagement": "name", "ips": [...], "urls": [...],
+           "max_iterations": 5, "time_budget_s": 600, "objective": "rce",
+           "use_llm": true}
+
+        Returns the AutonomousRunSummary dict synchronously. For long runs,
+        prefer the CLI (`heaven autonomous`) which streams progress.
+        """
+        try:
+            from heaven.ai.autonomous_loop import run_autonomous
+            from heaven.config import get_config as _get_config
+        except Exception as e:
+            raise HTTPException(500, f"autonomous loop unavailable: {e}")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        engagement = body.get("engagement")
+        store = _engagement_store_factory(engagement) if engagement else None
+
+        seed_targets = {
+            "ips": list(body.get("ips") or []),
+            "urls": list(body.get("urls") or []),
+        }
+        if not (seed_targets["ips"] or seed_targets["urls"]):
+            raise HTTPException(422, "need at least one ip or url")
+
+        summary = await run_autonomous(
+            seed_targets=seed_targets,
+            engagement_store=store,
+            base_config=_get_config(),
+            max_iterations=int(body.get("max_iterations") or 5),
+            time_budget_s=int(body.get("time_budget_s") or 600),
+            objective=str(body.get("objective") or ""),
+            use_llm_planner=bool(body.get("use_llm", True)),
+        )
+        return summary.to_dict()
+
+    # ── Coverage self-grading (heaven coverage equivalent) ──
+    @app.get("/api/coverage")
+    async def coverage_report(
+        engagement: Optional[str] = Query(None),
+        use_llm: bool = Query(True),
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """Return the rule-based + (optional) LLM coverage report for an engagement."""
+        try:
+            from heaven.ai.coverage_grader import grade_engagement
+        except Exception as e:
+            raise HTTPException(500, f"coverage_grader unavailable: {e}")
+        store = _engagement_store_factory(engagement)
+        report = await grade_engagement(store, use_llm=use_llm)
+        return report.to_dict()
+
+    # ── Lateral movement (no CLI equivalent yet — admin-gated) ──
+    @app.post("/api/lateral/run")
+    async def lateral_run(
+        request: Request,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """SSH key reuse + SMB/PsExec + pass-the-hash lateral.
+
+        Body JSON:
+          {"ssh_key_path": "/path/id_rsa",
+           "ssh_usernames": ["root","ubuntu"],
+           "smb_username": "Administrator", "smb_domain": "CORP",
+           "smb_password": "..." OR "smb_nthash": "...",
+           "targets": [["10.0.0.5", 22], ["10.0.0.5", 445]]}
+        """
+        try:
+            from heaven.postex.lateral import run_lateral
+        except Exception as e:
+            raise HTTPException(500, f"lateral module unavailable: {e}")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        targets = [(t[0], int(t[1])) for t in body.get("targets") or []]
+        try:
+            return await run_lateral(
+                authorized=True,
+                ssh_key_path=body.get("ssh_key_path"),
+                ssh_usernames=body.get("ssh_usernames") or [],
+                smb_username=body.get("smb_username"),
+                smb_password=body.get("smb_password", ""),
+                smb_nthash=body.get("smb_nthash", ""),
+                smb_domain=body.get("smb_domain", ""),
+                targets=targets,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"lateral.run failed: {e}")
+
+    # ── Knowledge graph (cross-engagement memory) ──
+    @app.get("/api/knowledge/stats")
+    async def knowledge_stats(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Aggregate counts + top-success techniques from ~/.heaven/knowledge.db."""
+        try:
+            from heaven.ai.knowledge_graph import get_knowledge_graph
+        except Exception as e:
+            raise HTTPException(500, f"knowledge_graph unavailable: {e}")
+        return get_knowledge_graph().stats()
+
+    @app.get("/api/knowledge/rank")
+    async def knowledge_rank(
+        os: str = Query(""), web_tech: str = Query(""),
+        ad_domain: str = Query(""), cloud: str = Query(""),
+        ports: str = Query("", description="comma-separated open ports, e.g. 22,80,443"),
+        top: int = Query(10),
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Beta-smoothed posterior success-rate per technique for the supplied profile."""
+        try:
+            from heaven.ai.knowledge_graph import TargetProfile, get_knowledge_graph
+        except Exception as e:
+            raise HTTPException(500, f"knowledge_graph unavailable: {e}")
+        try:
+            port_ints = [int(p) for p in ports.split(",") if p.strip()]
+        except ValueError:
+            raise HTTPException(422, "ports must be comma-separated integers")
+        profile = TargetProfile(
+            os=os, web_tech=web_tech, ad_domain=ad_domain, cloud=cloud,
+            open_ports_top=port_ints,
+        )
+        rankings = get_knowledge_graph().rank_techniques(profile, top_n=top)
+        return {
+            "fingerprint": profile.fingerprint(),
+            "rankings": [
+                {"technique": r.technique,
+                 "posterior_success_rate": round(r.posterior_success_rate, 4),
+                 "evidence_count": r.evidence_count,
+                 "last_success_at": r.last_success_at}
+                for r in rankings
+            ],
+        }
+
+    # ── ExploitDB lookup (per-CVE) ──
+    @app.get("/api/exploitdb/{cve}")
+    async def exploitdb_lookup(
+        cve: str,
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """Return Exploit-DB entries for one CVE. Tries local searchsploit
+        first, falls back to ExploitDB CSV mirror.
+        """
+        try:
+            from heaven.vulnscan.exploitdb_client import lookup_cve as _lookup
+        except Exception as e:
+            raise HTTPException(500, f"exploitdb_client unavailable: {e}")
+        result = await _lookup(cve)
+        return {
+            "cve": result.cve,
+            "error": result.error,
+            "count": len(result.entries),
+            "best": {
+                "edb_id": result.best.edb_id,
+                "title": result.best.title,
+                "url": result.best.edb_url,
+                "platform": result.best.platform,
+                "verified": result.best.verified,
+                "source": result.best.source,
+            } if result.best else None,
+            "entries": [
+                {"edb_id": e.edb_id, "url": e.edb_url, "title": e.title[:200],
+                 "date_published": e.date_published, "verified": e.verified,
+                 "platform": e.platform, "type": e.type}
+                for e in result.entries[:25]
+            ],
+        }
+
     # ── WebSocket for real-time updates ──
     @app.websocket("/api/ws/scan/{scan_id}")
     async def scan_websocket(websocket: WebSocket, scan_id: str, token: Optional[str] = Query(None)):

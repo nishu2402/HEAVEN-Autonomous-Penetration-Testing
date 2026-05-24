@@ -207,6 +207,49 @@ export const Benchmark = {
   latest: () => api(`/benchmark/results`),
 };
 
+// ── Sync round 2: autonomous loop, coverage, lateral, knowledge, ExploitDB ──
+
+export const Autonomous = {
+  // POST /api/autonomous/run
+  run: (body) =>
+    api(`/autonomous/run`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+export const Coverage = {
+  // GET /api/coverage?engagement=...&use_llm=true|false
+  get: (opts = {}) => {
+    const q = new URLSearchParams();
+    if (opts.engagement) q.append("engagement", opts.engagement);
+    if (opts.use_llm === false) q.append("use_llm", "false");
+    const tail = q.toString() ? `?${q.toString()}` : "";
+    return api(`/coverage${tail}`);
+  },
+};
+
+export const Lateral = {
+  // POST /api/lateral/run
+  run: (body) =>
+    api(`/lateral/run`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+export const Knowledge = {
+  // GET /api/knowledge/stats
+  stats: () => api(`/knowledge/stats`),
+  // GET /api/knowledge/rank?os=...&web_tech=...&ports=22,80
+  rank: (profile = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(profile)) {
+      if (v !== undefined && v !== null && v !== "") q.append(k, v);
+    }
+    return api(`/knowledge/rank?${q.toString()}`);
+  },
+};
+
+export const ExploitDB = {
+  // GET /api/exploitdb/{cve}
+  lookup: (cve) => api(`/exploitdb/${encodeURIComponent(cve)}`),
+};
+
 // WebSocket helper — token via query string (browsers can't set headers on WS open)
 export function openLogStream(onMessage) {
   if (!authToken) return null;

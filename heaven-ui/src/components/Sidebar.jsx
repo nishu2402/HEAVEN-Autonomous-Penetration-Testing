@@ -7,7 +7,12 @@ const ITEMS = [
   { to: "/findings",    label: "Findings",     icon: "⚠" },
   { to: "/kill-chain",  label: "Kill Chain",   icon: "⛓" },
   { to: "/scans",       label: "Scans",        icon: "⚡" },
+  { to: "/autonomous",  label: "Autonomous",   icon: "⚙" },
   { to: "/ai-plans",    label: "AI Plans",     icon: "✦" },
+  { to: "/coverage",    label: "Coverage",     icon: "◐" },
+  { to: "/postex",      label: "Post-Ex",      icon: "⚡" },
+  { to: "/lateral",     label: "Lateral",      icon: "↔" },
+  { to: "/knowledge",   label: "Knowledge",    icon: "🧠" },
   { to: "/benchmark",   label: "Benchmark",    icon: "≡" },
   { to: "/methodology", label: "Methodology",  icon: "§" },
 ];

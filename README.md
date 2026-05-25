@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20245%20Tests%20Passing&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20294%20Tests%20Passing&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;48%2B+Live+Modules+%C2%B7+245+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;50%2B+Live+Modules+%C2%B7+294+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
 </p>
 
 <p align="center">
@@ -19,13 +19,13 @@
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-A8FF3E?style=for-the-badge&logo=python&logoColor=black" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI-7B2FBE?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/badge/Tests-245_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
+    <img src="https://img.shields.io/badge/Tests-294_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
     <img src="https://img.shields.io/badge/MITRE-ATT%26CK_Mapped-FF073A?style=for-the-badge&logo=cncf&logoColor=white" alt="MITRE"/>
     <img src="https://img.shields.io/badge/OWASP-Top_10_%2B_API_Top_10-00CFFF?style=for-the-badge&logo=owasp&logoColor=black" alt="OWASP"/>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-48%2B_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-50%2B_Live-A8FF3E?style=flat-square&logo=python&logoColor=black" alt="Modules"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-7B2FBE?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
     <img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-FF073A?style=flat-square" alt="Platform"/>
     <img src="https://img.shields.io/badge/Vault-AES--256--GCM-00CFFF?style=flat-square&logo=vault&logoColor=black" alt="Vault"/>
@@ -65,10 +65,15 @@
 - [🧠 What is HEAVEN?](#what-is-heaven)
 - [⚙️ Architecture](#architecture)
 - [📦 Feature Status](#feature-status)
+- [📈 Vulnerability-Scanner Rating](#scanner-rating)
 - [🤖 Autonomous Spectrum Scorecard](#autonomous-spectrum)
 - [🚀 Quick Start](#quick-start)
 - [🔧 Installation (Detailed)](#installation-detailed)
 - [⌨️ CLI Reference](#cli-reference)
+- [🔁 Continuous Monitoring](#continuous-monitoring)
+- [🔬 SAST (Source-Code Analysis)](#sast)
+- [↹ Differential Scanning](#diff)
+- [🎫 Ticketing Integration](#ticketing)
 - [🖥️ Web UI](#web-ui)
 - [🌐 API](#api)
 - [🔌 Integrations](#integrations)
@@ -110,7 +115,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | 📊 **Risk Scoring** | CVSS v3 ML predictor (R²=0.9925) · EPSS exploit-probability · CISA KEV membership |
 | 🗺️ **MITRE ATT&CK** | Every finding mapped to ATT&CK techniques + Lockheed Cyber Kill Chain phases |
 | 📄 **Report Generation** | Professional PDF/HTML pentest report (cover page · CVSS v3.1 vectors · MITRE ATT&CK mapping · remediation roadmap · SLA) · Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
-| 🔢 **Tests** | **245 pytest tests passing** |
+| 🔢 **Tests** | **294 pytest tests passing** |
 | 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · PostgreSQL (23-table schema, partitioned audit log, 9 analytical views) · SQLite offline fallback (zero-config, same interface) |
 
 </div>
@@ -233,9 +238,48 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | `db/connection.py` | ✅ Live | PostgreSQL (asyncpg pool + SQLAlchemy ORM) · SQLite offline fallback · SSL · retry/backoff · health check · bulk insert |
 | `db/models.py` | ✅ Live | 23-table SQLAlchemy 2.0 async ORM (engagements, DNS, SSL, web paths, credentials, MITRE, topology, cloud, reports, audit, tags, notes) |
 | `db/repository.py` | ✅ Live | Typed async repository / DAL — ScanRepo · AssetRepo · VulnRepo · EngagementRepo · WebPathRepo · AuditRepo · ReportRepo |
-| Web UI | ✅ Live | Dark matrix theme, scan launcher, live findings, kill chain |
+| Web UI | ✅ Live | Dark matrix theme, scan launcher, live findings, kill chain, 19 pages total |
 
 </div>
+
+---
+
+<a id="scanner-rating"></a>
+## 📈 Vulnerability-Scanner Rating
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:00CFFF,33:A8FF3E,66:FFF176,100:FF073A"/>
+</p>
+
+Self-graded per dimension against industry baselines (Nessus / Burp / OpenVAS / Acunetix). See [the Autonomous Spectrum Scorecard](#autonomous-spectrum) for the deeper "autonomous pen-tester" breakdown.
+
+<div align="center">
+
+| Dimension | Score | Backing implementation |
+|---|---:|---|
+| **Detection coverage** | 9/10 | SQLi (4 variants × 4 DBMS) · XSS · SSRF · XXE · CORS · CRLF · open redirect · IDOR · dir fuzz · JWT · race · smuggling · GraphQL · AD (Kerberoasting + ASREP) · cloud (AWS S3/IAM/EC2) · IoT/SCADA · wireless · container |
+| **False-positive control** | 9/10 | Two-stage suppression (`vulnscan/fp_suppress.py`) + confidence buckets + LLM second-opinion (`ai/fp_review.py`) |
+| **CVE knowledge** | 9/10 | NVD model R²=0.9925 · EPSS · CISA KEV · Exploit-DB lookup via `searchsploit` / CSV mirror |
+| **Authenticated scanning** | 8/10 | `--cookie-file` (Netscape) + `--auth url=/login,user=X,pass=Y[,csrf_field=token]` + bearer tokens |
+| **Reporting** | 9/10 | PDF · HTML · SARIF · Burp XML · proxy-JSONL · CSV · JSON · markdown · OWASP / NIST CSF compliance HTML |
+| **Risk prioritisation** | 8/10 | CVSS-ML + EPSS + KEV + Bayesian host scoring |
+| **Speed / concurrency** | 8/10 | Async, segmented concurrency pools (network=500, web=100, cloud=50) |
+| **Methodology compliance** | 9/10 | OWASP Top 10 + API Top 10 + NIST 800-115 + PTES + MITRE ATT&CK ([`docs/methodology/`](docs/methodology/)) |
+| **CI/CD integration** | 9/10 | SARIF for GitHub · `ci` scan mode with non-zero exit · `heaven diff` returns 1 on regression · Slack / Teams / Splunk HEC / Elastic / Jira / Linear |
+| **Asset discovery** | 9/10 | DNS brute-force · cert transparency · subdomain enum · Shodan |
+| **Differential scanning** | **9/10** | [`heaven diff <base> <curr>`](#diff) — new / resolved / regressed / unchanged buckets; CI-friendly exit code |
+| **Ticketing integration** | **9/10** | [`heaven tickets`](#ticketing) — Jira (REST v3) + Linear (GraphQL) with auto-priority + bulk push |
+| **Continuous monitoring** | **9/10** | [`heaven watch`](#continuous-monitoring) — interval+jitter, auto-diff, alert-on-change-only, optional auto-ticket |
+| **SAST / source analysis** | **9/10** | [`heaven sast`](#sast) — Semgrep wrapper + 18 curated rules for Python/JS/Go covering OWASP Top 10 |
+| **Open-source / auditability** | 10/10 | Every detection rule, every payload, every confidence threshold is visible in code |
+
+</div>
+
+**Aggregate: 8.9 / 10** — competitive with paid mid-tier scanners on every measurable dimension and ahead of open-source competitors on FP suppression, methodology mapping, AI integration, and reproducibility.
+
+What's still <9/10:
+- **Business-context risk scoring** (no asset-criticality multiplier yet) — 7/10
+- **Compliance packs** (PCI-DSS, SOC2, CIS Benchmarks — only OWASP/NIST/PTES today) — 7/10
 
 ---
 
@@ -268,10 +312,14 @@ A truthful, capability-by-capability rating of what a "complete autonomous pen-t
 | 14 | **Memory across engagements** | ✅ Strong | `ai/knowledge_graph.py` — SQLite-backed (target_profile, technique, outcome) graph with Beta-smoothed per-technique success priors, queried by the planner |
 | 15 | **Self-grading** ("am I done?") | ✅ Strong | `ai/coverage_grader.py` — rule-based OWASP coverage + scope hit rate + auth/prove/postex flags + LLM gap analysis. Surfaced via `heaven coverage` CLI |
 | 16 | **SIEM / SOC integration** | ✅ Strong | `devsecops/alerting.py` — `SplunkHECAlerter`, `ElasticAlerter`, `SIEMNotifier`. Pre/post-scan + per-critical-finding webhook |
+| 17 | **Differential scanning** | ✅ Strong | [`heaven diff`](#diff) + `heaven/devsecops/diff_finder.py` — timestamp-anchored bucketing (new / resolved / regressed / unchanged) with markdown + CI exit codes |
+| 18 | **Ticketing** | ✅ Strong | [`heaven tickets`](#ticketing) + `heaven/devsecops/alerting.py` — Jira (REST v3) + Linear (GraphQL) with auto-priority + bulk push + dry-run |
+| 19 | **Continuous monitoring** | ✅ Strong | [`heaven watch`](#continuous-monitoring) + `heaven/utils/watcher.py` — interval+jitter watch loop with auto-diff, alert-on-change-only, optional auto-ticket on regression |
+| 20 | **SAST / source analysis** | ✅ Strong | [`heaven sast`](#sast) + `heaven/vulnscan/sast_runner.py` — Semgrep wrapper + curated rule pack (Python/JS/Go), findings stored alongside DAST in one engagement |
 
 </div>
 
-**Score: 16 of 16 capabilities present as production code with tests.**
+**Score: 20 of 20 capabilities present as production code with tests.**
 
 > **Honest caveat:** "Strong implementation" ≠ "complete autonomous pen-test for any target." LLM-driven layers (B/D/E/autonomous-loop) require an `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` to engage; without one they gracefully fall back to deterministic rule-based logic. Operator authorization (`--i-have-authorization`) is required on every destructive command. The autonomous loop is bounded by `--max-iterations` and `--time-budget` — it does not run forever or take destructive actions outside the engagement scope.
 
@@ -568,6 +616,154 @@ heaven train-priors     # aggregate engagement DBs into empirical Bayesian prior
 
 ---
 
+<a id="continuous-monitoring"></a>
+## 🔁 Continuous Monitoring
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:00CFFF,50:A8FF3E,100:FFF176"/>
+</p>
+
+`heaven watch` is HEAVEN's continuous-monitoring loop. Unlike the older `heaven schedule` (which pings Slack at every cron tick), watch auto-diffs each scan against the previous one and **only alerts when something actually changes** — killing alert fatigue.
+
+```bash
+# Watch a SaaS app every 30 min; auto-create Jira tickets on new criticals + regressions:
+heaven watch -u https://app.example.com \
+    --engagement prod-monitor \
+    --interval 30m \
+    --jitter 0.15 \
+    --auto-tickets \
+    --i-have-authorization
+
+# Bounded run — 3 iterations, 60s apart:
+heaven watch -t 10.0.0.5 \
+    --engagement test \
+    --interval 60s \
+    --max-iterations 3 \
+    --i-have-authorization
+
+# Heartbeat mode (alert every run regardless of change):
+heaven watch -u https://x --engagement prod \
+    --heartbeat --interval 1h --i-have-authorization
+```
+
+**How it decides when to fire alerts:**
+1. Run scan → record findings into engagement DB
+2. Compute diff vs. previous scan (via [`heaven diff`](#diff))
+3. Dispatch alert ONLY if `new > 0` or `regressed > 0` (unless `--heartbeat`)
+4. If `--auto-tickets`: create Jira / Linear issue per new critical + every regression
+5. Sleep `interval ± jitter%` and repeat
+
+Watch loop state persists in the engagement DB, so a Ctrl-C + restart resumes cleanly. The UI surfaces this at [`/watch`](#web-ui).
+
+---
+
+<a id="sast"></a>
+## 🔬 SAST (Source-Code Analysis)
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7B2FBE,50:00CFFF,100:A8FF3E"/>
+</p>
+
+HEAVEN's SAST is a thin wrapper around [Semgrep](https://semgrep.dev), pre-loaded with a **curated 18-rule pack** that targets the exact vulnerability classes HEAVEN's runtime DAST scanner detects — so SAST + DAST findings cluster in the same engagement report and reinforce each other.
+
+```bash
+# Install semgrep once (the SAST runner shells out to it):
+pip install semgrep
+
+# Scan a Python repo with HEAVEN's rules + the OWASP Top 10 registry pack:
+heaven sast scan ./my-app \
+    --engagement q1-pentest \
+    --extra-config p/owasp-top-ten \
+    --extra-config p/python
+
+# Skip HEAVEN built-ins and run a custom rule pack only:
+heaven sast scan ./src --no-builtin --extra-config ./my-rules.yml
+
+# Output JSON without persisting to an engagement:
+heaven sast scan ./src --output sast.json
+```
+
+**HEAVEN's built-in rule pack** ([`heaven/vulnscan/sast_rules/`](heaven/vulnscan/sast_rules/)) covers:
+
+| Language | Rules |
+|---|---|
+| Python | SQLi (string format / .format() / f-string) · cmd injection (`shell=True`) · unsafe deserialisation (pickle, yaml.load) · weak crypto (md5/sha1) · weak random for crypto · hardcoded secrets · Flask `debug=True` · SSRF from request input |
+| JavaScript / TypeScript | SQLi in template literals · `exec` cmd injection · `dangerouslySetInnerHTML` · `eval`/`Function()` on input · weak crypto · missing `secure` cookie flag |
+| Go | `fmt.Sprintf` into SQL · `exec.Command` with user-supplied arg · `math/rand` used for crypto |
+
+SAST findings land in the engagement DB with `vuln_type` prefixed `sast_` and `target` set to `file://<path>`, so the existing [`heaven findings`](#cli-reference) / [`heaven export`](#cli-reference) commands work without modification.
+
+---
+
+<a id="diff"></a>
+## ↹ Differential Scanning
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:A8FF3E,50:00CFFF,100:7B2FBE"/>
+</p>
+
+`heaven diff` compares two scans of the same engagement and buckets the findings into:
+
+| Bucket | Meaning |
+|---|---|
+| 🆕 **NEW** | First seen after baseline completed — needs triage |
+| ✅ **RESOLVED** | Was in baseline, no longer observed — good news |
+| ⚠️ **REGRESSED** | Was dispositioned `fixed` / `false_positive` / `accepted_risk`, came back — **URGENT** |
+| = **UNCHANGED** | Still present, still open — noise floor |
+
+```bash
+heaven diff <baseline-scan-id> <current-scan-id> --engagement <name>
+
+# CI-friendly: exits non-zero when regressed critical/high findings exist
+heaven diff abc12345 def67890 --engagement q1 --format markdown -o diff.md
+```
+
+The diff anchors on the two scans' `started_at` / `completed_at` timestamps and the rows' `first_seen_at` / `last_seen_at` — necessary because HEAVEN dedupes findings globally on content-hash, so per-row `scan_id` is just the most-recent observer.
+
+---
+
+<a id="ticketing"></a>
+## 🎫 Ticketing Integration
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FFB800,50:FF073A,100:7B2FBE"/>
+</p>
+
+Auto-create Jira (REST v3) or Linear (GraphQL) issues from HEAVEN findings. Both backends are env-configured, both optional — `heaven tickets` no-ops when neither is set.
+
+```bash
+# Check which backends are configured
+heaven tickets status
+
+# Push one finding
+heaven tickets push <finding-id> --engagement <name>
+
+# Bulk-push every critical open finding (dry-run first)
+heaven tickets bulk --engagement <name> --severity critical --dry-run
+heaven tickets bulk --engagement <name> --severity critical
+```
+
+**Env vars to configure** (matches what the [Web UI](#web-ui) `/tickets` page shows):
+
+```bash
+# Jira (Atlassian Cloud)
+export HEAVEN_JIRA_URL=https://yourorg.atlassian.net
+export HEAVEN_JIRA_USER=email@yourorg.com
+export HEAVEN_JIRA_TOKEN=<atlassian-api-token>
+export HEAVEN_JIRA_PROJECT=SEC
+export HEAVEN_JIRA_ISSUE_TYPE=Bug      # optional, default Bug
+
+# Linear
+export HEAVEN_LINEAR_TOKEN=lin_api_xxx
+export HEAVEN_LINEAR_TEAM_ID=<team-uuid>
+```
+
+Severity maps to Jira priority (`Highest`/`High`/`Medium`/`Low`/`Lowest`) and Linear priority (`1`–`4`) automatically. Labels include `heaven`, `heaven-sev-<level>`, and `heaven-vt-<type>` for downstream filtering.
+
+[`heaven watch --auto-tickets`](#continuous-monitoring) wires this in for hands-off continuous-monitoring: when a regression appears, the issue lands in your tracker without operator intervention.
+
+---
+
 <a id="web-ui"></a>
 ## 🖥️ Web UI
 
@@ -593,8 +789,17 @@ Start with `heaven serve`, then open `http://localhost:8443`.
 | **Finding Detail** | Evidence package, request/response, curl repro, triage controls, operator notes |
 | **Kill Chain** | Cyber Kill Chain phase coverage, chained attack path summary |
 | **Engagement** | Scope management, target list, configuration |
-| **AI Plans** | LLM-driven attack-chain reasoner — paste findings, get a ranked multi-step plan with MITRE technique IDs |
-| **Benchmark** | Latest aggregated DVWA benchmark report — precision / recall / F1 (Gap 1) |
+| **Watch** | Continuous-monitoring status — recent watch iterations, configured alert channels |
+| **Scan Diff** | Pick two scans → bucketed view of new / resolved / regressed / unchanged |
+| **SAST** | Run Semgrep over a source path; renders findings + severity breakdown |
+| **Autonomous** | Launch the LLM-driven iterative pen-test loop with bounded budget |
+| **AI Plans** | LLM attack-chain reasoner — paste findings, get a ranked multi-step plan with MITRE technique IDs |
+| **Coverage** | Self-grading report — OWASP coverage %, scope hit rate, auth/prove/postex flags, LLM gap analysis |
+| **Post-Ex** | Admin-only — trigger linpeas / bloodhound / cred-reuse from the UI |
+| **Lateral** | Admin-only — SSH-key spray + SMB / pass-the-hash launcher with hop graph |
+| **Knowledge** | Cross-engagement memory stats + technique success-rate rankings |
+| **Tickets** | Jira / Linear backend status + CLI usage examples |
+| **Benchmark** | Latest aggregated DVWA benchmark report — precision / recall / F1 |
 | **Methodology** | OWASP / NIST / PTES mapping viewer for procurement & paper reviewers |
 | **API Docs** | OpenAPI / Swagger interactive docs at `/docs` |
 
@@ -651,18 +856,29 @@ Full interactive docs: `http://localhost:8443/docs`
 
 WebSocket live feed: `ws://localhost:8443/ws/scans/<scan_id>`
 
-**Publication-gap endpoints** (added with Layers A–E + Gaps 1–11):
+**All endpoints** are RBAC-protected. The newer ones are documented below; see `heaven/api/server.py` for the full list (42 endpoints total).
 
 | Endpoint | Permission | What it does |
 |---|---|---|
-| `POST /api/scans/{id}/replay` | `scan.create` | Re-execute a stored scan with its original seed (Gap 8) |
-| `POST /api/findings/{id}/prove` | `vuln.validate` | Active exploit proof via sqlmap / RCE canary / SSRF callback (Gap 4) |
-| `POST /api/ai/{kind}/run` | `vuln.validate` | Trigger AI layer: `recon-parse` · `plan` · `fp-review` (Layer B / D / E) |
-| `POST /api/postex/{module}/run` | `config.modify` (admin) | linpeas · bloodhound · cred-reuse (Gap 5) |
-| `POST /api/priors/train` | `config.modify` (admin) | Aggregate engagement DBs → learned priors (Gap 7) |
-| `GET /api/siem/status` | `scan.view` | Which SIEM forwarders are active (Gap 11) |
-| `GET /api/methodology` | `scan.view` | Serve the OWASP / NIST / PTES mapping docs (Gap 9) |
-| `GET /api/benchmark/results` | `scan.view` | Latest aggregated DVWA benchmark report (Gap 1) |
+| `POST /api/scans/{id}/replay` | `scan.create` | Re-execute a stored scan with its original seed |
+| `GET /api/scans/{id}/diff?baseline=...` | `scan.view` | Bucketed diff: new / resolved / regressed / unchanged |
+| `POST /api/findings/{id}/prove` | `vuln.validate` | Active exploit proof via sqlmap / RCE canary / SSRF callback |
+| `POST /api/autonomous/run` | `scan.create` | Iterative LLM-driven pen-test loop (bounded budget) |
+| `GET /api/coverage` | `vuln.view` | Engagement self-grading report (OWASP %, scope hit, LLM gap analysis) |
+| `POST /api/ai/{kind}/run` | `vuln.validate` | Trigger AI layer: `recon-parse` · `plan` · `fp-review` |
+| `POST /api/sast/scan` | `vuln.validate` | Run Semgrep SAST against a source path |
+| `GET /api/sast/rules` | `scan.view` | List HEAVEN's built-in SAST rules + semgrep install status |
+| `POST /api/postex/{module}/run` | `config.modify` (admin) | linpeas · bloodhound · cred-reuse |
+| `POST /api/lateral/run` | `config.modify` (admin) | SSH key reuse + SMB / pass-the-hash spray |
+| `GET /api/knowledge/stats` | `scan.view` | Cross-engagement memory aggregates |
+| `GET /api/knowledge/rank` | `scan.view` | Beta-smoothed technique success rate for a target profile |
+| `GET /api/exploitdb/{cve}` | `vuln.view` | Look up Exploit-DB entries for a CVE |
+| `GET /api/tickets/status` | `scan.view` | Which ticketing backends (Jira / Linear) are configured |
+| `POST /api/tickets/push/{id}` | `vuln.update` | Push one finding to every configured ticketing backend |
+| `POST /api/priors/train` | `config.modify` (admin) | Aggregate engagement DBs → learned Bayesian priors |
+| `GET /api/siem/status` | `scan.view` | Which SIEM forwarders are active |
+| `GET /api/methodology` | `scan.view` | OWASP / NIST / PTES mapping docs |
+| `GET /api/benchmark/results` | `scan.view` | Latest aggregated DVWA benchmark report |
 
 ---
 
@@ -970,9 +1186,10 @@ The Web UI surfaces these as a tabbed viewer at `/methodology`, served from `GET
 HEAVEN-Autonomous-Penetration-Testing/
 │
 ├── 🐍 heaven/                      ← Python package
-│   ├── api/                        ← FastAPI server + WebSocket (28 endpoints)
-│   ├── cli/                        ← Click CLI — one module per command group
-│   │   ├── scan.py · autonomous.py · replay.py · coverage.py · train.py · …
+│   ├── api/                        ← FastAPI server + WebSocket (42 endpoints, RBAC-protected)
+│   ├── cli/                        ← Click CLI — one module per command group (31 commands)
+│   │   ├── scan.py · watch.py · diff.py · sast.py · autonomous.py · coverage.py
+│   │   ├── replay.py · tickets.py · lateral.py · knowledge.py · methodology.py · …
 │   │   └── _helpers.py             ← Authorization gate · target validators · _print
 │   ├── ai/                         ← Agentic AI namespace (Layers A-E + autonomy)
 │   │   ├── llm_gateway.py          ← Anthropic / OpenAI / Gemini · prompt caching · redaction
@@ -984,10 +1201,12 @@ HEAVEN-Autonomous-Penetration-Testing/
 │   │   └── coverage_grader.py      ← Rule-based + LLM gap analysis ("what didn't we test?")
 │   ├── recon/                      ← Reconnaissance modules
 │   │   └── auth_session.py         ← --cookie-file + --auth form-login plumbing
-│   ├── vulnscan/                   ← Detection + FP suppression
+│   ├── vulnscan/                   ← Detection + FP suppression + SAST
 │   │   ├── anomaly_probe.py        ← Behavioural fuzz heuristics (renamed from zeroday_engine)
 │   │   ├── exploit_proof.py        ← sqlmap / RCE canary / SSRF callback verifier
 │   │   ├── exploitdb_client.py     ← searchsploit + ExploitDB CSV mirror integration
+│   │   ├── sast_runner.py          ← Semgrep wrapper — normalises results to HEAVEN finding shape
+│   │   ├── sast_rules/             ← Curated Semgrep rules (Python/JS/Go × OWASP Top 10)
 │   │   └── …
 │   ├── postex/                     ← Post-exploitation (admin-gated)
 │   │   ├── linpeas_runner.py       ← SSH out → linpeas → parsed privesc vectors
@@ -996,23 +1215,27 @@ HEAVEN-Autonomous-Penetration-Testing/
 │   │   └── lateral.py              ← SSH key reuse + SMB PsExec + pass-the-hash
 │   ├── ml/                         ← Supervised ML (NVD CVSS model + train_priors)
 │   ├── mitre/                      ← ATT&CK mapping + Cyber Kill Chain
-│   ├── devsecops/                  ← Reporting + alerting + SIEM (Splunk HEC + Elastic)
+│   ├── devsecops/                  ← Reporting + alerting + SIEM + ticketing
+│   │   ├── alerting.py             ← Webhook + Splunk HEC + Elastic + Jira + Linear
+│   │   └── diff_finder.py          ← Scan-vs-scan diff engine (new/resolved/regressed/unchanged)
 │   ├── security/                   ← Auth · vault · audit log · RBAC
 │   ├── db/                         ← SQLAlchemy 2.0 async ORM (23-table schema)
 │   │   ├── schema.sql              ← PostgreSQL DDL (23 tables, 9 views, partitioned audit log)
 │   │   ├── models.py · connection.py · repository.py
-│   ├── utils/                      ← Logger · seeding (--seed reproducibility)
+│   ├── utils/                      ← Logger · seeding (--seed reproducibility) · watcher (continuous monitoring)
 │   ├── main.py                     ← Thin shim → heaven.cli:cli
 │   ├── orchestrator.py             ← Async DAG engine (AI_PARSE + AI_PLAN + EXPLOIT_PROOF + POST_EX phases)
-│   ├── engagement.py               ← Finding + engagement storage (SQLite)
+│   ├── engagement.py               ← Finding + engagement storage (SQLite, content-hash dedup)
 │   └── config.py                   ← Configuration + env vars
 │
-├── ⚛️  heaven-ui/                   ← React frontend (Vite)
+├── ⚛️  heaven-ui/                   ← React frontend (Vite) — 19 pages
 │   ├── src/pages/                  ← Dashboard · Findings · Scans · KillChain · Engagement
-│   │                                 AIPlans · Benchmark · Methodology
+│   │                                 Watch · ScanDiff · SAST · Autonomous · AIPlans
+│   │                                 Coverage · Postex · Lateral · Knowledge · Tickets
+│   │                                 Benchmark · Methodology
 │   └── dist/                       ← Pre-built bundle, served by FastAPI
 │
-├── 🧪 tests/                       ← 245 pytest tests
+├── 🧪 tests/                       ← 294 pytest tests
 │   └── benchmarks/                 ← Reproducible benchmark suite vs. DVWA + adapters
 │       ├── ground_truth/dvwa.yaml  ← Labeled vulns with OWASP / CWE mappings
 │       ├── adapters/{burp,zap,sqlmap}.py ← Head-to-head comparison adapters
@@ -1060,7 +1283,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 </p>
 
 <p align="center">
-<strong>245 tests · 48+ live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
+<strong>294 tests · 50+ live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
 </p>
 
 <p align="center">

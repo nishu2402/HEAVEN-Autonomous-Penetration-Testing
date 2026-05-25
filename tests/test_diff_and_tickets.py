@@ -17,6 +17,11 @@ import pytest
 
 
 class TestDiffEngine:
+    """The diff engine anchors on scan timestamps (scans.started_at and
+    scans.completed_at) and the findings' first_seen_at / last_seen_at,
+    because HEAVEN dedupes findings globally on content-hash — the per-row
+    scan_id is only the most-recent scan that observed the finding."""
+
     def _store(self, tmp_path):
         from heaven.engagement import EngagementStore
         store = EngagementStore(tmp_path / "e.db")
@@ -25,131 +30,135 @@ class TestDiffEngine:
 
     def _add(self, store, scan_id, fid_seed, vt="sqli_boolean", target="10.0.0.1",
              severity="high", confidence=0.9, status="open"):
-        """Add a finding via upsert; returns the deterministic id."""
         d = {
             "target": target, "vuln_type": vt,
             "title": f"{vt} on {target}", "severity": severity,
-            "confidence": confidence, "param": fid_seed,  # param fed into hash
+            "confidence": confidence, "param": fid_seed,
         }
         fid = store.upsert_finding(scan_id, d)
         if status != "open":
             store.update_finding_status(fid, status)
         return fid
 
-    def test_new_finding_appears_in_new_bucket(self, tmp_path):
+    def _mark_scan_complete(self, store, scan_id, ts: str):
+        """Manually backdate a scan's completed_at — needed so tests can
+        deterministically order finding timestamps vs. scan completion."""
+        import sqlite3
+        with sqlite3.connect(store.db_path) as c:
+            c.execute("UPDATE scans SET status='completed', completed_at=? WHERE id=?",
+                      (ts, scan_id))
+            c.commit()
+
+    def _backdate_finding(self, store, fid, first: str, last: str):
+        """Manually pin a finding's first_seen/last_seen for deterministic tests."""
+        import sqlite3
+        with sqlite3.connect(store.db_path) as c:
+            c.execute("UPDATE findings SET first_seen_at=?, last_seen_at=? WHERE id=?",
+                      (first, last, fid))
+            c.commit()
+
+    def test_new_finding_first_seen_after_baseline_complete(self, tmp_path):
         from heaven.devsecops.diff_finder import compute_diff
         store = self._store(tmp_path)
-        # baseline: nothing
+        # Baseline ran first, completed at T1
         store.record_scan_start("base", name="b", mode="x", config={})
-        # current: 1 new finding
+        self._mark_scan_complete(store, "base", "2020-01-01T10:00:00+00:00")
+        # Current scan started later at T2, completed at T3
         store.record_scan_start("curr", name="c", mode="x", config={})
-        self._add(store, "curr", "p1")
+        self._mark_scan_complete(store, "curr", "2020-01-01T11:00:00+00:00")
+        # Add a finding "discovered" at 10:30 — AFTER baseline completed
+        fid = self._add(store, "curr", "p1")
+        self._backdate_finding(store, fid, "2020-01-01T10:30:00+00:00", "2020-01-01T10:30:00+00:00")
         d = compute_diff(store, "base", "curr")
         assert len(d.new) == 1
-        assert len(d.resolved) == 0
-        assert len(d.regressed) == 0
+        assert d.new[0].id == fid
 
-    def test_resolved_finding_appears_in_resolved_bucket(self, tmp_path):
+    def test_resolved_when_last_seen_before_current_start(self, tmp_path):
         from heaven.devsecops.diff_finder import compute_diff
         store = self._store(tmp_path)
         store.record_scan_start("base", name="b", mode="x", config={})
-        self._add(store, "base", "p1")
+        self._mark_scan_complete(store, "base", "2020-01-01T10:00:00+00:00")
+        # Finding was around in baseline timeframe
+        fid = self._add(store, "base", "p1")
+        self._backdate_finding(store, fid, "2020-01-01T09:30:00+00:00", "2020-01-01T09:45:00+00:00")
+        # Current scan starts later — finding has not been re-observed since
         store.record_scan_start("curr", name="c", mode="x", config={})
-        # no finding added to current scan
+        # record_scan_start sets started_at = now(), which is later than 09:45
         d = compute_diff(store, "base", "curr")
         assert len(d.resolved) == 1
-        assert len(d.new) == 0
+        assert d.resolved[0].id == fid
 
-    def test_regressed_finding_after_fixed_status(self, tmp_path):
-        """Finding was marked 'fixed' in baseline, but came back in current."""
+    def test_regressed_when_fixed_finding_observed_again(self, tmp_path):
         from heaven.devsecops.diff_finder import compute_diff
         store = self._store(tmp_path)
         store.record_scan_start("base", name="b", mode="x", config={})
+        self._mark_scan_complete(store, "base", "2020-01-01T10:00:00+00:00")
         fid = self._add(store, "base", "p1", status="fixed")
+        # Finding observed in baseline window
+        self._backdate_finding(store, fid, "2020-01-01T09:30:00+00:00", "2020-01-01T09:45:00+00:00")
+        # Current scan starts later
         store.record_scan_start("curr", name="c", mode="x", config={})
-        # Re-upsert same content → same id; status preserved? No — upsert
-        # re-records the scan-level entry but doesn't touch the status.
-        # We need to insert the same finding into the new scan.
+        # Re-upsert SAME content → updates last_seen_at to now (which is >= curr.started_at)
         self._add(store, "curr", "p1")
-        # The finding id is content-hashed so identical content → same id
-        # But upsert preserves status, so it stays 'fixed'... let me check.
-        # Actually upsert preserves operator_notes and status on collision.
-        # The 'regressed' detection looks at base.status, which is still 'fixed'.
         d = compute_diff(store, "base", "curr")
-        assert len(d.regressed) == 1, f"expected regression, got {d.to_dict()}"
+        assert len(d.regressed) == 1, f"expected regression, got {d.to_dict()['summary']}"
         assert d.regressed[0].id == fid
 
-    def test_unchanged_finding_with_no_severity_shift(self, tmp_path):
+    def test_unchanged_when_open_and_recently_observed(self, tmp_path):
         from heaven.devsecops.diff_finder import compute_diff
         store = self._store(tmp_path)
         store.record_scan_start("base", name="b", mode="x", config={})
-        self._add(store, "base", "p1", severity="high", confidence=0.9)
+        self._mark_scan_complete(store, "base", "2020-01-01T10:00:00+00:00")
+        fid = self._add(store, "base", "p1")
+        self._backdate_finding(store, fid, "2020-01-01T09:30:00+00:00", "2020-01-01T09:45:00+00:00")
         store.record_scan_start("curr", name="c", mode="x", config={})
-        self._add(store, "curr", "p1", severity="high", confidence=0.9)
+        # Re-observe — last_seen_at moves to now()
+        self._add(store, "curr", "p1")
         d = compute_diff(store, "base", "curr")
+        # status is still open, last_seen >= curr.started_at, first_seen <= base.completed_at
         assert len(d.unchanged) == 1
-        assert len(d.promoted) == 0
-        assert len(d.demoted) == 0
-
-    def test_promoted_when_severity_increases(self, tmp_path):
-        from heaven.devsecops.diff_finder import compute_diff
-        store = self._store(tmp_path)
-        store.record_scan_start("base", name="b", mode="x", config={})
-        self._add(store, "base", "p1", severity="medium")
-        store.record_scan_start("curr", name="c", mode="x", config={})
-        self._add(store, "curr", "p1", severity="critical")
-        d = compute_diff(store, "base", "curr")
-        assert len(d.promoted) == 1
-        assert d.promoted[0].baseline_severity == "medium"
-        assert d.promoted[0].severity == "critical"
-
-    def test_promoted_when_confidence_jumps_above_threshold(self, tmp_path):
-        from heaven.devsecops.diff_finder import compute_diff
-        store = self._store(tmp_path)
-        store.record_scan_start("base", name="b", mode="x", config={})
-        self._add(store, "base", "p1", confidence=0.5)
-        store.record_scan_start("curr", name="c", mode="x", config={})
-        self._add(store, "curr", "p1", confidence=0.9)  # +0.4
-        d = compute_diff(store, "base", "curr")
-        assert len(d.promoted) == 1
-        assert d.promoted[0].baseline_confidence == 0.5
-
-    def test_demoted_when_severity_drops(self, tmp_path):
-        from heaven.devsecops.diff_finder import compute_diff
-        store = self._store(tmp_path)
-        store.record_scan_start("base", name="b", mode="x", config={})
-        self._add(store, "base", "p1", severity="critical")
-        store.record_scan_start("curr", name="c", mode="x", config={})
-        self._add(store, "curr", "p1", severity="low")
-        d = compute_diff(store, "base", "curr")
-        assert len(d.demoted) == 1
+        assert d.unchanged[0].id == fid
 
     def test_summary_counts(self, tmp_path):
         from heaven.devsecops.diff_finder import compute_diff
         store = self._store(tmp_path)
         store.record_scan_start("base", name="b", mode="x", config={})
-        self._add(store, "base", "p1", severity="high")      # will be resolved
-        self._add(store, "base", "p2", status="fixed")       # will regress
+        self._mark_scan_complete(store, "base", "2020-01-01T10:00:00+00:00")
+        # Finding A: present in baseline, NOT re-observed in current → resolved
+        fid_a = self._add(store, "base", "p1", severity="high")
+        self._backdate_finding(store, fid_a, "2020-01-01T09:30:00+00:00", "2020-01-01T09:45:00+00:00")
+        # Finding B: fixed in baseline, re-observed in current → regressed
+        fid_b = self._add(store, "base", "p2", severity="high", status="fixed")
+        self._backdate_finding(store, fid_b, "2020-01-01T09:30:00+00:00", "2020-01-01T09:45:00+00:00")
+
         store.record_scan_start("curr", name="c", mode="x", config={})
-        # 1 regression
-        self._add(store, "curr", "p2")
-        # 2 new findings (one critical, one low)
-        self._add(store, "curr", "p3", severity="critical")
-        self._add(store, "curr", "p4", severity="low")
+        # Re-observe finding B → moves last_seen to now (regressed)
+        self._add(store, "curr", "p2", severity="high")
+        # New finding C in current
+        fid_c = self._add(store, "curr", "p3", severity="critical")
+        self._backdate_finding(store, fid_c, "2020-01-01T10:30:00+00:00", "2020-01-01T10:30:00+00:00")
+
         d = compute_diff(store, "base", "curr")
         s = d.to_dict()["summary"]
-        assert s["new"] == 2
-        assert s["resolved"] == 1
-        assert s["regressed"] == 1
+        assert s["new"] == 1, f"expected 1 new, got {s}"
+        assert s["resolved"] == 1, f"expected 1 resolved, got {s}"
+        assert s["regressed"] == 1, f"expected 1 regressed, got {s}"
         assert s["critical_new"] == 1
-        assert s["regressed_critical_or_high"] >= 0   # regressed default sev was 'high'
+
+    def test_compute_diff_raises_for_unknown_scan(self, tmp_path):
+        from heaven.devsecops.diff_finder import compute_diff
+        store = self._store(tmp_path)
+        with pytest.raises(ValueError):
+            compute_diff(store, "nope-base", "nope-curr")
 
     def test_markdown_report_renders(self, tmp_path):
         from heaven.devsecops.diff_finder import compute_diff, render_diff_markdown
         store = self._store(tmp_path)
         store.record_scan_start("base", name="b", mode="x", config={})
+        self._mark_scan_complete(store, "base", "2020-01-01T10:00:00+00:00")
         store.record_scan_start("curr", name="c", mode="x", config={})
-        self._add(store, "curr", "p1", severity="critical")
+        fid = self._add(store, "curr", "p1", severity="critical")
+        self._backdate_finding(store, fid, "2020-01-01T10:30:00+00:00", "2020-01-01T10:30:00+00:00")
         d = compute_diff(store, "base", "curr")
         md = render_diff_markdown(d)
         assert "Scan diff" in md

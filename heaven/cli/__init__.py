@@ -62,8 +62,8 @@ if HAS_CLICK:
     # Wire up every subcommand module
     from heaven.cli import (
         audit, autonomous, coverage, db, diff, engage, exploitdb, findings,
-        info, knowledge, lateral, methodology, mitre, replay, scan,
-        server, tickets, train,
+        info, knowledge, lateral, methodology, mitre, replay, sast, scan,
+        server, tickets, train, watch,
     )
     audit.register(cli)
     autonomous.register(cli)
@@ -79,10 +79,12 @@ if HAS_CLICK:
     methodology.register(cli)
     mitre.register(cli)
     replay.register(cli)
+    sast.register(cli)
     scan.register(cli)
     server.register(cli)
     tickets.register(cli)
     train.register(cli)
+    watch.register(cli)
 
 else:
     def cli() -> None:  # type: ignore[misc]

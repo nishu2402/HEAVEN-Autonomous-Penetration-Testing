@@ -274,6 +274,16 @@ export const Tickets = {
   },
 };
 
+// ── Sync round 4: SAST scanner ──
+
+export const SAST = {
+  // POST /api/sast/scan
+  scan: (body) =>
+    api(`/sast/scan`, { method: "POST", body: JSON.stringify(body) }),
+  // GET /api/sast/rules
+  rules: () => api(`/sast/rules`),
+};
+
 // WebSocket helper — token via query string (browsers can't set headers on WS open)
 export function openLogStream(onMessage) {
   if (!authToken) return null;

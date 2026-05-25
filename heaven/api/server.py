@@ -1352,6 +1352,83 @@ def create_app() -> FastAPI:
             ],
         }
 
+    # ── SAST (static source-code analysis via Semgrep) ──
+    @app.post("/api/sast/scan")
+    async def sast_scan(
+        request: Request,
+        user: User = Depends(require_permission("vuln.validate")),
+    ):
+        """Run Semgrep against a source-code path. Persists findings into the
+        engagement if `engagement` is supplied.
+
+        Body JSON: {"path": "/abs/path", "engagement": "name",
+                    "extra_configs": ["p/owasp-top-ten"], "no_builtin": false,
+                    "timeout": 300}
+        """
+        try:
+            from heaven.vulnscan.sast_runner import (
+                has_semgrep, run_sast, persist_findings,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"sast_runner unavailable: {e}")
+        if not has_semgrep():
+            raise HTTPException(412, "semgrep not installed on the server "
+                                     "(pip install semgrep)")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        path = body.get("path")
+        if not path:
+            raise HTTPException(422, "body.path is required")
+
+        result = await run_sast(
+            path,
+            extra_configs=list(body.get("extra_configs") or []),
+            use_builtin_rules=not bool(body.get("no_builtin", False)),
+            timeout_s=int(body.get("timeout") or 300),
+        )
+
+        engagement = body.get("engagement")
+        if engagement and result.success:
+            import uuid as _uuid
+            from pathlib import Path as _P
+            store = _engagement_store_factory(engagement)
+            scan_id = f"sast-{_uuid.uuid4().hex[:12]}"
+            store.record_scan_start(
+                scan_id, name=f"SAST: {_P(path).name}", mode="sast",
+                config={"path": path,
+                        "extra_configs": list(body.get("extra_configs") or [])},
+            )
+            persisted = persist_findings(store, scan_id, result)
+            store.record_scan_complete(scan_id, {
+                "findings_count": persisted,
+                "duration_s": result.duration_s,
+            })
+            out = result.to_dict()
+            out["engagement_scan_id"] = scan_id
+            out["persisted_count"] = persisted
+            return out
+        return result.to_dict()
+
+    @app.get("/api/sast/rules")
+    async def sast_rules_list(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """List the built-in HEAVEN SAST rule files."""
+        from pathlib import Path as _P
+        rules_dir = _P(__file__).parent.parent / "vulnscan" / "sast_rules"
+        out: list[dict] = []
+        if rules_dir.exists():
+            for f in sorted(rules_dir.glob("*.yml")):
+                out.append({
+                    "name": f.stem,
+                    "size_bytes": f.stat().st_size,
+                })
+        return {"rules_dir": str(rules_dir), "files": out,
+                "semgrep_installed": __import__("shutil").which("semgrep") is not None}
+
     # ── Differential scanning ──
     @app.get("/api/scans/{scan_id}/diff")
     async def scan_diff(

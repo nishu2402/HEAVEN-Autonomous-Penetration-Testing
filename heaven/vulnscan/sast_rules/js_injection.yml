@@ -1,0 +1,109 @@
+# HEAVEN — JavaScript / TypeScript injection + misuse rules
+# Targets Node.js servers and front-end React/Vue components.
+
+rules:
+
+  - id: heaven.js.sqli-template-string
+    message: |
+      SQL query built from a template literal containing a request variable.
+      Use parameterised queries — every Node ORM and driver supports them.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: CWE-89
+      owasp: A03:2021 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $DB.query(`... ${$X} ...`)
+          - pattern: |
+              $DB.execute(`... ${$X} ...`)
+          - pattern: |
+              $DB.raw(`... ${$X} ...`)
+
+  - id: heaven.js.cmd-injection-exec
+    message: |
+      child_process.exec / execSync with shell=true (the default) and a
+      variable in the command — RCE vector. Use execFile / spawn with an
+      args array so the shell can't interpret metacharacters.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: CWE-78
+      owasp: A03:2021 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: |
+              exec(`... ${$X} ...`)
+          - pattern: |
+              execSync(`... ${$X} ...`)
+          - pattern: |
+              $CP.exec(`... ${$X} ...`)
+
+  - id: heaven.js.dangerously-set-inner-html
+    message: |
+      React's dangerouslySetInnerHTML on user input = XSS sink. Sanitise
+      with DOMPurify first, or render as text.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: CWE-79
+      owasp: A03:2021 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern: |
+          <$COMP dangerouslySetInnerHTML={{ __html: $X }} />
+
+  - id: heaven.js.eval-on-input
+    message: |
+      eval / Function() on dynamic data executes arbitrary JS. Almost never
+      necessary — replace with JSON.parse / explicit dispatch.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: CWE-95
+      owasp: A03:2021 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: new Function($X)
+          - pattern: Function($X)
+      - pattern-not: eval("...")
+      - pattern-not: new Function("...")
+
+  - id: heaven.js.weak-crypto-md5
+    message: |
+      MD5/SHA-1 used for security purposes. Switch to SHA-256 / SHA-512 /
+      BLAKE2 for signatures, hashing, fingerprints. Argon2id / bcrypt for
+      password hashes specifically.
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      cwe: CWE-327
+      owasp: A02:2021 - Cryptographic Failures
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: crypto.createHash("md5")
+          - pattern: crypto.createHash("sha1")
+
+  - id: heaven.js.cookie-no-secure-flag
+    message: |
+      Cookie set without secure flag — will be sent over plain HTTP if any
+      part of the site permits it. Always set { secure: true, httpOnly: true,
+      sameSite: 'lax' or 'strict' } on session cookies.
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      cwe: CWE-614
+      owasp: A05:2021 - Security Misconfiguration
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: |
+              res.cookie($NAME, $VAL, { ...$OPTS })
+      - pattern-not: |
+          res.cookie($NAME, $VAL, { ..., secure: true, ... })

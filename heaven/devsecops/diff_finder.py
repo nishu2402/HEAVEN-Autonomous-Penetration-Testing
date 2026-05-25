@@ -106,13 +106,6 @@ def _row_dict(r: FindingDiffRow) -> dict[str, Any]:
 # ═══════════════════════════════════════════
 
 
-# Minimum confidence change to register as "promoted" or "demoted"
-_CONFIDENCE_SHIFT_THRESHOLD = 0.15
-
-
-_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-
-
 def _finding_to_row(f, *, baseline_conf: Optional[float] = None,
                     baseline_sev: Optional[str] = None) -> FindingDiffRow:
     return FindingDiffRow(
@@ -211,8 +204,6 @@ def render_diff_markdown(report: DiffReport,
     lines.append(f"| 🆕 New | {s['new']} |")
     lines.append(f"| ✅ Resolved | {s['resolved']} |")
     lines.append(f"| ⚠️ Regressed | {s['regressed']} |")
-    lines.append(f"| ⬆️ Promoted | {s['promoted']} |")
-    lines.append(f"| ⬇️ Demoted | {s['demoted']} |")
     lines.append(f"| = Unchanged | {s['unchanged']} |\n")
     if s["regressed_critical_or_high"]:
         lines.append(f"> 🚨 **{s['regressed_critical_or_high']} previously-fixed "
@@ -236,9 +227,7 @@ def render_diff_markdown(report: DiffReport,
 
     _section("🆕 New findings", report.new)
     _section("⚠️ Regressed (closed → reopened)", report.regressed)
-    _section("⬆️ Promoted (severity/confidence increased)", report.promoted)
     _section("✅ Resolved", report.resolved)
-    _section("⬇️ Demoted", report.demoted)
     if include_unchanged:
         _section("= Unchanged", report.unchanged)
     return "\n".join(lines) + "\n"

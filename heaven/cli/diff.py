@@ -71,8 +71,6 @@ def diff(baseline_scan_id: str, current_scan_id: str,
         _print(f"  ⚠️  Regressed: [bold red]{s['regressed']:4}[/bold red]   "
                f"({s['regressed_critical_or_high']} critical/high) "
                + ("← URGENT" if s['regressed_critical_or_high'] else ""))
-        _print(f"  ⬆️  Promoted:  [yellow]{s['promoted']:4}[/yellow]")
-        _print(f"  ⬇️  Demoted:   [cyan]{s['demoted']:4}[/cyan]")
         _print(f"  = Unchanged: [dim]{s['unchanged']:4}[/dim]")
 
         def _print_bucket(title: str, rows, color: str = "") -> None:
@@ -91,7 +89,6 @@ def diff(baseline_scan_id: str, current_scan_id: str,
 
         _print_bucket("🆕 New findings", report.new)
         _print_bucket("⚠️ Regressed (closed → reopened)", report.regressed)
-        _print_bucket("⬆️ Promoted", report.promoted)
         _print_bucket("✅ Resolved", report.resolved)
 
     if output:

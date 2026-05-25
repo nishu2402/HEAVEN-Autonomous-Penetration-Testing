@@ -1,0 +1,57 @@
+# HEAVEN — Go security rules (small curated set)
+
+rules:
+
+  - id: heaven.go.sqli-fmt-sprintf
+    message: |
+      SQL query built with fmt.Sprintf and a variable — use parameterised
+      query (db.Query("SELECT ... WHERE id = ?", id)).
+    severity: ERROR
+    languages: [go]
+    metadata:
+      cwe: CWE-89
+      owasp: A03:2021 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $DB.Query(fmt.Sprintf("...", $X))
+          - pattern: |
+              $DB.Exec(fmt.Sprintf("...", $X))
+          - pattern: |
+              $DB.QueryRow(fmt.Sprintf("...", $X))
+
+  - id: heaven.go.cmd-injection-exec
+    message: |
+      exec.Command with a user-supplied first argument — only the first
+      arg is the binary (no shell), but operator controlling that arg can
+      run any binary on PATH. Validate against an allow-list.
+    severity: WARNING
+    languages: [go]
+    metadata:
+      cwe: CWE-78
+      owasp: A03:2021 - Injection
+      confidence: MEDIUM
+    patterns:
+      - pattern: exec.Command($CMD, ...)
+      - pattern-not: exec.Command("...", ...)
+
+  - id: heaven.go.weak-random-for-crypto
+    message: |
+      math/rand is deterministic — never use for tokens, IDs, or crypto.
+      Use crypto/rand.Read or crypto/rand.Int.
+    severity: WARNING
+    languages: [go]
+    metadata:
+      cwe: CWE-330
+      owasp: A02:2021 - Cryptographic Failures
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: rand.Int(...)
+          - pattern: rand.Intn(...)
+          - pattern: rand.Float64()
+          - pattern: rand.Read(...)
+      - pattern-inside: |
+          import "math/rand"
+          ...

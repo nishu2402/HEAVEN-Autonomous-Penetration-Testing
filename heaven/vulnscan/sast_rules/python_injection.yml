@@ -1,0 +1,156 @@
+# HEAVEN — Python injection rules
+# Tight, high-precision set focused on the same vulnerability classes
+# HEAVEN's runtime scanner targets, so SAST + DAST findings reinforce each other.
+
+rules:
+
+  - id: heaven.python.sqli-string-format
+    message: |
+      SQL query built with %, .format(), or f-string from a variable.
+      Use parameterised queries (cursor.execute(query, params)) — the
+      DB driver will escape inputs and the same query plan is cached.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: CWE-89
+      owasp: A03:2021 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $CUR.execute("..." % $X)
+          - pattern: |
+              $CUR.execute("...".format($X))
+          - pattern: |
+              $CUR.execute(f"... {$X} ...")
+
+  - id: heaven.python.cmd-injection-shell-true
+    message: |
+      subprocess called with shell=True and a variable in the command — the
+      shell will tokenise the variable, allowing operators like `;` and `|`.
+      Pass a list of args (shell=False, the default) so each token is literal.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: CWE-78
+      owasp: A03:2021 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.call($CMD, shell=True, ...)
+          - pattern: subprocess.run($CMD, shell=True, ...)
+          - pattern: subprocess.Popen($CMD, shell=True, ...)
+          - pattern: os.system($CMD)
+      - pattern-not: subprocess.$F("...", shell=True, ...)
+      - pattern-not: os.system("...")
+
+  - id: heaven.python.deserialisation-unsafe
+    message: |
+      pickle.loads / marshal.loads / yaml.load on data you don't fully
+      control = remote code execution. Use yaml.safe_load and validated
+      JSON instead.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: CWE-502
+      owasp: A08:2021 - Software and Data Integrity Failures
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: pickle.loads($X)
+          - pattern: pickle.load($X)
+          - pattern: marshal.loads($X)
+          - pattern: yaml.load($X)
+          - pattern: yaml.load($X, Loader=yaml.Loader)
+          - pattern: yaml.load($X, Loader=yaml.FullLoader)
+
+  - id: heaven.python.weak-crypto
+    message: |
+      MD5 / SHA-1 used for security-relevant hashing. Both have practical
+      collisions; use SHA-256 or BLAKE2 for signatures / fingerprinting.
+      (OK for non-security uses like cache keys — gate with `usedforsecurity=False`
+      on hashlib.new to silence this rule when intentional.)
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: CWE-327
+      owasp: A02:2021 - Cryptographic Failures
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5(...)
+          - pattern: hashlib.sha1(...)
+      - pattern-not: hashlib.md5(..., usedforsecurity=False)
+      - pattern-not: hashlib.sha1(..., usedforsecurity=False)
+
+  - id: heaven.python.weak-random-for-crypto
+    message: |
+      random.random / random.choice are deterministic PRNGs — fine for
+      simulations, NEVER for tokens / passwords / cryptographic material.
+      Use `secrets.token_urlsafe()` or `secrets.choice()` instead.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: CWE-330
+      owasp: A02:2021 - Cryptographic Failures
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: random.random()
+          - pattern: random.choice($X)
+          - pattern: random.randint($X, $Y)
+
+  - id: heaven.python.hardcoded-secret
+    message: |
+      String assignment that looks like an API key or password. Move to
+      environment variables or a secret manager.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: CWE-798
+      owasp: A07:2021 - Identification and Authentication Failures
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $VAR = "sk-..."
+          - pattern: |
+              $VAR = "AKIA..."
+          - pattern: |
+              $VAR = "ghp_..."
+          - pattern-regex: |
+              (?i)(password|api[_-]?key|secret|token)\s*=\s*['"][A-Za-z0-9_/+=.\-]{16,}['"]
+
+  - id: heaven.python.flask-debug-true
+    message: |
+      Flask app.run(debug=True) enables the Werkzeug debugger. If exposed,
+      it lets anyone execute arbitrary Python via the in-browser console.
+      Never ship debug=True to production.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: CWE-489
+      owasp: A05:2021 - Security Misconfiguration
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: $APP.run(..., debug=True, ...)
+          - pattern: app.run(..., debug=True, ...)
+
+  - id: heaven.python.ssrf-requests-from-input
+    message: |
+      `requests.get` / `httpx.get` called with a URL built from request
+      data — classic SSRF vector. Validate the URL against an allow-list
+      of hosts before fetching.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: CWE-918
+      owasp: A10:2021 - Server-Side Request Forgery
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: requests.get(request.$X.get(...))
+          - pattern: requests.get(request.args[...])
+          - pattern: requests.get(request.json[...])
+          - pattern: httpx.get(request.$X.get(...))

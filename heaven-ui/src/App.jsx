@@ -22,6 +22,8 @@ import KnowledgePage from "./pages/Knowledge.jsx";
 import LateralPage from "./pages/Lateral.jsx";
 import DiffPage from "./pages/Diff.jsx";
 import TicketsPage from "./pages/Tickets.jsx";
+import SastPage from "./pages/Sast.jsx";
+import WatchPage from "./pages/Watch.jsx";
 
 function ProtectedRoute({ children }) {
   const [authed, setAuthed] = useState(isAuthenticated());
@@ -77,6 +79,8 @@ function Shell() {
             <Route path="/benchmark" element={<Benchmark />} />
             <Route path="/methodology" element={<Methodology />} />
             <Route path="/tickets" element={<TicketsPage />} />
+            <Route path="/sast" element={<SastPage />} />
+            <Route path="/watch" element={<WatchPage />} />
           </Routes>
         </div>
       </div>

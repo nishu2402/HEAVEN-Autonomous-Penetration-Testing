@@ -250,6 +250,30 @@ export const ExploitDB = {
   lookup: (cve) => api(`/exploitdb/${encodeURIComponent(cve)}`),
 };
 
+// ── Sync round 3: differential scanning + ticketing ──
+
+export const Diff = {
+  // GET /api/scans/{id}/diff?baseline=...&engagement=...
+  compute: (currentScanId, baselineScanId, opts = {}) => {
+    const q = new URLSearchParams();
+    q.append("baseline", baselineScanId);
+    if (opts.engagement) q.append("engagement", opts.engagement);
+    if (opts.include_unchanged) q.append("include_unchanged", "true");
+    return api(`/scans/${encodeURIComponent(currentScanId)}/diff?${q.toString()}`);
+  },
+};
+
+export const Tickets = {
+  // GET /api/tickets/status
+  status: () => api(`/tickets/status`),
+  // POST /api/tickets/push/{finding_id}?engagement=...
+  push: (findingId, engagement) => {
+    const q = engagement ? `?engagement=${encodeURIComponent(engagement)}` : "";
+    return api(`/tickets/push/${encodeURIComponent(findingId)}${q}`,
+               { method: "POST" });
+  },
+};
+
 // WebSocket helper — token via query string (browsers can't set headers on WS open)
 export function openLogStream(onMessage) {
   if (!authToken) return null;

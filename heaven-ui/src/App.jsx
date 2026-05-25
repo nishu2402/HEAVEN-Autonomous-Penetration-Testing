@@ -20,6 +20,8 @@ import CoveragePage from "./pages/Coverage.jsx";
 import PostexPage from "./pages/Postex.jsx";
 import KnowledgePage from "./pages/Knowledge.jsx";
 import LateralPage from "./pages/Lateral.jsx";
+import DiffPage from "./pages/Diff.jsx";
+import TicketsPage from "./pages/Tickets.jsx";
 
 function ProtectedRoute({ children }) {
   const [authed, setAuthed] = useState(isAuthenticated());
@@ -65,6 +67,7 @@ function Shell() {
             <Route path="/findings/:id" element={<FindingDetail />} />
             <Route path="/kill-chain" element={<KillChain />} />
             <Route path="/scans" element={<Scans />} />
+            <Route path="/diff" element={<DiffPage />} />
             <Route path="/autonomous" element={<AutonomousPage />} />
             <Route path="/coverage" element={<CoveragePage />} />
             <Route path="/postex" element={<PostexPage />} />
@@ -73,6 +76,7 @@ function Shell() {
             <Route path="/ai-plans" element={<AIPlans />} />
             <Route path="/benchmark" element={<Benchmark />} />
             <Route path="/methodology" element={<Methodology />} />
+            <Route path="/tickets" element={<TicketsPage />} />
           </Routes>
         </div>
       </div>

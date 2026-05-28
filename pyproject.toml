@@ -43,14 +43,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-[project.urls]
-Homepage      = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
-Documentation = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing#readme"
-Repository    = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
-Issues        = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/issues"
-Changelog     = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/CHANGELOG.md"
-"Security Policy" = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/SECURITY.md"
-
 dependencies = [
     # Core async
     "uvloop>=0.19.0; sys_platform != 'win32'",
@@ -87,6 +79,14 @@ dependencies = [
     "hypothesis>=6.152.4",
 ]
 
+[project.urls]
+Homepage      = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
+Documentation = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing#readme"
+Repository    = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
+Issues        = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/issues"
+Changelog     = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/CHANGELOG.md"
+"Security Policy" = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/SECURITY.md"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
@@ -103,7 +103,14 @@ cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]
 heaven = "heaven.main:cli"
 
 [tool.setuptools.packages.find]
-include = ["heaven*"]
+include = ["heaven", "heaven.*"]
+
+[tool.setuptools.package-data]
+# Ship non-Python runtime data inside the wheel so `pip install heaven-pentest`
+# users get the SAST rulesets (heaven/vulnscan/sast_rules/*.yml) and the
+# PostgreSQL bootstrap schema (heaven/db/schema.sql). Without this the wheel
+# contains only .py files and those features silently degrade.
+heaven = ["**/*.yml", "**/*.yaml", "**/*.sql"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

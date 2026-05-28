@@ -20,8 +20,8 @@ jobs:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -35,8 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # mypy not enforced yet — surface issues without blocking
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -56,8 +56,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -70,9 +70,9 @@ jobs:
         run: pytest tests/ -v --cov=heaven --cov-report=xml --cov-report=term-missing
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
           fail_ci_if_error: false
         continue-on-error: true
 
@@ -81,8 +81,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # informational; vulns in deps shouldn't always block merge
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -95,8 +95,8 @@ jobs:
     name: SAST (bandit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -116,8 +116,8 @@ jobs:
     name: HEAVEN self-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -142,7 +142,7 @@ jobs:
           "
       - name: Upload self-audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: self-audit-report
           path: self-audit-report.json
@@ -152,13 +152,21 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Build image (no push)
-        uses: docker/build-push-action@v6
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image (load into local daemon)
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
+          load: true            # make the image available to `docker run` below
           tags: heaven:ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Smoke-test the built image
+        # Building isn't enough — a broken install path produces an image that
+        # builds fine but crashes on startup. Actually run it to prove the
+        # `heaven` entry point imports and executes.
+        run: |
+          docker run --rm heaven:ci-${{ github.sha }} heaven --version
+          docker run --rm heaven:ci-${{ github.sha }} heaven --help | head -5

@@ -1,0 +1,27 @@
+apiVersion: v2
+name: heaven
+description: |
+  HEAVEN — Autonomous penetration-testing framework with AI-driven attack-chain
+  planning, continuous monitoring, SAST/DAST, and ticketing integration.
+type: application
+version: 1.0.0           # chart version (SemVer)
+appVersion: "1.0.0"      # HEAVEN application version
+
+keywords:
+  - security
+  - pentesting
+  - vulnerability-scanner
+  - devsecops
+
+home: https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing
+sources:
+  - https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing
+
+maintainers:
+  - name: Nisarg Chasmawala
+    email: nisargkc@gmail.com
+    url: https://www.linkedin.com/in/nisarg-chasmawala
+
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/category: security

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS scope (
     target          TEXT NOT NULL UNIQUE,
     kind            TEXT NOT NULL,            -- 'ip', 'cidr', 'host', 'url', 'domain'
     in_scope        INTEGER NOT NULL DEFAULT 1,
+    criticality     TEXT NOT NULL DEFAULT 'medium',  -- low | medium | high | crown_jewel
     notes           TEXT,
     added_at        TEXT NOT NULL
 );
@@ -241,9 +242,21 @@ class ScopeEntry:
     target: str
     kind: str = "host"
     in_scope: bool = True
+    criticality: str = "medium"  # low / medium / high / crown_jewel
     notes: str = ""
     added_at: str = ""
     id: Optional[int] = None
+
+
+# Risk-score multipliers per asset criticality. Used to bias scan
+# prioritisation and report ordering — a critical SQLi on a "crown_jewel"
+# asset outranks the same finding on a "low"-criticality dev box.
+CRITICALITY_MULTIPLIER = {
+    "low":          0.7,
+    "medium":       1.0,
+    "high":         1.3,
+    "crown_jewel":  1.5,
+}
 
 
 @dataclass
@@ -322,14 +335,34 @@ class EngagementStore:
 
     # ── Scope ──────────────────────────────────────────────────────────
     def add_scope(self, target: str, kind: str = "host", in_scope: bool = True,
-                  notes: str = "") -> None:
+                  notes: str = "", criticality: str = "medium") -> None:
+        if criticality not in CRITICALITY_MULTIPLIER:
+            raise ValueError(
+                f"criticality must be one of {sorted(CRITICALITY_MULTIPLIER)}, "
+                f"got {criticality!r}"
+            )
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as c:
-            c.execute(
-                "INSERT OR REPLACE INTO scope (target, kind, in_scope, notes, added_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (target, kind, 1 if in_scope else 0, notes, now),
-            )
+            # Migration-safe insert: try the 6-column form; if criticality
+            # doesn't exist (older engagement DB) add it and retry.
+            try:
+                c.execute(
+                    "INSERT OR REPLACE INTO scope "
+                    "(target, kind, in_scope, criticality, notes, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (target, kind, 1 if in_scope else 0, criticality, notes, now),
+                )
+            except sqlite3.OperationalError:
+                c.execute(
+                    "ALTER TABLE scope ADD COLUMN criticality TEXT NOT NULL "
+                    "DEFAULT 'medium'"
+                )
+                c.execute(
+                    "INSERT OR REPLACE INTO scope "
+                    "(target, kind, in_scope, criticality, notes, added_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (target, kind, 1 if in_scope else 0, criticality, notes, now),
+                )
 
     def remove_scope(self, target: str) -> bool:
         with self._conn() as c:
@@ -342,14 +375,19 @@ class EngagementStore:
                 rows = c.execute("SELECT * FROM scope WHERE in_scope = 1 ORDER BY target").fetchall()
             else:
                 rows = c.execute("SELECT * FROM scope ORDER BY target").fetchall()
-            return [
-                ScopeEntry(
-                    id=r["id"], target=r["target"], kind=r["kind"],
-                    in_scope=bool(r["in_scope"]), notes=r["notes"] or "",
-                    added_at=r["added_at"],
-                )
-                for r in rows
-            ]
+            entries: list[ScopeEntry] = []
+            for r in rows:
+                row_dict = dict(r)
+                entries.append(ScopeEntry(
+                    id=row_dict.get("id"),
+                    target=row_dict["target"],
+                    kind=row_dict["kind"],
+                    in_scope=bool(row_dict.get("in_scope", 1)),
+                    criticality=row_dict.get("criticality") or "medium",
+                    notes=row_dict.get("notes") or "",
+                    added_at=row_dict.get("added_at") or "",
+                ))
+            return entries
 
     def is_in_scope(self, target: str) -> bool:
         """Check if a target is explicitly authorized in this engagement."""
@@ -358,6 +396,34 @@ class EngagementStore:
                 "SELECT in_scope FROM scope WHERE target = ?", (target,)
             ).fetchone()
             return bool(row and row["in_scope"])
+
+    def criticality_for_target(self, target: str) -> str:
+        """Look up the criticality tag for a target. Returns 'medium' (the
+        neutral multiplier) when the target isn't in scope or the column
+        doesn't exist on older DBs.
+
+        Matches exact target first, then prefix (so a finding at
+        https://app.example.com/login inherits the 'crown_jewel' tag of
+        https://app.example.com)."""
+        with self._conn() as c:
+            try:
+                row = c.execute(
+                    "SELECT criticality FROM scope "
+                    "WHERE target = ? OR ? LIKE target || '%' "
+                    "ORDER BY length(target) DESC LIMIT 1",
+                    (target, target),
+                ).fetchone()
+                if row and row["criticality"]:
+                    return str(row["criticality"])
+            except sqlite3.OperationalError:
+                pass
+        return "medium"
+
+    def criticality_multiplier(self, target: str) -> float:
+        """Return the risk-score multiplier (0.7 / 1.0 / 1.3 / 1.5) for a target."""
+        return CRITICALITY_MULTIPLIER.get(
+            self.criticality_for_target(target), 1.0,
+        )
 
     def import_scope_file(self, path: Path | str) -> int:
         """Import a scope file (one target per line, # for comments)."""

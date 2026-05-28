@@ -1,0 +1,167 @@
+# HEAVEN — Helm chart values
+#
+# Defaults: single-replica deployment on ClusterIP. Ingress opt-in.
+# PostgreSQL is optional (HEAVEN uses SQLite by default).
+#
+# Quick start:
+#   helm install heaven ./deploy/helm/heaven \
+#       --set image.tag=v1.0.0 \
+#       --set secrets.adminPassword=$(openssl rand -base64 32) \
+#       --set secrets.dbPassword=$(openssl rand -base64 32)
+
+# ─────────────────────────────────────────────────────────────
+# Container image
+# ─────────────────────────────────────────────────────────────
+image:
+  repository: ghcr.io/nishu2402/heaven
+  tag: ""                  # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+# - name: ghcr-creds
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ─────────────────────────────────────────────────────────────
+# Deployment
+# ─────────────────────────────────────────────────────────────
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+# Security context — non-root, read-only FS, dropped capabilities
+podSecurityContext:
+  fsGroup: 1000
+
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false   # HEAVEN writes scan output under /app/data
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ─────────────────────────────────────────────────────────────
+# Service
+# ─────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 8443
+  annotations: {}
+
+# ─────────────────────────────────────────────────────────────
+# Ingress (off by default; enable + set hosts to expose externally)
+# ─────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+  hosts:
+    - host: heaven.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: heaven-tls
+      hosts:
+        - heaven.example.com
+
+# ─────────────────────────────────────────────────────────────
+# Persistent storage for engagement DBs + audit log
+# ─────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""         # uses cluster default; e.g. gp3 / standard
+  accessMode: ReadWriteOnce
+  mountPath: /app/data
+
+# ─────────────────────────────────────────────────────────────
+# Secrets — created in a Kubernetes Secret, mounted as env vars
+# Set these via --set or a values.yaml override; do NOT commit them.
+# ─────────────────────────────────────────────────────────────
+secrets:
+  adminPassword: ""        # HEAVEN_ADMIN_PASSWORD (mandatory)
+  dbPassword: ""           # HEAVEN_DB_PASSWORD (mandatory)
+  llmProvider: ""          # anthropic / openai / gemini (optional)
+  anthropicKey: ""         # ANTHROPIC_API_KEY
+  openaiKey: ""            # OPENAI_API_KEY
+  geminiKey: ""            # GEMINI_API_KEY
+  nvdKey: ""               # HEAVEN_NVD_API_KEY
+  shodanKey: ""            # HEAVEN_SHODAN_API_KEY
+  webhookUrl: ""           # WEBHOOK_URL (Slack/Teams/Discord)
+  splunkHecUrl: ""
+  splunkHecToken: ""
+  elasticUrl: ""
+  elasticApiKey: ""
+  jiraUrl: ""
+  jiraUser: ""
+  jiraToken: ""
+  jiraProject: ""
+  linearToken: ""
+  linearTeamId: ""
+
+# ─────────────────────────────────────────────────────────────
+# Non-secret config (ConfigMap)
+# ─────────────────────────────────────────────────────────────
+config:
+  logLevel: INFO
+  debug: false
+  rbacEnabled: true
+  rateLimitRpm: 100
+  honeypotThreshold: 0.7
+  scannerNetConcurrency: 500
+  scannerWebConcurrency: 100
+
+# ─────────────────────────────────────────────────────────────
+# Health probes
+# ─────────────────────────────────────────────────────────────
+probes:
+  liveness:
+    httpGet:
+      path: /api/health
+      port: 8443
+    initialDelaySeconds: 30
+    periodSeconds: 30
+  readiness:
+    httpGet:
+      path: /api/health
+      port: 8443
+    initialDelaySeconds: 10
+    periodSeconds: 10
+
+# ─────────────────────────────────────────────────────────────
+# ServiceAccount + RBAC
+# ─────────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ─────────────────────────────────────────────────────────────
+# Optional: bundled PostgreSQL (recommended over SQLite for multi-replica)
+# ─────────────────────────────────────────────────────────────
+postgresql:
+  enabled: false
+  # When enabled, the official bitnami/postgresql subchart is recommended:
+  # https://github.com/bitnami/charts/tree/main/bitnami/postgresql
+  # Add as a dependency in Chart.yaml and uncomment the override below.
+  # auth:
+  #   username: heaven
+  #   database: heaven
+  #   existingSecret: heaven-secrets
+  #   secretKeys:
+  #     userPasswordKey: dbPassword

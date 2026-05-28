@@ -385,8 +385,15 @@ async def suppress_finding(session, finding: dict) -> SuppressionVerdict:
         )
 
 
-def apply_verdict(finding: dict, verdict: SuppressionVerdict) -> dict:
-    """Mutate a finding dict with the suppressor's verdict."""
+def apply_verdict(finding: dict, verdict: SuppressionVerdict,
+                  *, engagement_store=None) -> dict:
+    """Mutate a finding dict with the suppressor's verdict.
+
+    When `engagement_store` is supplied, the asset-criticality multiplier
+    (low=0.7 / medium=1.0 / high=1.3 / crown_jewel=1.5) is applied to the
+    risk_score. The original raw score is preserved in
+    finding["risk_score_raw"] for audit.
+    """
     finding["confidence"] = round(verdict.final_confidence, 3)
     finding["confidence_bucket"] = verdict.bucket
     finding["fp_check_reasons"] = verdict.reasons
@@ -394,6 +401,20 @@ def apply_verdict(finding: dict, verdict: SuppressionVerdict) -> dict:
     finding["suppressed"] = not verdict.keep
     if not verdict.keep:
         finding["result"] = "false_positive"
+
+    if engagement_store is not None:
+        try:
+            target = finding.get("target", "") or ""
+            mul = engagement_store.criticality_multiplier(target)
+            crit = engagement_store.criticality_for_target(target)
+        except Exception:
+            mul = 1.0
+            crit = "medium"
+        raw = float(finding.get("risk_score", 0) or 0)
+        finding["risk_score_raw"] = raw
+        finding["risk_score"] = round(raw * mul, 3)
+        finding["asset_criticality"] = crit
+        finding["criticality_multiplier"] = mul
     return finding
 
 

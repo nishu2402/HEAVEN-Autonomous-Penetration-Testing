@@ -14,7 +14,12 @@ RUN npm run build
 # ── Stage 2: Build Python packages ───────────────────────────────────
 FROM python:3.12-slim AS py-builder
 
-WORKDIR /build
+# Build under /app — the SAME path the runtime stage uses. The project is
+# installed editable, so pip bakes absolute source paths into the editable
+# finder; building under /app keeps those paths valid after the COPY into the
+# runtime stage (building under a throwaway dir like /build would leave the
+# finder pointing at a directory that no longer exists → ModuleNotFoundError).
+WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc \
@@ -57,12 +62,14 @@ WORKDIR /app
 
 # Copy installed Python packages from py-builder
 COPY --from=py-builder /install /usr/local
-# Copy source (needed for editable install paths & migrations)
-COPY --from=py-builder /build/heaven        /app/heaven
-COPY --from=py-builder /build/migrations    /app/migrations
-COPY --from=py-builder /build/alembic.ini   /app/alembic.ini
-COPY --from=py-builder /build/pyproject.toml /app/
-COPY --from=py-builder /build/NVD_model.pkl  /app/NVD_model.pkl
+# Copy source. The editable install resolves `import heaven` and the
+# source-relative lookups (heaven-ui/dist, vulnscan/sast_rules/, db/schema.sql)
+# against this tree, so the build path (/app) must match the runtime path.
+COPY --from=py-builder /app/heaven        /app/heaven
+COPY --from=py-builder /app/migrations    /app/migrations
+COPY --from=py-builder /app/alembic.ini   /app/alembic.ini
+COPY --from=py-builder /app/pyproject.toml /app/
+COPY --from=py-builder /app/NVD_model.pkl  /app/NVD_model.pkl
 
 # Copy the pre-built React UI so the API can serve it from /app/heaven-ui/dist
 COPY --from=ui-builder /ui/dist /app/heaven-ui/dist

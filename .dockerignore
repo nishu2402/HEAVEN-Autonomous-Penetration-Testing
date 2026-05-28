@@ -1,0 +1,57 @@
+# ── HEAVEN .dockerignore ─────────────────────────────────────────────
+# Keeps the Docker build context small, reproducible, and free of host-specific
+# or sensitive files.
+#
+# MUST stay in context (the image build reads these):
+#   pyproject.toml · README.md (pyproject `readme`) · requirements.txt
+#   heaven/ · migrations/ · alembic.ini · heaven-ui/ (source) · NVD_model.pkl
+
+# Version control & CI
+.git/
+.gitignore
+.github/
+
+# Python virtualenvs & build/test caches — host-specific (they bake absolute
+# paths into editable finders) and bloat the context by hundreds of MB.
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node — UI dependencies and the production build are produced fresh inside the
+# ui-builder stage, so never ship the host copies.
+node_modules/
+heaven-ui/node_modules/
+heaven-ui/dist/
+
+# Local runtime data, scan output & secrets — must NEVER leak into the image.
+data/
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+*.log
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Tests & docs aren't needed in the runtime image.
+tests/
+docs/

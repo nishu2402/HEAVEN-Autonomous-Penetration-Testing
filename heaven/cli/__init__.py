@@ -62,8 +62,9 @@ if HAS_CLICK:
     # Wire up every subcommand module
     from heaven.cli import (
         audit, autonomous, coverage, db, diff, engage, exploitdb, findings,
-        info, knowledge, lateral, methodology, mitre, replay, sast, scan,
-        server, tickets, train, watch,
+        info, init as init_module, knowledge, lateral, methodology, mitre,
+        replay, sast, scan, server, tickets, train, update as update_module,
+        watch,
     )
     audit.register(cli)
     autonomous.register(cli)
@@ -74,6 +75,7 @@ if HAS_CLICK:
     exploitdb.register(cli)
     findings.register(cli)
     info.register(cli)
+    init_module.register(cli)
     knowledge.register(cli)
     lateral.register(cli)
     methodology.register(cli)
@@ -84,6 +86,7 @@ if HAS_CLICK:
     server.register(cli)
     tickets.register(cli)
     train.register(cli)
+    update_module.register(cli)
     watch.register(cli)
 
 else:

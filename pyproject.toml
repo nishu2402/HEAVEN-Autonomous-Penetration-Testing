@@ -3,23 +3,53 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "heaven"
+name = "heaven-pentest"
 version = "1.0.0"
-description = "HEAVEN — Automated Infrastructure & Application Vulnerability Scanner and Risk Triage Platform"
+description = "HEAVEN — autonomous penetration-testing framework with AI-driven attack-chain planning, continuous monitoring, SAST/DAST, and 31 CLI commands"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
-    {name = "HEAVEN Project", email = "heaven@pentest.local"}
+    {name = "Nisarg Chasmawala", email = "nisargkc@gmail.com"}
 ]
-keywords = ["security", "pentesting", "vulnerability-scanner", "devsecops"]
+maintainers = [
+    {name = "Nisarg Chasmawala", email = "nisargkc@gmail.com"}
+]
+keywords = [
+    "security", "pentesting", "vulnerability-scanner", "devsecops",
+    "owasp", "mitre-attack", "sast", "dast", "ai-security",
+    "autonomous-pentesting", "fastapi", "click",
+]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Framework :: AsyncIO",
+    "Framework :: FastAPI",
     "Intended Audience :: Developers",
-    "Topic :: Security",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Networking :: Monitoring",
+    "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage      = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
+Documentation = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing#readme"
+Repository    = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
+Issues        = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/issues"
+Changelog     = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/CHANGELOG.md"
+"Security Policy" = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/SECURITY.md"
 
 dependencies = [
     # Core async

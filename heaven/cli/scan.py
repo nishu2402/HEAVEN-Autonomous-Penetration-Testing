@@ -23,6 +23,13 @@ from heaven.utils.logger import HAS_RICH, get_logger, print_banner
 logger = get_logger("cli.scan")
 
 
+class _SkipHud(Exception):
+    """Sentinel — raised inside the Rich-HUD try-block when --watch-tail
+    has already run the scan and bound `summary`. Caught by an except
+    clause that does nothing, letting control fall through to the post-
+    scan persistence."""
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # scan — the big one
 # ═══════════════════════════════════════════════════════════════════════════
@@ -66,6 +73,9 @@ logger = get_logger("cli.scan")
               help="Full autonomous mode: --auto-prove + chain post-exploitation modules "
                    "(linpeas / cred-reuse) from initial-access findings. Requires explicit "
                    "operator authorization.")
+@click.option("--watch-tail", is_flag=True,
+              help="Headless mode: disable the Rich live HUD and stream a flat log line per "
+                   "phase / finding to stdout. Better for CI, ssh sessions, and `tee` piping.")
 def scan(
     target: tuple[str, ...], url: tuple[str, ...],
     repo: tuple[str, ...], cloud: tuple[str, ...],
@@ -77,6 +87,7 @@ def scan(
     i_have_authorization: bool, skip_dep_check: bool,
     seed: Optional[int], cookie_file: Optional[str], auth: str,
     auto_prove: bool, autonomous: bool,
+    watch_tail: bool = False,
 ) -> None:
     """Launch a vulnerability scan against specified targets."""
     print_banner()
@@ -245,7 +256,70 @@ def scan(
             config={"targets": targets, "seed": seed},
         )
 
+    # --watch-tail short-circuits the Rich live HUD with a flat stdout stream.
+    # Useful for CI / ssh sessions / `heaven scan ... | tee scan.log` workflows
+    # where the live HUD ends up scrambled in the recording.
+    if watch_tail:
+        import time as _time
+
+        tail_sev_counts: dict[str, int] = {
+            "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+        }
+
+        def _tail_progress(p) -> None:
+            ts = _time.strftime("%H:%M:%S")
+            phase = p.phase.value.upper()
+            pct = p.progress_pct
+            task = p.current_task or ""
+            print(f"{ts}  [{phase:14}] {pct:5.1f}%  {task}", flush=True)
+
+        def _tail_finding(f: dict) -> None:
+            ts = _time.strftime("%H:%M:%S")
+            sev = (f.get("severity") or "info").lower()
+            tail_sev_counts[sev] = tail_sev_counts.get(sev, 0) + 1
+            vt = (f.get("vuln_type") or f.get("type") or "")[:24]
+            tgt = (f.get("target") or "")[:60]
+            conf = f.get("confidence", 0)
+            try:
+                conf_str = f"{float(conf):.2f}"
+            except (TypeError, ValueError):
+                conf_str = "—"
+            print(f"{ts}  FINDING  [{sev:<8}] {vt:24} {tgt:60} conf={conf_str}",
+                  flush=True)
+
+        orch.on_progress(_tail_progress)
+        orch.on_finding(_tail_finding)
+        try:
+            try:
+                summary = asyncio.run(orch.run())
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    summary = loop.run_until_complete(orch.run())
+                finally:
+                    loop.close()
+        except KeyboardInterrupt:
+            print("Scan aborted.", flush=True)
+            sys.exit(0)
+
+        elapsed = summary.get("elapsed_seconds", 0)
+        print(
+            f"\nScan complete in {elapsed}s · "
+            f"crit={tail_sev_counts['critical']} high={tail_sev_counts['high']} "
+            f"med={tail_sev_counts['medium']} low={tail_sev_counts['low']} "
+            f"info={tail_sev_counts['info']}",
+            flush=True,
+        )
+        # Skip past the Rich HUD block — `summary` is bound; fall through
+        # to the post-scan persistence by jumping over the HUD `try:`.
+        _watch_tail_handled = True
+    else:
+        _watch_tail_handled = False
+
     try:
+        if _watch_tail_handled:
+            raise _SkipHud()
         from rich.live import Live
         from rich.layout import Layout
         from rich.progress import (
@@ -430,6 +504,9 @@ def scan(
                 if console:
                     console.print(ft)
 
+    except _SkipHud:
+        # --watch-tail already ran the scan + bound `summary`; nothing to do.
+        pass
     except ImportError:
         # Fallback when Rich is not available
         def _plain_progress_callback(progress: Any) -> None:
@@ -546,7 +623,12 @@ def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
     _print(f"Interval: every {interval_minutes} minutes")
 
     try:
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        # Import apscheduler dynamically to avoid hard dependency at module-import time
+        import importlib
+        try:
+            AsyncIOScheduler = getattr(importlib.import_module("apscheduler.schedulers.asyncio"), "AsyncIOScheduler")
+        except Exception:
+            raise ImportError
         import subprocess
         from datetime import datetime
 

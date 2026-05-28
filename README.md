@@ -17,6 +17,9 @@
 <div align="center">
 
   <p>
+    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/ci.yml"><img src="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
+    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/benchmark.yml"><img src="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/benchmark.yml/badge.svg?branch=main" alt="DVWA Benchmark"/></a>
+    <a href="https://pypi.org/project/heaven-pentest/"><img src="https://img.shields.io/pypi/v/heaven-pentest.svg?label=PyPI&color=A8FF3E" alt="PyPI"/></a>
     <img src="https://img.shields.io/badge/Python-3.11+-A8FF3E?style=for-the-badge&logo=python&logoColor=black" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI-7B2FBE?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
     <img src="https://img.shields.io/badge/Tests-294_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
@@ -86,6 +89,7 @@
 - [🧪 Benchmarks](#benchmarks)
 - [📐 Methodology Mapping](#methodology)
 - [📁 Project Structure](#project-structure)
+- [📚 Documentation & Community](#documentation)
 - [⚠️ Legal & Disclaimer](#legal)
 
 ---
@@ -1260,6 +1264,43 @@ HEAVEN-Autonomous-Penetration-Testing/
 ├── 🐳 Dockerfile                   ← Multi-stage container build
 └── 🐳 docker-compose.yml           ← Optional PostgreSQL stack
 ```
+
+---
+
+<a id="documentation"></a>
+## 📚 Documentation & Community
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7B2FBE,33:A8FF3E,66:00CFFF,100:FFF176"/>
+</p>
+
+<div align="center">
+
+| | Document | Purpose |
+|---|---|---|
+| 📜 | [`LICENSE`](LICENSE) | MIT License + ethical-use notice for offensive-security tools |
+| 📋 | [`CHANGELOG.md`](CHANGELOG.md) | Version history (Keep a Changelog format, SemVer) |
+| 🤝 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute — dev setup, CI lanes, code style, PR checklist |
+| ⚖️ | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Contributor Covenant v2.1 + offensive-security-specific clauses |
+| 🔒 | [`SECURITY.md`](SECURITY.md) | Responsible-disclosure policy for vulnerabilities IN HEAVEN itself |
+| 🚀 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 5-minute walkthrough for evaluating HEAVEN |
+| ⚔️ | [`docs/COMPARISON.md`](docs/COMPARISON.md) | Head-to-head vs Burp / ZAP / sqlmap / Nessus / Acunetix |
+| 🎬 | [`docs/DEMO.md`](docs/DEMO.md) | Asciinema / video recording script for showcasing HEAVEN |
+| 🧪 | [`docs/BENCHMARK_HOWTO.md`](docs/BENCHMARK_HOWTO.md) | How to produce the real DVWA precision/recall numbers |
+| 📐 | [`docs/methodology/`](docs/methodology/) | OWASP Testing Guide v4 · NIST SP 800-115 · PTES mappings |
+| 📓 | [`docs/runbooks/`](docs/runbooks/) | Operational runbooks for common engagement workflows |
+| 🤖 | [`data/models/NVD_model.MODEL_CARD.md`](data/models/NVD_model.MODEL_CARD.md) | Google "Model Cards" format for the CVSS predictor |
+| 🧪 | [`tests/benchmarks/README.md`](tests/benchmarks/README.md) | How to run the DVWA benchmark and read the metrics |
+| ☸️ | [`deploy/helm/heaven/`](deploy/helm/heaven/) | Helm chart for Kubernetes deployments |
+
+</div>
+
+**Community channels:**
+
+- 💬 **GitHub Discussions** — design questions, ideas, show-and-tell
+- 🐛 **GitHub Issues** — use the [bug report](.github/ISSUE_TEMPLATE/bug_report.md) or [feature request](.github/ISSUE_TEMPLATE/feature_request.md) templates
+- 🔐 **Security issues** — see [`SECURITY.md`](SECURITY.md), do NOT use public issues
+- 💼 **Direct contact** — [LinkedIn](https://www.linkedin.com/in/nisarg-chasmawala) (see [Authors](#authors))
 
 ---
 

@@ -1,0 +1,48 @@
+🚀 HEAVEN has been deployed to namespace {{ .Release.Namespace }} as
+release {{ .Release.Name }}.
+
+⏳ It typically takes 30–60 seconds to become ready. Check status with:
+
+  kubectl rollout status deployment {{ include "heaven.fullname" . }} \
+      -n {{ .Release.Namespace }}
+
+{{ if .Values.ingress.enabled -}}
+🌐 The Web UI is exposed via Ingress at:
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}
+{{- end }}
+
+{{ else if eq .Values.service.type "LoadBalancer" -}}
+🌐 Get the external LoadBalancer URL:
+
+  kubectl get svc {{ include "heaven.fullname" . }} \
+      -n {{ .Release.Namespace }} \
+      -w \
+      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{"\n"}'
+
+{{ else -}}
+🌐 Port-forward to access the Web UI locally:
+
+  kubectl port-forward svc/{{ include "heaven.fullname" . }} \
+      8443:{{ .Values.service.port }} \
+      -n {{ .Release.Namespace }}
+
+Then open: https://localhost:8443
+
+{{ end }}
+🔐 The default admin username is `admin`. The password is the value of
+the `HEAVEN_ADMIN_PASSWORD` Kubernetes Secret. Retrieve with:
+
+  kubectl get secret {{ include "heaven.secretName" . }} \
+      -n {{ .Release.Namespace }} \
+      -o jsonpath='{.data.HEAVEN_ADMIN_PASSWORD}' | base64 -d
+
+📚 Documentation:
+  - README:        https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing
+  - Quick start:   docs/QUICKSTART.md
+  - Benchmark:     docs/BENCHMARK_HOWTO.md
+  - Security:      SECURITY.md
+
+⚠️ Reminder: HEAVEN performs active vulnerability testing. Every scan
+   requires --i-have-authorization. Only scan systems you own or have
+   written authorization to test.

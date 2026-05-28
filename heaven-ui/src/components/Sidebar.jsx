@@ -1,28 +1,80 @@
-import React, { useState, useEffect } from "react";
-import { NavLink } from "react-router-dom";
+// HEAVEN — Sidebar with collapsible groups
+//
+// 17 flat items was overwhelming. Groups mirror the operator's mental
+// model: Operations (what you launch) → Findings (what you triage) →
+// Engagement (workspace state) → Reporting (what you ship).
 
-const ITEMS = [
-  { to: "/",            label: "Dashboard",    icon: "▣" },
-  { to: "/engagement",  label: "Engagement",   icon: "◈" },
-  { to: "/findings",    label: "Findings",     icon: "⚠" },
-  { to: "/kill-chain",  label: "Kill Chain",   icon: "⛓" },
-  { to: "/scans",       label: "Scans",        icon: "⚡" },
-  { to: "/watch",       label: "Watch",        icon: "🔁" },
-  { to: "/diff",        label: "Scan Diff",    icon: "↹" },
-  { to: "/sast",        label: "SAST",         icon: "🔬" },
-  { to: "/autonomous",  label: "Autonomous",   icon: "⚙" },
-  { to: "/ai-plans",    label: "AI Plans",     icon: "✦" },
-  { to: "/coverage",    label: "Coverage",     icon: "◐" },
-  { to: "/postex",      label: "Post-Ex",      icon: "⚡" },
-  { to: "/lateral",     label: "Lateral",      icon: "↔" },
-  { to: "/knowledge",   label: "Knowledge",    icon: "🧠" },
-  { to: "/tickets",     label: "Tickets",      icon: "🎫" },
-  { to: "/benchmark",   label: "Benchmark",    icon: "≡" },
-  { to: "/methodology", label: "Methodology",  icon: "§" },
+import React, { useEffect, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+
+const GROUPS = [
+  {
+    name: "Operations",
+    items: [
+      { to: "/",            label: "Dashboard",    icon: "▣" },
+      { to: "/scans",       label: "Scans",        icon: "⚡" },
+      { to: "/watch",       label: "Watch",        icon: "🔁" },
+      { to: "/autonomous",  label: "Autonomous",   icon: "⚙" },
+      { to: "/diff",        label: "Scan Diff",    icon: "↹" },
+      { to: "/sast",        label: "SAST",         icon: "🔬" },
+    ],
+  },
+  {
+    name: "Findings",
+    items: [
+      { to: "/findings",    label: "Findings",     icon: "⚠" },
+      { to: "/kill-chain",  label: "Kill Chain",   icon: "⛓" },
+      { to: "/ai-plans",    label: "AI Plans",     icon: "✦" },
+      { to: "/coverage",    label: "Coverage",     icon: "◐" },
+    ],
+  },
+  {
+    name: "Engagement",
+    items: [
+      { to: "/engagement",  label: "Engagement",   icon: "◈" },
+      { to: "/knowledge",   label: "Knowledge",    icon: "🧠" },
+      { to: "/lateral",     label: "Lateral",      icon: "↔" },
+      { to: "/postex",      label: "Post-Ex",      icon: "⚡" },
+    ],
+  },
+  {
+    name: "Reporting",
+    items: [
+      { to: "/tickets",     label: "Tickets",      icon: "🎫" },
+      { to: "/benchmark",   label: "Benchmark",    icon: "≡" },
+      { to: "/methodology", label: "Methodology",  icon: "§" },
+    ],
+  },
 ];
+
+
+function useSidebarGroupState() {
+  // Default: all groups expanded. Persist collapsed state per browser.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      const raw = localStorage.getItem("heaven.sidebar.collapsed");
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  function toggle(name) {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      try {
+        localStorage.setItem("heaven.sidebar.collapsed", JSON.stringify([...next]));
+      } catch { /* localStorage disabled */ }
+      return next;
+    });
+  }
+  return [collapsed, toggle];
+}
+
 
 export default function Sidebar() {
   const [time, setTime] = useState(new Date());
+  const [collapsed, toggleGroup] = useSidebarGroupState();
+  const loc = useLocation();
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -37,17 +89,41 @@ export default function Sidebar() {
       </div>
 
       <nav>
-        {ITEMS.map((it) => (
-          <NavLink
-            key={it.to}
-            to={it.to}
-            end={it.to === "/"}
-            className={({ isActive }) => "nav-item" + (isActive ? " active" : "")}
-          >
-            <span className="nav-icon">{it.icon}</span>
-            <span>{it.label}</span>
-          </NavLink>
-        ))}
+        {GROUPS.map((group) => {
+          const isCollapsed = collapsed.has(group.name);
+          // Auto-expand a group if the active route belongs to it
+          const hasActive = group.items.some(it => loc.pathname === it.to);
+          const effectivelyCollapsed = isCollapsed && !hasActive;
+
+          return (
+            <div
+              key={group.name}
+              className={"nav-group" + (effectivelyCollapsed ? " collapsed" : "")}
+            >
+              <button
+                type="button"
+                className="nav-group-header"
+                onClick={() => toggleGroup(group.name)}
+              >
+                <span>{group.name}</span>
+                <span className="nav-group-chevron">▾</span>
+              </button>
+              <div className="nav-group-items">
+                {group.items.map((it) => (
+                  <NavLink
+                    key={it.to}
+                    to={it.to}
+                    end={it.to === "/"}
+                    className={({ isActive }) => "nav-item" + (isActive ? " active" : "")}
+                  >
+                    <span className="nav-icon">{it.icon}</span>
+                    <span>{it.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </nav>
 
       <div className="sidebar-status">
@@ -55,7 +131,9 @@ export default function Sidebar() {
         <div style={{ marginTop: 4, fontFamily: 'monospace', letterSpacing: '0.05em' }}>
           {time.toISOString().slice(11, 19)} UTC
         </div>
-        <div style={{ marginTop: 6, fontSize: 9 }}>v1.0 · operator-driven</div>
+        <div style={{ marginTop: 6, fontSize: 9 }}>
+          v1.0 · <kbd>⌘K</kbd> for command palette
+        </div>
       </div>
     </aside>
   );

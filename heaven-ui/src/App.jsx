@@ -3,8 +3,10 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import { isAuthenticated, onAuthChange } from "./api";
 
-import Sidebar      from "./components/Sidebar.jsx";
-import Header       from "./components/Header.jsx";
+import Sidebar         from "./components/Sidebar.jsx";
+import Header          from "./components/Header.jsx";
+import { ToastProvider }   from "./components/Toast.jsx";
+import { CommandPalette }  from "./components/CommandPalette.jsx";
 import LoginPage    from "./pages/LoginPage.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Engagement from "./pages/Engagement.jsx";
@@ -41,23 +43,26 @@ function ProtectedRoute({ children }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="/*"
-        element={
-          <ProtectedRoute>
-            <Shell />
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+    <ToastProvider>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <Shell />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </ToastProvider>
   );
 }
 
 function Shell() {
   return (
     <div className="app-shell">
+      <CommandPalette />
       <Sidebar />
       <div className="main-pane">
         <Header />

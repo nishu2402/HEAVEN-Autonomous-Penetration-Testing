@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "heaven.configMapName" . }}
+  labels:
+    {{- include "heaven.labels" . | nindent 4 }}
+data:
+  HEAVEN_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  HEAVEN_DEBUG: {{ .Values.config.debug | quote }}
+  HEAVEN_RBAC_ENABLED: {{ .Values.config.rbacEnabled | quote }}
+  HEAVEN_RATE_LIMIT: {{ .Values.config.rateLimitRpm | quote }}
+  HEAVEN_HONEYPOT_THRESHOLD: {{ .Values.config.honeypotThreshold | quote }}
+  HEAVEN_NET_CONCURRENCY: {{ .Values.config.scannerNetConcurrency | quote }}
+  HEAVEN_WEB_CONCURRENCY: {{ .Values.config.scannerWebConcurrency | quote }}
+  HEAVEN_DATA_DIR: {{ .Values.persistence.mountPath | quote }}

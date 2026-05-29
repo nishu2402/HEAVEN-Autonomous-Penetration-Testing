@@ -1,12 +1,16 @@
-import { useRef, useMemo, useState, useEffect } from 'react'
+import { useRef, useMemo, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Html, Stars } from '@react-three/drei'
 import * as THREE from 'three'
 
+// three.js materials need real hex colors (CSS vars can't reach the GPU),
+// so the premium palette is mirrored here as literals.
 const SEV_COLORS = {
-  critical: '#FF003C', high: '#FF6B00', medium: '#FFB800',
-  low: '#00D4FF', info: '#00FF41', unknown: '#00FF41',
+  critical: '#FF4D6A', high: '#FF8A3D', medium: '#FFC53D',
+  low: '#38BDF8', info: '#8593AD', unknown: '#6D7CFF',
 }
+const ACCENT = '#6D7CFF'
+const ACCENT_2 = '#A78BFA'
 
 function Edge({ start, end, color }) {
   const ref = useRef()
@@ -18,13 +22,13 @@ function Edge({ start, end, color }) {
 
   useFrame(({ clock }) => {
     if (ref.current) {
-      ref.current.material.opacity = 0.1 + 0.05 * Math.sin(clock.elapsedTime * 2 + start[0])
+      ref.current.material.opacity = 0.12 + 0.06 * Math.sin(clock.elapsedTime * 2 + start[0])
     }
   })
 
   return (
     <line ref={ref} geometry={geo}>
-      <lineBasicMaterial color={color || '#00FF41'} transparent opacity={0.15} />
+      <lineBasicMaterial color={color || ACCENT} transparent opacity={0.18} />
     </line>
   )
 }
@@ -59,33 +63,33 @@ function HostNode({ host, position, severity, portCount, onClick }) {
         <icosahedronGeometry args={[radius, 1]} />
         <meshStandardMaterial
           color={color} emissive={color}
-          emissiveIntensity={hovered ? 0.8 : 0.3}
-          transparent opacity={0.85}
+          emissiveIntensity={hovered ? 0.9 : 0.35}
+          transparent opacity={0.9}
           wireframe={hovered}
         />
       </mesh>
 
-      {/* Ring */}
       <mesh ref={ring} position={position} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[radius * 1.6, 0.012, 8, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={hovered ? 0.6 : 0.2} />
+        <meshBasicMaterial color={color} transparent opacity={hovered ? 0.7 : 0.22} />
       </mesh>
 
       {hovered && (
         <Html position={[position[0], position[1] + radius + 0.3, position[2]]}
               style={{ pointerEvents: 'none' }}>
           <div style={{
-            background: 'rgba(0,0,0,0.92)',
+            background: 'rgba(11,15,26,0.94)',
             border: `1px solid ${color}`,
-            color: '#00FF41',
-            padding: '6px 10px',
+            borderRadius: 8,
+            color: '#ECEFF7',
+            padding: '7px 11px',
             fontSize: '11px',
-            fontFamily: 'monospace',
+            fontFamily: 'JetBrains Mono, monospace',
             whiteSpace: 'nowrap',
-            boxShadow: `0 0 12px ${color}44`,
+            boxShadow: `0 8px 24px rgba(0,0,0,0.5), 0 0 16px ${color}55`,
           }}>
             <div style={{ color, fontWeight: 700 }}>{host.ip || host.host || 'unknown'}</div>
-            <div style={{ color: 'rgba(0,255,65,0.6)', fontSize: 10, marginTop: 2 }}>
+            <div style={{ color: '#9BA7C0', fontSize: 10, marginTop: 2 }}>
               {severity?.toUpperCase()} · {portCount} port{portCount !== 1 ? 's' : ''}
             </div>
           </div>
@@ -97,8 +101,7 @@ function HostNode({ host, position, severity, portCount, onClick }) {
 
 function GridPlane() {
   return (
-    <gridHelper args={[20, 20, 'rgba(0,255,65,0.05)', 'rgba(0,255,65,0.05)']}
-                position={[0, -2, 0]} />
+    <gridHelper args={[20, 20, '#1b2336', '#141a28']} position={[0, -2, 0]} />
   )
 }
 
@@ -130,9 +133,9 @@ function Scene({ hosts, onSelect }) {
 
   return (
     <>
-      <ambientLight intensity={0.1} />
-      <pointLight position={[0, 5, 0]} intensity={0.5} color="#00FF41" />
-      <pointLight position={[-5, -2, -5]} intensity={0.3} color="#00D4FF" />
+      <ambientLight intensity={0.12} />
+      <pointLight position={[0, 5, 0]} intensity={0.6} color={ACCENT} />
+      <pointLight position={[-5, -2, -5]} intensity={0.35} color={ACCENT_2} />
       <Stars radius={30} depth={20} count={300} factor={2} saturation={0} fade speed={0.5} />
       <GridPlane />
       {edges.map((e, i) => (
@@ -164,23 +167,14 @@ export default function NetworkTopology3D({ hosts = [] }) {
 
   return (
     <div className="topology-container">
-      {hasHosts ? (
-        <div style={{
-          position: 'absolute', top: 8, right: 10, zIndex: 10,
-          fontSize: 11, color: 'rgba(0,255,65,0.65)',
-          letterSpacing: '0.1em',
-        }}>
-          ● {hosts.length} host{hosts.length !== 1 ? 's' : ''} mapped
-        </div>
-      ) : (
-        <div style={{
-          position: 'absolute', top: 8, right: 10, zIndex: 10,
-          fontSize: 10, color: 'rgba(0,255,65,0.55)',
-          letterSpacing: '0.1em', textTransform: 'uppercase',
-        }}>
-          ○ no hosts — run a scan
-        </div>
-      )}
+      <div style={{
+        position: 'absolute', top: 12, right: 14, zIndex: 10,
+        fontSize: 11, color: 'var(--text-2)', letterSpacing: '0.06em',
+      }}>
+        {hasHosts
+          ? <><span style={{ color: 'var(--brand)' }}>●</span> {hosts.length} host{hosts.length !== 1 ? 's' : ''} mapped</>
+          : <span style={{ textTransform: 'uppercase' }}>○ no hosts — run a scan</span>}
+      </div>
 
       <Canvas
         camera={{ position: [0, 2, 8], fov: 55 }}
@@ -191,17 +185,11 @@ export default function NetworkTopology3D({ hosts = [] }) {
       </Canvas>
 
       {selected && (
-        <div style={{
-          position: 'absolute', bottom: 12, left: 12, right: 12,
-          background: 'rgba(0,0,0,0.9)',
-          border: '1px solid rgba(0,255,65,0.3)',
-          padding: '8px 12px',
-          fontSize: 11,
-          fontFamily: 'monospace',
-          color: '#00FF41',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+        <div className="card-glass" style={{
+          position: 'absolute', bottom: 14, left: 14, right: 14,
+          padding: '10px 14px', borderRadius: 'var(--radius-md)',
+          fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-0)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span>
             <span style={{ color: SEV_COLORS[selected.severity || 'unknown'] }}>●</span>
@@ -210,7 +198,7 @@ export default function NetworkTopology3D({ hosts = [] }) {
           </span>
           <button
             onClick={() => setSelected(null)}
-            style={{ background: 'none', border: 'none', color: 'rgba(0,255,65,0.4)', cursor: 'pointer', fontSize: 12 }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', fontSize: 14 }}
           >✕</button>
         </div>
       )}

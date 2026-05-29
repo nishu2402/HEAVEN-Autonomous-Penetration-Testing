@@ -64,7 +64,7 @@ export default function LateralPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#FF073A", marginTop: 0 }}>↔ Lateral Movement</h2>
+        <h2 style={{ color: "var(--crit)", marginTop: 0 }}>↔ Lateral Movement</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           SSH key reuse + SMB PsExec + pass-the-hash. Outputs a hop graph of
           which target accepted which credential. Mirrors{" "}
@@ -72,8 +72,8 @@ export default function LateralPage() {
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <fieldset style={{ border: "1px solid rgba(0,255,65,0.2)", padding: 12 }}>
-            <legend style={{ color: "#00D4FF", fontSize: 11 }}>SSH key reuse</legend>
+          <fieldset style={{ border: "1px solid var(--border)", padding: 12 }}>
+            <legend style={{ color: "var(--cyan)", fontSize: 11 }}>SSH key reuse</legend>
             <label className="form-label">Private key path (on this server)</label>
             <input type="text" value={sshKey}
                    onChange={(e) => setSshKey(e.target.value)}
@@ -86,7 +86,7 @@ export default function LateralPage() {
           </fieldset>
 
           <fieldset style={{ border: "1px solid rgba(255,7,58,0.2)", padding: 12 }}>
-            <legend style={{ color: "#FF073A", fontSize: 11 }}>SMB / pass-the-hash</legend>
+            <legend style={{ color: "var(--crit)", fontSize: 11 }}>SMB / pass-the-hash</legend>
             <label className="form-label">Username · Domain</label>
             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
               <input type="text" value={smbUser}
@@ -116,7 +116,7 @@ export default function LateralPage() {
                   style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }} />
 
         <label style={{ display: "flex", alignItems: "flex-start", gap: 8,
-                        color: authorized ? "#00FF41" : "#FFB800",
+                        color: authorized ? "var(--text-0)" : "var(--med)",
                         marginTop: 12, marginBottom: 12 }}>
           <input type="checkbox" checked={authorized}
                  onChange={(e) => setAuthorized(e.target.checked)} />
@@ -147,7 +147,7 @@ export default function LateralPage() {
               {result.hops.map((h, i) => (
                 <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 4 }}>
                   <span className="dim">{h.from}</span> →{" "}
-                  <span style={{ color: "#00FF41" }}>{h.to}</span>{" "}
+                  <span style={{ color: "var(--text-0)" }}>{h.to}</span>{" "}
                   <span className="dim">via</span> {h.technique}{" "}
                   <span className="dim">as</span> {h.credential_label}
                 </div>

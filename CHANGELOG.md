@@ -9,6 +9,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — web UI redesign (premium "hybrid" theme)
+
+- **Complete React UI overhaul** — replaced the green-on-black CRT/matrix
+  aesthetic with a modern, professional dark theme: deep-slate surfaces,
+  aurora-gradient backdrop, glassmorphism, a violet→blue primary accent
+  with emerald kept as the live/signature colour, **Inter** for UI text +
+  **JetBrains Mono** for data/code, layered elevation, and framer-motion.
+- **Rebuilt design system** (`heaven-ui/src/index.css`) around the same
+  class vocabulary, so all 19 pages re-theme consistently. Flagship
+  surfaces hand-built: split-hero **LoginPage**, **Dashboard** (gradient
+  stat cards + real severity-distribution chart), **Sidebar**/**Header**;
+  3D topology reskinned to the new palette.
+- **Verified live** — server-rendered screenshots of Login, Dashboard,
+  Findings and Scans against a seeded engagement confirm real data flow.
+- **Code-splitting** — the heavy three.js 3D topology (~900 KB) is now
+  lazy-loaded behind a dynamic import, and every authenticated page is its
+  own chunk (`React.lazy` + `Suspense`). First-load JS dropped from a single
+  ~1.1 MB bundle to ~313 KB (login + shell); the 3D engine only downloads
+  when the Dashboard opens. Removed dead `recharts`/`mermaid` manual chunks.
+
+### Fixed — functional reliability (no fake/stub behaviour)
+
+- **Exploit-DB product search** — added `search_product(service, version)`
+  to `vulnscan/exploitdb_client.py` (searchsploit + CSV-mirror free-text
+  search). The recon agent's `_tool_correlate_exploit` now returns **real**
+  PoC matches instead of an empty placeholder; honest empty result when no
+  source is available.
+- **Honeypot orchestrator phase** — `recon/honeypot_detector.check_honeypots`
+  no longer returns hardcoded zeros; it runs the real `analyze_host` over
+  the network scan's discovered hosts and reports genuine counts (wired via
+  an orchestrator closure that reads the network task result).
+- **Honeypot detection calibration** — a known honeypot-software banner
+  (cowrie/kippo/…) now flags on its own; the weighted composite capped
+  banner signal at ~0.28 (below the 0.5 threshold), so definitive matches
+  went undetected. Added a score floor on signature match.
+- **8 new regression tests** (`tests/test_honeypot_and_exploitdb.py`).
+  Suite now **313 passed, 1 skipped**.
+
+### Fixed — CI / packaging
+
+- **`pyproject.toml` dependencies block** had drifted under `[project.urls]`,
+  so setuptools parsed it as `project.urls.dependencies` and every
+  `pip install -e .` aborted — breaking the test, mypy, self-audit and
+  docker CI jobs. Moved it back under `[project]`.
+- **Wheel data files** — added `[tool.setuptools.package-data]` so SAST
+  rulesets (`vulnscan/sast_rules/*.yml`) and `db/schema.sql` ship in the
+  wheel; tightened `packages.find` to exclude `heaven-ui`.
+- **Dockerfile** — aligned the py-builder workdir with the runtime path
+  (`/build` → `/app`) so the editable-install finder resolves after COPY
+  (image built fine but crashed on startup before). Added **`.dockerignore`**
+  (keeps host venv / node_modules / `data/` / secrets out of the context)
+  and a **CI smoke-test** that runs the built image (`heaven --version`).
+- **GitHub Actions** — bumped all Node-20 actions to current majors
+  (checkout@v5, setup-python@v6, upload/download-artifact@v5, buildx@v4,
+  build-push@v7, …), clearing the deprecation warnings.
+
+### Verified
+
+- **NVD model** (`NVD_model.pkl`) confirmed a genuinely trained 13-feature
+  ExtraTreesRegressor (R²=0.9925) — discriminates critical→10.0 / low→2.35,
+  top features = Integrity/Confidentiality/Availability impact. Not a stub.
+- **CLI ↔ webapp parity** — every operational CLI command maps to a UI
+  surface; all 35 `api.js` helpers map to real server routes.
+
 ### Added — publication-readiness sprint
 
 - **PyPI release workflow** (`.github/workflows/release.yml`) — on `v*`

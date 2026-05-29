@@ -18,12 +18,19 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    // The only large chunk left is three.js (~900 KB), and it is intentionally
+    // off the critical path — lazy-loaded behind a dynamic import (see the
+    // Dashboard's lazy NetworkTopology3D). Limit sits just above it so a NEW
+    // oversized chunk in the eager path would still warn.
+    chunkSizeWarningLimit: 950,
     rollupOptions: {
       output: {
+        // Long-lived vendor chunks that change rarely → better browser caching.
+        // three.js / @react-three are intentionally NOT listed: they auto-split
+        // into the lazy topology chunk via the dynamic import and must stay async.
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom"],
-          charts: ["recharts"],
-          mermaid: ["mermaid"],
+          motion: ["framer-motion"],
         },
       },
     },

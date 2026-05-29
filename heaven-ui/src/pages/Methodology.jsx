@@ -47,7 +47,7 @@ export default function Methodology() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#00FF41", marginTop: 0 }}>§ Methodology Mapping</h2>
+        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>§ Methodology Mapping</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Which HEAVEN scanner maps to which test ID in each standard.
           Use this to satisfy enterprise procurement and academic review.
@@ -70,7 +70,7 @@ export default function Methodology() {
             style={{
               padding: 12,
               background: "rgba(0,0,0,0.4)",
-              border: "1px solid rgba(0,255,65,0.2)",
+              border: "1px solid var(--border)",
               fontFamily: "monospace",
               fontSize: 12,
               whiteSpace: "pre-wrap",

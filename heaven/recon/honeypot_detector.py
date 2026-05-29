@@ -213,6 +213,13 @@ async def analyze_host(host: str, port_results: list[dict], total_scanned: int =
     analysis.score = sum(
         analysis.weights.get(k, 0) * w for k, w in weights.items()
     )
+    # A banner that matches known honeypot software (cowrie, kippo, dionaea, …)
+    # is near-conclusive on its own. The weighted composite under-counts it —
+    # banners are only 35% of the score, so even a 100% banner match tops out
+    # at ~0.28 and would never cross the 0.5 threshold. Floor the score when a
+    # software signature actually matched so these get flagged on banner alone.
+    if any("signature" in ind for ind in analysis.indicators):
+        analysis.score = max(analysis.score, 0.85)
     analysis.score = min(analysis.score, 1.0)
     analysis.is_honeypot = analysis.score >= 0.5
 
@@ -232,8 +239,54 @@ async def analyze_host(host: str, port_results: list[dict], total_scanned: int =
     return analysis
 
 
-async def check_honeypots(scan_id: str = "", **kwargs) -> dict[str, Any]:
-    """Main entry point (called by orchestrator after network scan)."""
-    # This would normally read results from DB; for now return structure
-    logger.info("Honeypot detection analysis running...")
-    return {"analyzed": 0, "honeypots_detected": 0, "ctfs_detected": 0, "results": []}
+async def check_honeypots(
+    scan_id: str = "",
+    hosts: list[dict] | None = None,
+    total_scanned: int = 1024,
+    **kwargs,
+) -> dict[str, Any]:
+    """Analyze the network scan's discovered hosts for honeypot / CTF traits.
+
+    Called by the orchestrator after Network Reconnaissance, which passes the
+    list of host dicts (each with ``open_ports`` carrying banners and response
+    times). Runs the real per-host :func:`analyze_host` and returns a genuine
+    summary — every number here comes from actual analysis, nothing is faked.
+    Hosts with no open ports are skipped (nothing to analyze).
+    """
+    hosts = hosts or []
+    results: list[dict[str, Any]] = []
+    honeypots = 0
+    ctfs = 0
+    analyzed = 0
+
+    for h in hosts:
+        host = h.get("host") or h.get("ip") or ""
+        port_results = h.get("open_ports") or []
+        if not host or not port_results:
+            continue
+        analyzed += 1
+        analysis = await analyze_host(host, port_results, total_scanned)
+        if analysis.is_honeypot:
+            honeypots += 1
+        if analysis.is_ctf:
+            ctfs += 1
+        # Only surface hosts that scored at all — keeps the report signal-dense
+        if analysis.is_honeypot or analysis.is_ctf or analysis.score > 0.0:
+            results.append({
+                "host": host,
+                "score": round(analysis.score, 3),
+                "is_honeypot": analysis.is_honeypot,
+                "is_ctf": analysis.is_ctf,
+                "indicators": analysis.indicators,
+            })
+
+    logger.info(
+        f"Honeypot analysis: {analyzed} host(s) analyzed — "
+        f"{honeypots} honeypot(s), {ctfs} CTF target(s)"
+    )
+    return {
+        "analyzed": analyzed,
+        "honeypots_detected": honeypots,
+        "ctfs_detected": ctfs,
+        "results": results,
+    }

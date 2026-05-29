@@ -671,10 +671,17 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         repos=targets.get("repositories", []),
     )
 
+    async def _honeypot_phase(**kw):
+        # Feed the real honeypot analyzer the hosts the network scan found.
+        net_res = orch.results.get(net_id)
+        hosts = []
+        if net_res and net_res.data and isinstance(net_res.data, dict):
+            hosts = net_res.data.get("hosts", [])
+        return await check_honeypots(scan_id=orch.scan_id, hosts=hosts)
+
     hp_id = orch.add_task(
-        "Honeypot Detection", check_honeypots,
+        "Honeypot Detection", _honeypot_phase,
         phase=ScanPhase.RECON, depends_on=[net_id],
-        scan_id=orch.scan_id,
     )
 
     # ═══ Phase: DEEP RECON (subdomain enum, JS secrets, endpoint fuzzing) ═══

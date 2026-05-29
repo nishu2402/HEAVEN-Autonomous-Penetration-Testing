@@ -270,14 +270,41 @@ class ReconAgent:
             return {"error": str(e), "predicted_cvss": None}
 
     async def _tool_correlate_exploit(self, service: str, version: str) -> dict:
-        # Best-effort. Real implementations would hit ExploitDB / Metasploit
-        # search API. For now, return a structured placeholder so the agent
-        # learns the call shape and can plan around the absence.
+        """Search Exploit-DB for public PoCs matching a service/version.
+
+        Backed by the real exploitdb_client: searchsploit when the binary is
+        present (Kali/Parrot), otherwise the cached ExploitDB CSV mirror. An
+        empty list means "no match in available sources" — the agent must
+        treat that as 'unknown', not 'no exploits exist'.
+        """
+        try:
+            from heaven.vulnscan.exploitdb_client import search_product
+            result = await search_product(service, version or "")
+        except Exception as e:
+            return {
+                "service": service, "version": version,
+                "known_exploits": [], "error": str(e),
+                "note": "exploit lookup failed — treat absence as 'unknown'",
+            }
+        entries = result.entries[:10]
         return {
             "service": service, "version": version,
-            "known_exploits": [],
-            "note": ("public-exploit-DB integration not wired yet — agent should "
-                     "treat absence as 'unknown', not 'no exploits exist'"),
+            "source": entries[0].source if entries else "none",
+            "count": len(result.entries),
+            "known_exploits": [
+                {
+                    "edb_id": e.edb_id, "title": e.title[:120], "url": e.edb_url,
+                    "cve": e.cve, "type": e.type, "platform": e.platform,
+                    "verified": e.verified, "local_path": e.file_path,
+                }
+                for e in entries
+            ],
+            "note": (
+                f"{len(result.entries)} Exploit-DB match(es) found"
+                if entries else
+                "no public exploits in available sources (searchsploit / CSV "
+                "mirror) — absence is not proof none exist"
+            ),
         }
 
     # ── rules-based fallback ─────────────────────────────────────────────

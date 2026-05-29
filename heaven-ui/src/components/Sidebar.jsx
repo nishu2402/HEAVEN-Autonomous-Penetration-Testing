@@ -84,8 +84,11 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div>⚡ HEAVEN</div>
-        <div className="brand-sub">AUTONOMOUS PEN-TESTING</div>
+        <div className="brand-mark">⚡</div>
+        <div className="brand-text">
+          <span className="brand-title">HEAVEN</span>
+          <span className="brand-sub">Pentest Platform</span>
+        </div>
       </div>
 
       <nav>
@@ -127,12 +130,14 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-status">
-        <div><span className="status-dot" />ONLINE</div>
-        <div style={{ marginTop: 4, fontFamily: 'monospace', letterSpacing: '0.05em' }}>
-          {time.toISOString().slice(11, 19)} UTC
+        <div className="flex items-center justify-between">
+          <span><span className="status-dot" />System online</span>
+          <span className="mono" style={{ color: 'var(--text-2)' }}>
+            {time.toISOString().slice(11, 19)}
+          </span>
         </div>
-        <div style={{ marginTop: 6, fontSize: 9 }}>
-          v1.0 · <kbd>⌘K</kbd> for command palette
+        <div style={{ marginTop: 8, fontSize: 10.5, color: 'var(--text-2)' }}>
+          v1.0 · press <kbd>⌘K</kbd> for commands
         </div>
       </div>
     </aside>

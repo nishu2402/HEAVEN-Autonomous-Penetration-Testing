@@ -5,8 +5,8 @@ import React, { useEffect, useState } from "react";
 import { SAST, Engagement } from "../api";
 
 const SEV_COLOR = {
-  critical: "#FF073A", high: "#FF6F00", medium: "#FFB800",
-  low: "#00D4FF", info: "#888",
+  critical: "var(--crit)", high: "var(--high)", medium: "var(--med)",
+  low: "var(--cyan)", info: "#888",
 };
 
 export default function SastPage() {
@@ -59,7 +59,7 @@ export default function SastPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#7B2FBE", marginTop: 0 }}>🔬 SAST (Semgrep)</h2>
+        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🔬 SAST (Semgrep)</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Static source-code analysis. Uses HEAVEN's curated rule pack
           (Python/JS/Go) + any extra Semgrep registry packs you list.
@@ -147,7 +147,7 @@ export default function SastPage() {
           <div className="card" style={{ marginTop: 12 }}>
             <div className="card-title">Findings ({result.findings_count})</div>
             <table style={{ width: "100%", fontSize: 12 }}>
-              <thead><tr style={{ color: "#00D4FF" }}>
+              <thead><tr style={{ color: "var(--cyan)" }}>
                 <th align="left">Sev</th>
                 <th align="left">Rule</th>
                 <th align="left">File</th>

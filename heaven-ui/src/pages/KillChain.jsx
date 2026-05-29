@@ -21,7 +21,7 @@ function findPhase(vuln_type) {
 }
 
 const SEV_COLORS = {
-  critical: '#FF003C', high: '#FF6B00', medium: '#FFB800', low: '#00D4FF', info: '#666',
+  critical: 'var(--crit)', high: 'var(--high)', medium: 'var(--med)', low: 'var(--cyan)', info: '#666',
 }
 
 export default function KillChain() {
@@ -59,26 +59,26 @@ export default function KillChain() {
         <div className="card-title">Cyber Kill Chain Coverage</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 48, fontWeight: 700, color: pct > 60 ? '#FF003C' : pct > 30 ? '#FFB800' : '#00FF41',
+            <div style={{ fontSize: 48, fontWeight: 700, color: pct > 60 ? 'var(--crit)' : pct > 30 ? 'var(--med)' : 'var(--text-0)',
                           textShadow: `0 0 30px currentColor`, lineHeight: 1 }}>
               {pct}
             </div>
-            <div style={{ fontSize: 11, color: 'rgba(0,255,65,0.68)', letterSpacing: '0.1em' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-1)', letterSpacing: '0.1em' }}>
               COVERAGE SCORE
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ marginBottom: 6, fontSize: 12, color: 'rgba(0,255,65,0.72)' }}>
+            <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--text-1)' }}>
               {totalScore}/{maxScore} phases · {findings.length} finding{findings.length !== 1 ? 's' : ''}
             </div>
             <div className="progress-bar" style={{ height: 6 }}>
               <div className="progress-fill"
                    style={{
                      width: `${pct}%`,
-                     background: pct > 60 ? '#FF003C' : pct > 30 ? '#FFB800' : '#00FF41',
+                     background: pct > 60 ? 'var(--crit)' : pct > 30 ? 'var(--med)' : 'var(--text-0)',
                    }} />
             </div>
-            <div style={{ marginTop: 6, fontSize: 11, color: 'rgba(0,255,65,0.65)' }}>
+            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-1)' }}>
               {pct > 60 ? '⚠ HIGH COVERAGE — attacker has a clear path' :
                pct > 30 ? '⚡ PARTIAL COVERAGE — gaps exist' :
                '✓ LOW COVERAGE — limited attack surface observed'}
@@ -104,7 +104,7 @@ export default function KillChain() {
         {phases.map((phase, i) => {
           const hasFindings = phase.findings.length > 0
           const topSev = phase.findings[0]?.severity || 'info'
-          const color  = hasFindings ? (SEV_COLORS[topSev] || '#00FF41') : 'rgba(0,255,65,0.42)'
+          const color  = hasFindings ? (SEV_COLORS[topSev] || 'var(--text-0)') : 'var(--text-2)'
           return (
             <motion.div
               key={i}
@@ -163,7 +163,7 @@ export default function KillChain() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexWrap: 'wrap' }}>
             {attackPath.map((phase, i) => {
               const topSev = phase.findings[0]?.severity || 'info'
-              const color = SEV_COLORS[topSev] || '#00FF41'
+              const color = SEV_COLORS[topSev] || 'var(--text-0)'
               return (
                 <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
                   <motion.div
@@ -187,7 +187,7 @@ export default function KillChain() {
                     </div>
                   </motion.div>
                   {i < attackPath.length - 1 && (
-                    <span style={{ color: 'rgba(0,255,65,0.68)', fontSize: 16, padding: '0 4px' }}>→</span>
+                    <span style={{ color: 'var(--text-1)', fontSize: 16, padding: '0 4px' }}>→</span>
                   )}
                 </div>
               )

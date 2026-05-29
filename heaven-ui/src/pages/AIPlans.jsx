@@ -53,7 +53,7 @@ export default function AIPlans() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#00FF41", marginTop: 0 }}>✦ AI Attack-Chain Planner</h2>
+        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>✦ AI Attack-Chain Planner</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Layer D — LLM proposes multi-step attack chains from a finding list.
           Requires <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, or{" "}
@@ -106,7 +106,7 @@ export default function AIPlans() {
 
       {output && (
         <div className="card" style={{ marginTop: 12 }}>
-          <h3 style={{ color: "#00D4FF" }}>Planner output</h3>
+          <h3 style={{ color: "var(--cyan)" }}>Planner output</h3>
           {output.skipped && (
             <div className="dim">Skipped: {output.skipped}</div>
           )}
@@ -114,8 +114,8 @@ export default function AIPlans() {
             <div className="dim">{output.reasoning || "No chain possible from these findings."}</div>
           )}
           {(output.plans || []).map((p, i) => (
-            <div key={i} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid rgba(0,255,65,0.15)" }}>
-              <div style={{ color: "#00FF41", fontWeight: 700 }}>{p.name}</div>
+            <div key={i} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+              <div style={{ color: "var(--text-0)", fontWeight: 700 }}>{p.name}</div>
               <div className="dim" style={{ fontSize: 11 }}>
                 Objective: {p.objective} · Risk: {p.risk_to_target} · Est. success: {Math.round((p.estimated_success || 0) * 100)}%
               </div>

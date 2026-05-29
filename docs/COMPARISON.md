@@ -33,7 +33,7 @@ all three competitors so the comparison is a one-command diff.
 | **Post-exploitation** (linpeas / BloodHound / lateral) | ✅ | ❌ | ❌ | ⚠️ via shell | ❌ | ❌ |
 | **Methodology mapping** (OWASP / NIST / PTES) | ✅ | ⚠️ | ⚠️ | ❌ | ✅ | ✅ |
 | **MITRE ATT&CK mapping** | ✅ | ❌ | ❌ | ❌ | ⚠️ | ✅ |
-| **Web UI** | ✅ React + dark matrix | ✅ Java GUI | ✅ Java GUI | ❌ CLI only | ✅ | ✅ |
+| **Web UI** | ✅ React (modern dark) | ✅ Java GUI | ✅ Java GUI | ❌ CLI only | ✅ | ✅ |
 | **REST API + WebSocket** | ✅ FastAPI | ✅ paid | ✅ | ❌ | ✅ | ✅ |
 | **Reproducible benchmark suite shipped** | ✅ DVWA + adapters | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Annual cost** | $0 | ~$450 / user | $0 | $0 | ~$3,500 / scanner | ~$3,500 / target |

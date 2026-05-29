@@ -31,20 +31,19 @@ export default function Header() {
     <header className="header">
       <div className="header-left">
         {hasEngagement ? (
-          <>
-            <span className="eng-label">ENG</span>
+          <div className="eng-chip">
+            <span className="eng-label">Engagement</span>
             <span className="eng-name">{eng.engagement.name}</span>
             {eng.engagement.client && (
-              <span className="eng-stats"> — {eng.engagement.client}</span>
+              <span className="eng-stats">· {eng.engagement.client}</span>
             )}
             <span className="eng-stats">
-              {" · "}{eng.stats.total_findings ?? 0} findings
-              {" · "}{eng.stats.scope_targets ?? 0} targets
+              · {eng.stats.total_findings ?? 0} findings · {eng.stats.scope_targets ?? 0} targets
             </span>
-          </>
+          </div>
         ) : (
           <span className="eng-warn">
-            No engagement — run: heaven engage init &lt;name&gt;
+            ⚠ No active engagement — run <span className="mono">heaven engage init &lt;name&gt;</span>
           </span>
         )}
       </div>
@@ -58,8 +57,8 @@ export default function Header() {
                 : "No SIEM configured — set HEAVEN_SPLUNK_HEC_* or HEAVEN_ELASTIC_* env vars"
             }
             style={{
-              borderColor: siem.siem_backends_active.length ? "#00FF41" : "rgba(255,255,255,0.2)",
-              color: siem.siem_backends_active.length ? "#00FF41" : "rgba(255,255,255,0.5)",
+              borderColor: siem.siem_backends_active.length ? "var(--brand)" : "var(--border)",
+              color: siem.siem_backends_active.length ? "var(--brand)" : "var(--text-2)",
             }}
           >
             SIEM {siem.siem_backends_active.length ? "✓" : "—"}

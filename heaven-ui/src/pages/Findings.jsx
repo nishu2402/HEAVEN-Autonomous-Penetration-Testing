@@ -96,7 +96,7 @@ export default function Findings() {
             <div className="card-title" style={{ marginBottom: 0 }}>
               {data.count} finding{data.count !== 1 ? "s" : ""}
             </div>
-            <div style={{ fontSize: 11, color: "rgba(0,255,65,0.62)" }}>
+            <div style={{ fontSize: 11, color: "var(--text-1)" }}>
               Click column headers to sort
             </div>
           </div>
@@ -120,8 +120,8 @@ export default function Findings() {
                   <td className="ellipsis" title={f.target}>{f.target}</td>
                   <td>
                     <span style={{
-                      color: Number(f.confidence) >= 0.9 ? '#00FF41'
-                           : Number(f.confidence) >= 0.7 ? '#FFB800' : '#FF6B00',
+                      color: Number(f.confidence) >= 0.9 ? 'var(--text-0)'
+                           : Number(f.confidence) >= 0.7 ? 'var(--med)' : 'var(--high)',
                     }}>
                       {Number(f.confidence).toFixed(2)}
                     </span>

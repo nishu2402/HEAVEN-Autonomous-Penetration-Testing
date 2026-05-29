@@ -15,7 +15,7 @@ export default function TicketsPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#FFB800", marginTop: 0 }}>🎫 Ticketing</h2>
+        <h2 style={{ color: "var(--med)", marginTop: 0 }}>🎫 Ticketing</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Auto-create Jira / Linear issues from findings. Backends are
           env-configured — once set, the "Push to ticketing" button on
@@ -43,8 +43,8 @@ export default function TicketsPage() {
         )}
 
         {status && status.configured_backends?.length === 0 && (
-          <div style={{ marginTop: 12, padding: 12, background: "rgba(255,184,0,0.05)",
-                        border: "1px solid rgba(255,184,0,0.3)" }}>
+          <div style={{ marginTop: 12, padding: 12, background: "var(--border)",
+                        border: "1px solid var(--med)" }}>
             <strong>No backends configured.</strong> Set the env vars above
             and restart the API server. Critical findings won't auto-create
             tickets until at least one backend is configured.
@@ -57,7 +57,7 @@ export default function TicketsPage() {
         <pre style={{
           fontSize: 12, fontFamily: "monospace", padding: 12,
           background: "rgba(0,0,0,0.4)",
-          border: "1px solid rgba(0,255,65,0.2)",
+          border: "1px solid var(--border)",
           whiteSpace: "pre-wrap",
         }}>{`# Check backend config
 heaven tickets status
@@ -79,11 +79,11 @@ function Backend({ name, configured, env, color }) {
   return (
     <div style={{
       padding: 12, background: "rgba(0,0,0,0.3)",
-      border: `1px solid ${configured ? "#00FF41" : "#FFB800"}33`,
+      border: `1px solid ${configured ? "var(--text-0)" : "var(--med)"}33`,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontWeight: 700, color }}>{name}</div>
-        <div style={{ color: configured ? "#00FF41" : "#FFB800" }}>
+        <div style={{ color: configured ? "var(--text-0)" : "var(--med)" }}>
           {configured ? "✓ configured" : "✗ not configured"}
         </div>
       </div>

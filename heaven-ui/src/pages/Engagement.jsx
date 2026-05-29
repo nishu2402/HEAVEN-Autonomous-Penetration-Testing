@@ -62,7 +62,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
 
         <div className="card">
           <div className="card-title">Why per-engagement SQLite?</div>
-          <div style={{ color: 'rgba(0,255,65,0.80)', lineHeight: 1.8, fontSize: 13 }}>
+          <div style={{ color: 'var(--text-1)', lineHeight: 1.8, fontSize: 13 }}>
             <p>Each engagement gets an isolated database file. No cross-contamination of findings,
             no shared state between clients. The file lives next to your notes — hand it to a
             colleague or archive it after the engagement ends.</p>
@@ -78,7 +78,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
         <div className="card-title">Engagement Details</div>
         <table className="kv-table">
           <tbody>
-            <tr><td>Name</td><td style={{ color: '#00FF41', fontWeight: 700 }}>{engagement.name}</td></tr>
+            <tr><td>Name</td><td style={{ color: 'var(--text-0)', fontWeight: 700 }}>{engagement.name}</td></tr>
             <tr><td>Client</td><td>{engagement.client || "—"}</td></tr>
             <tr><td>Statement of work</td><td>{engagement.statement_of_work || "—"}</td></tr>
             <tr><td>Created</td><td className="dim">{engagement.created_at || "—"}</td></tr>
@@ -95,7 +95,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
           {Object.entries(stats.by_severity || {}).map(([sev, count]) => (
             <div key={sev} style={{ textAlign: 'center', minWidth: 60 }}>
               <div style={{ fontSize: 24, fontWeight: 700 }} className={`sev-${sev}`}>{count}</div>
-              <div style={{ fontSize: 10, color: 'rgba(0,255,65,0.68)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>{sev}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>{sev}</div>
             </div>
           ))}
         </div>

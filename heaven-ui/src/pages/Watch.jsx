@@ -26,7 +26,7 @@ export default function WatchPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#00D4FF", marginTop: 0 }}>🔁 Watch Mode</h2>
+        <h2 style={{ color: "var(--cyan)", marginTop: 0 }}>🔁 Watch Mode</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Continuous monitoring with auto-diff. Runs scans on an interval,
           diffs each against the previous, and alerts ONLY when something
@@ -38,7 +38,7 @@ export default function WatchPage() {
         <pre style={{
           fontSize: 12, fontFamily: "monospace", padding: 12,
           background: "rgba(0,0,0,0.4)",
-          border: "1px solid rgba(0,212,255,0.2)",
+          border: "1px solid var(--border-accent)",
           whiteSpace: "pre-wrap",
         }}>{`# Watch a SaaS app every 30 min, auto-create Jira tickets on new criticals:
 heaven watch -u https://app.example.com \\
@@ -92,7 +92,7 @@ heaven watch -u https://x --engagement prod \\
           <div className="dim">No watch iterations yet. Start one from the CLI above.</div>
         ) : (
           <table style={{ width: "100%", fontSize: 12 }}>
-            <thead><tr style={{ color: "#00D4FF" }}>
+            <thead><tr style={{ color: "var(--cyan)" }}>
               <th align="left">Iteration</th>
               <th align="left">Scan ID</th>
               <th align="left">Status</th>
@@ -127,10 +127,10 @@ function Channel({ name, active, note }) {
   return (
     <div style={{
       padding: 12, background: "rgba(0,0,0,0.3)",
-      border: `1px solid ${active ? "#00FF41" : "#FFB800"}33`,
+      border: `1px solid ${active ? "var(--text-0)" : "var(--med)"}33`,
     }}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{name}</div>
-      <div style={{ color: active ? "#00FF41" : "#FFB800", fontSize: 12 }}>
+      <div style={{ color: active ? "var(--text-0)" : "var(--med)", fontSize: 12 }}>
         {active ? "✓ active" : "✗ not configured"}
       </div>
       <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>{note}</div>

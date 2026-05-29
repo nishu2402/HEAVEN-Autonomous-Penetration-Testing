@@ -34,7 +34,7 @@ export default function KnowledgePage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#7B2FBE", marginTop: 0 }}>🧠 Knowledge Graph</h2>
+        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🧠 Knowledge Graph</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Cross-engagement memory: (target_profile, technique, outcome)
           tuples stored in <code>~/.heaven/knowledge.db</code>. Used by the
@@ -46,9 +46,9 @@ export default function KnowledgePage() {
 
         {stats && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-            <Stat label="Target profiles"  value={stats.profiles}  color="#00D4FF" />
-            <Stat label="Total attempts"   value={stats.attempts}  color="#FFB800" />
-            <Stat label="Successes"        value={stats.successes} color="#00FF41" />
+            <Stat label="Target profiles"  value={stats.profiles}  color="var(--cyan)" />
+            <Stat label="Total attempts"   value={stats.attempts}  color="var(--med)" />
+            <Stat label="Successes"        value={stats.successes} color="var(--text-0)" />
           </div>
         )}
       </div>
@@ -57,7 +57,7 @@ export default function KnowledgePage() {
         <div className="card" style={{ marginTop: 12 }}>
           <div className="card-title">Top techniques by success count</div>
           <table style={{ width: "100%", fontSize: 12 }}>
-            <thead><tr style={{ color: "#00D4FF" }}>
+            <thead><tr style={{ color: "var(--cyan)" }}>
               <th align="left">Technique</th>
               <th align="right">Successes</th>
               <th align="right">Attempts</th>
@@ -69,7 +69,7 @@ export default function KnowledgePage() {
                 return (
                   <tr key={t.technique}>
                     <td>{t.technique}</td>
-                    <td align="right" style={{ color: "#00FF41" }}>{t.successes}</td>
+                    <td align="right" style={{ color: "var(--text-0)" }}>{t.successes}</td>
                     <td align="right">{t.attempts}</td>
                     <td align="right">{(rate * 100).toFixed(0)}%</td>
                   </tr>
@@ -108,7 +108,7 @@ export default function KnowledgePage() {
               : ranking.rankings.map((r) => (
                 <div key={r.technique} style={{ marginBottom: 4 }}>
                   <span style={{ display: "inline-block", width: 220 }}>{r.technique}</span>
-                  <span style={{ color: "#00FF41" }}>
+                  <span style={{ color: "var(--text-0)" }}>
                     {(r.posterior_success_rate * 100).toFixed(0)}%
                   </span>
                   <span className="dim" style={{ marginLeft: 8 }}>

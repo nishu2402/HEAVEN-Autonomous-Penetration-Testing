@@ -21,7 +21,7 @@ export default function Benchmark() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#00FF41", marginTop: 0 }}>≡ Benchmark — HEAVEN vs. DVWA</h2>
+        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>≡ Benchmark — HEAVEN vs. DVWA</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Latest aggregated report from <code>tests/benchmarks/reports/dvwa_aggregated.md</code>.
           To produce / refresh, run on the server:
@@ -45,7 +45,7 @@ export default function Benchmark() {
               marginTop: 12,
               padding: 12,
               background: "rgba(0,0,0,0.4)",
-              border: "1px solid rgba(0,255,65,0.2)",
+              border: "1px solid var(--border)",
               fontFamily: "monospace",
               fontSize: 12,
               whiteSpace: "pre-wrap",

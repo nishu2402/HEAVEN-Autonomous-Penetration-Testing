@@ -5,8 +5,8 @@ import React, { useEffect, useState } from "react";
 import { Diff, Scans } from "../api";
 
 const SEV_COLOR = {
-  critical: "#FF073A", high: "#FF6F00", medium: "#FFB800",
-  low: "#00D4FF", info: "#888",
+  critical: "var(--crit)", high: "var(--high)", medium: "var(--med)",
+  low: "var(--cyan)", info: "#888",
 };
 
 export default function DiffPage() {
@@ -46,7 +46,7 @@ export default function DiffPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#00D4FF", marginTop: 0 }}>↹ Scan Diff</h2>
+        <h2 style={{ color: "var(--cyan)", marginTop: 0 }}>↹ Scan Diff</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Compare two scans of the same engagement. Bucketed output: NEW · RESOLVED ·
           REGRESSED · UNCHANGED. <strong>Regressed</strong> = a finding that was marked
@@ -93,10 +93,10 @@ export default function DiffPage() {
             <div className="card-title">Summary</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
               <Stat label="🆕 New" value={report.summary.new}
-                    color="#00FF41" sub={`${report.summary.critical_new} critical`} />
-              <Stat label="✅ Resolved" value={report.summary.resolved} color="#00D4FF" />
+                    color="var(--text-0)" sub={`${report.summary.critical_new} critical`} />
+              <Stat label="✅ Resolved" value={report.summary.resolved} color="var(--cyan)" />
               <Stat label="⚠ Regressed" value={report.summary.regressed}
-                    color="#FF073A"
+                    color="var(--crit)"
                     sub={`${report.summary.regressed_critical_or_high} crit/high`}
                     highlight={report.summary.regressed_critical_or_high > 0} />
               <Stat label="= Unchanged" value={report.summary.unchanged} color="#888" />
@@ -106,7 +106,7 @@ export default function DiffPage() {
                 marginTop: 12, padding: 12,
                 background: "rgba(255,7,58,0.07)",
                 border: "1px solid rgba(255,7,58,0.3)",
-                color: "#FF073A", fontWeight: 600,
+                color: "var(--crit)", fontWeight: 600,
               }}>
                 🚨 {report.summary.regressed_critical_or_high} previously-fixed critical/high finding(s) came back. Treat as P0.
               </div>
@@ -142,7 +142,7 @@ function FindingBucket({ title, rows, dim }) {
     <div className="card" style={{ marginTop: 12, opacity: dim ? 0.85 : 1 }}>
       <div className="card-title">{title} ({rows.length})</div>
       <table style={{ width: "100%", fontSize: 12 }}>
-        <thead><tr style={{ color: "#00D4FF" }}>
+        <thead><tr style={{ color: "var(--cyan)" }}>
           <th align="left" style={{ width: 60 }}>Sev</th>
           <th align="left">Type</th>
           <th align="left">Target</th>

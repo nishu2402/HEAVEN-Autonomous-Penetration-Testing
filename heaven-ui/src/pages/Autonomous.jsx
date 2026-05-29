@@ -62,7 +62,7 @@ export default function AutonomousPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#FF073A", marginTop: 0 }}>⚙ Autonomous Loop</h2>
+        <h2 style={{ color: "var(--crit)", marginTop: 0 }}>⚙ Autonomous Loop</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Iterative observe → plan → act loop. The LLM-driven planner picks
           the next action each iteration; falls back to a deterministic
@@ -117,7 +117,7 @@ export default function AutonomousPage() {
           <span>Use LLM planner (falls back to rule-based when no API key set)</span>
         </label>
         <label style={{ display: "flex", alignItems: "flex-start", gap: 10,
-                        color: authorized ? "#00FF41" : "#FFB800", marginBottom: 12 }}>
+                        color: authorized ? "var(--text-0)" : "var(--med)", marginBottom: 12 }}>
           <input type="checkbox" checked={authorized}
                  onChange={(e) => setAuthorized(e.target.checked)} />
           <span>I confirm written authorization for every target listed.</span>
@@ -132,20 +132,20 @@ export default function AutonomousPage() {
 
       {result && (
         <div className="card" style={{ marginTop: 12 }}>
-          <h3 style={{ color: "#00FF41" }}>
-            Run summary — <span style={{ color: "#00D4FF" }}>{result.stop_reason}</span>
+          <h3 style={{ color: "var(--text-0)" }}>
+            Run summary — <span style={{ color: "var(--cyan)" }}>{result.stop_reason}</span>
           </h3>
           <div className="dim" style={{ fontSize: 12 }}>
             Iterations: {result.iterations_run} · Duration: {result.duration_s.toFixed(0)}s ·
             Findings: {result.total_findings} (critical: {result.total_critical}, high: {result.total_high})
           </div>
           {result.objective_met && (
-            <div style={{ color: "#00FF41", marginTop: 8 }}>
+            <div style={{ color: "var(--text-0)", marginTop: 8 }}>
               ✓ Objective met: {result.objective}
             </div>
           )}
           <table style={{ width: "100%", marginTop: 12, fontSize: 12 }}>
-            <thead><tr style={{ color: "#00D4FF" }}>
+            <thead><tr style={{ color: "var(--cyan)" }}>
               <th align="left">#</th><th align="left">Action</th>
               <th align="left">Target</th><th align="right">+Find</th>
               <th align="right">Reward</th><th align="left">Rationale</th>

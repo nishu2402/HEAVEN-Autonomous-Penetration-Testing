@@ -54,11 +54,11 @@ export default function LiveTerminal({ scanId }) {
       <div className="terminal-header">
         <span>
           {connected
-            ? <><span className="blink" style={{ color: '#00FF41' }}>●</span> LIVE</>
+            ? <><span className="blink" style={{ color: 'var(--text-0)' }}>●</span> LIVE</>
             : scanId ? '◌ CONNECTING' : '○ IDLE'
           }
           {scanId && (
-            <span style={{ marginLeft: 8, color: 'rgba(0,255,65,0.3)' }}>
+            <span style={{ marginLeft: 8, color: 'var(--text-2)' }}>
               {scanId.slice(0, 8)}
             </span>
           )}

@@ -62,7 +62,7 @@ heaven serve
 
 Cut to browser at `http://localhost:8443`. Show:
 
-1. Dashboard — severity distribution donut
+1. Dashboard — gradient stat cards + live severity-distribution bars
 2. Click → KillChain page (Cyber Kill Chain phase coverage)
 3. Click → Watch page (continuous-monitoring status)
 

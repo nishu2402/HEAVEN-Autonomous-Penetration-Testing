@@ -98,8 +98,8 @@ export default function Scans() {
                 placeholder={"https://app.example.com\n10.0.0.1\n192.168.1.0/24"}
                 rows={4}
                 style={{
-                  width: "100%", background: "rgba(0,255,65,0.04)",
-                  border: "1px solid rgba(0,255,65,0.2)", color: "#00FF41",
+                  width: "100%", background: "var(--border)",
+                  border: "1px solid var(--border)", color: "var(--text-0)",
                   fontFamily: "monospace", fontSize: 12, padding: "8px 10px",
                   outline: "none", resize: "vertical", boxSizing: "border-box",
                 }}
@@ -112,8 +112,8 @@ export default function Scans() {
                 value={mode}
                 onChange={e => setMode(e.target.value)}
                 style={{
-                  width: "100%", background: "#0a0a0a", color: "#00FF41",
-                  border: "1px solid rgba(0,255,65,0.25)", padding: "8px 10px",
+                  width: "100%", background: "var(--bg-1)", color: "var(--text-0)",
+                  border: "1px solid var(--border)", padding: "8px 10px",
                   fontFamily: "monospace", fontSize: 12, outline: "none",
                 }}
               >
@@ -127,8 +127,8 @@ export default function Scans() {
                 value={stealth}
                 onChange={e => setStealth(e.target.value)}
                 style={{
-                  width: "100%", background: "#0a0a0a", color: "#00FF41",
-                  border: "1px solid rgba(0,255,65,0.25)", padding: "8px 10px",
+                  width: "100%", background: "var(--bg-1)", color: "var(--text-0)",
+                  border: "1px solid var(--border)", padding: "8px 10px",
                   fontFamily: "monospace", fontSize: 12, outline: "none",
                 }}
               >
@@ -146,8 +146,8 @@ export default function Scans() {
                 onChange={e => setEngagement(e.target.value)}
                 placeholder="e.g. acme-webapp-pentest"
                 style={{
-                  width: "100%", background: "rgba(0,255,65,0.04)",
-                  border: "1px solid rgba(0,255,65,0.2)", color: "#00FF41",
+                  width: "100%", background: "var(--border)",
+                  border: "1px solid var(--border)", color: "var(--text-0)",
                   fontFamily: "monospace", fontSize: 12, padding: "8px 10px",
                   outline: "none", boxSizing: "border-box",
                 }}
@@ -157,13 +157,13 @@ export default function Scans() {
 
           <label style={{
             display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
-            marginBottom: 16, fontSize: 12, color: authorized ? "#00FF41" : "#FFB800",
+            marginBottom: 16, fontSize: 12, color: authorized ? "var(--text-0)" : "var(--med)",
           }}>
             <input
               type="checkbox"
               checked={authorized}
               onChange={e => setAuthorized(e.target.checked)}
-              style={{ marginTop: 2, accentColor: "#00FF41" }}
+              style={{ marginTop: 2, accentColor: "var(--text-0)" }}
             />
             <span>
               I confirm I have <strong>written authorization</strong> from the target system owner.
@@ -174,15 +174,15 @@ export default function Scans() {
           {launchError && (
             <div style={{
               marginBottom: 12, padding: "8px 12px",
-              background: "rgba(255,0,60,0.07)", border: "1px solid rgba(255,0,60,0.3)",
-              color: "#FF003C", fontSize: 11, fontFamily: "monospace",
+              background: "var(--border)", border: "1px solid var(--crit)",
+              color: "var(--crit)", fontSize: 11, fontFamily: "monospace",
             }}>✗ {launchError}</div>
           )}
           {launchSuccess && (
             <div style={{
               marginBottom: 12, padding: "8px 12px",
-              background: "rgba(0,255,65,0.07)", border: "1px solid rgba(0,255,65,0.3)",
-              color: "#00FF41", fontSize: 11, fontFamily: "monospace",
+              background: "var(--border)", border: "1px solid var(--text-2)",
+              color: "var(--text-0)", fontSize: 11, fontFamily: "monospace",
             }}>✓ {launchSuccess}</div>
           )}
 
@@ -192,7 +192,7 @@ export default function Scans() {
             className="btn"
             style={{
               opacity: (!authorized || launching) ? 0.5 : 1,
-              borderColor: "#00FF41", color: "#00FF41",
+              borderColor: "var(--text-0)", color: "var(--text-0)",
             }}
           >
             {launching ? "⏳ Launching..." : "⚡ Launch Scan"}
@@ -256,7 +256,7 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                   const isActive = selected === id;
                   return (
                     <tr key={id} onClick={() => setSelected(isActive ? null : id)}
-                        style={{ cursor: "pointer", background: isActive ? "rgba(0,255,65,0.04)" : "" }}>
+                        style={{ cursor: "pointer", background: isActive ? "var(--border)" : "" }}>
                       <td>
                         <code style={{ fontSize: 11 }}>{id.slice(0, 8)}</code>
                       </td>
@@ -284,7 +284,7 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                       </td>
                       <td>
                         {s.findings_count != null
-                          ? <span style={{ color: s.findings_count > 0 ? "#FFB800" : "rgba(0,255,65,0.62)" }}>
+                          ? <span style={{ color: s.findings_count > 0 ? "var(--med)" : "var(--text-1)" }}>
                               {s.findings_count}
                             </span>
                           : "—"

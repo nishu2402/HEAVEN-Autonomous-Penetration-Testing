@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20294%20Tests%20Passing&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:080F08,30:0A1F0A,45:1A3A00,60:A8FF3E,75:7B2FBE,90:FF073A,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Autonomous%20Penetration%20Testing%20%7C%20Real-World%20%7C%20Not%20a%20Simulation%20%7C%20313%20Tests%20Passing&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;50%2B+Live+Modules+%C2%B7+294+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=A8FF3E&center=true&vCenter=true&width=1200&lines=Find+It.+Confirm+It.+Report+It.;Recon+%C2%B7+Vuln+Detection+%C2%B7+CVSS+ML+Scoring+%C2%B7+ATT%26CK+Mapping;SQLi+%C2%B7+XSS+%C2%B7+SSRF+%C2%B7+IDOR+%C2%B7+Dir+Fuzzing+%C2%B7+JWT+%C2%B7+Race+Conditions;CVSS+Predictor+R%C2%B2%3D0.9925+%E2%80%94+ExtraTreesRegressor+on+NVD;50%2B+Live+Modules+%C2%B7+313+Tests+%C2%B7+PostgreSQL+%2B+SQLite+%2B+FastAPI+%2B+React+HUD"/>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
     <a href="https://pypi.org/project/heaven-pentest/"><img src="https://img.shields.io/pypi/v/heaven-pentest.svg?label=PyPI&color=A8FF3E" alt="PyPI"/></a>
     <img src="https://img.shields.io/badge/Python-3.11+-A8FF3E?style=for-the-badge&logo=python&logoColor=black" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI-7B2FBE?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/badge/Tests-294_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
+    <img src="https://img.shields.io/badge/Tests-313_Passing-A8FF3E?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
     <img src="https://img.shields.io/badge/MITRE-ATT%26CK_Mapped-FF073A?style=for-the-badge&logo=cncf&logoColor=white" alt="MITRE"/>
     <img src="https://img.shields.io/badge/OWASP-Top_10_%2B_API_Top_10-00CFFF?style=for-the-badge&logo=owasp&logoColor=black" alt="OWASP"/>
   </p>
@@ -119,8 +119,8 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | 📊 **Risk Scoring** | CVSS v3 ML predictor (R²=0.9925) · EPSS exploit-probability · CISA KEV membership |
 | 🗺️ **MITRE ATT&CK** | Every finding mapped to ATT&CK techniques + Lockheed Cyber Kill Chain phases |
 | 📄 **Report Generation** | Professional PDF/HTML pentest report (cover page · CVSS v3.1 vectors · MITRE ATT&CK mapping · remediation roadmap · SLA) · Markdown · CSV · JSON · SARIF · Burp XML · proxy JSONL · OWASP Top 10 / NIST CSF compliance HTML |
-| 🔢 **Tests** | **294 pytest tests passing** |
-| 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React web UI (dark matrix) · PostgreSQL (23-table schema, partitioned audit log, 9 analytical views) · SQLite offline fallback (zero-config, same interface) |
+| 🔢 **Tests** | **313 pytest tests passing** |
+| 🏗️ **Stack** | FastAPI + JWT RBAC + WebSocket · React command-centre UI (modern dark, glassmorphic — Inter + JetBrains Mono) · PostgreSQL (23-table schema, partitioned audit log, 9 analytical views) · SQLite offline fallback (zero-config, same interface) |
 
 </div>
 
@@ -172,7 +172,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 │   • Stealth timing levels 1–5 with randomized delays                     │
 ├──────────────────────────────────────────────────────────────────────────┤
 │              FastAPI + JWT RBAC + WebSocket live feed                    │
-│   • React web UI — dark matrix aesthetic                                 │
+│   • React web UI — premium glass console                                 │
 │   • Scan launcher  ·  Live findings feed  ·  3D topology                 │
 │   • Kill chain view  ·  Triage workflow  ·  Operator notes               │
 │   • AES-256-GCM credential vault  ·  HMAC-signed audit log               │
@@ -242,7 +242,7 @@ HEAVEN is a **production-grade autonomous penetration testing platform** that au
 | `db/connection.py` | ✅ Live | PostgreSQL (asyncpg pool + SQLAlchemy ORM) · SQLite offline fallback · SSL · retry/backoff · health check · bulk insert |
 | `db/models.py` | ✅ Live | 23-table SQLAlchemy 2.0 async ORM (engagements, DNS, SSL, web paths, credentials, MITRE, topology, cloud, reports, audit, tags, notes) |
 | `db/repository.py` | ✅ Live | Typed async repository / DAL — ScanRepo · AssetRepo · VulnRepo · EngagementRepo · WebPathRepo · AuditRepo · ReportRepo |
-| Web UI | ✅ Live | Dark matrix theme, scan launcher, live findings, kill chain, 19 pages total |
+| Web UI | ✅ Live | Modern dark glassmorphic theme (Inter + mono, aurora/severity-aware) · scan launcher · live findings · kill chain · 19 pages total |
 
 </div>
 
@@ -307,7 +307,7 @@ A truthful, capability-by-capability rating of what a "complete autonomous pen-t
 | 5 | **Post-exploitation** | ✅ Strong | `postex/linpeas_runner.py` (SSH → linpeas → privesc vectors), `postex/bloodhound_collector.py`, `postex/cred_validator.py`, auto-chained in `ScanPhase.POST_EX` under `--autonomous` |
 | 6 | **Lateral movement** | ✅ Strong | `postex/lateral.py` — SSH key reuse scanner, SMB/PsExec via impacket, pass-the-hash. Unified `run_lateral()` entry point |
 | 7 | **AI decision-making** (iterative loop) | ✅ Strong | `ai/autonomous_loop.py` — observe → plan → act loop driven by `AttackChainPlanner` (LLM tool-use) with deterministic rule-based fallback. New `heaven autonomous` CLI command |
-| 8 | **Exploit DB integration** | ✅ Strong | `vulnscan/exploitdb_client.py` — local `searchsploit` (preferred) + ExploitDB CSV mirror, CVE → PoC mapping with verified-priority ranking |
+| 8 | **Exploit DB integration** | ✅ Strong | `vulnscan/exploitdb_client.py` — local `searchsploit` (preferred) + ExploitDB CSV mirror. CVE → PoC (`lookup_cve`) **and** free-text service/version → PoC (`search_product`) with verified-priority ranking; the recon agent's `_tool_correlate_exploit` calls it for real results |
 | 9 | **Reproducibility** | ✅ Strong | `utils/seeding.py` + `--seed` flag + `heaven replay <scan-id>` command, stores seed in engagement DB |
 | 10 | **Reporting** | ✅ Strong | PDF, Markdown, SARIF, Burp XML, proxy-JSONL, OWASP/NIST compliance HTML — every export format real |
 | 11 | **Authorization safety** | ✅ Strong | `_verify_authorization()` gate refuses to scan without explicit ack flag, env-var scope allowlist, or interactive TTY confirm. CFAA/CMA cited in user-facing text |
@@ -1239,7 +1239,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 │   │                                 Benchmark · Methodology
 │   └── dist/                       ← Pre-built bundle, served by FastAPI
 │
-├── 🧪 tests/                       ← 294 pytest tests
+├── 🧪 tests/                       ← 313 pytest tests
 │   └── benchmarks/                 ← Reproducible benchmark suite vs. DVWA + adapters
 │       ├── ground_truth/dvwa.yaml  ← Labeled vulns with OWASP / CWE mappings
 │       ├── adapters/{burp,zap,sqlmap}.py ← Head-to-head comparison adapters
@@ -1324,7 +1324,7 @@ HEAVEN-Autonomous-Penetration-Testing/
 </p>
 
 <p align="center">
-<strong>294 tests · 50+ live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
+<strong>313 tests · 50+ live modules · PostgreSQL + SQLite · MIT License · Built for real-world pen-testing engagements</strong>
 </p>
 
 <p align="center">

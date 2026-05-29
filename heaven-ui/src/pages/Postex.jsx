@@ -68,7 +68,7 @@ export default function PostexPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#FF073A", marginTop: 0 }}>⚡ Post-Exploitation</h2>
+        <h2 style={{ color: "var(--crit)", marginTop: 0 }}>⚡ Post-Exploitation</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Destructive operations. Every module is admin-gated server-side and
           requires <code>authorized=True</code>; this UI checkbox is the
@@ -91,7 +91,7 @@ export default function PostexPage() {
                   style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }} />
 
         <label style={{ display: "flex", alignItems: "flex-start", gap: 8,
-                        color: authorized ? "#00FF41" : "#FFB800",
+                        color: authorized ? "var(--text-0)" : "var(--med)",
                         marginTop: 10, marginBottom: 10 }}>
           <input type="checkbox" checked={authorized}
                  onChange={(e) => setAuthorized(e.target.checked)} />

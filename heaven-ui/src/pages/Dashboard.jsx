@@ -1,28 +1,73 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
-import NetworkTopology3D from '../components/NetworkTopology3D'
+import { useNavigate } from 'react-router-dom'
 import LiveTerminal from '../components/LiveTerminal'
 import { Engagement, Dashboard as DashApi } from '../api'
 
-const SEV_COLORS = {
-  critical: '#FF003C', high: '#FF6B00', medium: '#FFB800', low: '#00D4FF',
+// three.js + r3f + drei are heavy (~600 KB). Load them only when the dashboard
+// mounts, not in the app's first paint — keeps login/findings/etc. lightweight.
+const NetworkTopology3D = lazy(() => import('../components/NetworkTopology3D'))
+
+function TopologyFallback() {
+  return (
+    <div className="topology-container topology-loading">
+      <span className="route-spinner" />
+      <span>Initializing 3D topology…</span>
+    </div>
+  )
 }
 
-function StatCard({ label, value, color, sub }) {
+const SEV = {
+  critical: { color: '#FF4D6A', label: 'Critical' },
+  high:     { color: '#FF8A3D', label: 'High' },
+  medium:   { color: '#FFC53D', label: 'Medium' },
+  low:      { color: '#38BDF8', label: 'Low' },
+  info:     { color: '#8593AD', label: 'Info' },
+}
+
+function StatCard({ label, value, color, sub, delay = 0 }) {
   return (
     <motion.div
       className="stat-card"
       style={{ color }}
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1], delay }}
     >
       <div className="stat-label">{label}</div>
-      <div className="stat-value" style={{ color, textShadow: `0 0 20px ${color}55` }}>
-        {value ?? '—'}
-      </div>
-      {sub && <div style={{ fontSize: 10, color: 'rgba(0,255,65,0.62)', marginTop: 4 }}>{sub}</div>}
+      <div className="stat-value" style={{ color }}>{value ?? '—'}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
     </motion.div>
+  )
+}
+
+function SeverityBars({ bySeverity, total }) {
+  const order = ['critical', 'high', 'medium', 'low', 'info']
+  return (
+    <div className="flex-col gap-md" style={{ padding: '16px' }}>
+      <div className="card-title" style={{ marginBottom: 4 }}>Severity distribution</div>
+      {order.map((s) => {
+        const n = bySeverity?.[s] ?? 0
+        const pct = total > 0 ? Math.round((n / total) * 100) : 0
+        return (
+          <div key={s}>
+            <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 5 }}>
+              <span style={{ color: SEV[s].color, fontWeight: 600 }}>{SEV[s].label}</span>
+              <span className="mono" style={{ color: 'var(--text-2)' }}>{n}</span>
+            </div>
+            <div className="progress-bar">
+              <motion.div
+                className="progress-fill"
+                style={{ background: SEV[s].color, boxShadow: `0 0 10px ${SEV[s].color}66` }}
+                initial={{ width: 0 }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+              />
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -30,6 +75,7 @@ export default function Dashboard() {
   const [eng, setEng] = useState(null)
   const [dash, setDash] = useState(null)
   const [activeScanId] = useState(localStorage.getItem('heaven_active_scan') || '')
+  const navigate = useNavigate()
 
   useEffect(() => {
     const load = () => {
@@ -44,103 +90,82 @@ export default function Dashboard() {
   const stats = eng?.stats || {}
   const hosts = dash?.assets || []
   const noEng = !eng || eng.no_engagement
-
-  const critCount = stats.by_severity?.critical ?? 0
-  const highCount = stats.by_severity?.high ?? 0
-  const medCount  = stats.by_severity?.medium ?? 0
+  const bySev = stats.by_severity || {}
   const totalFindings = stats.total_findings ?? 0
 
   return (
     <div className="dashboard-grid">
-      {/* Left: 3D + stat cards */}
+      {/* Left: topology + stats */}
       <div className="dashboard-left">
-        {/* 3D Topology */}
         <div style={{ position: 'relative', overflow: 'hidden' }}>
-          <NetworkTopology3D hosts={hosts} />
-
-          {/* Overlay info */}
+          <Suspense fallback={<TopologyFallback />}>
+            <NetworkTopology3D hosts={hosts} />
+          </Suspense>
           {noEng && (
             <div style={{
               position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
               justifyContent: 'center', pointerEvents: 'none',
             }}>
-              <div style={{
-                background: 'rgba(0,0,0,0.75)',
-                border: '1px solid rgba(0,212,255,0.3)',
-                padding: '12px 20px',
-                textAlign: 'center',
-                backdropFilter: 'blur(4px)',
+              <div className="card-glass" style={{
+                padding: '20px 28px', textAlign: 'center', borderRadius: 'var(--radius-lg)',
+                pointerEvents: 'auto',
               }}>
-                <div style={{ color: '#00D4FF', fontSize: 12, letterSpacing: '0.1em', marginBottom: 4 }}>
-                  NO ACTIVE ENGAGEMENT
+                <div style={{ color: 'var(--text-0)', fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+                  No active engagement
                 </div>
-                <div style={{ color: 'rgba(0,255,65,0.72)', fontSize: 11 }}>
-                  heaven engage init &lt;name&gt;
+                <div style={{ color: 'var(--text-2)', fontSize: 12.5, marginBottom: 14 }}>
+                  Create one to begin mapping your target surface.
                 </div>
+                <button className="btn btn-primary" style={{ pointerEvents: 'auto' }}
+                        onClick={() => navigate('/engagement')}>
+                  Set up engagement →
+                </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Stat cards */}
         <div className="stat-grid">
-          <StatCard
-            label="Critical" value={critCount} color={SEV_COLORS.critical}
-            sub={critCount > 0 ? 'NEEDS ATTENTION' : 'CLEAR'}
-          />
-          <StatCard
-            label="High" value={highCount} color={SEV_COLORS.high}
-          />
-          <StatCard
-            label="Medium" value={medCount} color={SEV_COLORS.medium}
-          />
-          <StatCard
-            label="Targets" value={stats.scope_targets ?? 0} color="#00FF41"
-            sub={`${stats.scans_run ?? 0} scan${stats.scans_run !== 1 ? 's' : ''}`}
-          />
+          <StatCard label="Critical" value={bySev.critical ?? 0} color={SEV.critical.color}
+                    sub={(bySev.critical ?? 0) > 0 ? 'Needs attention' : 'All clear'} delay={0.02} />
+          <StatCard label="High" value={bySev.high ?? 0} color={SEV.high.color} delay={0.06} />
+          <StatCard label="Total findings" value={totalFindings} color="#6D7CFF" delay={0.10}
+                    sub={`${stats.scans_run ?? 0} scan${stats.scans_run !== 1 ? 's' : ''} run`} />
+          <StatCard label="Targets" value={stats.scope_targets ?? 0} color="#34E5A3" delay={0.14}
+                    sub="In scope" />
         </div>
       </div>
 
-      {/* Right: terminal + info */}
+      {/* Right rail */}
       <div className="dashboard-right">
-        {/* Engagement mini-summary */}
-        <div style={{
-          padding: '10px 14px',
-          borderBottom: '1px solid rgba(0,255,65,0.1)',
-          fontSize: 11,
-        }}>
+        <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
           {noEng ? (
-            <div style={{ color: 'rgba(0,255,65,0.72)', fontSize: 12 }}>
-              <div style={{ marginBottom: 6, color: '#00D4FF', letterSpacing: '0.1em', fontSize: 11 }}>QUICK START</div>
-              <div style={{ lineHeight: 1.8 }}>
-                <div>$ heaven engage init my-eng</div>
-                <div>$ heaven scope add 10.0.0.0/24 --kind cidr</div>
-                <div>$ heaven scan -t 10.0.0.1 --i-have-authorization</div>
-              </div>
+            <div>
+              <div className="card-title" style={{ marginBottom: 10 }}>Quick start</div>
+              <pre className="code" style={{ fontSize: 11.5 }}>{`$ heaven engage init my-eng
+$ heaven scope add 10.0.0.0/24 --kind cidr
+$ heaven scan -t 10.0.0.1 \\
+    --i-have-authorization`}</pre>
             </div>
           ) : (
             <div>
-              <div style={{ color: 'rgba(0,255,65,0.68)', fontSize: 10, letterSpacing: '0.1em', marginBottom: 4 }}>
-                ENGAGEMENT
-              </div>
-              <div style={{ color: '#00FF41', fontWeight: 700, marginBottom: 2 }}>
+              <div className="stat-label" style={{ marginBottom: 6 }}>Engagement</div>
+              <div style={{ color: 'var(--text-0)', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>
                 {eng.engagement?.name}
               </div>
-              <div style={{ color: 'rgba(0,255,65,0.72)', fontSize: 11 }}>
+              <div style={{ color: 'var(--text-1)', fontSize: 12.5 }}>
                 {totalFindings} findings · {stats.scope_targets} targets in scope
-              </div>
-              <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                {Object.entries(SEV_COLORS).map(([s, c]) => (
-                  <span key={s} style={{ fontSize: 11, color: c }}>
-                    {stats.by_severity?.[s] ?? 0} {s.charAt(0).toUpperCase()}
-                  </span>
-                ))}
               </div>
             </div>
           )}
         </div>
 
-        {/* Live terminal */}
+        {!noEng && totalFindings > 0 && (
+          <div style={{ borderBottom: '1px solid var(--border)' }}>
+            <SeverityBars bySeverity={bySev} total={totalFindings} />
+          </div>
+        )}
+
         <LiveTerminal scanId={activeScanId} />
       </div>
     </div>

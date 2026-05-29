@@ -5,7 +5,7 @@ import React, { useState, useEffect } from "react";
 import { Coverage, Engagement, Priors } from "../api";
 
 const GRADE_COLOR = {
-  A: "#00FF41", B: "#00D4FF", C: "#FFB800", D: "#FF6F00", F: "#FF073A",
+  A: "var(--text-0)", B: "var(--cyan)", C: "var(--med)", D: "var(--high)", F: "var(--crit)",
 };
 
 export default function CoveragePage() {
@@ -49,7 +49,7 @@ export default function CoveragePage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "#00FF41", marginTop: 0 }}>📊 Coverage Self-Grading</h2>
+        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>📊 Coverage Self-Grading</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Rule-based OWASP coverage + scope hit-rate + auth/auto-prove/post-ex
           flags, with optional LLM-driven gap analysis.
@@ -98,17 +98,17 @@ export default function CoveragePage() {
             </div>
             <div style={{ marginTop: 10 }}>
               <div className="dim" style={{ fontSize: 11 }}>Scope coverage</div>
-              <div style={{ background: "rgba(0,255,65,0.08)", height: 12, borderRadius: 2 }}>
+              <div style={{ background: "var(--border)", height: 12, borderRadius: 2 }}>
                 <div style={{
                   width: `${report.scope_coverage_pct}%`, height: "100%",
-                  background: "#00FF41",
+                  background: "var(--text-0)",
                 }} />
               </div>
               <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>OWASP Top 10 coverage</div>
-              <div style={{ background: "rgba(0,212,255,0.08)", height: 12, borderRadius: 2 }}>
+              <div style={{ background: "var(--border-accent)", height: 12, borderRadius: 2 }}>
                 <div style={{
                   width: `${report.owasp_coverage_pct}%`, height: "100%",
-                  background: "#00D4FF",
+                  background: "var(--cyan)",
                 }} />
               </div>
             </div>
@@ -123,7 +123,7 @@ export default function CoveragePage() {
                     <td style={{ width: 80 }}><code>{c.code}</code></td>
                     <td>{c.name}</td>
                     <td align="right" style={{ width: 60 }}>{c.findings}</td>
-                    <td style={{ width: 30, color: c.covered ? "#00FF41" : "#FF073A" }}>
+                    <td style={{ width: 30, color: c.covered ? "var(--text-0)" : "var(--crit)" }}>
                       {c.covered ? "✓" : "✗"}
                     </td>
                   </tr>
@@ -157,7 +157,7 @@ export default function CoveragePage() {
               <div className="card-title">LLM gap analysis</div>
               <pre style={{
                 whiteSpace: "pre-wrap", fontSize: 12, fontFamily: "monospace",
-                background: "rgba(0,0,0,0.4)", padding: 10, border: "1px solid rgba(0,255,65,0.2)",
+                background: "rgba(0,0,0,0.4)", padding: 10, border: "1px solid var(--border)",
               }}>{report.llm_gap_summary}</pre>
             </div>
           )}

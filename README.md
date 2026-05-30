@@ -777,7 +777,7 @@ Severity maps to Jira priority (`Highest`/`High`/`Medium`/`Low`/`Lowest`) and Li
 
 <div align="center">
 
-<img width="1701" height="929" alt="image" src="https://github.com/user-attachments/assets/64828917-609e-4ef0-971d-e09c14438ec1" />
+<img width="1600" height="1000" alt="image-1780074658456" src="https://github.com/user-attachments/assets/6e40d32d-67a4-4ab3-8faf-46a5fb4e3192" />
 
 </div>
 

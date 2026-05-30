@@ -59,12 +59,14 @@ class User:
     failed_attempts: int = 0
     locked_until: float = 0.0
     is_active: bool = True
+    must_change_password: bool = False
 
     def to_dict(self) -> dict:
         return {
             "id": self.id, "username": self.username, "role": self.role.value,
             "created_at": self.created_at, "last_login": self.last_login,
             "is_active": self.is_active, "has_api_key": bool(self.api_key),
+            "must_change_password": self.must_change_password,
         }
 
 
@@ -97,10 +99,43 @@ class AuthManager:
 
     def _setup_default_admin(self) -> None:
         admin_pass = os.environ.get("HEAVEN_ADMIN_PASSWORD", "")
-        if not admin_pass:
-            admin_pass = os.urandom(16).hex()
-            logger.warning(f"No HEAVEN_ADMIN_PASSWORD set — generated: {admin_pass[:8]}...")
-        self.create_user("admin", admin_pass, Role.ADMIN)
+        if admin_pass:
+            # Operator supplied a strong password via env — trust it, no forced change.
+            self.create_user("admin", admin_pass, Role.ADMIN)
+            return
+        # No env password: ship a usable default (admin/admin) so a fresh install
+        # works out-of-the-box, but FORCE a password change on first login and let
+        # `self-audit` flag the unchanged default as critical. Balances zero-friction
+        # onboarding with "no weak default credentials in production".
+        user = self.create_user("admin", "admin", Role.ADMIN)
+        user.must_change_password = True
+        logger.warning(
+            "No HEAVEN_ADMIN_PASSWORD set — seeded default admin/admin with a FORCED "
+            "password change on first login. Set HEAVEN_ADMIN_PASSWORD or change the "
+            "password immediately for production use."
+        )
+
+    def verify_user_password(self, username: str, password: str) -> bool:
+        """Constant-time check of a user's current password (no token, no lockout
+        side-effects). Used by the change-password flow."""
+        user = next((u for u in self._users.values() if u.username == username), None)
+        return bool(user and self._verify_password(password, user.password_hash))
+
+    def set_password(self, username: str, new_password: str) -> bool:
+        """Change a user's password and clear the must-change flag. Enforces a
+        minimum strength so the forced change can't be a no-op (admin -> admin)."""
+        user = next((u for u in self._users.values() if u.username == username), None)
+        if not user:
+            return False
+        if not new_password or len(new_password) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if new_password.lower() in {"admin", "password", "changeme", "admin123", "administrator"}:
+            raise ValueError("Password is too common — choose a stronger one")
+        user.password_hash = self._hash_password(new_password)
+        user.must_change_password = False
+        user.failed_attempts = 0
+        user.locked_until = 0.0
+        return True
 
     def _hash_password(self, password: str, salt: Optional[str] = None) -> str:
         salt = salt or os.urandom(16).hex()
@@ -152,7 +187,8 @@ class AuthManager:
         user.locked_until = 0
         user.last_login = time.time()
         token = self._issue_token(user, source_ip)
-        return {"token": token, "user": user.to_dict(), "expires_in": self.TOKEN_EXPIRY}
+        return {"token": token, "user": user.to_dict(), "expires_in": self.TOKEN_EXPIRY,
+                "must_change_password": user.must_change_password}
 
     def authenticate_api_key(self, api_key: str) -> Optional[User]:
         user_id = self._api_keys.get(api_key)

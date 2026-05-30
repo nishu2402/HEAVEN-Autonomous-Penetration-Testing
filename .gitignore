@@ -63,3 +63,4 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+*.sarif

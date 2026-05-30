@@ -4,6 +4,7 @@
 
 let authToken = null;
 let currentUser = null;
+let mustChangePassword = false;
 const listeners = new Set();
 
 const API_BASE = "/api";
@@ -50,8 +51,62 @@ export async function login(username, password) {
   const data = await r.json();
   authToken = data.token;
   currentUser = data.user;
+  mustChangePassword = Boolean(data.must_change_password);
   notify();
   return data.user;
+}
+
+// True when the server flagged the account as still on the default password.
+export function needsPasswordChange() {
+  return mustChangePassword;
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  const r = await fetch(`${API_BASE}/auth/change-password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!r.ok) {
+    let detail;
+    try { detail = (await r.json()).detail; } catch { detail = "Password change failed"; }
+    throw new Error(detail);
+  }
+  mustChangePassword = false;
+  notify();
+  return true;
+}
+
+// Fetch a report as a blob and trigger a browser download. A plain <a download>
+// can't be used because the export endpoint requires the bearer auth header.
+export async function downloadReport(format, opts = {}) {
+  const q = new URLSearchParams({ format });
+  if (opts.engagement) q.append("engagement", opts.engagement);
+  if (opts.framework) q.append("framework", opts.framework);
+  const r = await fetch(`${API_BASE}/report/export?${q.toString()}`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+  });
+  if (!r.ok) {
+    let detail;
+    try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(detail || `Export failed (${r.status})`);
+  }
+  const blob = await r.blob();
+  const cd = r.headers.get("content-disposition") || "";
+  const m = /filename="?([^"]+)"?/.exec(cd);
+  const filename = m ? m[1] : `heaven-report.${format}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return filename;
 }
 
 export async function logout() {

@@ -96,16 +96,50 @@ export default function FindingDetail() {
               {f.confidence_bucket && <span className="dim" style={{ marginLeft: 6 }}>({f.confidence_bucket})</span>}
             </td></tr>
             <tr><td>CVE</td><td>{f.cve_id || "—"}</td></tr>
-            <tr><td>Predicted CVSS</td><td>{f.predicted_cvss_score?.toFixed?.(1) ?? "—"}</td></tr>
+            <tr><td>CVSS</td><td>
+              {f.predicted_cvss_score?.toFixed?.(1)
+                ?? (f.typical_cvss ? Number(f.typical_cvss).toFixed(1) : "—")}
+              {!f.predicted_cvss_score && f.typical_cvss
+                ? <span className="dim" style={{ marginLeft: 6 }}>(typical for class)</span>
+                : null}
+            </td></tr>
             <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "—"}</td></tr>
-            <tr><td>MITRE Technique</td><td>{f.mitre_technique || "—"}</td></tr>
-            <tr><td>Seen</td><td className="dim">{f.seen_count ?? 1}× (last: {(f.last_seen_at || "").slice(0, 10)})</td></tr>
+            <tr><td>CWE</td><td>{f.cwe || ev.cwe || "—"}</td></tr>
+            <tr><td>OWASP</td><td>{f.owasp || ev.owasp || "—"}</td></tr>
+            <tr><td>MITRE Technique</td><td>{f.mitre_technique || ev.mitre || "—"}</td></tr>
+            <tr><td>Seen</td><td className="dim">
+              {f.seen_count ?? 1}×{f.last_seen_at ? ` (last: ${f.last_seen_at.slice(0, 10)})` : ""}
+            </td></tr>
             <tr><td>Status</td><td>
               <span className={`status-pill status-${f.status}`}>{f.status}</span>
             </td></tr>
           </tbody>
         </table>
       </div>
+
+      {(ev.description || ev.impact) && (
+        <div className="card">
+          <div className="card-title">About this vulnerability</div>
+          {ev.description && (
+            <p style={{ color: "var(--text-0)", fontSize: 13.5, lineHeight: 1.7, marginBottom: ev.impact ? 14 : 0 }}>
+              {ev.description}
+            </p>
+          )}
+          {ev.impact && (
+            <>
+              <div style={{ fontSize: 11, color: "var(--text-2)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Impact</div>
+              <p style={{ color: "var(--text-1)", fontSize: 13, lineHeight: 1.7 }}>{ev.impact}</p>
+            </>
+          )}
+          {(ev.cwe || ev.owasp || ev.mitre) && (
+            <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {ev.cwe && <span className="badge-soft">{ev.cwe}</span>}
+              {ev.owasp && <span className="badge-soft">{ev.owasp}</span>}
+              {ev.mitre && <span className="badge-soft">{ev.mitre}</span>}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Active confirmation — Gap 4 + Gap 6 */}
       <ExploitAndReviewActions id={id} finding={f} onChange={load} />
@@ -206,6 +240,21 @@ export default function FindingDetail() {
         <div className="card">
           <div className="card-title">Remediation</div>
           <div className="evidence-block">{ev.remediation}</div>
+        </div>
+      )}
+
+      {/* References */}
+      {ev.references?.length > 0 && (
+        <div className="card">
+          <div className="card-title">References</div>
+          <ul style={{ paddingLeft: 18, lineHeight: 1.9 }}>
+            {ev.references.map((r, i) => (
+              <li key={i} style={{ fontSize: 13 }}>
+                <a href={r} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "var(--cyan)", wordBreak: "break-all" }}>{r}</a>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

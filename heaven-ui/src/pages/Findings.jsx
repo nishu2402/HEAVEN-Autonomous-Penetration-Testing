@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { Engagement } from "../api";
+import ReportMenu from "../components/ReportMenu.jsx";
 
 const SEVERITIES = ["", "critical", "high", "medium", "low", "info"];
 const STATUSES   = ["", "open", "verified", "false_positive", "accepted_risk", "fixed"];
@@ -73,6 +74,7 @@ export default function Findings() {
         <button className="btn" onClick={load} disabled={loading}>
           {loading ? "..." : "Apply"}
         </button>
+        <div style={{ marginLeft: "auto" }}><ReportMenu /></div>
       </div>
 
       {error && <div className="card error">{error}</div>}

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — report downloads, vuln knowledge base, forced-change auth
+
+- **Downloadable reports (webapp + API).** New `GET /api/report/export?format=…`
+  streams a report in 8 working text/standard formats — HTML (compliance-mapped),
+  Markdown, CSV, JSON, SARIF, Burp XML, proxy-JSONL — plus PDF when `reportlab`
+  is installed (a declared dependency; returns a clear 503 if absent). A
+  "Download report" menu is wired into the Findings page (`ReportMenu`). The API
+  reuses the exact reporters behind `heaven export` / `heaven report`, so CLI and
+  webapp output match.
+- **Vulnerability Knowledge Base** (`heaven/devsecops/vuln_kb.py`) — 16 curated
+  classes with real description / impact / remediation / references / MITRE / CWE /
+  OWASP. The evidence packager and the finding-detail API enrich every finding
+  from it, so the UI and reports never show blank fields. Fixes the empty
+  `DOCKER_SOCKET_EXPOSED` detail view (now shows CVSS 9.8, MITRE T1610, CWE-284,
+  remediation, and references). Also surfaced real stored fields the detail page
+  previously dropped (CVSS from risk_score, seen-count, last-seen date).
+- **Finding-detail page** now renders an "About this vulnerability" section,
+  impact, CWE/OWASP/MITRE chips, and a references list.
+- **admin/admin default + forced change.** Fresh installs seed admin/admin so the
+  console works out-of-the-box, but the account is flagged `must_change_password`:
+  the webapp shows a blocking change-password screen on first login and refuses
+  to proceed until a strong password is set (≥8 chars, common-password blocklist).
+  `HEAVEN_ADMIN_PASSWORD` still overrides with no forced change. New
+  `POST /api/auth/change-password`; `self-audit` still flags unchanged defaults.
+
 ### Changed — web UI redesign (premium "hybrid" theme)
 
 - **Complete React UI overhaul** — replaced the green-on-black CRT/matrix

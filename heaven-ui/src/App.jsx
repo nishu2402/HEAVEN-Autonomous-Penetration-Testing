@@ -74,8 +74,15 @@ export default function App() {
 }
 
 function Shell() {
+  const [mustChange, setMustChange] = useState(needsPasswordChange());
+
+  useEffect(() => {
+    return onAuthChange(() => setMustChange(needsPasswordChange()));
+  }, []);
+
   return (
     <div className="app-shell">
+      {mustChange && <ForcedPasswordChange onDone={() => setMustChange(false)} />}
       <CommandPalette />
       <Sidebar />
       <div className="main-pane">

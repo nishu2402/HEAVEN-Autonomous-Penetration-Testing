@@ -852,13 +852,23 @@ def create_app() -> FastAPI:
         if not f:
             raise HTTPException(404, "Finding not found")
         from heaven.devsecops.evidence import package_finding
+        from heaven.devsecops.vuln_kb import enrich_finding
         finding_dict = {
             "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
             "title": f.title, "severity": f.severity, "confidence": f.confidence,
             "confidence_bucket": f.confidence_bucket, "cve_id": f.cve_id,
             "risk_score": f.risk_score, "status": f.status,
             "operator_notes": f.operator_notes, "evidence": f.evidence,
+            # Real stored fields the UI detail table reads (previously omitted →
+            # blank rows). risk_score doubles as the engine's CVSS-scale score.
+            "predicted_cvss_score": f.risk_score or None,
+            "priority_score": f.risk_score or None,
+            "seen_count": f.seen_count, "last_seen_at": f.last_seen_at,
+            "first_seen_at": f.first_seen_at,
         }
+        # Enrich from the vuln knowledge base so description / remediation /
+        # references / CWE / OWASP / MITRE / typical-CVSS are never blank.
+        finding_dict = enrich_finding(finding_dict)
         pkg = package_finding(finding_dict)
         return {
             "finding": finding_dict,
@@ -876,6 +886,114 @@ def create_app() -> FastAPI:
             for v in vulns
         ]
         return {"scores": scores}
+
+    # ── Report export (download) ──
+    @app.get("/api/report/export")
+    async def export_report(
+        format: str = "html",
+        engagement: Optional[str] = None,
+        framework: str = "OWASP_TOP10",
+        user: User = Depends(require_permission("report.view")),
+    ):
+        """Generate + download an engagement report. Reuses the exact reporters
+        behind `heaven export` / `heaven report`, so CLI and webapp produce the
+        same output. Formats: html, pdf, markdown, csv, json, sarif, burp,
+        proxy-jsonl."""
+        from fastapi import Response
+        from fastapi.responses import FileResponse
+        from heaven.devsecops.vuln_kb import enrich_finding
+
+        store = _engagement_store_factory(engagement)
+        eng = store.get_engagement()
+        eng_name = (eng.name if eng else None) or engagement or \
+            os.environ.get("HEAVEN_ENGAGEMENT") or "HEAVEN Engagement"
+        rows = store.list_findings(limit=10000)
+        if not rows:
+            raise HTTPException(404, "No findings to report for this engagement")
+        findings = []
+        for f in rows:
+            d = {
+                "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
+                "title": f.title, "severity": f.severity, "confidence": f.confidence,
+                "confidence_bucket": f.confidence_bucket, "cve_id": f.cve_id,
+                "risk_score": f.risk_score, "predicted_cvss_score": f.risk_score,
+                "priority_score": f.risk_score, "first_seen_at": f.first_seen_at,
+                "last_seen_at": f.last_seen_at, "status": f.status,
+                "operator_notes": f.operator_notes, "evidence": f.evidence,
+            }
+            findings.append(enrich_finding(d))
+
+        fmt = (format or "html").lower()
+        media = {
+            "html": "text/html", "markdown": "text/markdown", "csv": "text/csv",
+            "json": "application/json", "sarif": "application/json",
+            "burp": "application/xml", "proxy-jsonl": "application/x-ndjson",
+        }
+        ext = {"markdown": "md", "proxy-jsonl": "jsonl"}
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", eng_name)[:60] or "engagement"
+        try:
+            if fmt == "pdf":
+                import importlib.util
+                if importlib.util.find_spec("reportlab") is None:
+                    raise HTTPException(
+                        503, "PDF export needs reportlab — `pip install reportlab`. "
+                        "Use HTML/Markdown export, which need no extra dependency.")
+                import tempfile
+                from heaven.devsecops.pdf_report import PDFReportGenerator
+                tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+                tmp.close()
+                ok = PDFReportGenerator().generate(
+                    {"engagement": eng_name, "vulnerabilities": findings,
+                     "findings": findings}, tmp.name)
+                if not ok:
+                    raise HTTPException(500, "PDF generation failed (reportlab installed?)")
+                return FileResponse(tmp.name, media_type="application/pdf",
+                                    filename=f"heaven-report-{safe}.pdf")
+            if fmt == "html":
+                from heaven.devsecops.compliance_report import ComplianceReportGenerator
+                body = ComplianceReportGenerator().generate_html_report(
+                    findings, engagement_name=eng_name)
+            elif fmt == "markdown":
+                from heaven.devsecops.evidence import export_findings_markdown
+                body = export_findings_markdown(findings, engagement_name=eng_name)
+            elif fmt == "csv":
+                from heaven.devsecops.evidence import export_findings_csv
+                body = export_findings_csv(findings)
+            elif fmt == "json":
+                body = json.dumps(findings, indent=2, default=str)
+            elif fmt == "sarif":
+                from heaven.devsecops.aggregator import export_sarif
+                body = json.dumps(export_sarif({"vulnerabilities": findings}), indent=2)
+            elif fmt == "burp":
+                from heaven.devsecops.burp_export import export_burp_xml
+                body = export_burp_xml(findings, engagement_name=eng_name)
+            elif fmt == "proxy-jsonl":
+                from heaven.devsecops.burp_export import export_proxy_history_jsonl
+                body = export_proxy_history_jsonl(findings)
+            else:
+                raise HTTPException(400, f"unsupported format: {fmt}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"report generation failed: {e}")
+        filename = f"heaven-report-{safe}.{ext.get(fmt, fmt)}"
+        return Response(content=body, media_type=media.get(fmt, "text/plain"),
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    # ── Change password (forced-change flow) ──
+    @app.post("/api/auth/change-password")
+    async def change_password(body: dict, user: User = Depends(require_user)):
+        """Change the current user's password; clears the forced-change flag."""
+        am = get_auth_manager()
+        current = (body or {}).get("current_password", "")
+        new = (body or {}).get("new_password", "")
+        if not am.verify_user_password(user.username, current):
+            raise HTTPException(401, "Current password is incorrect")
+        try:
+            am.set_password(user.username, new)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        return {"ok": True, "message": "Password changed"}
 
     # ══════════════════════════════════════════════════════════════════
     # New API surface — exposes the publication-gap features to the UI

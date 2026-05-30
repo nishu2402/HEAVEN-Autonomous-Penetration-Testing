@@ -52,6 +52,15 @@ class EvidencePackage:
     cve_id: str = ""
     remediation: str = ""
 
+    # Class-level reference context (finding's own data, else vuln knowledge base)
+    # so the UI/reports always show meaningful info even for host-level findings
+    # that produced no HTTP request/response pair.
+    description: str = ""
+    impact: str = ""
+    references: list[str] = field(default_factory=list)
+    owasp: str = ""
+    mitre: str = ""
+
     # Operator workflow
     notes: str = ""
     status: str = "open"
@@ -232,8 +241,26 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
     reasons = (
         finding.get("fp_check_reasons", [])
         or finding.get("reasons", [])
+        or evidence.get("reasons", [])
         or []
     )
+
+    # Class-level reference context. Prefer values already on the finding/
+    # evidence (the API enriches these from the vuln knowledge base), then fall
+    # back to a direct KB lookup so any caller gets useful, accurate data.
+    from heaven.devsecops.vuln_kb import lookup as _kb_lookup
+    _kb = _kb_lookup(vuln_type)
+    _description = evidence.get("description", "") or _kb.get("description", "")
+    _impact = evidence.get("impact", "") or _kb.get("impact", "")
+    _references = evidence.get("references", []) or _kb.get("references", [])
+    _cwe = finding.get("cwe", "") or finding.get("cwe_id", "") or _kb.get("cwe", "")
+    _owasp = finding.get("owasp", "") or evidence.get("owasp", "") or _kb.get("owasp", "")
+    _mitre = (finding.get("mitre_technique", "") or evidence.get("mitre", "")
+              or _kb.get("mitre", ""))
+    _remediation = (finding.get("patch", "") or finding.get("remediation", "")
+                    or evidence.get("remediation", "") or _kb.get("remediation", ""))
+    if not reasons and _kb.get("title"):
+        reasons = [f"Matches the {_kb['title']} class ({_kb.get('cwe', '')})."]
 
     return EvidencePackage(
         finding_id=finding.get("id", ""),
@@ -256,12 +283,17 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
         fp_check_evidence=finding.get("fp_check_evidence", {}) or {},
         curl_command=curl,
         repro_steps=finding.get("repro_steps", []),
-        cwe_id=finding.get("cwe_id", ""),
+        cwe_id=_cwe or finding.get("cwe_id", ""),
         cve_id=finding.get("cve_id", ""),
-        remediation=finding.get("patch", "") or finding.get("remediation", ""),
+        remediation=_remediation,
         notes=finding.get("operator_notes", ""),
         status=finding.get("status", "open"),
         timestamp=datetime.now(timezone.utc).isoformat(),
+        description=_description,
+        impact=_impact,
+        references=_references,
+        owasp=_owasp,
+        mitre=_mitre,
     )
 
 

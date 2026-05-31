@@ -13,25 +13,10 @@ required.
 
 ## 1 · Install (60 seconds)
 
-**Option A — PyPI (recommended for evaluation):**
-
-```bash
-pip install heaven-pentest
-heaven --version
-```
-
-**Option B — From source (recommended for contributors):**
-
 ```bash
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing
 cd HEAVEN-Autonomous-Penetration-Testing
 ./install.sh          # creates venv, installs deps, builds React UI
-```
-
-**Option C — Docker:**
-
-```bash
-docker run --rm -it -p 8443:8443 ghcr.io/nishu2402/heaven:latest heaven --help
 ```
 
 ---

@@ -41,7 +41,7 @@ ruff check heaven/ tests/
 mypy --ignore-missing-imports --no-strict-optional heaven/
 
 # Tests
-pytest tests/                 # ~294 tests, ~6s
+pytest tests/                 # 313 tests, ~6s
 
 # Security audit (informational — exits 0 even on findings)
 bandit -r heaven/ -ll

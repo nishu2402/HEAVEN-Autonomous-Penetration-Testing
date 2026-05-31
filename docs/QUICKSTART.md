@@ -88,8 +88,9 @@ heaven serve
 Open <http://localhost:8443> and log in with:
 
 - Username: `admin`
-- Password: the value of `HEAVEN_ADMIN_PASSWORD` (set in your env, or
-  auto-generated and printed at first run)
+- Password: `admin` on a fresh install — the UI then forces a password change
+  on first login. Set `HEAVEN_ADMIN_PASSWORD` beforehand to use a strong
+  password from the start and skip the prompt.
 
 You'll see 19 pages:
 

@@ -207,16 +207,9 @@ It runs three ways from the **same engagement dataset**:
 ### Install
 
 ```bash
-# Option A — pip
-pip install heaven-pentest
-
-# Option B — from source
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git
 cd HEAVEN-Autonomous-Penetration-Testing
 chmod +x install.sh && ./install.sh      # venv + deps + builds the web UI
-
-# Option C — Docker (bundles PostgreSQL)
-docker compose up
 ```
 
 ### Configure

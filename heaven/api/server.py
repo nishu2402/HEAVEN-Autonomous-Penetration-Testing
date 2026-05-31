@@ -57,6 +57,9 @@ class LoginResponse(BaseModel):
     token: str
     expires_in: int
     user: dict
+    # True when the account is still on the seeded default (admin/admin) and the
+    # UI must force a password change before proceeding.
+    must_change_password: bool = False
 
 
 class ScanRequest(BaseModel):
@@ -907,6 +910,10 @@ def create_app() -> FastAPI:
         eng = store.get_engagement()
         eng_name = (eng.name if eng else None) or engagement or \
             os.environ.get("HEAVEN_ENGAGEMENT") or "HEAVEN Engagement"
+        # Strip a stray .db (engagement may resolve from a DB filename) so the
+        # downloaded report isn't named "heaven-report-foo.db.json".
+        if eng_name.endswith(".db"):
+            eng_name = eng_name[:-3]
         rows = store.list_findings(limit=10000)
         if not rows:
             raise HTTPException(404, "No findings to report for this engagement")

@@ -126,7 +126,7 @@ It runs three ways from the **same engagement dataset**:
 | 🗺️ **Threat Intel** | MITRE ATT&CK mapping · Lockheed Kill Chain · TAXII feed |
 | 📄 **Report Formats** | 8 (PDF · HTML · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL) |
 | 🔒 **Security** | JWT RBAC · AES-256-GCM vault · HMAC-signed audit log · LLM credential redaction |
-| 📦 **Install** | `pip install heaven-pentest` or `./install.sh` |
+| 📦 **Install** | `./install.sh` |
 | 🐳 **Container** | `docker compose up` (bundles PostgreSQL) |
 | 🔁 **CI** | ruff · mypy · pytest · pip-audit · Bandit · self-audit · Docker smoke-test |
 

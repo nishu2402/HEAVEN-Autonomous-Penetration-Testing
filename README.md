@@ -18,7 +18,6 @@
 
   <p>
     <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/ci.yml"><img src="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
-    <a href="https://pypi.org/project/heaven-pentest/"><img src="https://img.shields.io/pypi/v/heaven-pentest.svg?label=PyPI&color=FF36AB&style=flat-square" alt="PyPI"/></a>
   </p>
 
   <p>

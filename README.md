@@ -17,10 +17,6 @@
 <div align="center">
 
   <p>
-    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/ci.yml"><img src="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
-  </p>
-
-  <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI_45_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
     <img src="https://img.shields.io/badge/Tests-313_Passing-B8FF00?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>

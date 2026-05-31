@@ -169,11 +169,11 @@ It runs three ways from the **same engagement dataset**:
 </p>
 
 ```
-            ┌────────────────────────────────────────────────────────────┐
-  CLI ──────┤                                                            │
-  Web UI ───┤   ORCHESTRATOR  (async dependency-aware task graph)        │
-  REST API ─┤   resumable · checkpointed · stealth timing 1–5           │
-            └───────────────────────────┬────────────────────────────────┘
+            ┌───────────────────────────────────────────────────────┐
+  CLI ──────┤   ORCHESTRATOR  (async dependency-aware task graph)   │
+  Web UI ───┤                resumable · checkpointed               │
+  REST API ─┤                   stealth timing 1–5                  │
+            └───────────────────────────┬───────────────────────────┘
                                         │
    ┌─────────────┬──────────────┬───────┴──────┬──────────────┬──────────────┐
    │   RECON     │ VULN DETECT  │ EXPLOIT/POST │   AI / ML    │  REPORTING   │
@@ -181,13 +181,13 @@ It runs three ways from the **same engagement dataset**:
    │ DNS · cloud │ SSRF/IDOR    │ RCE canary   │ recon agent  │ SARIF · Burp │
    │ AD · K8s    │ fuzz · API   │ linPEAS · BH │ attack plan  │ compliance   │
    │ IoT · OSINT │ Nuclei · FP  │ lateral move │ knowledge gr │ ticketing    │
-   └─────────────┴──────────────┴──────────────┴──────────────┴──────────────┘
+   └─────────────┴──────────────┴───────┬──────┴──────────────┴──────────────┘
                                         │
-   ┌────────────────────────────────────┴───────────────────────────────────────┐
+   ┌────────────────────────────────────┴────────────────────────────────────────┐
    │  STORAGE — PostgreSQL (async, 23-table schema, partitioned audit log)       │
    │  with a zero-config SQLite fallback (same interface, file = one engagement) │
    │  SECURITY — JWT RBAC · AES-256-GCM credential vault · HMAC-signed audit log │
-   └────────────────────────────────────────────────────────────────────────────┘
+   └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---

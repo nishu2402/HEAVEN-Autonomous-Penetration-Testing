@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Scans, Tickets, SIEM } from "../api";
+import { EmptyState } from "../components/Skeleton.jsx";
 
 export default function WatchPage() {
   const [scans, setScans] = useState([]);
@@ -89,7 +90,11 @@ heaven watch -u https://x --engagement prod \\
           Recent watch-iteration scans ({watchScans.length})
         </div>
         {watchScans.length === 0 ? (
-          <div className="dim">No watch iterations yet. Start one from the CLI above.</div>
+          <EmptyState
+            icon="🔁"
+            headline="No watch iterations yet"
+            body="The watch loop is a long-running CLI process. Start one with the command above and its iterations will appear here as they run."
+          />
         ) : (
           <table style={{ width: "100%", fontSize: 12 }}>
             <thead><tr style={{ color: "var(--cyan)" }}>

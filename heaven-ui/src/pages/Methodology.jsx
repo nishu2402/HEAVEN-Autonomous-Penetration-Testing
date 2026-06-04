@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Methodology as M } from "../api";
+import { SkeletonCard } from "../components/Skeleton.jsx";
 
 const PRETTY = {
   owasp_testing_guide: "OWASP Testing Guide v4",
@@ -37,7 +38,7 @@ export default function Methodology() {
   if (!docs) {
     return (
       <div className="page">
-        <div className="card"><span className="dim blink">Loading methodology docs…</span></div>
+        <SkeletonCard lines={6} />
       </div>
     );
   }

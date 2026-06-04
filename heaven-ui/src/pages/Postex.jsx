@@ -3,6 +3,7 @@
 
 import React, { useState } from "react";
 import { Postex, getUser } from "../api";
+import { SkeletonCard } from "../components/Skeleton.jsx";
 
 const MODULES = [
   { key: "linpeas", label: "Linpeas (SSH → privesc enum)" },
@@ -104,6 +105,10 @@ export default function PostexPage() {
 
         {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
       </div>
+
+      {loading && (
+        <div style={{ marginTop: 12 }}><SkeletonCard lines={4} /></div>
+      )}
 
       {result && (
         <div className="card" style={{ marginTop: 12 }}>

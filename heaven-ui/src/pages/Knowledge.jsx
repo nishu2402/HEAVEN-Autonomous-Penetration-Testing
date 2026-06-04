@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Knowledge } from "../api";
+import { EmptyState, SkeletonStatGrid } from "../components/Skeleton.jsx";
 
 export default function KnowledgePage() {
   const [stats, setStats] = useState(null);
@@ -44,6 +45,8 @@ export default function KnowledgePage() {
 
         {error && <div className="error">{error}</div>}
 
+        {!stats && !error && <SkeletonStatGrid count={3} />}
+
         {stats && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
             <Stat label="Target profiles"  value={stats.profiles}  color="var(--cyan)" />
@@ -52,6 +55,16 @@ export default function KnowledgePage() {
           </div>
         )}
       </div>
+
+      {stats && stats.attempts === 0 && (
+        <EmptyState
+          icon="🧠"
+          headline="The knowledge graph is empty"
+          body="It learns which techniques work against which target profiles, then biases the autonomous planner toward what's worked before. Run a scan to start populating it."
+          cta="Launch a scan →"
+          ctaTo="/scans"
+        />
+      )}
 
       {stats && stats.top_techniques?.length > 0 && (
         <div className="card" style={{ marginTop: 12 }}>

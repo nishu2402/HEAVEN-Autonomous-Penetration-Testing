@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Diff, Scans } from "../api";
+import { EmptyState, SkeletonCard } from "../components/Skeleton.jsx";
 
 const SEV_COLOR = {
   critical: "var(--crit)", high: "var(--high)", medium: "var(--med)",
@@ -86,6 +87,20 @@ export default function DiffPage() {
 
         {error && <div className="error">{error}</div>}
       </div>
+
+      {scans.length < 2 && !report && !loading && (
+        <EmptyState
+          icon="↹"
+          headline="Need at least two scans to compare"
+          body="Scan diff buckets findings into new / resolved / regressed between two runs of the same engagement. Run a couple of scans first."
+          cta="Launch a scan →"
+          ctaTo="/scans"
+        />
+      )}
+
+      {loading && (
+        <div style={{ marginTop: 12 }}><SkeletonCard lines={4} /></div>
+      )}
 
       {report && (
         <>

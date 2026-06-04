@@ -48,18 +48,21 @@ and operator notes:
 
 ```bash
 heaven engage init my-first-pentest --client "Personal" --sow "evaluation"
-heaven scope add http://localhost:8080 --kind url --engagement my-first-pentest
-heaven scan -u http://localhost:8080 -m web \
-    --engagement my-first-pentest \
-    --i-have-authorization
+heaven use my-first-pentest          # make it active — no more --engagement
+heaven scope add http://localhost:8080 --kind url
+heaven scan -u http://localhost:8080 -m web --i-have-authorization
 ```
+
+`heaven use` sets a git-branch-style sticky context, so every following
+command targets that engagement automatically. Run `heaven use` with no
+argument to see the current selection, or `heaven use --clear` to reset.
 
 List findings:
 
 ```bash
-heaven findings --engagement my-first-pentest
-heaven findings --engagement my-first-pentest --severity high
-heaven show <finding-id>          # full evidence + curl repro
+heaven findings                       # uses the active engagement
+heaven findings --severity high
+heaven show <finding-id>              # full evidence + curl repro
 ```
 
 ---
@@ -116,7 +119,7 @@ so the README's benchmark badge has a target to link to.
 | You want to … | Read |
 |---|---|
 | Set up production HEAVEN | [README — Installation (Detailed)](../README.md#installation-detailed) |
-| Add an LLM to the AI layer | Set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` and re-run any scan |
+| Add an LLM to the AI layer | `pip install -e ".[gemini]"`, set `GEMINI_API_KEY` (or Anthropic/OpenAI), re-run. Full guide: [README — API Keys](../README.md#api-keys) |
 | Continuously monitor a target | [README — Continuous Monitoring](../README.md#continuous-monitoring) |
 | Compare HEAVEN vs Burp / ZAP / sqlmap | [COMPARISON.md](COMPARISON.md) |
 | Record a demo video | [DEMO.md](DEMO.md) |
@@ -132,3 +135,4 @@ so the README's benchmark badge has a target to link to.
 | Web UI shows blank page | `cd heaven-ui && npm install && npm run build` |
 | `HEAVEN_ADMIN_PASSWORD not set` warning | Run `heaven init` for an interactive setup, or `export HEAVEN_ADMIN_PASSWORD=…` |
 | Scan exits "Authorization required" | Add `--i-have-authorization` flag (mandatory and intentional) |
+| Not sure what's wired up | Run `heaven doctor` — shows LLM / SIEM / tickets / tool / engagement state |

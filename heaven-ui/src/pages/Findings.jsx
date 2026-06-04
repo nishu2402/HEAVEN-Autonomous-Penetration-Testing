@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { Engagement } from "../api";
 import ReportMenu from "../components/ReportMenu.jsx";
+import { EmptyState, SkeletonTable } from "../components/Skeleton.jsx";
 
 const SEVERITIES = ["", "critical", "high", "medium", "low", "info"];
 const STATUSES   = ["", "open", "verified", "false_positive", "accepted_risk", "fixed"];
@@ -24,7 +25,12 @@ export default function Findings() {
       .finally(() => setLoading(false));
   }, [filters]);
 
-  useEffect(() => { load(); }, []);
+  // Auto-apply on filter change (debounced). Enter and the Apply button fire it
+  // immediately. Also runs once on mount (load is stable until filters change).
+  useEffect(() => {
+    const t = setTimeout(load, 350);
+    return () => clearTimeout(t);
+  }, [load]);
 
   const toggleSort = (col) => {
     setSort(s => ({ col, dir: s.col === col ? -s.dir : 1 }));
@@ -42,8 +48,18 @@ export default function Findings() {
 
   function SortTh({ col, children }) {
     const active = sort.col === col;
+    const ariaSort = active ? (sort.dir > 0 ? "ascending" : "descending") : "none";
     return (
-      <th onClick={() => toggleSort(col)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+      <th
+        role="button"
+        tabIndex={0}
+        aria-sort={ariaSort}
+        onClick={() => toggleSort(col)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(col); }
+        }}
+        style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+      >
         {children}{active ? (sort.dir > 0 ? " ↑" : " ↓") : ""}
       </th>
     );
@@ -63,12 +79,14 @@ export default function Findings() {
           <span className="form-label">Target contains</span>
           <input className="form-input" type="text" value={filters.target}
             placeholder="api.acme"
+            onKeyDown={(e) => { if (e.key === "Enter") load(); }}
             onChange={(e) => setFilters(f => ({ ...f, target: e.target.value }))} />
         </label>
         <label className="form-group">
           <span className="form-label">Min confidence</span>
           <input className="form-input" type="number" min="0" max="1" step="0.05"
             value={filters.min_confidence}
+            onKeyDown={(e) => { if (e.key === "Enter") load(); }}
             onChange={(e) => setFilters(f => ({ ...f, min_confidence: e.target.value }))} />
         </label>
         <button className="btn" onClick={load} disabled={loading}>
@@ -79,17 +97,18 @@ export default function Findings() {
 
       {error && <div className="card error">{error}</div>}
 
+      {loading && !data && (
+        <div className="card"><SkeletonTable rows={8} cols={7} /></div>
+      )}
+
       {noEng && (
-        <div className="onboarding-banner">
-          <div className="onboarding-icon">⚠</div>
-          <div>
-            <div className="onboarding-title">No Active Engagement</div>
-            <div className="onboarding-body">
-              Set <code>HEAVEN_ENGAGEMENT</code> and restart the server to load findings.
-              <br/>Run a scan first: <code>heaven scan -u https://target --i-have-authorization</code>
-            </div>
-          </div>
-        </div>
+        <EmptyState
+          icon="🛰"
+          headline="No active engagement yet"
+          body="Findings show up here after your first scan. Launch one from the Scans page — no terminal required."
+          cta="Launch a scan →"
+          ctaTo="/scans"
+        />
       )}
 
       {data && !noEng && (

@@ -3,6 +3,7 @@
 
 import React, { useState } from "react";
 import { Lateral, getUser } from "../api";
+import { SkeletonCard } from "../components/Skeleton.jsx";
 
 export default function LateralPage() {
   const [sshKey, setSshKey] = useState("");
@@ -129,6 +130,10 @@ export default function LateralPage() {
 
         {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
       </div>
+
+      {loading && (
+        <div style={{ marginTop: 12 }}><SkeletonCard lines={4} /></div>
+      )}
 
       {result && (
         <div className="card" style={{ marginTop: 12 }}>

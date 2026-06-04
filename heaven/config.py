@@ -160,7 +160,9 @@ class APIConfig:
     def __post_init__(self):
         self.host = _env("HEAVEN_API_HOST", self.host)
         self.port = _env("HEAVEN_API_PORT", self.port, int)
-        self.nvd_api_key = _env("HEAVEN_NVD_API_KEY", self.nvd_api_key)
+        # Canonical NVD_API_KEY (matches NVD's own docs + .env.example + the
+        # train-model path); HEAVEN_NVD_API_KEY kept as a legacy alias.
+        self.nvd_api_key = _env("NVD_API_KEY", _env("HEAVEN_NVD_API_KEY", self.nvd_api_key))
         self.nvd_rate_limit = _env("HEAVEN_NVD_RATE_LIMIT", self.nvd_rate_limit, float)
         self.epss_enabled = _env("HEAVEN_EPSS_ENABLED", self.epss_enabled, bool)
 

@@ -6,6 +6,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Benchmark as B } from "../api";
+import { SkeletonLine, EmptyState } from "../components/Skeleton.jsx";
 
 export default function Benchmark() {
   const [data, setData]   = useState(null);
@@ -33,10 +34,20 @@ export default function Benchmark() {
 
         {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
 
-        {data && data.available === false && (
-          <div style={{ marginTop: 12 }} className="dim">
-            {data.note || "No benchmark report yet."}
+        {!data && !error && (
+          <div style={{ marginTop: 12 }}>
+            <SkeletonLine width="40%" />
+            <div style={{ height: 8 }} />
+            <SkeletonLine /><SkeletonLine width="92%" /><SkeletonLine width="70%" />
           </div>
+        )}
+
+        {data && data.available === false && (
+          <EmptyState
+            icon="≡"
+            headline="No benchmark report yet"
+            body={data.note || "Run the DVWA benchmark on the server (command above), then click Refresh to load the results here."}
+          />
         )}
 
         {data && data.available && (

@@ -7,6 +7,7 @@
 
 import React, { useState } from "react";
 import { AI, SIEM, Engagement } from "../api";
+import { SkeletonCard } from "../components/Skeleton.jsx";
 
 export default function AIPlans() {
   const [findingsJson, setFindingsJson] = useState("");
@@ -103,6 +104,10 @@ export default function AIPlans() {
           </div>
         )}
       </div>
+
+      {loading && (
+        <div style={{ marginTop: 12 }}><SkeletonCard lines={4} /></div>
+      )}
 
       {output && (
         <div className="card" style={{ marginTop: 12 }}>

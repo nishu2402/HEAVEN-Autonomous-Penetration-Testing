@@ -68,6 +68,7 @@
 - [⚡ Capabilities](#capabilities)
 - [⚙️ Architecture](#architecture)
 - [🚀 Quick Start](#quick-start)
+- [🔑 API Keys & Configuration](#api-keys)
 - [⌨️ CLI Reference](#cli)
 - [🖥️ Web UI](#web-ui)
 - [🌐 REST API](#api)
@@ -214,29 +215,109 @@ chmod +x install.sh && ./install.sh      # venv + deps + builds the web UI
 
 ### Configure
 
+The friendliest path is the interactive wizard — it prompts for the admin
+password and any API keys you want, then writes a `.env` for you:
+
 ```bash
-# Required for web UI login (ships with admin/admin + forced password change)
+heaven init
+```
+
+Prefer to do it by hand? Only the admin password is needed to start:
+
+```bash
+# Web UI login (admin/admin on first run → forced change). Set this to skip that.
 export HEAVEN_ADMIN_PASSWORD="your-strong-password"
 
-# Optional enrichments
-export SHODAN_API_KEY="…"               # passive recon
-export HEAVEN_ENGAGEMENT="client-q3"   # default engagement name
-
-# Optional — LLM autonomous mode
-export ANTHROPIC_API_KEY="…"           # or OPENAI_API_KEY / GOOGLE_API_KEY
-# Runs fully deterministic without any key:
-heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
+# Optional — turn on the AI layers (Gemini has a generous free tier):
+export GEMINI_API_KEY="your-gemini-key"     # from https://aistudio.google.com/apikey
+pip install -e ".[gemini]"                    # install the Gemini SDK
 ```
+
+> **No LLM key needed.** Every AI feature falls back to a deterministic
+> heuristic, or pass `--no-llm`:
+> `heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization`
+
+👉 Full key reference (Gemini / Anthropic / OpenAI / NVD / Shodan, and the three
+ways to set them) is in **[API Keys & Configuration](#api-keys)** below.
 
 ### Scan
 
 ```bash
 heaven --version
 heaven engage init my-engagement
+heaven use my-engagement                # set it active — no more --engagement
 heaven scan -u https://target.example.com -m web --i-have-authorization
 heaven scan -t 10.0.0.0/24 -m network --i-have-authorization
 heaven serve            # → http://localhost:8443
 ```
+
+---
+
+<a id="api-keys"></a>
+## 🔑 API Keys & Configuration
+
+**HEAVEN runs with zero API keys.** Scanning, the web UI, reports, and ML risk
+scoring all work offline. Keys only unlock *optional* enrichments — most
+importantly the AI layers (autonomous mode, AI attack plans, LLM
+false-positive review). Add only what you want.
+
+### Every supported key
+
+| Env var | Unlocks | Required? | Where to get it |
+|---|---|---|---|
+| `GEMINI_API_KEY` | AI layers via Google Gemini (**free tier**) | Optional | <https://aistudio.google.com/apikey> |
+| `ANTHROPIC_API_KEY` | AI layers via Claude | Optional | <https://console.anthropic.com> |
+| `OPENAI_API_KEY` | AI layers via GPT | Optional | <https://platform.openai.com/api-keys> |
+| `NVD_API_KEY` | 30× faster CVE-feed ingestion | Optional | <https://nvd.nist.gov/developers/request-an-api-key> |
+| `SHODAN_API_KEY` | Passive recon (exposed-host intel) | Optional | <https://account.shodan.io> |
+| `WEBHOOK_URL` | Slack / Teams / Discord alerts | Optional | Your workspace's incoming-webhook URL |
+| `HEAVEN_ADMIN_PASSWORD` | Web UI login (skips the admin/admin forced-change) | Recommended | You choose it |
+
+> You only need **one** of the three LLM keys. HEAVEN auto-detects whichever is
+> set (Anthropic → OpenAI → Gemini), or pin one with `HEAVEN_LLM_PROVIDER`.
+
+### Add a Gemini key (free) — 3 steps
+
+1. **Get the key** — open <https://aistudio.google.com/apikey>, sign in with a
+   Google account, click **Create API key**, and copy it.
+2. **Install the Gemini SDK:**
+   ```bash
+   pip install -e ".[gemini]"        # or:  pip install google-generativeai
+   ```
+3. **Give it to HEAVEN** (pick one):
+   ```bash
+   heaven init                                   # a) wizard — writes .env for you
+   echo 'GEMINI_API_KEY=your-key' >> .env        # b) .env file
+   export GEMINI_API_KEY="your-key"              # c) shell (this session only)
+   ```
+
+Confirm it's active:
+
+```bash
+heaven doctor        # shows  ✓ LLM  gemini (gemini-1.5-pro)  when working
+```
+
+### Three ways to set any key
+
+| Method | How | Best for |
+|---|---|---|
+| **Wizard** | `heaven init` | First-time setup — prompts for everything, writes `.env` |
+| **`.env` file** | copy [`.env.example`](.env.example) → `.env`, edit | Persistent local / dev |
+| **Shell export** | `export GEMINI_API_KEY=…` | One-off / CI |
+
+HEAVEN auto-loads `.env` from the working directory. **Never commit `.env`** —
+it's already in `.gitignore`.
+
+### Pinning a provider / model (optional)
+
+```bash
+export HEAVEN_LLM_PROVIDER=gemini        # force a provider (else auto-detected)
+export HEAVEN_LLM_MODEL=gemini-1.5-pro   # override the default model
+```
+
+Default models: Claude `claude-sonnet-4-6` · OpenAI `gpt-4o` · Gemini
+`gemini-1.5-pro`. With no key set anywhere, every AI feature falls back to a
+deterministic heuristic (or pass `--no-llm`).
 
 ---
 
@@ -255,12 +336,12 @@ heaven serve            # → http://localhost:8443
 |---|---|
 | `scan` | Launch a vulnerability scan (`-m web\|network\|full`, `--stealth 1-5`, `--auto-prove`, `--autonomous`) |
 | `serve` | Start the API server + web UI |
-| `engage` · `scope` | Manage engagements / in-scope targets |
+| `engage` · `scope` · `use` | Manage engagements · in-scope targets · select the active engagement (stops repeating `--engagement`) |
 | `findings` · `show` · `mark` | List findings · full detail · set triage status |
 | `export` · `report` | Export findings (8 formats) · generate compliance HTML/PDF |
 | `kill-chain` · `coverage` | Kill-chain phase coverage · OWASP coverage grade |
 | `autonomous` | LLM-driven observe→plan→act loop (bounded budget) |
-| `watch` · `schedule` | Continuous monitoring with differential alerts |
+| `watch` | Continuous monitoring — diffs each run, alerts only on change |
 | `diff` | Compare two scans (new / resolved / regressed / unchanged) |
 | `sast` | Semgrep static analysis + curated OWASP rule pack |
 | `lateral` · `knowledge` | Lateral movement · cross-engagement knowledge graph |
@@ -269,7 +350,7 @@ heaven serve            # → http://localhost:8443
 | `pause` · `resume` · `replay` | Pause · resume · deterministically replay a scan |
 | `train-model` · `train-priors` | Retrain the CVSS model · learn Bayesian priors |
 | `init` · `init-db` · `update` | Setup wizard · PostgreSQL schema · refresh CVE/Nuclei feeds |
-| `self-audit` · `sys-status` · `info` | Security self-audit · system status · platform info |
+| `self-audit` · `doctor` · `info` | Security self-audit · deployment health check · platform info |
 | `completion` | Shell-completion script (bash / zsh / fish) |
 
 </div>

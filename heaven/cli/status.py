@@ -5,10 +5,11 @@ backends · ticketing backends · active engagement summary · last scan
 · disk usage of the data dir. Useful for answering "what's the state
 of my deployment?" without clicking around the Web UI.
 
-Note: there's already a `heaven status` registered by cli/scan.py that
-lists scans in an engagement. To avoid the name collision we register
-this one as `heaven sys-status`. The Web UI dashboard equivalent is at
-GET /api/dashboard.
+Primary name is `heaven doctor` — the familiar "is my setup healthy?"
+idiom (brew doctor / flutter doctor). `heaven sys-status` is kept as a
+hidden, backward-compatible alias. Separately, `heaven status` (from
+cli/scan.py) lists scans in an engagement. The Web UI equivalent of this
+report is GET /api/dashboard.
 """
 
 from __future__ import annotations
@@ -23,31 +24,48 @@ from typing import Optional
 import click
 
 from heaven import __version__
-from heaven.cli._helpers import _engagement_db_path, _print
+from heaven.cli._helpers import (
+    _engagement_db_path,
+    _print,
+    resolve_engagement_name,
+)
 
 
-@click.command(name="sys-status")
-@click.option("--engagement", help="Engagement name to summarise (default: HEAVEN_ENGAGEMENT env)")
-@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
-              default="pretty", help="pretty (default) or json")
-def sys_status(engagement: Optional[str], fmt: str) -> None:
-    """Print a system-wide HEAVEN status report.
-
-    Covers everything an operator needs to verify the deployment is
-    healthy: HEAVEN version, optional integrations (LLM / SIEM /
-    ticketing), the active engagement's last scan, and disk usage.
-
-    Use --format json for machine-readable output (CI / health checks):
-
-        heaven sys-status --format json | jq .llm.available
-    """
+def _run_status(engagement: Optional[str], fmt: str) -> None:
+    """Shared implementation behind `heaven doctor` and the `sys-status` alias."""
     report = _collect_status(engagement)
-
     if fmt == "json":
         print(json.dumps(report, indent=2, default=str))
         return
-
     _render_pretty(report)
+
+
+@click.command(name="doctor")
+@click.option("--engagement",
+              help="Engagement to summarise (default: current `heaven use` / HEAVEN_ENGAGEMENT)")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty", help="pretty (default) or json")
+def doctor(engagement: Optional[str], fmt: str) -> None:
+    """Diagnose the deployment: versions, integrations, engagement, disk.
+
+    The "is everything wired up?" command. Reports HEAVEN + Python version,
+    optional integrations (LLM / SIEM / ticketing), external tools on PATH,
+    the active engagement's last scan, and data-dir disk usage.
+
+    Machine-readable output for CI / health checks:
+
+        heaven doctor --format json | jq .llm.available
+    """
+    _run_status(engagement, fmt)
+
+
+@click.command(name="sys-status", hidden=True)
+@click.option("--engagement", help="(alias of `heaven doctor`)")
+@click.option("--format", "fmt", type=click.Choice(["pretty", "json"]),
+              default="pretty")
+def sys_status(engagement: Optional[str], fmt: str) -> None:
+    """Deprecated alias for `heaven doctor` (kept for backward compatibility)."""
+    _run_status(engagement, fmt)
 
 
 def _collect_status(engagement: Optional[str]) -> dict:
@@ -101,13 +119,15 @@ def _collect_status(engagement: Optional[str]) -> dict:
         "docker":   shutil.which("docker") is not None,
     }
 
-    # Active engagement
-    eng_name = engagement or os.environ.get("HEAVEN_ENGAGEMENT")
+    # Active engagement (flag > HEAVEN_ENGAGEMENT env > `heaven use` context)
+    eng_name = resolve_engagement_name(engagement)
     if eng_name:
         report["engagement"] = _engagement_status(eng_name)
     else:
-        report["engagement"] = {"active": None,
-                                 "hint": "set HEAVEN_ENGAGEMENT or pass --engagement"}
+        report["engagement"] = {
+            "active": None,
+            "hint": "run `heaven use <name>`, set HEAVEN_ENGAGEMENT, or pass --engagement",
+        }
 
     # Disk usage of data dir
     try:
@@ -243,4 +263,5 @@ def _render_pretty(report: dict) -> None:
 
 
 def register(cli: click.Group) -> None:
-    cli.add_command(sys_status)
+    cli.add_command(doctor)
+    cli.add_command(sys_status)  # hidden backward-compatible alias

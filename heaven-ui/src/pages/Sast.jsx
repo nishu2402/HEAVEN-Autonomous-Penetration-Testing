@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { SAST, Engagement } from "../api";
+import { SkeletonCard } from "../components/Skeleton.jsx";
 
 const SEV_COLOR = {
   critical: "var(--crit)", high: "var(--high)", medium: "var(--med)",
@@ -123,6 +124,10 @@ export default function SastPage() {
             ))}
           </ul>
         </div>
+      )}
+
+      {loading && (
+        <div style={{ marginTop: 12 }}><SkeletonCard lines={5} /></div>
       )}
 
       {result && (

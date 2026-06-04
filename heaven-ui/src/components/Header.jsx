@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Engagement, SIEM, getUser, logout } from "../api";
+import { Engagement, SIEM, Scans, getUser, logout } from "../api";
 
 export default function Header() {
   const [eng, setEng] = useState(null);
   const [siem, setSiem] = useState(null);
+  const [running, setRunning] = useState(0);
   const [clock, setClock] = useState(new Date().toLocaleTimeString());
   const navigate = useNavigate();
   const location = useLocation();
@@ -18,6 +19,21 @@ export default function Header() {
   useEffect(() => {
     const t = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Global "scan running" indicator — polls so it stays visible after you
+  // navigate away from the Scans page.
+  useEffect(() => {
+    let alive = true;
+    const poll = () =>
+      Scans.list(50)
+        .then((d) => {
+          if (alive) setRunning((d.scans || []).filter((s) => s.status === "running").length);
+        })
+        .catch(() => {});
+    poll();
+    const t = setInterval(poll, 10000);
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
   async function handleLogout() {
@@ -48,6 +64,17 @@ export default function Header() {
         )}
       </div>
       <div className="header-right">
+        {running > 0 && (
+          <button
+            type="button"
+            className="scan-running-badge"
+            onClick={() => navigate("/scans")}
+            title={`${running} scan${running !== 1 ? "s" : ""} in progress — view`}
+          >
+            <span className="scan-running-dot" />
+            {running} scanning
+          </button>
+        )}
         {siem && (
           <span
             className="user-badge"

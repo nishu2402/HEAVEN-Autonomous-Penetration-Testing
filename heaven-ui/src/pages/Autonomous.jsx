@@ -7,6 +7,7 @@
 
 import React, { useState } from "react";
 import { Autonomous, Engagement } from "../api";
+import { SkeletonCard } from "../components/Skeleton.jsx";
 
 export default function AutonomousPage() {
   const [engagement, setEngagement] = useState("");
@@ -129,6 +130,10 @@ export default function AutonomousPage() {
 
         {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
       </div>
+
+      {loading && (
+        <div style={{ marginTop: 12 }}><SkeletonCard lines={4} /></div>
+      )}
 
       {result && (
         <div className="card" style={{ marginTop: 12 }}>

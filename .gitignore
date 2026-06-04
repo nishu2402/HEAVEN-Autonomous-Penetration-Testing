@@ -37,6 +37,7 @@ uv.lock
 # Engagement / scan data (per-run, never commit)
 engagement.db
 engagements/
+.heaven/
 data/
 *.sqlite
 *.db

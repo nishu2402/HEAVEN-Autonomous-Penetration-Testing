@@ -3,6 +3,8 @@
 
 import React, { useState, useEffect } from "react";
 import { Coverage, Engagement, Priors } from "../api";
+import { useToast } from "../components/Toast.jsx";
+import { SkeletonCard } from "../components/Skeleton.jsx";
 
 const GRADE_COLOR = {
   A: "var(--text-0)", B: "var(--cyan)", C: "var(--med)", D: "var(--high)", F: "var(--crit)",
@@ -14,6 +16,7 @@ export default function CoveragePage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const toast = useToast();
 
   useEffect(() => {
     Engagement.summary()
@@ -37,12 +40,13 @@ export default function CoveragePage() {
   async function trainPriors() {
     try {
       const r = await Priors.train();
-      alert(`Trained on ${r.engagement_dbs} engagement DB(s)\n` +
-            `Findings ingested: ${r.finding_count}\n` +
-            `Service priors updated: ${r.service_priors_updated}\n` +
-            `Output: ${r.output}`);
+      toast.success(
+        "Priors trained",
+        `${r.engagement_dbs} DB(s) · ${r.finding_count} findings · ` +
+        `${r.service_priors_updated} service priors updated`,
+      );
     } catch (e) {
-      alert(`Train priors failed: ${e.message}`);
+      toast.error("Train priors failed", e.message);
     }
   }
 
@@ -76,6 +80,10 @@ export default function CoveragePage() {
 
         {error && <div className="error">{error}</div>}
       </div>
+
+      {loading && !report && (
+        <div style={{ marginTop: 12 }}><SkeletonCard lines={5} /></div>
+      )}
 
       {report && (
         <>

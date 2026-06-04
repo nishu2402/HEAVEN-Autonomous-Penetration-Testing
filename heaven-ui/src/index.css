@@ -742,3 +742,66 @@ kbd {
   .login-hero { display: none; }
   .login-panel { padding: 24px; }
 }
+
+/* ── UX hardening: error boundary · ghost button · scan badge · focus ───── */
+
+.error-boundary {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 60vh; padding: 32px;
+}
+.error-boundary-card {
+  max-width: 520px; width: 100%; text-align: center;
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 32px 28px;
+}
+.error-boundary-icon { font-size: 40px; margin-bottom: 12px; }
+.error-boundary-title { font-size: 18px; font-weight: 700; color: var(--text-0); margin: 0 0 8px; }
+.error-boundary-text { font-size: 13px; color: var(--text-1); line-height: 1.6; margin: 0 0 16px; }
+.error-boundary-detail {
+  text-align: left; font-size: 11px; color: var(--crit);
+  background: rgba(255,77,106,0.08); border: 1px solid rgba(255,77,106,0.25);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin: 0 0 18px;
+  white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto;
+}
+.error-boundary-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+.btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong); background: transparent;
+  color: var(--text-1); font-size: 13px; cursor: pointer; text-decoration: none;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.btn-ghost:hover { border-color: var(--border-accent); color: var(--text-0); background: rgba(255,255,255,0.04); }
+
+/* Header "scan running" indicator */
+.scan-running-badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--brand); background: rgba(52,229,163,0.10);
+  color: var(--brand); font-size: 11.5px; font-weight: 600;
+  cursor: pointer; transition: background .15s;
+}
+.scan-running-badge:hover { background: rgba(52,229,163,0.18); }
+.scan-running-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--brand);
+  animation: scanPulse 1.4s infinite;
+}
+@keyframes scanPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(52,229,163,0.55); }
+  70%  { box-shadow: 0 0 0 7px rgba(52,229,163,0); }
+  100% { box-shadow: 0 0 0 0 rgba(52,229,163,0); }
+}
+
+/* Accessibility: visible keyboard focus ring (mouse clicks stay clean) */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+th[role="button"] { outline-offset: -2px; }
+th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-running-dot { animation: none; }
+}

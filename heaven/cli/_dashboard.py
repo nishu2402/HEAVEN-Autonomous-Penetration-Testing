@@ -7,7 +7,7 @@ subcommand. Uses Rich if available, falls back to plain text.
 from __future__ import annotations
 
 from heaven import __version__
-from heaven.cli._helpers import check_module_health
+from heaven.cli._helpers import check_module_health, get_current_engagement
 from heaven.utils.logger import HAS_RICH
 
 _BANNER = r"""
@@ -22,15 +22,15 @@ _BANNER = r"""
 _CMDS: list[tuple[str, str, str]] = [
     ("heaven scan -t <ip>",        "Network & service scan",         "--i-have-authorization"),
     ("heaven scan -u <url>",        "Web application scan",           "--api-scan --i-have-authorization"),
-    ("heaven scan -m web",          "Web-only mode",                  "-u https://target.com -m web"),
-    ("heaven schedule <mins>",      "Continuous monitoring",          "60 -t 10.0.0.1 --i-have-authorization"),
     ("heaven engage init <name>",   "Create pentest engagement",      "--client 'Acme Corp'"),
+    ("heaven use <name>",           "Set active engagement",          "stops repeating --engagement"),
     ("heaven scope add <target>",   "Add target to scope",            "10.0.0.0/24 --kind cidr"),
     ("heaven findings",             "List findings",                  "--severity high"),
+    ("heaven watch -u <url>",       "Continuous monitoring",          "--interval 30m --i-have-authorization"),
     ("heaven export -o report.md",  "Export findings report",         "--format markdown"),
-    ("heaven kill-chain",           "Cyber Kill Chain coverage",      "--engagement <name>"),
     ("heaven report -o out.html",   "Compliance HTML report",         "--framework OWASP_TOP10"),
     ("heaven serve",                "Start API + Command Centre UI",  "--host 127.0.0.1 --port 8443"),
+    ("heaven doctor",               "Diagnose deployment health",     "--format json"),
     ("heaven self-audit",           "Security self-audit",            "--output audit.json"),
     ("heaven info",                 "Platform & tool status",         ""),
 ]
@@ -50,6 +50,13 @@ def show_dashboard() -> None:
                 f"  [bold white]v{__version__}[/bold white]  "
                 "[dim]Autonomous Penetration Testing Platform[/dim]\n"
             )
+
+            cur_eng = get_current_engagement()
+            if cur_eng:
+                console.print(
+                    f"  [dim]Active engagement:[/dim] [bold cyan]{cur_eng}[/bold cyan]"
+                    "  [dim](heaven use --clear to reset)[/dim]\n"
+                )
 
             health = check_module_health()
             htable = Table(box=rich_box.SIMPLE, show_header=False, padding=(0, 2))
@@ -86,6 +93,9 @@ def show_dashboard() -> None:
     # Plain fallback when Rich is not installed
     print(_BANNER)
     print(f"  HEAVEN v{__version__} — Autonomous Penetration Testing Platform\n")
+    cur_eng = get_current_engagement()
+    if cur_eng:
+        print(f"  Active engagement: {cur_eng}\n")
     health = check_module_health()
     print("  Module Status:")
     for name, status in health.items():

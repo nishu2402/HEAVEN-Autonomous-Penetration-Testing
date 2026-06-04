@@ -97,6 +97,7 @@ pydantic>=2.6.0
 pydantic-settings>=2.1.0
 rich>=13.7.0
 click>=8.1.0
+rich-click>=1.7.0
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
 tabulate>=0.9.0

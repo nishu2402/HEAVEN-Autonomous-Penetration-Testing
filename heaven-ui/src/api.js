@@ -1,13 +1,50 @@
 // HEAVEN — API client.
-// Token kept in memory only; localStorage is exposed to any XSS so we don't.
-// On 401 the SPA navigates to /login (handled by ProtectedRoute).
+//
+// Auth token is persisted in sessionStorage so a page refresh keeps you signed
+// in; it clears automatically when the browser tab closes. Tradeoff:
+// sessionStorage is readable by any XSS while the tab is open — acceptable for
+// an operator console that already sits behind login, and far better UX than
+// logging out on every refresh. For maximum hardening, switch to an httpOnly
+// refresh cookie (a server-side change).
+// On 401 the token is cleared, a "session expired" event fires (toast), and
+// ProtectedRoute redirects to /login.
+
+const SS_KEY = "heaven.auth";
 
 let authToken = null;
 let currentUser = null;
 let mustChangePassword = false;
 const listeners = new Set();
+const sessionExpiredListeners = new Set();
 
 const API_BASE = "/api";
+
+function persistAuth() {
+  try {
+    if (authToken && currentUser) {
+      sessionStorage.setItem(
+        SS_KEY,
+        JSON.stringify({ token: authToken, user: currentUser, mustChangePassword }),
+      );
+    } else {
+      sessionStorage.removeItem(SS_KEY);
+    }
+  } catch { /* sessionStorage unavailable (private mode / disabled) */ }
+}
+
+function hydrateAuth() {
+  try {
+    const raw = sessionStorage.getItem(SS_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    authToken = d.token || null;
+    currentUser = d.user || null;
+    mustChangePassword = Boolean(d.mustChangePassword);
+  } catch { /* corrupt/blocked storage — start logged out */ }
+}
+
+// Restore any existing session before the app first renders.
+hydrateAuth();
 
 export function getToken() {
   return authToken;
@@ -32,6 +69,19 @@ function notify() {
   }
 }
 
+// Fired when the server rejects our token (401). The app shows a toast; the
+// redirect to /login is handled by ProtectedRoute reacting to onAuthChange.
+export function onSessionExpired(fn) {
+  sessionExpiredListeners.add(fn);
+  return () => sessionExpiredListeners.delete(fn);
+}
+
+function emitSessionExpired(message) {
+  for (const fn of sessionExpiredListeners) {
+    try { fn(message); } catch { /* swallow */ }
+  }
+}
+
 export async function login(username, password) {
   const r = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
@@ -52,6 +102,7 @@ export async function login(username, password) {
   authToken = data.token;
   currentUser = data.user;
   mustChangePassword = Boolean(data.must_change_password);
+  persistAuth();
   notify();
   return data.user;
 }
@@ -76,6 +127,7 @@ export async function changePassword(currentPassword, newPassword) {
     throw new Error(detail);
   }
   mustChangePassword = false;
+  persistAuth();
   notify();
   return true;
 }
@@ -120,6 +172,7 @@ export async function logout() {
   }
   authToken = null;
   currentUser = null;
+  persistAuth();
   notify();
 }
 
@@ -133,7 +186,9 @@ async function api(path, opts = {}) {
   if (r.status === 401) {
     authToken = null;
     currentUser = null;
+    persistAuth();
     notify();
+    emitSessionExpired("Your session expired — please sign in again.");
     throw new Error("Authentication expired");
   }
   if (r.status === 429) {

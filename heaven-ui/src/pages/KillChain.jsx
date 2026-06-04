@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Engagement } from '../api'
+import { EmptyState } from '../components/Skeleton.jsx'
 
 const PHASES = [
   { name: 'Recon',       icon: '🔍', keys: ['scan', 'enum', 'recon', 'fingerprint', 'osint', 'shodan'] },
@@ -88,15 +89,13 @@ export default function KillChain() {
       </div>
 
       {noEng && (
-        <div className="onboarding-banner">
-          <div className="onboarding-icon">⛓</div>
-          <div>
-            <div className="onboarding-title">No Engagement Data</div>
-            <div className="onboarding-body">
-              Set HEAVEN_ENGAGEMENT and run a scan to populate the kill chain.
-            </div>
-          </div>
-        </div>
+        <EmptyState
+          icon="⛓"
+          headline="No kill-chain data yet"
+          body="The kill chain maps your findings onto attack phases. Run a scan to populate it."
+          cta="Launch a scan →"
+          ctaTo="/scans"
+        />
       )}
 
       {/* Phase grid */}

@@ -14,4 +14,8 @@ __all__ = ["cli"]
 
 
 if __name__ == "__main__":
-    cli()
+    # Pin prog_name so `python -m heaven.main` behaves identically to the
+    # `heaven` entry point: consistent "heaven" usage text, and — crucially —
+    # Click's shell-completion hook resolves the right _HEAVEN_COMPLETE var
+    # (the `heaven completion` command spawns this module to emit the script).
+    cli(prog_name="heaven")

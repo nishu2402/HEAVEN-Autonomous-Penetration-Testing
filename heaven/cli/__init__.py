@@ -15,11 +15,19 @@ from __future__ import annotations
 from typing import Optional
 
 from heaven import __banner__, __version__
+from heaven.cli._richconfig import apply_rich_click
 from heaven.config import get_config, reload_config
 from heaven.utils.logger import get_logger, setup_logging
 
 logger = get_logger("cli")
 
+
+# rich-click presentation layer (optional). apply_rich_click() must run BEFORE
+# `import click` and before the subcommand modules are imported, so the patched
+# — and far prettier — Command/Group/Option classes get picked up by every
+# decorator. No-op + graceful fallback to plain Click when rich-click is absent.
+# (The import itself lives in the top import block to satisfy E402.)
+HAS_RICH_CLICK = apply_rich_click()
 
 try:
     import click
@@ -30,7 +38,34 @@ except ImportError:
 
 if HAS_CLICK:
 
-    @click.group(invoke_without_command=True)
+    class HeavenGroup(click.Group):
+        """Root command group that suggests close matches on a mistyped command.
+
+        `heaven scna` → "Did you mean: heaven scan". Pure UX sugar; the
+        command resolution itself is unchanged.
+        """
+
+        def resolve_command(self, ctx, args):  # type: ignore[override]
+            try:
+                return super().resolve_command(ctx, args)
+            except click.exceptions.UsageError as exc:
+                # rich-click ships its own "Did you mean?" suggestion, so only
+                # add ours on the plain-Click fallback path (no duplication).
+                if HAS_RICH_CLICK:
+                    raise
+                import difflib
+
+                typed = args[0] if args else ""
+                candidates = sorted(self.list_commands(ctx))
+                matches = difflib.get_close_matches(typed, candidates, n=3, cutoff=0.45)
+                if matches:
+                    exc.message = (exc.message or "") + (
+                        "\n\nDid you mean:\n"
+                        + "\n".join(f"    heaven {m}" for m in matches)
+                    )
+                raise
+
+    @click.group(cls=HeavenGroup, invoke_without_command=True)
     @click.version_option(version=__version__, prog_name="HEAVEN")
     @click.option("--debug", is_flag=True, help="Enable debug logging")
     @click.option("--config-file", type=click.Path(), help="Path to .env config file")
@@ -64,7 +99,7 @@ if HAS_CLICK:
         audit, autonomous, completion, coverage, db, diff, engage, exploitdb,
         findings, info, init as init_module, knowledge, lateral, methodology,
         mitre, replay, sast, scan, server, status as status_module, tickets,
-        train, update as update_module, watch,
+        train, update as update_module, use as use_module, watch,
     )
     audit.register(cli)
     autonomous.register(cli)
@@ -89,6 +124,7 @@ if HAS_CLICK:
     tickets.register(cli)
     train.register(cli)
     update_module.register(cli)
+    use_module.register(cli)
     watch.register(cli)
 
 else:

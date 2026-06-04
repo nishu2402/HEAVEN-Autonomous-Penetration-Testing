@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Engagement as Eng } from "../api";
+import { EmptyState } from "../components/Skeleton.jsx";
 
 export default function EngagementPage() {
   const [data, setData] = useState(null);
@@ -33,19 +34,16 @@ export default function EngagementPage() {
   if (noEng) {
     return (
       <div className="page">
-        <div className="onboarding-banner">
-          <div className="onboarding-icon">◈</div>
-          <div>
-            <div className="onboarding-title">No Active Engagement</div>
-            <div className="onboarding-body">
-              HEAVEN organizes findings per engagement — one SQLite file per engagement.
-              Start one from the CLI, then set the environment variable so the UI can load it.
-            </div>
-          </div>
-        </div>
+        <EmptyState
+          icon="◈"
+          headline="No active engagement yet"
+          body="HEAVEN organizes findings per engagement. The quickest way to start one is to launch a scan with an engagement name — or use the CLI steps below."
+          cta="Launch a scan →"
+          ctaTo="/scans"
+        />
 
         <div className="card">
-          <div className="card-title">Setup</div>
+          <div className="card-title">Or set up from the CLI</div>
           <pre className="code">{`# 1. Create an engagement
 heaven engage init acme-q2 --client "ACME Corp" --sow "SOW-2026-001"
 

@@ -114,11 +114,11 @@ export default function Dashboard() {
                   No active engagement
                 </div>
                 <div style={{ color: 'var(--text-2)', fontSize: 12.5, marginBottom: 14 }}>
-                  Create one to begin mapping your target surface.
+                  Launch a scan to map your target surface — no terminal required.
                 </div>
                 <button className="btn btn-primary" style={{ pointerEvents: 'auto' }}
-                        onClick={() => navigate('/engagement')}>
-                  Set up engagement →
+                        onClick={() => navigate('/scans')}>
+                  Launch a scan →
                 </button>
               </div>
             </div>
@@ -142,10 +142,16 @@ export default function Dashboard() {
           {noEng ? (
             <div>
               <div className="card-title" style={{ marginBottom: 10 }}>Quick start</div>
-              <pre className="code" style={{ fontSize: 11.5 }}>{`$ heaven engage init my-eng
-$ heaven scope add 10.0.0.0/24 --kind cidr
-$ heaven scan -t 10.0.0.1 \\
-    --i-have-authorization`}</pre>
+              <div style={{ color: 'var(--text-1)', fontSize: 12.5, lineHeight: 1.6, marginBottom: 12 }}>
+                Launch your first scan to populate the dashboard — findings, severity
+                breakdown and topology fill in automatically.
+              </div>
+              <button className="btn btn-primary" onClick={() => navigate('/scans')}>
+                Launch a scan →
+              </button>
+              <div className="dim" style={{ fontSize: 11, marginTop: 12 }}>
+                Prefer the terminal? <code>heaven scan -t 10.0.0.1 --i-have-authorization</code>
+              </div>
             </div>
           ) : (
             <div>

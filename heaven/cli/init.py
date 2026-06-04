@@ -30,8 +30,8 @@ _ENV_KEYS_ORDER = [
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",
-    "HEAVEN_NVD_API_KEY",
-    "HEAVEN_SHODAN_API_KEY",
+    "NVD_API_KEY",
+    "SHODAN_API_KEY",
     "HEAVEN_AUTHORIZED_SCOPE",
     "WEBHOOK_URL",
     "HEAVEN_SPLUNK_HEC_URL",
@@ -174,7 +174,11 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
 
     # ── Optional: LLM for the AI layers ─────────────────────────────────
     _print("\n[bold]LLM for AI layers[/bold] (Layer B/D/E + autonomous loop)")
-    _print("  [dim]Skip with Enter on each prompt to leave unconfigured.[/dim]")
+    _print("  [dim]Optional — HEAVEN runs fully without it ([cyan]--no-llm[/cyan]). "
+           "Press Enter to skip.[/dim]")
+    _print("  [dim]Get a key:  Gemini (free) https://aistudio.google.com/apikey"
+           "  ·  Anthropic https://console.anthropic.com"
+           "  ·  OpenAI https://platform.openai.com/api-keys[/dim]")
     provider = _prompt("Provider [anthropic/openai/gemini] (Enter to skip)",
                        default=existing.get("HEAVEN_LLM_PROVIDER", ""),
                        allow_empty=True).lower().strip()
@@ -183,17 +187,22 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
         key_var = {"anthropic": "ANTHROPIC_API_KEY",
                    "openai": "OPENAI_API_KEY",
                    "gemini": "GEMINI_API_KEY"}[provider]
+        pip_pkg = {"anthropic": "anthropic",
+                   "openai": "openai",
+                   "gemini": "google-generativeai"}[provider]
         api_key = _prompt(f"{key_var}",
                           default=existing.get(key_var, ""),
                           hide=True, allow_empty=True)
         if api_key:
             values[key_var] = api_key
+        _print(f"  [dim]Install the SDK:  [cyan]pip install {pip_pkg}[/cyan]"
+               f"   (or  [cyan]pip install -e \".[{provider}]\"[/cyan])[/dim]")
 
     # ── Optional: external service keys ────────────────────────────────
     _print("\n[bold]Recon enrichment[/bold] (optional)")
     for var, label in [
-        ("HEAVEN_NVD_API_KEY", "NVD API key (30x faster vuln-DB ingestion)"),
-        ("HEAVEN_SHODAN_API_KEY", "Shodan API key (passive recon)"),
+        ("NVD_API_KEY", "NVD API key (30x faster vuln-DB ingestion) — nvd.nist.gov/developers/request-an-api-key"),
+        ("SHODAN_API_KEY", "Shodan API key (passive recon) — account.shodan.io"),
     ]:
         v = _prompt(label, default=existing.get(var, ""), hide=True, allow_empty=True)
         if v:

@@ -9,6 +9,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — API-key configuration consistency
+
+- The README's Quick Start told users to set **`GOOGLE_API_KEY`** for Gemini,
+  but the code reads **`GEMINI_API_KEY`** — so the documented key was silently
+  ignored. Corrected, and added a dedicated **API Keys & Configuration** section
+  (every key, where to get it, three ways to set it, and a free-Gemini
+  walkthrough).
+- **`heaven init` wrote `HEAVEN_SHODAN_API_KEY` / `HEAVEN_NVD_API_KEY`**, but the
+  code reads `SHODAN_API_KEY` / `NVD_API_KEY` — so wizard-set recon keys didn't
+  take effect. The wizard now writes the canonical names; `config.py` also
+  accepts `NVD_API_KEY` (keeping `HEAVEN_NVD_API_KEY` as a legacy alias).
+- **Wrong SDK hint** — a missing Gemini SDK suggested `pip install gemini`
+  (doesn't exist). It now suggests the correct `pip install google-generativeai`.
+
+### Added — easy LLM setup
+
+- pip extras for the AI layers: `pip install -e ".[gemini]"` / `".[anthropic]"` /
+  `".[openai]"`, or `".[llm]"` for all three. `.env.example` and `heaven init`
+  now document each key, where to obtain it, and which SDK to install; `heaven
+  init` prints the get-a-key URLs and the exact `pip install` line.
+
+### Fixed — web UI crash on login (critical)
+
+- `App.jsx` referenced `needsPasswordChange()` and `<ForcedPasswordChange>`
+  without importing either (the imports had been dropped). With no ESLint to
+  catch it and Vite not flagging undefined refs, the authenticated app threw a
+  `ReferenceError` and **white-screened for every logged-in user**. Added the
+  missing imports; verified end-to-end in a browser (login → forced-change →
+  dashboard, zero console errors).
+
+### Added — web UI resilience & usability
+
+- **Error boundary** around the routed content — a render error now shows a
+  recoverable "something went wrong" card (Reload / Back to dashboard) instead
+  of a blank screen. Keyed by route, so navigating away clears it.
+- **404 route** — unknown URLs render a proper "page not found" instead of an
+  empty content area.
+- **Session survives refresh** — the auth token is persisted in sessionStorage
+  (clears on tab close), so F5 / reopening a tab no longer forces re-login.
+  Tradeoff documented in `api.js`; httpOnly cookie remains the max-hardening
+  option.
+- **Graceful session expiry** — a 401 clears auth, raises a "Session expired"
+  toast, and ProtectedRoute redirects to /login (no more raw error card).
+- **Actionable empty states** — the "no engagement" screens on Dashboard,
+  Findings, Kill Chain and Engagement now offer an in-app **Launch a scan →**
+  button (the Scans page has a full launcher) instead of telling the operator
+  to go run CLI commands / restart the server.
+- **Global "scan running" indicator** in the header — polls so it stays visible
+  after you navigate away from the Scans page; click to return.
+- **Findings filters** — debounced auto-apply + Enter-to-apply, and a loading
+  skeleton on first fetch.
+- **Accessibility** — visible keyboard focus rings, keyboard-operable sortable
+  table headers with `aria-sort`, `aria-expanded` on sidebar groups, and
+  `aria-hidden` on decorative icons; honors `prefers-reduced-motion`.
+- **Consistency pass across all pages** — skeleton loaders on every
+  fetch/run (Coverage, Knowledge, Tickets, Methodology, Benchmark, Diff, SAST,
+  Autonomous, Post-Ex, Lateral, AI Plans) and actionable empty states
+  (Knowledge / Diff → "Launch a scan", Benchmark / Watch → clear guidance).
+- **No more `alert()` dialogs** — the Replay (Scans) and Train-priors (Coverage)
+  flows now use the in-app toast system instead of blocking browser alerts.
+
+### Added — CLI usability pass
+
+- **Colourised, grouped help via rich-click.** `heaven --help` now renders the
+  38 commands in six labelled panels (Scanning & Monitoring · Engagements &
+  Findings · Reporting & Tickets · AI & Threat Intel · Models · Platform &
+  Setup) instead of one flat alphabetical dump. `heaven scan --help` groups its
+  options into Targets / Scan profile / Authorization & scope / Exploitation
+  chaining / Output panels and shows a worked Examples block. Falls back to
+  plain Click (same commands) when `rich-click` isn't installed.
+- **`heaven use <engagement>`** — git-branch-style sticky engagement context
+  stored per working directory (`./.heaven/`), so you stop retyping
+  `--engagement` on every command. Resolution precedence: explicit flag >
+  `HEAVEN_ENGAGEMENT` env > `heaven use` > default. `heaven use` shows the
+  current selection + available engagements; `heaven use --clear` resets it.
+  The no-arg dashboard now displays the active engagement.
+- **"Did you mean?" suggestions** on a mistyped command
+  (`heaven scna` → suggests `scan`).
+
+### Changed — CLI command clarity
+
+- **`heaven sys-status` → `heaven doctor`.** The deployment health check now
+  uses the familiar `doctor` idiom and is discoverable in the grouped help.
+  `sys-status` is kept as a hidden, backward-compatible alias.
+- **`heaven schedule` deprecated** in favour of `heaven watch` (which adds
+  change-detection and alert-on-change). It is now hidden and prints a
+  deprecation notice, but still runs for backward compatibility.
+
 ### Added — report downloads, vuln knowledge base, forced-change auth
 
 - **Downloadable reports (webapp + API).** New `GET /api/report/export?format=…`

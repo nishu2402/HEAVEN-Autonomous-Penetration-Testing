@@ -124,11 +124,71 @@ def check_module_health() -> dict:
     return results
 
 
+# ── Current-engagement context ────────────────────────────────────────────
+# Git-branch-style sticky selection set via `heaven use <name>`, so operators
+# stop retyping --engagement on every command. Stored per working directory
+# (in ./.heaven/) so separate projects keep independent context.
+#
+# Resolution precedence used everywhere in the CLI:
+#   explicit --engagement flag  >  HEAVEN_ENGAGEMENT env  >  `heaven use`  >  default
+_CONTEXT_FILE = Path(".heaven") / "current_engagement"
+
+
+def get_current_engagement() -> Optional[str]:
+    """Return the engagement name set via `heaven use`, or None if unset."""
+    try:
+        if _CONTEXT_FILE.is_file():
+            name = _CONTEXT_FILE.read_text(encoding="utf-8").strip()
+            return name or None
+    except OSError:
+        pass
+    return None
+
+
+def set_current_engagement(name: str) -> Path:
+    """Persist the current engagement for this working directory."""
+    _CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CONTEXT_FILE.write_text(name.strip() + "\n", encoding="utf-8")
+    return _CONTEXT_FILE
+
+
+def clear_current_engagement() -> bool:
+    """Remove the current-engagement context. True if one existed."""
+    try:
+        if _CONTEXT_FILE.is_file():
+            _CONTEXT_FILE.unlink()
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def resolve_engagement_name(explicit: Optional[str] = None) -> Optional[str]:
+    """Effective engagement *name* using the standard precedence.
+
+    explicit flag > HEAVEN_ENGAGEMENT env > `heaven use` context > None.
+    """
+    if explicit:
+        return explicit
+    env = os.environ.get("HEAVEN_ENGAGEMENT")
+    if env:
+        return env
+    return get_current_engagement()
+
+
 def _engagement_db_path(name: Optional[str] = None) -> Path:
-    """Resolve engagement DB. Default = current dir, or named ./engagements/<name>.db"""
+    """Resolve the engagement SQLite path.
+
+    Precedence: explicit name > HEAVEN_ENGAGEMENT env > `heaven use` context
+    > ./engagement.db default. A bare name maps to ./engagements/<name>.db
+    (matching what `heaven engage init` creates).
+    """
     if name:
         return Path("engagements") / f"{name}.db"
     env_path = os.environ.get("HEAVEN_ENGAGEMENT")
     if env_path:
         return Path(env_path)
+    ctx = get_current_engagement()
+    if ctx:
+        return Path("engagements") / f"{ctx}.db"
     return Path("engagement.db")

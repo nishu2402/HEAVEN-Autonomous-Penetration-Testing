@@ -84,14 +84,14 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">⚡</div>
+        <div className="brand-mark" aria-hidden="true">⚡</div>
         <div className="brand-text">
           <span className="brand-title">HEAVEN</span>
           <span className="brand-sub">Pentest Platform</span>
         </div>
       </div>
 
-      <nav>
+      <nav aria-label="Primary">
         {GROUPS.map((group) => {
           const isCollapsed = collapsed.has(group.name);
           // Auto-expand a group if the active route belongs to it
@@ -106,10 +106,11 @@ export default function Sidebar() {
               <button
                 type="button"
                 className="nav-group-header"
+                aria-expanded={!effectivelyCollapsed}
                 onClick={() => toggleGroup(group.name)}
               >
                 <span>{group.name}</span>
-                <span className="nav-group-chevron">▾</span>
+                <span className="nav-group-chevron" aria-hidden="true">▾</span>
               </button>
               <div className="nav-group-items">
                 {group.items.map((it) => (
@@ -119,7 +120,7 @@ export default function Sidebar() {
                     end={it.to === "/"}
                     className={({ isActive }) => "nav-item" + (isActive ? " active" : "")}
                   >
-                    <span className="nav-icon">{it.icon}</span>
+                    <span className="nav-icon" aria-hidden="true">{it.icon}</span>
                     <span>{it.label}</span>
                   </NavLink>
                 ))}

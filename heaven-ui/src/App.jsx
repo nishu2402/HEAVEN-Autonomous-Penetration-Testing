@@ -1,16 +1,19 @@
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
-import { isAuthenticated, onAuthChange } from "./api";
+import { isAuthenticated, onAuthChange, needsPasswordChange, onSessionExpired } from "./api";
 
 // Eager: the app shell + the login screen. These paint first, so they stay in
 // the main bundle. Everything below is code-split (React.lazy) so the heavy
 // stuff — especially the three.js 3D topology — never lands in first load.
 import Sidebar from "./components/Sidebar.jsx";
 import Header from "./components/Header.jsx";
-import { ToastProvider } from "./components/Toast.jsx";
+import { ToastProvider, useToast } from "./components/Toast.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import ForcedPasswordChange from "./components/ForcedPasswordChange.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
+import NotFound from "./pages/NotFound.jsx";
 
 // Lazy: one chunk per authenticated page, fetched on navigation.
 const Dashboard      = lazy(() => import("./pages/Dashboard.jsx"));
@@ -55,9 +58,20 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+// Lives inside ToastProvider so it can raise a toast when api.js reports a 401.
+function SessionExpiryWatcher() {
+  const toast = useToast();
+  useEffect(
+    () => onSessionExpired((msg) => toast.warning("Session expired", msg)),
+    [toast],
+  );
+  return null;
+}
+
 export default function App() {
   return (
     <ToastProvider>
+      <SessionExpiryWatcher />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
@@ -75,6 +89,7 @@ export default function App() {
 
 function Shell() {
   const [mustChange, setMustChange] = useState(needsPasswordChange());
+  const location = useLocation();
 
   useEffect(() => {
     return onAuthChange(() => setMustChange(needsPasswordChange()));
@@ -88,8 +103,10 @@ function Shell() {
       <div className="main-pane">
         <Header />
         <div className="content">
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
+          {/* Keyed by path so navigating to another route clears a crashed page. */}
+          <ErrorBoundary key={location.pathname}>
+            <Suspense fallback={<RouteFallback />}>
+              <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/engagement" element={<Engagement />} />
               <Route path="/findings" element={<Findings />} />
@@ -108,8 +125,10 @@ function Shell() {
               <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/sast" element={<SastPage />} />
               <Route path="/watch" element={<WatchPage />} />
-            </Routes>
-          </Suspense>
+              <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Scans as ScansApi, Replay } from "../api";
+import { useToast } from "../components/Toast.jsx";
 
 const MODES = ["web", "network", "full", "ad", "cloud"];
 const STEALTH = [
@@ -24,6 +25,7 @@ export default function Scans() {
   const [launching, setLaunching]   = useState(false);
   const [launchError, setLaunchError] = useState(null);
   const [launchSuccess, setLaunchSuccess] = useState(null);
+  const toast = useToast();
 
   async function load() {
     setRefreshing(true);
@@ -299,15 +301,16 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                               e.stopPropagation();
                               try {
                                 const r = await Replay.scan(id, {});
-                                alert(
-                                  `Replay started.\nNew scan ID: ${r.new_scan_id}\n` +
+                                toast.success(
+                                  "Replay started",
+                                  `New scan ${String(r.new_scan_id || "").slice(0, 8)}` +
                                   (r.seed != null
-                                    ? `Seed: ${r.seed} (deterministic)`
-                                    : "No seed stored — non-deterministic replay")
+                                    ? ` · seed ${r.seed} (deterministic)`
+                                    : " · no seed stored (non-deterministic)")
                                 );
                                 load();
                               } catch (err) {
-                                alert(`Replay failed: ${err.message}`);
+                                toast.error("Replay failed", err.message);
                               }
                             }}
                           >

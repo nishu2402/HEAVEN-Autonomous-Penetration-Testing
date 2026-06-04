@@ -34,7 +34,16 @@ class _SkipHud(Exception):
 # scan — the big one
 # ═══════════════════════════════════════════════════════════════════════════
 
-@click.command()
+@click.command(epilog="""
+\b
+Examples:
+  heaven scan -t 10.0.0.5 --i-have-authorization
+  heaven scan -u https://app.example.com -m web --api-scan --i-have-authorization
+  heaven scan -t 10.0.0.0/24 --engagement acme --auto-prove --i-have-authorization
+  heaven scan -u https://app.example.com --cookie-file cookies.txt -m web --i-have-authorization
+
+Tip: run `heaven use <engagement>` once to stop repeating --engagement.
+""")
 @click.option("--target", "-t", multiple=True, help="Target IPs, hostnames, or CIDRs")
 @click.option("--url", "-u", multiple=True, help="Target URLs for web scanning")
 @click.option("--repo", "-r", multiple=True, help="Git repositories to scan")
@@ -599,7 +608,7 @@ def scan(
 # schedule
 # ═══════════════════════════════════════════════════════════════════════════
 
-@click.command()
+@click.command(hidden=True)
 @click.argument("interval_minutes", type=int)
 @click.option("--target", "-t", multiple=True, required=True, help="Target IPs or URLs")
 @click.option("--mode", "-m", type=click.Choice([m.value for m in ScanMode]), default="full")
@@ -607,8 +616,17 @@ def scan(
               help="Required for scheduled scans — confirms all targets are authorized")
 def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
              i_have_authorization: bool) -> None:
-    """Continuously monitor targets at a specified interval (minutes)."""
+    """[Deprecated — use `heaven watch`] Re-scan targets every N minutes.
+
+    Kept for backward compatibility. This is a naive fixed-interval re-scan
+    with no diffing and no alert-on-change. `heaven watch` supersedes it: it
+    diffs each run against the previous one and only alerts when something
+    actually changed, with optional auto-ticketing.
+    """
     print_banner()
+    _print("[yellow]Note:[/yellow] `heaven schedule` is deprecated — "
+           "`heaven watch` adds change-detection and alert-on-change. "
+           "See [cyan]heaven watch --help[/cyan].")
 
     if not i_have_authorization:
         _print("[red]Scheduled scans require --i-have-authorization for every target.[/red]")

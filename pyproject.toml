@@ -74,6 +74,7 @@ dependencies = [
     "pydantic-settings>=2.1.0",
     "rich>=13.7.0",
     "click>=8.1.0",
+    "rich-click>=1.7.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "hypothesis>=6.152.4",
@@ -98,6 +99,14 @@ dev = [
 ]
 cloud-gcp = ["google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0"]
 cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]
+
+# LLM provider SDKs for the AI layers (optional — HEAVEN runs without any).
+# Pick one:  pip install -e ".[gemini]"  /  ".[anthropic]"  /  ".[openai]"
+# Or all three:  pip install -e ".[llm]"
+gemini = ["google-generativeai>=0.8.0"]
+anthropic = ["anthropic>=0.39.0"]
+openai = ["openai>=1.40.0"]
+llm = ["google-generativeai>=0.8.0", "anthropic>=0.39.0", "openai>=1.40.0"]
 
 [project.scripts]
 heaven = "heaven.main:cli"

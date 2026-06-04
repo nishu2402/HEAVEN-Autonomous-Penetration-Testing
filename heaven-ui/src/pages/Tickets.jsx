@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Tickets } from "../api";
+import { SkeletonStatGrid } from "../components/Skeleton.jsx";
 
 export default function TicketsPage() {
   const [status, setStatus] = useState(null);
@@ -23,6 +24,8 @@ export default function TicketsPage() {
         </p>
 
         {error && <div className="error">{error}</div>}
+
+        {!status && !error && <SkeletonStatGrid count={2} />}
 
         {status && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

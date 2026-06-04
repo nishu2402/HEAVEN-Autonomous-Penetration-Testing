@@ -50,6 +50,14 @@ PROVIDER_KEY_ENVS = {
     "gemini": "GEMINI_API_KEY",
 }
 
+# pip package name per provider — NOT always the provider name. In particular
+# Gemini's SDK is `google-generativeai`, so "pip install gemini" is wrong.
+PROVIDER_PIP_PACKAGES = {
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "gemini": "google-generativeai",
+}
+
 
 # ═══════════════════════════════════════════
 # SECRET REDACTION
@@ -208,10 +216,14 @@ class LLMGateway:
             else:
                 self._init_error = f"unknown provider '{self.provider}'"
         except ImportError as e:
-            self._init_error = f"SDK not installed for {self.provider}: {e}"
+            pkg = PROVIDER_PIP_PACKAGES.get(self.provider, self.provider)
+            self._init_error = (
+                f"SDK not installed for {self.provider}: {e} "
+                f"(install with: pip install {pkg})"
+            )
             logger.warning(
                 f"LLM provider '{self.provider}' selected but SDK not installed — "
-                f"install with: pip install {self.provider}"
+                f"install with: pip install {pkg}"
             )
         except Exception as e:
             self._init_error = f"client init failed: {e}"

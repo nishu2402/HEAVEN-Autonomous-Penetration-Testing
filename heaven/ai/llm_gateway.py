@@ -51,11 +51,13 @@ PROVIDER_KEY_ENVS = {
 }
 
 # pip package name per provider — NOT always the provider name. In particular
-# Gemini's SDK is `google-generativeai`, so "pip install gemini" is wrong.
+# Gemini's SDK is `google-genai` (the current SDK; the older
+# `google-generativeai` is deprecated but still accepted as a fallback), so
+# "pip install gemini" is wrong.
 PROVIDER_PIP_PACKAGES = {
     "anthropic": "anthropic",
     "openai": "openai",
-    "gemini": "google-generativeai",
+    "gemini": "google-genai",
 }
 
 
@@ -184,6 +186,7 @@ class LLMGateway:
         )
         self._client: Any = None
         self._init_error: Optional[str] = None
+        self._gemini_sdk: Optional[str] = None  # "new" (google-genai) | "legacy"
 
         if self.provider and self.api_key:
             self._init_client()
@@ -210,9 +213,18 @@ class LLMGateway:
                 import openai  # type: ignore[import-not-found]
                 self._client = openai.OpenAI(api_key=self.api_key)
             elif self.provider == "gemini":
-                import google.generativeai as genai  # type: ignore[import-not-found]
-                genai.configure(api_key=self.api_key)
-                self._client = genai.GenerativeModel(self.model)
+                # Prefer the current SDK (`google-genai`, imported as
+                # `from google import genai`); fall back to the deprecated
+                # `google-generativeai` if that's what's installed.
+                try:
+                    from google import genai as google_genai  # type: ignore[import-not-found]
+                    self._client = google_genai.Client(api_key=self.api_key)
+                    self._gemini_sdk = "new"
+                except ImportError:
+                    import google.generativeai as legacy_genai  # type: ignore[import-not-found]
+                    legacy_genai.configure(api_key=self.api_key)
+                    self._client = legacy_genai.GenerativeModel(self.model)
+                    self._gemini_sdk = "legacy"
             else:
                 self._init_error = f"unknown provider '{self.provider}'"
         except ImportError as e:
@@ -386,13 +398,30 @@ class LLMGateway:
         )
 
     def _call_gemini(self, prompt: str, req: LLMRequest) -> LLMResponse:
-        # Gemini doesn't have a distinct "system" message in the basic API;
-        # prepend it to the user prompt instead.
-        full_prompt = prompt
-        if req.system:
-            full_prompt = req.system + "\n\n" + prompt
-        config = {"max_output_tokens": req.max_tokens, "temperature": req.temperature}
-        result = self._client.generate_content(full_prompt, generation_config=config)
+        if self._gemini_sdk == "new":
+            # Current SDK (`google-genai`): client-based, supports a real
+            # system_instruction rather than prepending it to the prompt.
+            from google.genai import types  # type: ignore[import-not-found]
+            config = types.GenerateContentConfig(
+                max_output_tokens=req.max_tokens,
+                temperature=req.temperature,
+                system_instruction=req.system or None,
+            )
+            result = self._client.models.generate_content(
+                model=self.model, contents=prompt, config=config,
+            )
+        else:
+            # Legacy SDK (`google-generativeai`): no distinct system message in
+            # the basic API, so prepend it to the user prompt instead.
+            full_prompt = (req.system + "\n\n" + prompt) if req.system else prompt
+            result = self._client.generate_content(
+                full_prompt,
+                generation_config={
+                    "max_output_tokens": req.max_tokens,
+                    "temperature": req.temperature,
+                },
+            )
+
         text = getattr(result, "text", "") or ""
         usage = getattr(result, "usage_metadata", None)
         return LLMResponse(

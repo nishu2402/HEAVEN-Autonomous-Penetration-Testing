@@ -277,6 +277,25 @@ a:hover { color: var(--accent-2); }
   padding: 4px 11px; background: rgba(255,255,255,0.03);
 }
 
+/* Signed-in identity: username (real, configurable via HEAVEN_ADMIN_USERNAME)
+   shown plainly + the RBAC role as a distinct pill, so it reads as
+   "who · what they can do" rather than a static duplicated string. */
+.user-identity {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 5px 3px 11px; background: rgba(255,255,255,0.03);
+}
+.user-identity .user-name {
+  color: var(--text-0); font-size: 11.5px; font-weight: 600;
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.user-identity .user-role-chip {
+  color: var(--brand); font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1px solid rgba(109,124,255,0.35); border-radius: 999px;
+  padding: 2px 8px; background: rgba(109,124,255,0.10);
+}
+
 .logout-btn {
   background: transparent; border: 1px solid var(--border);
   color: var(--text-1); font-family: var(--font-ui); font-size: 12px; font-weight: 500;

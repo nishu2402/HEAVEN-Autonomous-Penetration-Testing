@@ -9,6 +9,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Gemini SDK migration (`google-generativeai` → `google-genai`)
+
+- Google deprecated the `google-generativeai` package (it prints a end-of-life
+  warning and stops receiving updates) in favour of the new `google-genai` SDK.
+  The LLM gateway now uses the current client-based SDK
+  (`from google import genai` → `genai.Client(...).models.generate_content(...)`,
+  with a real `system_instruction` instead of prompt-prepending) and **falls back
+  to the legacy SDK** if only that one is installed. Updated the `[gemini]` /
+  `[llm]` / `[all]` extras, `requirements.txt`, the `heaven init` pip hint, and
+  the README to `google-genai`. New `tests/test_llm_gateway.py` covers provider
+  selection, the SDK choice, secret redaction, and structured parsing.
+
+### Fixed — bytes/str handling in SSH post-exploitation
+
+- `asyncssh`'s `conn.run().stdout/stderr` can be `bytes` or `str` depending on
+  the connection encoding. `linpeas_runner.py` and `lateral.py` assumed `str`,
+  so on a `bytes` result the linpeas output would be parsed with a `b'...'`
+  wrapper and the SSH-key-reuse check (`"uid=" in out`) would raise `TypeError`.
+  Added a defensive `_as_text()` coercion at each boundary. (Surfaced by mypy once
+  the `[lateral]` extra was installed.)
+
+### Fixed — security hardening
+
+- **Credential vault is written `0600`.** `vault.enc` (the AES-256-GCM credential
+  store) was created with the default umask (often `0644` → world-readable). It's
+  now chmod'd to owner-only `0600` on every save. Flagged by `heaven self-audit`,
+  which now scores **100/100 (grade A, 0 findings)**.
+- **`cryptography` and `pyjwt` are core deps now** (see packaging note below).
+  Without them the vault silently fell back to *plaintext* and auth used opaque
+  (non-JWT) tokens — both degrade-gracefully paths, but not what a security tool
+  should ship by default.
+
+### Changed — packaging: base install vs. feature extras
+
+- **`pip install` now matches the documented experience.** Three deps that power
+  the default out-of-the-box flow were missing from `pyproject.toml`'s base
+  install: `aiosqlite` (the default offline SQLite store — it was wrongly buried
+  in the `dev` extra), `pyjwt` (JWT sessions) and `cryptography` (vault). Moved
+  them to core `dependencies`.
+- **Optional features are now installable as pip extras** instead of only via
+  `requirements.txt`: `[recon]`, `[reports]`, `[lateral]`, `[mitre]`, `[deploy]`,
+  `[scheduling]`, and an umbrella `[all]` (mirrors the existing `[gemini]` /
+  `[anthropic]` / `[openai]` / `[llm]` pattern). Each feature still degrades
+  gracefully when its extra isn't installed. README documents the matrix.
+
+### Changed — `.env` is now authoritative
+
+- The CLI auto-loads `.env` with `override=True`, so it wins over stale shell
+  exports. Editing `.env` (or the Web-UI password change that writes back to it)
+  now always takes effect on the next run — no "I changed it but a leftover
+  `export` shadowed it" gotcha. `heaven init`'s next-steps no longer tell you to
+  `source`/`export` the file (that step is obsolete).
+
+### Fixed — CLI ↔ API ↔ Web UI wiring (the ".env never reached the server" class of bugs)
+
+- **`.env` was only loaded when you passed `--config-file`.** Plain
+  `heaven serve` / `heaven autonomous` (and every other command) never read
+  `.env`, so the password, LLM keys, NVD/Shodan keys and SIEM/ticketing config
+  written by `heaven init` were silently invisible to the running stack. The CLI
+  now **auto-loads `.env` from the working directory at startup** (an explicit
+  `--config-file` still overrides). This single fix resolved four reported
+  symptoms at once:
+  - **Web-UI admin password set via `heaven init` didn't take effect** — the
+    server fell back to `admin/admin` + forced change because it never saw
+    `HEAVEN_ADMIN_PASSWORD`. Now the configured password works on first login.
+  - **`heaven autonomous` "did nothing smart"** — the LLM key was never loaded,
+    so the planner always used the dumb rule-based fallback. With the key now
+    loaded, the LLM planner engages.
+- **Admin identity is now configurable.** New `HEAVEN_ADMIN_USERNAME` env var
+  (defaults to `admin`); `heaven init` prompts for it and `.env.example`
+  documents it. The header badge previously *looked* static ("admin · admin")
+  because both the username and role were `admin`; it now renders the real
+  username plus a distinct role pill, and the username follows your config.
+- **Web-UI password changes now persist to `.env`.** The AuthManager is
+  in-memory, so a password set in the browser used to vanish on restart
+  (reverting to the old value or to admin/admin). `POST /api/auth/change-password`
+  now writes `HEAVEN_ADMIN_PASSWORD` back to `.env` (surgical, comment-preserving
+  edit via the new `heaven/utils/env_file.py`, file mode tightened to 0600) and
+  updates the running process, so the change sticks across restarts — `.env` is
+  the single source of truth. The forced first-login change now sticks too.
+
+### Fixed — autonomous loop loses its run when you navigate away
+
+- **`POST /api/autonomous/run` ran the whole loop synchronously**, blocking the
+  HTTP request for minutes; the React page kept run state in component-local
+  state, so switching pages discarded the in-flight run and the result. The
+  endpoint now launches the loop as a **background job** and returns a `job_id`
+  immediately; added `GET /api/autonomous/jobs` and
+  `GET /api/autonomous/jobs/{id}`. The Autonomous page polls the job and
+  persists the active `job_id` in `sessionStorage`, so a run **survives
+  navigating away and back — and a full page refresh**. Verified live: POST
+  returned in 0.47 s, the job completed in the background, and returning to the
+  page re-rendered the summary.
+
+### Added — Reports page in the Reporting nav group
+
+- The multi-format report export already existed but was buried as a dropdown on
+  the Findings page, so the **Reporting** section (Tickets / Benchmark /
+  Methodology) had no obvious way to "get a report". Added a first-class
+  **Reports** page (`/reports`) that shows a live severity snapshot of the active
+  engagement and one-click download in all 8 formats (PDF / HTML / Markdown /
+  CSV / JSON / SARIF / Burp / Proxy-JSONL), with an actionable empty state when
+  there are no findings yet.
+
 ### Fixed — API-key configuration consistency
 
 - The README's Quick Start told users to set **`GOOGLE_API_KEY`** for Gemini,

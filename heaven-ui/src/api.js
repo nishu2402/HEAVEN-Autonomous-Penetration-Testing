@@ -320,9 +320,14 @@ export const Benchmark = {
 // ── Sync round 2: autonomous loop, coverage, lateral, knowledge, ExploitDB ──
 
 export const Autonomous = {
-  // POST /api/autonomous/run
+  // POST /api/autonomous/run → { job_id, status: "running" }
+  // The run executes in the background on the server; poll job() for progress.
   run: (body) =>
     api(`/autonomous/run`, { method: "POST", body: JSON.stringify(body) }),
+  // GET /api/autonomous/jobs/{id} → { status, result, error, ... }
+  job: (jobId) => api(`/autonomous/jobs/${encodeURIComponent(jobId)}`),
+  // GET /api/autonomous/jobs → { jobs: [...] }
+  jobs: () => api(`/autonomous/jobs`),
 };
 
 export const Coverage = {

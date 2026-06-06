@@ -1,6 +1,7 @@
 """HEAVEN — `heaven init` interactive first-time-setup wizard.
 
 Asks the operator the bare minimum to bring HEAVEN to "ready":
+  - HEAVEN_ADMIN_USERNAME       (optional; Web UI login name, defaults to "admin")
   - HEAVEN_ADMIN_PASSWORD       (mandatory; gates the Web UI)
   - HEAVEN_DB_PASSWORD          (mandatory; gates SQLite + optional Postgres)
   - HEAVEN_LLM_PROVIDER + key   (optional; enables Layers B/D/E/autonomous)
@@ -24,6 +25,7 @@ from heaven.cli._helpers import _print
 
 
 _ENV_KEYS_ORDER = [
+    "HEAVEN_ADMIN_USERNAME",
     "HEAVEN_ADMIN_PASSWORD",
     "HEAVEN_DB_PASSWORD",
     "HEAVEN_LLM_PROVIDER",
@@ -144,11 +146,21 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
     if non_interactive:
         admin = existing.get("HEAVEN_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
         dbpw  = existing.get("HEAVEN_DB_PASSWORD") or secrets.token_urlsafe(24)
+        values["HEAVEN_ADMIN_USERNAME"] = existing.get("HEAVEN_ADMIN_USERNAME", "admin")
         values["HEAVEN_ADMIN_PASSWORD"] = admin
         values["HEAVEN_DB_PASSWORD"] = dbpw
+        _print(f"  HEAVEN_ADMIN_USERNAME = [green]{values['HEAVEN_ADMIN_USERNAME']}[/green]")
         _print(f"  HEAVEN_ADMIN_PASSWORD = [green]{admin}[/green] (generated)")
         _print(f"  HEAVEN_DB_PASSWORD    = [green]{dbpw}[/green] (generated)")
     else:
+        # Admin username — what you'll log into the Web UI with and what the
+        # header badge shows (so it's no longer a generic "admin").
+        admin_user = _prompt(
+            "Web UI admin username",
+            default=existing.get("HEAVEN_ADMIN_USERNAME", "") or "admin",
+        )
+        values["HEAVEN_ADMIN_USERNAME"] = admin_user
+
         current_admin = existing.get("HEAVEN_ADMIN_PASSWORD", "")
         admin = _prompt(
             "Web UI admin password (24+ chars recommended)",
@@ -189,7 +201,7 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
                    "gemini": "GEMINI_API_KEY"}[provider]
         pip_pkg = {"anthropic": "anthropic",
                    "openai": "openai",
-                   "gemini": "google-generativeai"}[provider]
+                   "gemini": "google-genai"}[provider]
         api_key = _prompt(f"{key_var}",
                           default=existing.get(key_var, ""),
                           hide=True, allow_empty=True)
@@ -236,14 +248,19 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
     _print(f"\n[green]✓ Wrote[/green] {env_path}")
 
     # ── Helpful next-steps reminder ────────────────────────────────────
+    # HEAVEN auto-loads .env from the working directory on every command, so
+    # there's no `source .env` / `export` step — just run from this directory.
+    is_default = env_path == (Path.cwd() / ".env").resolve()
     _print("\n[bold]Next steps:[/bold]")
-    _print(f"  1. Source the env file:        [cyan]source {env_path.name}[/cyan]")
-    _print( "                          (or)  [cyan]export $(grep -v '^#' "
-            f"{env_path.name} | xargs)[/cyan]")
-    _print( "  2. Create your first engagement: [cyan]heaven engage init <name>[/cyan]")
-    _print( "  3. Add a target with criticality: "
+    _print(f"  [dim]HEAVEN auto-loads {env_path.name} from this directory — "
+           "no need to `source` or `export` it.[/dim]")
+    if not is_default:
+        _print(f"  [dim](custom path — pass [cyan]--config-file {env_path}[/cyan] "
+               "or run from its directory)[/dim]")
+    _print( "  1. Create your first engagement: [cyan]heaven engage init <name>[/cyan]")
+    _print( "  2. Add a target with criticality: "
             "[cyan]heaven scope add <target> --criticality high[/cyan]")
-    _print( "  4. Launch the UI:               [cyan]heaven serve[/cyan]")
+    _print( "  3. Launch the UI:               [cyan]heaven serve[/cyan]")
 
     # ── Reminder about gitignore ───────────────────────────────────────
     gi = Path(".gitignore")

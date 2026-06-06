@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 import uuid
 import json
 import glob
@@ -121,6 +122,15 @@ log_ws_connections: list = []
 # Strong references to background scan tasks. Kept OUT of active_scans because
 # that dict is JSON-serialised by the API — an asyncio.Task is not serialisable.
 _background_scan_tasks: set = set()
+
+# ── Autonomous-loop jobs ──
+# The autonomous loop can run for minutes. Running it inline in the request
+# handler blocked the HTTP response for the whole run and made the UI lose all
+# state the moment the operator navigated away. Instead we launch each run as a
+# detached background task, return a job_id immediately, and let the UI poll
+# GET /api/autonomous/jobs/{job_id}. Mirrors the active_scans pattern.
+autonomous_jobs: dict[str, dict] = {}
+_autonomous_tasks: set = set()
 
 
 class ConnectionManager:
@@ -990,7 +1000,13 @@ def create_app() -> FastAPI:
     # ── Change password (forced-change flow) ──
     @app.post("/api/auth/change-password")
     async def change_password(body: dict, user: User = Depends(require_user)):
-        """Change the current user's password; clears the forced-change flag."""
+        """Change the current user's password; clears the forced-change flag.
+
+        The AuthManager is in-memory, so for the env-backed admin account we also
+        persist the new password to `.env` (HEAVEN_ADMIN_PASSWORD). That way the
+        change survives a server restart — `heaven serve` re-reads `.env` on boot
+        — instead of silently reverting to the old value or to admin/admin.
+        """
         am = get_auth_manager()
         current = (body or {}).get("current_password", "")
         new = (body or {}).get("new_password", "")
@@ -1000,7 +1016,25 @@ def create_app() -> FastAPI:
             am.set_password(user.username, new)
         except ValueError as e:
             raise HTTPException(422, str(e))
-        return {"ok": True, "message": "Password changed"}
+
+        # Persist to .env for the env-backed admin account (the only one mapped
+        # to HEAVEN_ADMIN_PASSWORD). Never fail the change on a write error — the
+        # in-memory update already succeeded.
+        persisted = False
+        admin_username = os.environ.get("HEAVEN_ADMIN_USERNAME", "admin")
+        if user.username == admin_username:
+            try:
+                from heaven.utils.env_file import resolve_env_path, set_env_var
+                env_path = resolve_env_path()
+                set_env_var(env_path, "HEAVEN_ADMIN_PASSWORD", new)
+                # Keep the running process consistent if the manager is rebuilt.
+                os.environ["HEAVEN_ADMIN_PASSWORD"] = new
+                persisted = True
+                logger.info("Admin password change persisted to %s", env_path)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Password changed in memory but .env persist failed: %s", e)
+
+        return {"ok": True, "message": "Password changed", "persisted": persisted}
 
     # ══════════════════════════════════════════════════════════════════
     # New API surface — exposes the publication-gap features to the UI
@@ -1336,15 +1370,17 @@ def create_app() -> FastAPI:
         request: Request,
         user: User = Depends(require_permission("scan.create")),
     ):
-        """Trigger the LLM-driven iterative pen-test loop.
+        """Start the LLM-driven iterative pen-test loop as a BACKGROUND job.
 
         Body JSON:
           {"engagement": "name", "ips": [...], "urls": [...],
            "max_iterations": 5, "time_budget_s": 600, "objective": "rce",
            "use_llm": true}
 
-        Returns the AutonomousRunSummary dict synchronously. For long runs,
-        prefer the CLI (`heaven autonomous`) which streams progress.
+        Returns immediately with {"job_id", "status": "running"}. The loop runs
+        detached so a multi-minute run neither blocks the HTTP request nor gets
+        lost when the operator navigates away in the UI. Poll
+        GET /api/autonomous/jobs/{job_id} for progress and the final summary.
         """
         try:
             from heaven.ai.autonomous_loop import run_autonomous
@@ -1358,8 +1394,6 @@ def create_app() -> FastAPI:
             body = {}
 
         engagement = body.get("engagement")
-        store = _engagement_store_factory(engagement) if engagement else None
-
         seed_targets = {
             "ips": list(body.get("ips") or []),
             "urls": list(body.get("urls") or []),
@@ -1367,16 +1401,83 @@ def create_app() -> FastAPI:
         if not (seed_targets["ips"] or seed_targets["urls"]):
             raise HTTPException(422, "need at least one ip or url")
 
-        summary = await run_autonomous(
-            seed_targets=seed_targets,
-            engagement_store=store,
-            base_config=_get_config(),
-            max_iterations=int(body.get("max_iterations") or 5),
-            time_budget_s=int(body.get("time_budget_s") or 600),
-            objective=str(body.get("objective") or ""),
-            use_llm_planner=bool(body.get("use_llm", True)),
-        )
-        return summary.to_dict()
+        max_iterations = int(body.get("max_iterations") or 5)
+        time_budget_s = int(body.get("time_budget_s") or 600)
+        objective = str(body.get("objective") or "")
+        use_llm = bool(body.get("use_llm", True))
+
+        job_id = uuid.uuid4().hex[:12]
+        job: dict = {
+            "job_id": job_id,
+            "status": "running",          # running | done | error
+            "engagement": engagement,
+            "seeds": seed_targets,
+            "objective": objective,
+            "max_iterations": max_iterations,
+            "use_llm": use_llm,
+            "started_by": user.username,
+            "started_at": time.time(),
+            "ended_at": None,
+            "result": None,
+            "error": None,
+        }
+        autonomous_jobs[job_id] = job
+
+        # Bound the history so the registry doesn't grow without limit.
+        if len(autonomous_jobs) > 30:
+            stale = sorted(autonomous_jobs.values(), key=lambda j: j["started_at"])
+            for old in stale[:-30]:
+                autonomous_jobs.pop(old["job_id"], None)
+
+        async def _runner() -> None:
+            try:
+                store = _engagement_store_factory(engagement) if engagement else None
+                summary = await run_autonomous(
+                    seed_targets=seed_targets,
+                    engagement_store=store,
+                    base_config=_get_config(),
+                    max_iterations=max_iterations,
+                    time_budget_s=time_budget_s,
+                    objective=objective,
+                    use_llm_planner=use_llm,
+                )
+                job["result"] = summary.to_dict()
+                job["status"] = "done"
+            except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+                job["error"] = str(e)
+                job["status"] = "error"
+                logger.exception("Autonomous job %s failed", job_id)
+            finally:
+                job["ended_at"] = time.time()
+
+        task = asyncio.create_task(_runner())
+        _autonomous_tasks.add(task)
+        task.add_done_callback(_autonomous_tasks.discard)
+
+        return {"job_id": job_id, "status": "running"}
+
+    @app.get("/api/autonomous/jobs")
+    async def autonomous_jobs_list(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Most-recent-first list of autonomous jobs this server has launched."""
+        return {
+            "jobs": sorted(
+                autonomous_jobs.values(),
+                key=lambda j: j["started_at"], reverse=True,
+            ),
+        }
+
+    @app.get("/api/autonomous/jobs/{job_id}")
+    async def autonomous_job_get(
+        job_id: str,
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Status + (when finished) the full AutonomousRunSummary for one job."""
+        job = autonomous_jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, "no such autonomous job")
+        return job
 
     # ── Coverage self-grading (heaven coverage equivalent) ──
     @app.get("/api/coverage")

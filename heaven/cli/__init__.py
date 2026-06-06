@@ -72,13 +72,30 @@ if HAS_CLICK:
     @click.pass_context
     def cli(ctx: click.Context, debug: bool, config_file: Optional[str]) -> None:
         """HEAVEN — Automated Vulnerability Scanner & Risk Triage Platform"""
-        if config_file:
-            try:
-                from dotenv import load_dotenv
-                load_dotenv(config_file)
-            except ImportError:
+        # Always load environment from a .env file, so the flow
+        #   heaven init  →  writes .env  →  heaven serve / heaven autonomous
+        # "just works" without having to remember `--config-file` or `source .env`.
+        # This is the wiring that connects the CLI to the rest of the stack:
+        # the Web-UI admin password (HEAVEN_ADMIN_PASSWORD / HEAVEN_ADMIN_USERNAME),
+        # the LLM keys (GEMINI/ANTHROPIC/OPENAI — without which `heaven autonomous`
+        # silently falls back to the rule-based planner), and the NVD / Shodan /
+        # SIEM / ticketing settings all live in .env.
+        #
+        # `.env` is the single source of truth and is loaded with override=True,
+        # so it wins over any stale shell exports — editing `.env` (or the Web-UI
+        # password change that writes back to it) always takes effect on the next
+        # run, with no "I changed it but a leftover `export` shadowed it" gotcha.
+        # To intentionally override a value for one run, edit `.env` or point at a
+        # different file with `--config-file`.
+        try:
+            from dotenv import find_dotenv, load_dotenv
+            target = config_file or find_dotenv(usecwd=True)
+            if target:
+                load_dotenv(target, override=True)
+        except ImportError:
+            if config_file:
                 logger.warning("python-dotenv not installed — .env file ignored")
-            reload_config()
+        reload_config()
 
         cfg = get_config()
         if debug:

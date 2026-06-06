@@ -369,6 +369,14 @@ class CredentialVault:
         else:
             self._vault_path.write_bytes(vault_data)
 
+        # The vault holds (encrypted) credentials — keep it owner-only (0600) so a
+        # stray default umask can't leave it world-readable. Best-effort: chmod is
+        # a no-op on filesystems/OSes that don't support POSIX modes.
+        try:
+            os.chmod(self._vault_path, 0o600)
+        except OSError:
+            pass
+
     def summary(self) -> dict:
         """Vault status summary (no secrets exposed)."""
         return {

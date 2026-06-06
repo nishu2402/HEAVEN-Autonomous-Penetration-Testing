@@ -192,3 +192,33 @@ def test_lateral_run_no_targets_succeeds_empty(api_client):
 def test_autonomous_run_missing_targets(api_client):
     r = api_client.post("/api/autonomous/run", json={})
     assert r.status_code == 422
+
+
+# ── Autonomous loop is now a background job (run survives navigation) ────────
+
+def test_autonomous_jobs_list_shape(api_client):
+    r = api_client.get("/api/autonomous/jobs")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "jobs" in body and isinstance(body["jobs"], list)
+
+
+def test_autonomous_job_not_found(api_client):
+    r = api_client.get("/api/autonomous/jobs/does-not-exist")
+    assert r.status_code == 404
+
+
+# ── Admin identity is configurable (header is no longer a static "admin") ───
+
+def test_admin_username_configurable(monkeypatch):
+    """HEAVEN_ADMIN_USERNAME + HEAVEN_ADMIN_PASSWORD seed that exact account and
+    skip the forced-change; the legacy admin/admin must then fail."""
+    monkeypatch.setenv("HEAVEN_ADMIN_USERNAME", "nisarg")
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "S3cure-Passw0rd-123")
+    from heaven.security.auth import AuthManager
+    am = AuthManager()
+    res = am.authenticate("nisarg", "S3cure-Passw0rd-123")
+    assert res and res["user"]["username"] == "nisarg"
+    assert res["user"]["role"] == "admin"
+    assert res["must_change_password"] is False
+    assert am.authenticate("admin", "admin") is None

@@ -31,6 +31,15 @@ from heaven.utils.logger import get_logger
 logger = get_logger("postex.linpeas")
 
 
+def _as_text(data: Any) -> str:
+    """Coerce asyncssh process output to str. `conn.run().stdout/stderr` can be
+    bytes or str depending on the connection's encoding; normalise so downstream
+    string ops (parsing, f-strings) never get a raw `b'...'` or a TypeError."""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data or ""
+
+
 # Default upstream URL — used when the runner is told to fetch live.
 LINPEAS_URL = "https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh"
 
@@ -104,7 +113,7 @@ class LinpeasRunner:
                     if fetch.exit_status != 0:
                         return LinpeasResult(
                             host=host, user=username, success=False,
-                            error=f"could not fetch linpeas.sh on target: {fetch.stderr}",
+                            error=f"could not fetch linpeas.sh on target: {_as_text(fetch.stderr)}",
                         )
 
                 run_cmd = "chmod +x /tmp/linpeas.sh && /tmp/linpeas.sh -q -N 2>&1"
@@ -112,7 +121,7 @@ class LinpeasRunner:
                 # Always cleanup
                 await conn.run("rm -f /tmp/linpeas.sh", check=False, timeout=5)
 
-                output = run.stdout or ""
+                output = _as_text(run.stdout)
                 parsed = _parse_linpeas(output)
                 return LinpeasResult(
                     host=host, user=username, success=True,

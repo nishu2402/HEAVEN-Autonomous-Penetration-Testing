@@ -54,6 +54,14 @@ from heaven.utils.logger import get_logger
 logger = get_logger("postex.lateral")
 
 
+def _as_text(data: object) -> str:
+    """Coerce asyncssh process output (bytes or str) to str, so downstream
+    string ops never hit a `b'...'` repr or a `str in bytes` TypeError."""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data or ""  # type: ignore[return-value]
+
+
 # ═══════════════════════════════════════════
 # RESULT TYPES
 # ═══════════════════════════════════════════
@@ -151,7 +159,7 @@ class SSHKeyReuseScanner:
                         connect_timeout=self.timeout,
                     ) as conn:
                         r = await conn.run("id", check=False, timeout=8)
-                        out = (r.stdout or "").strip()
+                        out = _as_text(r.stdout).strip()
                         if out and "uid=" in out:
                             hop = LateralHop(
                                 source_host=source_host, target_host=host,

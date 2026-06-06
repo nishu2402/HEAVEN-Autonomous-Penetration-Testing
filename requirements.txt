@@ -104,9 +104,13 @@ tabulate>=0.9.0
 tqdm>=4.66.0
 colorama>=0.4.6
 
-# ─── Optional: AI-assisted remediation ───────────────────────────────
-# Heavy dependency, only needed if you use heaven.devsecops.ai_remediation
-# google-generativeai>=0.4.0
+# ─── Optional: AI layers (LLM providers) ─────────────────────────────
+# Only needed for the AI features (recon-parse, planner, FP-review, autonomous,
+# coverage). HEAVEN runs fully without them. Install one (or use the pip extras:
+#   pip install -e ".[gemini]" / ".[anthropic]" / ".[openai]" / ".[llm]")
+# google-genai>=1.0.0        # Gemini (current SDK; replaces google-generativeai)
+# anthropic>=0.39.0          # Claude
+# openai>=1.40.0             # GPT
 
 # ─── Development & Testing (optional) ────────────────────────────────
 # pytest>=8.0.0

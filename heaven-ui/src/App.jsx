@@ -34,6 +34,7 @@ const DiffPage       = lazy(() => import("./pages/Diff.jsx"));
 const TicketsPage    = lazy(() => import("./pages/Tickets.jsx"));
 const SastPage       = lazy(() => import("./pages/Sast.jsx"));
 const WatchPage      = lazy(() => import("./pages/Watch.jsx"));
+const Reports        = lazy(() => import("./pages/Reports.jsx"));
 
 function RouteFallback() {
   return (
@@ -122,6 +123,7 @@ function Shell() {
               <Route path="/ai-plans" element={<AIPlans />} />
               <Route path="/benchmark" element={<Benchmark />} />
               <Route path="/methodology" element={<Methodology />} />
+              <Route path="/reports" element={<Reports />} />
               <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/sast" element={<SastPage />} />
               <Route path="/watch" element={<WatchPage />} />

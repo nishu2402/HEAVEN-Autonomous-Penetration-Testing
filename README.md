@@ -213,6 +213,21 @@ cd HEAVEN-Autonomous-Penetration-Testing
 chmod +x install.sh && ./install.sh      # venv + deps + builds the web UI
 ```
 
+`install.sh` installs everything from `requirements.txt`. If you instead install
+the package with `pip`, the base install is intentionally lean and each feature
+group is an **optional extra** (the feature degrades gracefully when its extra
+isn't installed):
+
+```bash
+pip install -e .                  # core: CLI, API, web UI, scanning, SQLite, auth
+pip install -e ".[recon]"         # dnspython / nmap / whois / shodan passive recon
+pip install -e ".[reports]"       # PDF/HTML report rendering (jinja2, weasyprint…)
+pip install -e ".[lateral]"       # SSH/SMB/AD lateral movement (impacket, asyncssh…)
+pip install -e ".[mitre]"         # MITRE ATT&CK / STIX enrichment
+pip install -e ".[llm]"           # all three LLM SDKs (or [gemini]/[anthropic]/[openai])
+pip install -e ".[all]"           # every feature extra at once
+```
+
 ### Configure
 
 The friendliest path is the interactive wizard — it prompts for the admin
@@ -271,6 +286,7 @@ false-positive review). Add only what you want.
 | `NVD_API_KEY` | 30× faster CVE-feed ingestion | Optional | <https://nvd.nist.gov/developers/request-an-api-key> |
 | `SHODAN_API_KEY` | Passive recon (exposed-host intel) | Optional | <https://account.shodan.io> |
 | `WEBHOOK_URL` | Slack / Teams / Discord alerts | Optional | Your workspace's incoming-webhook URL |
+| `HEAVEN_ADMIN_USERNAME` | Web UI login name (shown in the header badge) | Optional (defaults to `admin`) | You choose it |
 | `HEAVEN_ADMIN_PASSWORD` | Web UI login (skips the admin/admin forced-change) | Recommended | You choose it |
 
 > You only need **one** of the three LLM keys. HEAVEN auto-detects whichever is
@@ -282,7 +298,7 @@ false-positive review). Add only what you want.
    Google account, click **Create API key**, and copy it.
 2. **Install the Gemini SDK:**
    ```bash
-   pip install -e ".[gemini]"        # or:  pip install google-generativeai
+   pip install -e ".[gemini]"        # or:  pip install google-genai
    ```
 3. **Give it to HEAVEN** (pick one):
    ```bash
@@ -415,7 +431,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 
 </div>
 
-> **First login:** ships with `admin/admin` and **forces a password change** on first sign-in. Set `HEAVEN_ADMIN_PASSWORD` beforehand to skip the prompt. JWTs are held in memory only — never `localStorage`.
+> **First login:** ships with `admin/admin` and **forces a password change** on first sign-in. Set `HEAVEN_ADMIN_PASSWORD` (and optionally `HEAVEN_ADMIN_USERNAME`) beforehand to skip the prompt. A password changed in the Web UI is **persisted to `.env`**, so it survives a server restart (`.env` is the source of truth that `heaven serve` re-reads on boot). JWTs are held in memory only — never `localStorage`.
 
 ---
 
@@ -599,7 +615,7 @@ data/models/              NVD_model.pkl · MODEL_CARD.md
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # 313 tests, ~6 s
+pytest tests/                  # full suite, ~8 s
 heaven self-audit              # security self-check
 ```
 

@@ -98,21 +98,26 @@ class AuthManager:
         self._setup_default_admin()
 
     def _setup_default_admin(self) -> None:
+        # The admin *identity* is configurable via env so the operator console
+        # isn't stuck showing a generic "admin" forever. Set HEAVEN_ADMIN_USERNAME
+        # in .env (or via `heaven init`) to brand it; defaults to "admin".
+        admin_user = (os.environ.get("HEAVEN_ADMIN_USERNAME") or "admin").strip() or "admin"
         admin_pass = os.environ.get("HEAVEN_ADMIN_PASSWORD", "")
         if admin_pass:
             # Operator supplied a strong password via env — trust it, no forced change.
-            self.create_user("admin", admin_pass, Role.ADMIN)
+            self.create_user(admin_user, admin_pass, Role.ADMIN)
             return
         # No env password: ship a usable default (admin/admin) so a fresh install
         # works out-of-the-box, but FORCE a password change on first login and let
         # `self-audit` flag the unchanged default as critical. Balances zero-friction
         # onboarding with "no weak default credentials in production".
-        user = self.create_user("admin", "admin", Role.ADMIN)
+        user = self.create_user(admin_user, "admin", Role.ADMIN)
         user.must_change_password = True
         logger.warning(
-            "No HEAVEN_ADMIN_PASSWORD set — seeded default admin/admin with a FORCED "
-            "password change on first login. Set HEAVEN_ADMIN_PASSWORD or change the "
-            "password immediately for production use."
+            "No HEAVEN_ADMIN_PASSWORD set — seeded default %s/admin with a FORCED "
+            "password change on first login. Set HEAVEN_ADMIN_PASSWORD (and optionally "
+            "HEAVEN_ADMIN_USERNAME) in your .env or run `heaven init` for production use.",
+            admin_user,
         )
 
     def verify_user_password(self, username: str, password: str) -> bool:

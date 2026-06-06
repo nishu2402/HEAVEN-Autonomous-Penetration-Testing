@@ -93,7 +93,13 @@ export default function Header() {
         )}
         <span className="header-clock">{clock}</span>
         {user && (
-          <span className="user-badge">{user.username} · {user.role}</span>
+          <span
+            className="user-identity"
+            title={`Signed in as ${user.username} (role: ${user.role})`}
+          >
+            <span className="user-name">{user.username}</span>
+            <span className="user-role-chip">{user.role}</span>
+          </span>
         )}
         <button className="logout-btn" onClick={handleLogout}>Sign out</button>
       </div>

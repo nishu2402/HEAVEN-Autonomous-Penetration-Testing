@@ -40,6 +40,7 @@ const GROUPS = [
   {
     name: "Reporting",
     items: [
+      { to: "/reports",     label: "Reports",      icon: "📄" },
       { to: "/tickets",     label: "Tickets",      icon: "🎫" },
       { to: "/benchmark",   label: "Benchmark",    icon: "≡" },
       { to: "/methodology", label: "Methodology",  icon: "§" },

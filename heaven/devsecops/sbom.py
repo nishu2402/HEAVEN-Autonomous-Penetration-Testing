@@ -53,7 +53,7 @@ def generate_cyclonedx_sbom(scan_data: dict[str, Any], output_path: str = "heave
                 {
                     "vendor": "HEAVEN Security",
                     "name": "HEAVEN Scanner",
-                    "version": "1.3.0"
+                    "version": "1.0.0"
                 }
             ]
         },

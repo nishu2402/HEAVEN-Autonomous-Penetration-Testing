@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.0] — 2026-06-09
+## [1.0.0] — 2026-06-09
 
 ### Added — wider injection coverage: LFI / RFI / OS command injection
 
@@ -537,9 +537,5 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
 - Ruff E731 (lambda-assignment) + F401 (unused imports) across the
   AI layer.
 
----
-
-## [1.0.0] — pre-publication baseline
-
-Initial public release of HEAVEN — autonomous penetration testing
-framework. See README.md for the feature matrix.
+Initial public release of HEAVEN — autonomous penetration-testing
+framework. See README.md for the full feature matrix.

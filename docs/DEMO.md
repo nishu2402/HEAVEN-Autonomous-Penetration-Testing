@@ -15,7 +15,7 @@ heaven --version
 clear
 ```
 
-The banner reads `HEAVEN v1.3.0 — Autonomous Penetration Testing Platform`
+The banner reads `HEAVEN v1.0.0 — Autonomous Penetration Testing Platform`
 and lists 31 commands. This is the "moment of trust" — the viewer knows
 they're not watching a toy.
 

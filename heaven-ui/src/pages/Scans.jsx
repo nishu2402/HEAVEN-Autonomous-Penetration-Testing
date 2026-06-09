@@ -46,6 +46,13 @@ export default function Scans() {
     return () => clearInterval(i);
   }, []);
 
+  // 1-second tick so a running scan's elapsed time updates live.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   async function launchScan(e) {
     e.preventDefault();
     if (!authorized) { setLaunchError("You must confirm written authorization before scanning."); return; }
@@ -267,6 +274,17 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                         <span className={`scan-status ${statusClass(s.status)}`}>
                           {s.status || "unknown"}
                         </span>
+                        {s.status === "running" && (() => {
+                          const start = Date.parse(s.created || s.started_at || "");
+                          if (!start) return null;
+                          const sec = Math.max(0, Math.floor((now - start) / 1000));
+                          const mm = Math.floor(sec / 60);
+                          return (
+                            <div className="dim" style={{ fontSize: 10, marginTop: 2 }}>
+                              ⏱ {mm}m {sec % 60}s
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td style={{ width: 100 }}>
                         {progress !== null ? (

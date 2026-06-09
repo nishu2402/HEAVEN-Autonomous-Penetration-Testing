@@ -178,6 +178,30 @@ def _engagement_status(name: str) -> dict:
         return {"name": name, "error": str(e)}
 
 
+def _next_steps(report: dict) -> list[str]:
+    """Turn the diagnostic into a guide: the single most useful next command(s)
+    given what's already set up. Walks the happy path init → engage → scan →
+    report so a brand-new operator is never left wondering 'now what?'."""
+    eng = report.get("engagement", {})
+    admin_set = bool(os.environ.get("HEAVEN_ADMIN_PASSWORD"))
+    name = eng.get("name") or "<name>"
+    steps: list[str] = []
+    if not admin_set:
+        steps.append("[cyan]heaven init[/cyan]  — set the Web-UI admin password + optional API keys")
+    if not eng.get("exists"):
+        steps.append("[cyan]heaven engage init <name>[/cyan]  — create your first engagement")
+        steps.append("[cyan]heaven scope add <target> --criticality high[/cyan]  — add an authorized target")
+    elif (eng.get("total_findings") or 0) == 0:
+        steps.append(
+            f"[cyan]heaven scan -u <url> --engagement {name} --i-have-authorization[/cyan]"
+            "  — run your first scan"
+        )
+    else:
+        steps.append(f"[cyan]heaven report --engagement {name}[/cyan]  — generate a deliverable")
+        steps.append("[cyan]heaven serve[/cyan]  — open the web dashboard")
+    return steps
+
+
 def _render_pretty(report: dict) -> None:
     """Human-friendly two-column layout."""
     v = report["version"]
@@ -260,6 +284,12 @@ def _render_pretty(report: dict) -> None:
         _print(f"[dim]Data dir:  {dd.get('path')} (not created yet)[/dim]")
     elif "size_mb" in dd:
         _print(f"[dim]Data dir:  {dd['path']} · {dd['size_mb']} MB[/dim]")
+
+    # Contextual next step — make the diagnostic a guide, not a dead end.
+    _print("")
+    _print("[bold]Next step[/bold]")
+    for line in _next_steps(report):
+        _print(f"  → {line}")
 
 
 def register(cli: click.Group) -> None:

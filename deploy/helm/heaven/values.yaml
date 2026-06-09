@@ -5,7 +5,7 @@
 #
 # Quick start:
 #   helm install heaven ./deploy/helm/heaven \
-#       --set image.tag=v1.3.0 \
+#       --set image.tag=v1.0.0 \
 #       --set secrets.adminPassword=$(openssl rand -base64 32) \
 #       --set secrets.dbPassword=$(openssl rand -base64 32)
 

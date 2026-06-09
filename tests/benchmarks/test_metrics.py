@@ -374,12 +374,12 @@ class TestGroundTruthLoader:
 
 
 # ═══════════════════════════════════════════
-# END-TO-END SCORING OF THE 1.3.0 INJECTION CLASSES
+# END-TO-END SCORING OF THE 1.0.0 INJECTION CLASSES
 # ═══════════════════════════════════════════
 
 
 class TestNewClassesScoreAgainstDvwaGroundTruth:
-    """Regression guard for the SQLi/LFI/CmdI probes shipped in 1.3.0.
+    """Regression guard for the SQLi/LFI/CmdI probes shipped in 1.0.0.
 
     The scanner emits findings with ``vuln_type`` of ``"sqli"``, ``"lfi"`` and
     ``"cmdi"``. Those strings must (a) normalise to the canonical categories the

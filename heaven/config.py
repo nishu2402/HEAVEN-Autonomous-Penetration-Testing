@@ -304,13 +304,20 @@ def reload_config() -> HeavenConfig:
 
 
 def _warn_about_generated_secrets() -> None:
+    # Logged at DEBUG, not WARNING: a fresh CLI invocation is a new process, so a
+    # WARNING here printed on *every* command and read as noise/alarm. The
+    # actionable nudge lives where it matters instead — `heaven serve` warns
+    # loudly at startup if HEAVEN_ADMIN_PASSWORD is unset, and `heaven doctor`
+    # suggests `heaven init`. Use --debug (or HEAVEN_DEBUG=1) to see this.
     if not _GENERATED_SECRETS:
         return
     try:
         from heaven.utils.logger import get_logger
         log = get_logger("config")
         for k in _GENERATED_SECRETS:
-            log.warning(f"{k} not set — generated a random value for this run only. Set it explicitly for persistent installs.")
+            log.debug(f"{k} not set — generated a random value for this run only. "
+                      "Set it explicitly (or run `heaven init`) for persistent installs.")
     except Exception:
-        for k in _GENERATED_SECRETS:
-            print(f"[heaven config] WARN: {k} not set — random value generated for this run only.")
+        if os.environ.get("HEAVEN_DEBUG"):
+            for k in _GENERATED_SECRETS:
+                print(f"[heaven config] {k} not set — random value generated for this run only.")

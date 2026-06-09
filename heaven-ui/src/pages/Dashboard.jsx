@@ -2,6 +2,7 @@ import { useEffect, useState, lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import LiveTerminal from '../components/LiveTerminal'
+import FirstRunGuide from '../components/FirstRunGuide'
 import { Engagement, Dashboard as DashApi } from '../api'
 
 // three.js + r3f + drei are heavy (~600 KB). Load them only when the dashboard
@@ -95,6 +96,7 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-grid">
+      <FirstRunGuide />
       {/* Left: topology + stats */}
       <div className="dashboard-left">
         <div style={{ position: 'relative', overflow: 'hidden' }}>

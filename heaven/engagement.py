@@ -126,6 +126,21 @@ HOST_LEVEL_VULN_TYPES = frozenset({
     "version_disclosure",
 })
 
+# Substring signals for host/domain-level posture findings. The exact vuln_type
+# strings drift between scanners ("no_x_content_type" vs "x_content_type_missing"
+# vs "missing_x_content_type"), so an exact-set match alone silently lets the
+# same site-wide issue multiply once-per-URL. Matching these substrings collapses
+# every spelling to one finding per host. Per-endpoint bug classes (xss, sqli,
+# idor, csrf, lfi, ssrf, rce, open_redirect…) deliberately contain none of them.
+_HOST_LEVEL_SUBSTRINGS = (
+    "header", "hsts", "csp", "clickjacking", "x_frame", "x_content_type",
+    "referrer_policy", "permissions_policy", "cors",
+    "ssl", "_tls", "tls_", "cipher", "forward_secrecy", "heartbleed", "certificate",
+    "smuggling", "spf", "dmarc", "dkim", "dnssec", "dns_",
+    "version_disclosure", "server_version", "server_banner", "directory_listing",
+    "xml_accepted", "rate_limit",
+)
+
 
 def _host_key(target: str) -> str:
     """
@@ -151,8 +166,23 @@ def _host_key(target: str) -> str:
 
 
 def is_host_level(vuln_type: str) -> bool:
-    """True when a vuln type dedups per host rather than per URL."""
-    return (vuln_type or "").strip().lower() in HOST_LEVEL_VULN_TYPES
+    """True when a vuln type dedups per host rather than per URL.
+
+    Matches the explicit set OR any host-level substring signal, so spelling
+    drift between scanners can't cause a site-wide finding to multiply per URL.
+    """
+    vt = (vuln_type or "").strip().lower()
+    if vt in HOST_LEVEL_VULN_TYPES:
+        return True
+    return any(s in vt for s in _HOST_LEVEL_SUBSTRINGS)
+
+
+def _strip_query(url: str) -> str:
+    """Drop the query string + fragment so payload-varying URLs collapse to one
+    canonical endpoint. Critical for injection findings: `?id=1`, `?id=1' OR 1=1`
+    and `?id=1 AND sleep(5)` are the SAME vulnerability (one injectable param),
+    not 188 separate findings — the differing payload lives in the query string."""
+    return url.split("?", 1)[0].split("#", 1)[0]
 
 
 def _finding_hash(target: str, vuln_type: str, param: str = "",
@@ -164,13 +194,17 @@ def _finding_hash(target: str, vuln_type: str, param: str = "",
     identical hashes — they dedup, not duplicate. Host-level vuln types
     (missing headers, TLS, smuggling, SPF/DMARC) dedup per host, ignoring the
     URL path, so "CSP missing" reports once per host instead of once per
-    crawled page.
+    crawled page. For path-level vulns the query string is stripped from the
+    identity so the same injectable parameter probed with N payloads collapses
+    to a single finding (the parameter, not the payload, is the vulnerability).
     """
     vt = (vuln_type or "").strip().lower()
-    if vt in HOST_LEVEL_VULN_TYPES:
+    if is_host_level(vt):
         key = f"{_host_key(target)}|{vt}"
     else:
-        key = f"{target.lower()}|{vt}|{endpoint.lower()}|{param.lower()}"
+        base = _strip_query(target).lower()
+        ep = _strip_query(endpoint).lower()
+        key = f"{base}|{vt}|{ep}|{param.lower()}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 

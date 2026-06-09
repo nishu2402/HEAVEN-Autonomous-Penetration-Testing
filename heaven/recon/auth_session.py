@@ -212,9 +212,15 @@ def aiohttp_session_kwargs() -> dict[str, Any]:
     if not s:
         return {}
     out: dict[str, Any] = {}
-    jar = s.to_aiohttp_jar()
-    if jar is not None:
-        out["cookie_jar"] = jar
+    # Pass cookies as the session-level `cookies=` dict, NOT a pre-filled
+    # cookie_jar. A jar built with `update_cookies({k: v})` (no response_url)
+    # leaves the cookies with an empty domain, and aiohttp then never sends
+    # them — so scanners silently hit protected pages UNAUTHENTICATED and find
+    # nothing. The flat `cookies=` dict is attached to every request regardless
+    # of host (works for localhost / IP targets) — the approach the crawler
+    # already uses successfully.
+    if s.cookies:
+        out["cookies"] = dict(s.cookies)
     if s.headers:
         out["headers"] = dict(s.headers)
     return out

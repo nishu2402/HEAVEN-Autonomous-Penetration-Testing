@@ -643,6 +643,22 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                              resume_scan_id=resume_scan_id)
     stealth = targets.get("stealth_level", "normal")
 
+    # Authenticated scanning: if the operator loaded a cookie file / login session
+    # (`heaven scan --cookie-file` / `--auth`), feed those cookies + headers to the
+    # crawler so it can follow links PAST the login wall and discover the deep,
+    # protected endpoints (e.g. DVWA's /vulnerabilities/*). Without this the crawl
+    # stops at /login.php and the injection scanners never receive the real
+    # attack surface. The per-endpoint scanners read the same session globally.
+    _auth_cfg = None
+    try:
+        from heaven.recon.auth_session import get_active_session
+        _sess = get_active_session()
+        if _sess and (_sess.cookies or _sess.headers):
+            _auth_cfg = {"cookies": dict(_sess.cookies), "headers": dict(_sess.headers)}
+            logger.info(f"Authenticated crawl enabled ({len(_sess.cookies)} cookie(s))")
+    except Exception as e:  # noqa: BLE001 — auth is optional, never block the scan
+        logger.debug(f"no active auth session for crawl: {e}")
+
     # ═══ Phase: RECON (parallel multi-vector) ═══
     net_id = orch.add_task(
         "Network Reconnaissance", scan_network,
@@ -657,6 +673,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "Web Application Crawling", crawl_targets,
         phase=ScanPhase.RECON, concurrency_group="web",
         urls=targets.get("urls", []),
+        stealth_level=stealth,
+        auth_config=_auth_cfg,
     )
 
     cloud_id = orch.add_task(
@@ -902,18 +920,28 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _nuclei_scan(**kw):
         try:
             from heaven.vulnscan.nuclei_scanner import scan_nuclei
-            urls = targets.get("urls", [])
-            stealth = targets.get("stealth_level", "normal")
-            # Also extract URLs from crawler if available
-            for tid, res in orch.results.items():
-                if res.state == TaskState.COMPLETED and res.data:
-                    if isinstance(res.data, dict) and "endpoints" in res.data:
-                        for ep in res.data["endpoints"]:
-                            if ep.get("url") and ep["url"] not in urls:
-                                urls.append(ep["url"])
-            return await scan_nuclei(urls, stealth_level=stealth)
         except ImportError:
             return {}
+        urls = list(targets.get("urls", []))
+        stealth = targets.get("stealth_level", "normal")
+        # Enrich with crawler-discovered endpoints — BEST EFFORT. A malformed
+        # task result (non-dict endpoints, missing keys, a result whose `.data`
+        # is a string) must never raise and fail the whole Nuclei task; that's
+        # what caused "Nuclei Scanner failed: 'str'". Guard every access.
+        try:
+            for _tid, res in orch.results.items():
+                data = getattr(res, "data", None)
+                if getattr(res, "state", None) == TaskState.COMPLETED and isinstance(data, dict):
+                    eps = data.get("endpoints")
+                    if not isinstance(eps, list):
+                        continue
+                    for ep in eps:
+                        u = ep.get("url") if isinstance(ep, dict) else None
+                        if u and u not in urls:
+                            urls.append(u)
+        except Exception as e:  # noqa: BLE001 — enrichment is optional
+            logger.debug(f"nuclei URL enrichment skipped: {e}")
+        return await scan_nuclei(urls, stealth_level=stealth)
 
     nuclei_id = orch.add_task(
         "Nuclei Scanner", _nuclei_scan,
@@ -1024,36 +1052,67 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _injection_scan(**kw):
         try:
             from heaven.vulnscan.injection_scanner import scan_for_injections
-            urls = list(targets.get("urls", []))
-            crawl_data: dict = {}
-            forms_by_url: dict = {}
-            for tid, res in orch.results.items():
-                if res.state != TaskState.COMPLETED or not res.data:
-                    continue
-                data = res.data if isinstance(res.data, dict) else {}
-                # Collect additional crawled URLs
-                for ep in data.get("endpoints", []):
-                    ep_url = ep if isinstance(ep, str) else ep.get("url", "")
-                    if ep_url and ep_url not in urls:
-                        urls.append(ep_url)
-                # Collect forms keyed by URL
-                for url_str, forms in data.get("url_forms", {}).items():
-                    forms_by_url.setdefault(url_str, []).extend(forms)
-                # Also top-level forms list
-                for form in data.get("forms", []):
-                    action = form.get("action", "")
-                    if action:
-                        forms_by_url.setdefault(action, []).append(form)
-                if data.get("pages"):
-                    crawl_data["pages"] = crawl_data.get("pages", []) + data["pages"]
-            if not urls:
-                return {"skipped": True, "reason": "no URLs for injection scanning"}
-            return await scan_for_injections(
-                urls, crawl_data=crawl_data, forms_by_url=forms_by_url,
-                stealth_level=stealth,
-            )
         except ImportError:
             return {}
+        from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+        urls = list(targets.get("urls", []))
+        forms_by_url: dict = {}
+        get_params: dict = {}   # base GET url → set of param names (grouped per form)
+
+        def _add_post_field(action: str, param: str) -> None:
+            forms_by_url.setdefault(action, [])
+            form = next((f for f in forms_by_url[action] if f.get("action") == action), None)
+            if form is None:
+                form = {"action": action, "method": "POST", "fields": []}
+                forms_by_url[action].append(form)
+            if not any(fl.get("name") == param for fl in form["fields"]):
+                form["fields"].append({"name": param, "value": "test"})
+
+        for _tid, res in orch.results.items():
+            if getattr(res, "state", None) != TaskState.COMPLETED:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                if not isinstance(ep, dict):
+                    continue
+                ep_url = ep.get("url", "")
+                if ep_url and ep_url not in urls:
+                    urls.append(ep_url)
+                # Crawler-extracted input vectors (form fields + URL params) are
+                # the real attack surface — convert them into testable targets so
+                # the injection scanner has parameters to fuzz.
+                for iv in ep.get("input_vectors", []):
+                    if not isinstance(iv, dict):
+                        continue
+                    param = iv.get("param")
+                    iv_url = iv.get("url") or ep_url
+                    if not param or not iv_url:
+                        continue
+                    if (iv.get("method") or "GET").upper() == "POST":
+                        _add_post_field(iv_url, param)
+                    else:
+                        get_params.setdefault(iv_url, set()).add(param)
+
+        # Build ONE GET URL per form with ALL its params present. Many apps only
+        # run the query when every form field is supplied (e.g. DVWA's SQLi page
+        # needs both id AND Submit) — a single-param URL would never trigger the
+        # bug. The injection scanner then fuzzes each param while holding the
+        # others, so the combined URL covers every parameter.
+        for base_url, params in get_params.items():
+            parsed = urlparse(base_url)
+            qs = parse_qs(parsed.query, keep_blank_values=True)
+            for p in params:
+                qs.setdefault(p, ["1"])
+            test_url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
+            if test_url not in urls:
+                urls.append(test_url)
+
+        if not urls and not forms_by_url:
+            return {"skipped": True, "reason": "no URLs for injection scanning"}
+        return await scan_for_injections(
+            urls, forms_by_url=forms_by_url, stealth_level=stealth,
+        )
 
     inject_id = orch.add_task(
         "Injection Discovery (XSS/SQLi)", _injection_scan,

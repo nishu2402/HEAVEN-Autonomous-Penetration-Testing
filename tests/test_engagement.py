@@ -112,6 +112,60 @@ class TestFindingDedup:
         id2 = store.upsert_finding("s1", f2)
         assert id1 != id2
 
+    def test_host_level_findings_collapse_per_host(self):
+        """Regression: site-wide issues (missing headers, version disclosure,
+        smuggling, xml-accepted) must dedup to ONE per host even when reported on
+        many URLs — the scanner vuln_type spellings differ from the explicit set,
+        so they must match by substring. Per-endpoint bugs stay distinct."""
+        from heaven.engagement import dedup_findings, is_host_level
+        findings = []
+        for i in range(40):
+            url = f"http://h/page{i}"
+            for vt in ("no_x_content_type", "no_referrer_policy",
+                       "server_version_disclosure", "http_smuggling_te_obfuscation",
+                       "xml_accepted", "no_hsts", "no_forward_secrecy"):
+                findings.append({"target": url, "vuln_type": vt, "severity": "low"})
+            findings.append({"target": url, "vuln_type": "xss",
+                             "endpoint": f"/page{i}", "param": "q", "severity": "high"})
+        out = dedup_findings(findings)
+        from collections import Counter
+        c = Counter(f["vuln_type"] for f in out)
+        for vt in ("no_x_content_type", "no_referrer_policy", "server_version_disclosure",
+                   "http_smuggling_te_obfuscation", "xml_accepted", "no_hsts",
+                   "no_forward_secrecy"):
+            assert c[vt] == 1, f"{vt} should collapse to 1 per host, got {c[vt]}"
+        assert c["xss"] == 40, "per-endpoint XSS must stay distinct"
+        # classification sanity
+        assert is_host_level("no_x_content_type") and is_host_level("xml_accepted")
+        assert not is_host_level("xss") and not is_host_level("sqli") and not is_host_level("idor")
+
+    def test_injection_payloads_collapse_to_one_finding(self):
+        """Regression (real DVWA finding): probing ONE injectable parameter with
+        N payloads carries the payload in the query string, so each probe used to
+        hash to a distinct identity → 188 'sqli' findings for a single bug. The
+        query string must be stripped from the identity so all payloads collapse
+        to one finding per (endpoint, parameter, vuln_type)."""
+        from collections import Counter
+
+        from heaven.engagement import dedup_findings
+        base = "http://t/vulnerabilities/sqli/"
+        payloads = ["?id=1", "?id=1'", "?id=1 OR 1=1", "?id=1 AND SLEEP(5)",
+                    "?id=1 UNION SELECT NULL", "?id=1' --", "?id=2", "?id=1%27"]
+        findings = [
+            {"target": base + p, "vuln_type": "sqli", "param": "id",
+             "endpoint": base, "severity": "critical", "confidence": 0.8}
+            for p in payloads
+        ]
+        # A genuinely different parameter on the same endpoint stays separate.
+        findings.append({"target": base + "?name=x'", "vuln_type": "sqli",
+                         "param": "name", "endpoint": base,
+                         "severity": "critical", "confidence": 0.8})
+        out = dedup_findings(findings)
+        c = Counter((f["vuln_type"], f.get("param")) for f in out)
+        assert c[("sqli", "id")] == 1, f"all id-payloads must collapse to 1, got {c}"
+        assert c[("sqli", "name")] == 1, "a different param stays a separate finding"
+        assert len(out) == 2
+
     def test_dedup_preserves_operator_status(self, store):
         finding = {"target": "x", "vuln_type": "sqli", "param": "id",
                    "severity": "high", "confidence": 0.8}

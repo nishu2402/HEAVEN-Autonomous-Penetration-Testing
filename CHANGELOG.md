@@ -9,6 +9,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — authenticated scanning now actually works end-to-end (commercial-grade coverage)
+
+Running the live DVWA benchmark surfaced four real bugs that, together, meant an
+authenticated web scan reached nothing behind the login wall. All fixed and
+verified against live DVWA:
+
+- **Auth cookies were never sent by the scanners.** `aiohttp_session_kwargs()`
+  built a cookie *jar* via `CookieJar.update_cookies({k: v})` with no
+  response_url, leaving every cookie domain-less — aiohttp then silently dropped
+  them. So the injection/fuzzer/API scanners hit protected pages
+  **unauthenticated** and found nothing. Now cookies are passed as the flat
+  `cookies=` dict (the approach the crawler already used). *This was the single
+  biggest blocker to authenticated coverage.* Verified: the scanner now reaches
+  DVWA's SQLi page authenticated (HTTP 200) and reports
+  `critical sqli (error-based) — param 'id'`.
+- **Crawler ignored the auth session.** The orchestrator never passed
+  `auth_config` to `crawl_targets`, so the crawl stopped at `/login.php`. Now the
+  active session's cookies/headers are plumbed in — verified the crawler
+  self-discovers **17 endpoints under `/vulnerabilities/*`** (sqli/exec/fi/…)
+  from just the base URL.
+- **Crawler input-vectors never reached the injection scanner.** `_injection_scan`
+  read `forms`/`url_forms` keys the crawler doesn't emit. Now it converts the
+  crawler's `input_vectors` into testable targets, grouping a form's params into
+  one URL (DVWA's SQLi needs `id` *and* `Submit` present, so single-param URLs
+  never triggered it).
+- **Nuclei task crashed with `'str'`.** Its URL-enrichment loop wasn't guarded
+  against malformed task results. Made it best-effort so Nuclei always runs.
+- **Web fuzzer timed out at 600s.** It fuzzed every payload-varying URL; the
+  host/path-level checks are now collapsed to unique paths and capped
+  (`max_urls=40`), so the phase is bounded (scan time 812s → ~140–170s).
+
+Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
+
+### Fixed — findings multiplied per payload (major report-quality bug, found via live DVWA benchmark)
+
+- Running the real DVWA benchmark exposed that one injectable parameter probed
+  with N payloads produced **N findings** — a single SQLi on `?id=` became
+  **188 "findings"** (and a live scan ballooned to 1,653 rows from 2 URLs).
+  Root cause: `_finding_hash` keyed path-level findings on the full target URL
+  **including the query string**, so each payload (`?id=1`, `?id=1' OR 1=1`, …)
+  hashed to a distinct identity. Now the query string + fragment are stripped
+  from the identity, so all payloads on the same (endpoint, parameter, vuln_type)
+  collapse to one finding. **Replaying the real scan's findings: 1,653 → 35
+  (-98%).** Since the finding `id` is this hash (PRIMARY KEY), the collapse takes
+  effect at persist time too. Regression test added; genuinely-different
+  parameters still stay separate.
+- The DVWA benchmark harness itself queried a non-existent `evidence` column
+  (the schema column is `evidence_json`) — it would have failed for anyone with
+  Docker. Fixed the query (`evidence_json AS evidence`).
+
+### Added — onboarding / UX polish
+
+- The "X not set — random value generated" config notice is now DEBUG-level, so
+  normal commands are quiet for unconfigured users (the actionable nudge still
+  lives in `heaven serve` startup + `heaven doctor`'s next-step).
+- Web Scans page shows **live elapsed time** for running scans (updates every
+  second) alongside the existing progress bar.
+- **First-run guide on the Dashboard** — a dismissible checklist
+  (scope → scan → findings → report) that auto-checks each step from real
+  engagement state and hides once the core flow is complete.
+
+### Added — live autonomous progress over WebSocket
+
+- The autonomous loop now streams each iteration the instant it completes over
+  `WS /api/autonomous/jobs/{id}/stream` (snapshot → iteration… → done), with
+  per-subscriber fan-out. `run_autonomous` gained an `on_iteration` hook and
+  `IterationReport.to_dict()`. The web UI renders a live table and falls back to
+  polling if the socket drops. Verified end-to-end over a real socket.
+
+### Added — test + CI coverage
+
+- New `tests/test_report_auth_api.py`: report export (empty-engagement 404,
+  unknown-format handling) and the password-change flow (wrong-current 401,
+  weak/common new-password 422, success persists to `.env`).
+- CI now builds the web UI (`ui-build` job: `npm ci` + `npm run build`, uploads
+  `dist`) and the Docker job depends on it.
+
+### Added — `heaven doctor` is now a guide, not just a diagnostic
+
+- `heaven doctor` ends with a contextual **Next step** block that walks the
+  happy path based on current state (no admin password → `heaven init`; no
+  engagement → `heaven engage init` + `scope add`; no findings → `heaven scan`;
+  has findings → `heaven report` / `heaven serve`). A new operator is never left
+  wondering "now what?".
+
+### Security — patched vulnerable dependency
+
+- Bumped `aiohttp` to **>=3.14.0** (was >=3.9.0). `pip-audit` flagged
+  `aiohttp 3.13.x` for CVE-2026-34993 (`CookieJar.load()` RCE on untrusted input)
+  and CVE-2026-47265 (cookies leaked across a cross-origin redirect) — both
+  relevant to HEAVEN's authenticated-scan cookie handling + redirect following.
+  `pip-audit` is now clean (0 known vulnerabilities).
+
+### Fixed — site-wide findings multiplied per URL (report-quality bug)
+
+- Host/domain-level issues (missing security headers, `server_version_disclosure`,
+  HTTP request smuggling, `xml_accepted`, weak TLS, SPF/DMARC/DNSSEC) were being
+  reported **once per discovered URL** instead of once per host. Root cause: the
+  scanners emit vuln_type strings (`no_x_content_type`, `http_smuggling_te_obfuscation`,
+  …) that didn't match the spellings in `HOST_LEVEL_VULN_TYPES`, so they fell
+  through to per-URL dedup. Found via a real end-to-end scan that produced **2,384
+  findings** against a one-page target. `is_host_level()` now also matches a set of
+  host-level substring signals, so every spelling collapses to one finding per
+  host while per-endpoint bugs (xss/sqli/idor/csrf…) stay distinct. Regression
+  test added.
+
+### Fixed — `heaven update` CVE-feed refresh was a stub
+
+- `heaven update` bailed with "NVDPipeline.download_recent not implemented yet".
+  Implemented `NVDPipeline.download_recent(days=7)` — fetches CVEs published in
+  the window via the NVD 2.0 API and appends new records (de-duped by CVE id) to
+  `nvd_data/nvd_dataset.jsonl`. The command now actually refreshes the CVE feed.
+
 ### Changed — Gemini SDK migration (`google-generativeai` → `google-genai`)
 
 - Google deprecated the `google-generativeai` package (it prints a end-of-life

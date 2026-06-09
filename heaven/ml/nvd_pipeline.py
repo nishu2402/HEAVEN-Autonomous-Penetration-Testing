@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +83,50 @@ class NVDPipeline:
                         print(f"  {year} error: {e}")
                     year += 1
         return out_file
+
+    async def download_recent(self, days: int = 7,
+                              output_dir: Path | None = None) -> int:
+        """Append CVEs published in the last ``days`` days to the local NVD cache
+        (``nvd_data/nvd_dataset.jsonl``), de-duplicating by CVE id.
+
+        Returns the number of NEW records appended. This is the incremental
+        feed-refresh used by ``heaven update`` (a full re-download via
+        ``download_dataset`` is the heavyweight alternative).
+        """
+        output_dir = output_dir or Path("nvd_data")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out_file = output_dir / "nvd_dataset.jsonl"
+
+        # Existing CVE ids so a re-run doesn't write duplicate rows.
+        known: set[str] = set()
+        if out_file.exists():
+            with open(out_file, encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        cid = (json.loads(line).get("cve") or {}).get("id")
+                    except Exception:
+                        continue
+                    if cid:
+                        known.add(cid)
+
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=max(1, days))
+        start = start_dt.strftime("%Y-%m-%dT%H:%M:%S.000")
+        end = end_dt.strftime("%Y-%m-%dT%H:%M:%S.000")
+
+        appended = 0
+        async with aiohttp.ClientSession() as session:
+            cves = await self.fetch_cves(session, start, end)
+            with open(out_file, "a", encoding="utf-8") as f:
+                for cve in cves:
+                    cid = (cve.get("cve") or {}).get("id")
+                    if cid and cid in known:
+                        continue
+                    f.write(json.dumps(cve) + "\n")
+                    if cid:
+                        known.add(cid)
+                    appended += 1
+        return appended
 
     # Canonical 13-feature names used by NVD_model.pkl
     FEATURE_NAMES = [

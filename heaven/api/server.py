@@ -129,8 +129,22 @@ _background_scan_tasks: set = set()
 # state the moment the operator navigated away. Instead we launch each run as a
 # detached background task, return a job_id immediately, and let the UI poll
 # GET /api/autonomous/jobs/{job_id}. Mirrors the active_scans pattern.
+# For *live* progress the UI can also subscribe to a WebSocket
+# (/api/autonomous/jobs/{id}/stream); each subscriber gets its own asyncio.Queue
+# registered here, and each completed iteration is fanned out to all of them.
 autonomous_jobs: dict[str, dict] = {}
 _autonomous_tasks: set = set()
+_autonomous_subscribers: dict[str, set] = {}  # job_id -> set[asyncio.Queue]
+
+
+def _autonomous_broadcast(job_id: str, message: dict) -> None:
+    """Push a message to every live WebSocket subscriber of an autonomous job.
+    Safe to call from the loop thread — uses put_nowait and swallows errors."""
+    for q in list(_autonomous_subscribers.get(job_id, set())):
+        try:
+            q.put_nowait(message)
+        except Exception:  # noqa: BLE001 — a full/closed queue must not break the run
+            pass
 
 
 class ConnectionManager:
@@ -1420,6 +1434,7 @@ def create_app() -> FastAPI:
             "ended_at": None,
             "result": None,
             "error": None,
+            "progress": [],   # accumulates per-iteration dicts for poll + late WS join
         }
         autonomous_jobs[job_id] = job
 
@@ -1428,6 +1443,13 @@ def create_app() -> FastAPI:
             stale = sorted(autonomous_jobs.values(), key=lambda j: j["started_at"])
             for old in stale[:-30]:
                 autonomous_jobs.pop(old["job_id"], None)
+                _autonomous_subscribers.pop(old["job_id"], None)
+
+        def _on_iteration(item: dict) -> None:
+            # Called synchronously from run_autonomous (same event loop) after each
+            # iteration — record it and fan it out to live WebSocket subscribers.
+            job["progress"].append(item)
+            _autonomous_broadcast(job_id, {"type": "iteration", "data": item})
 
         async def _runner() -> None:
             try:
@@ -1440,6 +1462,7 @@ def create_app() -> FastAPI:
                     time_budget_s=time_budget_s,
                     objective=objective,
                     use_llm_planner=use_llm,
+                    on_iteration=_on_iteration,
                 )
                 job["result"] = summary.to_dict()
                 job["status"] = "done"
@@ -1449,6 +1472,8 @@ def create_app() -> FastAPI:
                 logger.exception("Autonomous job %s failed", job_id)
             finally:
                 job["ended_at"] = time.time()
+                # Signal end-of-stream to any live WebSocket subscribers.
+                _autonomous_broadcast(job_id, {"type": "done", "job": job})
 
         task = asyncio.create_task(_runner())
         _autonomous_tasks.add(task)
@@ -1478,6 +1503,67 @@ def create_app() -> FastAPI:
         if not job:
             raise HTTPException(404, "no such autonomous job")
         return job
+
+    @app.websocket("/api/autonomous/jobs/{job_id}/stream")
+    async def autonomous_stream(
+        websocket: WebSocket, job_id: str, token: Optional[str] = Query(None),
+    ):
+        """Live per-iteration progress for an autonomous job.
+
+        On connect, sends a `snapshot` (status + iterations so far), then streams
+        `iteration` messages as they complete and a final `done` message with the
+        full job. Auth is via the `token` query param (browsers can't set headers
+        on a WebSocket handshake). Polling GET /api/autonomous/jobs/{id} remains a
+        complete fallback.
+        """
+        if not _auth_disabled():
+            auth = get_auth_manager()
+            if not token or token not in auth._sessions:
+                await websocket.close(code=4401, reason="Unauthorized")
+                return
+            session = auth._sessions[token]
+            if session.expires_at < time.time():
+                await websocket.close(code=4401, reason="Token expired")
+                return
+
+        job = autonomous_jobs.get(job_id)
+        if not job:
+            await websocket.close(code=4404, reason="No such job")
+            return
+
+        await websocket.accept()
+        # Catch-up snapshot so a late subscriber (or reconnect) sees prior work.
+        await websocket.send_json({
+            "type": "snapshot", "status": job["status"],
+            "progress": list(job.get("progress", [])),
+        })
+        if job["status"] != "running":
+            await websocket.send_json({"type": "done", "job": job})
+            await websocket.close()
+            return
+
+        queue: asyncio.Queue = asyncio.Queue()
+        _autonomous_subscribers.setdefault(job_id, set()).add(queue)
+        try:
+            while True:
+                msg = await queue.get()
+                await websocket.send_json(msg)
+                if msg.get("type") == "done":
+                    break
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:  # noqa: BLE001 — never let a socket error crash the worker
+            logger.debug("autonomous stream error for %s: %s", job_id, e)
+        finally:
+            subs = _autonomous_subscribers.get(job_id)
+            if subs is not None:
+                subs.discard(queue)
+                if not subs:
+                    _autonomous_subscribers.pop(job_id, None)
+            try:
+                await websocket.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     # ── Coverage self-grading (heaven coverage equivalent) ──
     @app.get("/api/coverage")

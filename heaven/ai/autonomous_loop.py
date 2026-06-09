@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from heaven.utils.logger import get_logger
 
@@ -70,6 +70,20 @@ class IterationReport:
     def new_findings(self) -> int:
         return max(0, self.findings_after - self.findings_before)
 
+    def to_dict(self) -> dict:
+        """One iteration in the same shape the UI table + WS stream consume."""
+        return {
+            "n": self.iteration,
+            "action": {"kind": self.action.kind, "target": self.action.target,
+                       "mode": self.action.mode, "rationale": self.action.rationale,
+                       "estimated_value": self.action.estimated_value},
+            "duration_s": round(self.duration_s, 1),
+            "new_findings": self.new_findings,
+            "new_critical": self.new_critical, "new_high": self.new_high,
+            "reward": round(self.reward, 3),
+            "error": self.error,
+        }
+
 
 @dataclass
 class AutonomousRunSummary:
@@ -97,20 +111,7 @@ class AutonomousRunSummary:
             "total_findings": self.total_findings,
             "total_critical": self.total_critical,
             "total_high": self.total_high,
-            "iterations": [
-                {
-                    "n": r.iteration,
-                    "action": {"kind": r.action.kind, "target": r.action.target,
-                               "mode": r.action.mode, "rationale": r.action.rationale,
-                               "estimated_value": r.action.estimated_value},
-                    "duration_s": round(r.duration_s, 1),
-                    "new_findings": r.new_findings,
-                    "new_critical": r.new_critical, "new_high": r.new_high,
-                    "reward": round(r.reward, 3),
-                    "error": r.error,
-                }
-                for r in self.iterations
-            ],
+            "iterations": [r.to_dict() for r in self.iterations],
         }
 
 
@@ -363,10 +364,16 @@ async def run_autonomous(
     time_budget_s: int = 1800,
     objective: str = "",
     use_llm_planner: bool = True,
+    on_iteration: Optional[Callable[[dict], None]] = None,
 ) -> AutonomousRunSummary:
     """Drive the observe → plan → act loop.
 
     Returns an AutonomousRunSummary suitable for serialisation and audit.
+
+    ``on_iteration`` (optional) is invoked with each completed iteration's
+    ``IterationReport.to_dict()`` as soon as it finishes — used by the API to
+    stream live progress over a WebSocket. It must not raise; failures are
+    swallowed so a flaky consumer can't break the run.
     """
     summary = AutonomousRunSummary(
         started_at=time.time(), target_objective=objective,
@@ -456,6 +463,12 @@ async def run_autonomous(
         )
         summary.iterations.append(report)
         iter_n += 1
+
+        if on_iteration is not None:
+            try:
+                on_iteration(report.to_dict())
+            except Exception:
+                logger.debug("on_iteration callback raised; ignoring", exc_info=True)
 
     else:
         summary.stop_reason = "max_iterations_reached"

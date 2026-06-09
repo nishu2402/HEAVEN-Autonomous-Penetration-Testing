@@ -697,8 +697,32 @@ async def fuzz_url(url: str, aggressive: bool = False) -> dict:
     }
 
 
-async def fuzz_targets(urls: list[str], aggressive: bool = False) -> dict:
-    """Fuzz multiple URLs concurrently."""
+async def fuzz_targets(urls: list[str], aggressive: bool = False,
+                       max_urls: int = 40) -> dict:
+    """Fuzz multiple URLs concurrently.
+
+    The verb-tampering / host-header / 403-bypass / cache-poisoning / smuggling /
+    method-override / content-type checks are host- or path-level — they return
+    the same verdict regardless of the query string. Probing every
+    payload-varying URL a crawl/dir-fuzz produces was the main cause of this
+    phase blowing past its time budget (and emitting hundreds of duplicates).
+    Collapse to unique scheme+path (query stripped) and cap the count so the
+    phase stays bounded and fast.
+    """
+    seen: set[str] = set()
+    unique: list[str] = []
+    for u in urls:
+        key = u.split("?", 1)[0].split("#", 1)[0]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(u)
+        if len(unique) >= max_urls:
+            break
+    if len(urls) > len(unique):
+        logger.info(f"Web fuzz: {len(urls)} URLs collapsed to {len(unique)} unique "
+                    f"path(s) (cap {max_urls})")
+
     sem = asyncio.Semaphore(5)
     all_findings: list[dict] = []
 
@@ -707,7 +731,7 @@ async def fuzz_targets(urls: list[str], aggressive: bool = False) -> dict:
             r = await fuzz_url(url, aggressive=aggressive)
             all_findings.extend(r.get("findings", []))
 
-    await asyncio.gather(*[_one(u) for u in urls], return_exceptions=True)
+    await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
     return {
         "total": len(all_findings),
         "findings": all_findings,

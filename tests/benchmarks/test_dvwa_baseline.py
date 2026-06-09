@@ -140,9 +140,11 @@ def _findings_from_db(db_path: Path) -> list[Finding]:
     rows: list[dict] = []
     try:
         # `findings` is the canonical table — schema in heaven/engagement.py
+        # The column is `evidence_json` in the engagement schema; alias it to
+        # `evidence` so Finding.from_heaven (which reads the `evidence` key) works.
         cur = conn.execute(
             "SELECT id, target, vuln_type, title, severity, confidence, "
-            "evidence FROM findings"
+            "evidence_json AS evidence FROM findings"
         )
         for row in cur:
             rows.append(dict(row))

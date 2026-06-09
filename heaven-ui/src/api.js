@@ -409,3 +409,19 @@ export function openLogStream(onMessage) {
   ws.onmessage = (ev) => onMessage(ev.data);
   return ws;
 }
+
+// Live progress for an autonomous job. `onMessage` receives parsed JSON
+// ({type:"snapshot"|"iteration"|"done", ...}). Returns the WebSocket (or null
+// if not authenticated) so the caller can close it. Polling remains a fallback.
+export function openAutonomousStream(jobId, onMessage) {
+  if (!authToken) return null;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(
+    `${proto}//${window.location.host}/api/autonomous/jobs/${encodeURIComponent(jobId)}` +
+    `/stream?token=${encodeURIComponent(authToken)}`
+  );
+  ws.onmessage = (ev) => {
+    try { onMessage(JSON.parse(ev.data)); } catch { /* ignore malformed frame */ }
+  };
+  return ws;
+}

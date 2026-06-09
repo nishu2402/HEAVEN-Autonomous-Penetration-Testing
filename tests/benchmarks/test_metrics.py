@@ -371,3 +371,57 @@ class TestGroundTruthLoader:
         )
         with pytest.raises(ValueError, match="unknown category"):
             GroundTruth.load(bad)
+
+
+# ═══════════════════════════════════════════
+# END-TO-END SCORING OF THE 1.3.0 INJECTION CLASSES
+# ═══════════════════════════════════════════
+
+
+class TestNewClassesScoreAgainstDvwaGroundTruth:
+    """Regression guard for the SQLi/LFI/CmdI probes shipped in 1.3.0.
+
+    The scanner emits findings with ``vuln_type`` of ``"sqli"``, ``"lfi"`` and
+    ``"cmdi"``. Those strings must (a) normalise to the canonical categories the
+    DVWA ground-truth uses and (b) match the corresponding GT endpoints so they
+    are scored as true positives. A future rename of any vuln_type would
+    silently zero-out these benchmark numbers — this test fails loudly first.
+    """
+
+    _DVWA_GT = Path(__file__).parent / "ground_truth" / "dvwa.yaml"
+
+    def _gt(self) -> GroundTruth:
+        return GroundTruth.load(self._DVWA_GT)
+
+    def test_injection_findings_match_their_gt_entries(self) -> None:
+        gt = self._gt()
+        base = gt.base_url.rstrip("/")
+        findings = [
+            Finding(url=f"{base}/vulnerabilities/sqli/?id=1",
+                    vuln_type="sqli", parameter="id", severity="critical"),
+            Finding(url=f"{base}/vulnerabilities/fi/?page=../../etc/passwd",
+                    vuln_type="lfi", parameter="page", severity="high"),
+            Finding(url=f"{base}/vulnerabilities/exec/",
+                    vuln_type="cmdi", parameter="ip", severity="critical"),
+        ]
+
+        result = evaluate(findings, gt)
+
+        # Every finding corresponds to at least one labeled vuln → perfect precision.
+        assert result.matched_finding_count == 3
+        assert result.unmatched_finding_count == 0
+        assert result.precision == 1.0
+
+        # The low-difficulty required entries for each new class are credited.
+        for gt_id in ("dvwa-sqli-low-id", "dvwa-lfi-low-page", "dvwa-cmdi-low-ip"):
+            assert gt_id in result.detected_gt_ids, f"{gt_id} not scored as a TP"
+            assert gt_id in result.detected_required_ids
+
+    def test_vuln_types_normalise_to_gt_categories(self) -> None:
+        # The exact strings the injection scanner emits must land on the
+        # canonical categories present in the DVWA ground-truth.
+        assert normalize_category("lfi") == "lfi"
+        assert normalize_category("rfi") == "rfi"
+        assert normalize_category("cmdi") == "cmdi"
+        gt_categories = {e.category for e in self._gt().vulnerabilities}
+        assert {"sqli", "lfi", "cmdi"} <= gt_categories

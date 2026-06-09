@@ -1089,6 +1089,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     iv_url = iv.get("url") or ep_url
                     if not param or not iv_url:
                         continue
+                    iv_url = iv_url.split("#", 1)[0]  # form action="#" → page URL
                     if (iv.get("method") or "GET").upper() == "POST":
                         _add_post_field(iv_url, param)
                     else:
@@ -1107,6 +1108,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             test_url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
             if test_url not in urls:
                 urls.append(test_url)
+
+        # The scanner only tests a POST form when its action URL is in `targets`,
+        # so make sure every form action is also a scan target.
+        for action in forms_by_url:
+            if action not in urls:
+                urls.append(action)
 
         if not urls and not forms_by_url:
             return {"skipped": True, "reason": "no URLs for injection scanning"}

@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20349%20Tests%20%C2%B7%20131%20Modules%20%C2%B7%2037%20CLI%20Commands%20%C2%B7%2048%20API%20Routes&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20349%20Tests%20%C2%B7%20131%20Modules%20%C2%B7%2035%20CLI%20Commands%20%C2%B7%2048%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;349+Tests+%C2%B7+131+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;349+Tests+%C2%B7+131+Modules+%C2%B7+19+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
 </p>
 
 <p align="center">
@@ -18,14 +18,14 @@
 
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-    <img src="https://img.shields.io/badge/API-FastAPI_45_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+    <img src="https://img.shields.io/badge/API-FastAPI_48_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
     <img src="https://img.shields.io/badge/Tests-347_Passing-B8FF00?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
     <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
     <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-128-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-131-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-35-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-19-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
@@ -96,7 +96,7 @@ It runs three ways from the **same engagement dataset**:
 
 - **CLI** — 35 commands for scriptable, CI-friendly workflows.
 - **Web UI** — a 19-page React command centre (scan launcher, live findings, kill-chain, reports).
-- **REST + WebSocket API** — 45 RBAC-protected routes for automation and integration.
+- **REST + WebSocket API** — 48 RBAC-protected routes for automation and integration.
 
 <div align="center">
 <img width="540" alt="HEAVEN overview" src="https://github.com/user-attachments/assets/76d75a34-463f-4063-b4c5-97d759bb0219" />
@@ -117,11 +117,11 @@ It runs three ways from the **same engagement dataset**:
 |---|---|
 | 🧪 **Tests** | 347 passing, 2 skipped (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 128 |
-| ⌨️ **CLI Commands** | 37 |
-| 🌐 **API Routes** | 47 RBAC-protected routes |
+| 🧩 **Modules** | 131 |
+| ⌨️ **CLI Commands** | 35 |
+| 🌐 **API Routes** | 48 RBAC-protected routes |
 | 🖥️ **UI Pages** | 19 (React + Vite, dark glassmorphic) |
-| 🗄️ **Database** | PostgreSQL (async, 23-table schema) + zero-config SQLite fallback |
+| 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · FP review · knowledge graph |
 | 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · **deterministic fallback (no API key needed)** |
 | 📊 **CVSS Predictor** | ExtraTreesRegressor · R²=0.9925 · 13 features · trained on NVD |
@@ -186,7 +186,7 @@ It runs three ways from the **same engagement dataset**:
    └─────────────┴──────────────┴───────┬──────┴──────────────┴──────────────┘
                                         │
    ┌────────────────────────────────────┴────────────────────────────────────────┐
-   │  STORAGE — PostgreSQL (async, 23-table schema, partitioned audit log)       │
+   │  STORAGE — PostgreSQL (async, 29-table schema, partitioned audit log)       │
    │  with a zero-config SQLite fallback (same interface, file = one engagement) │
    │  SECURITY — JWT RBAC · AES-256-GCM credential vault · HMAC-signed audit log │
    └─────────────────────────────────────────────────────────────────────────────┘
@@ -413,9 +413,11 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 | Page | Description |
 |---|---|
 | **Dashboard** | Severity distribution · MITRE ATT&CK heat-map |
+| **Engagement** | Active engagement · in-scope targets · asset criticality |
 | **Scans** | Launch · history · live progress |
 | **Findings** | Filter · triage · **download report** |
 | **Finding Detail** | Description · impact · remediation · CWE/OWASP/MITRE · evidence · curl repro |
+| **Reports** | Severity snapshot · one-click download in all 8 formats |
 | **Kill Chain** | Lockheed phase coverage · attack-path summary |
 | **Watch** | Continuous monitoring · differential alert feed |
 | **Scan Diff** | New / resolved / regressed / unchanged findings |
@@ -443,7 +445,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7400B8,50:00D2FF,100:B8FF00"/>
 </p>
 
-45 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
+48 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
 
 ```bash
 # Health (no auth)
@@ -584,7 +586,7 @@ Model provenance and caveats are documented in [`data/models/NVD_model.MODEL_CAR
 </p>
 
 ```
-heaven/                   ← Python package (128 modules)
+heaven/                   ← Python package (131 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · wireless · Git · email
 ├── vulnscan/             injection · IDOR · API · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               linPEAS · BloodHound · lateral movement · credential reuse
@@ -592,12 +594,12 @@ heaven/                   ← Python package (128 modules)
 ├── ml/                   CVSS model · feature engine · Bayesian priors · training pipeline
 ├── mitre/                ATT&CK mapping · kill chain · TAXII threat-intel
 ├── devsecops/            PDF/compliance reports · vuln KB · SBOM · diff · alerting · ticketing
-├── db/                   PostgreSQL (async ORM, 23-table schema) + SQLite fallback
+├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
-├── api/                  FastAPI server + WebSocket (45 routes)
+├── api/                  FastAPI server + WebSocket (48 routes)
 └── cli/                  Click CLI — one module per command group (35 commands)
 
-heaven-ui/                React + Vite web console (21 pages)
+heaven-ui/                React + Vite web console (19 pages)
 tests/                    349 pytest tests + DVWA benchmark suite
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
@@ -682,7 +684,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>349 tests · 131 modules · 37 CLI commands · 48 API routes · 21 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>349 tests · 131 modules · 35 CLI commands · 48 API routes · 19 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

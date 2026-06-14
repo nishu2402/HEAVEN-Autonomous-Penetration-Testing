@@ -22,31 +22,18 @@ from typing import Optional
 import click
 
 from heaven.cli._helpers import _print
+from heaven.settings_catalog import SETTINGS
 
-
-_ENV_KEYS_ORDER = [
+# Mandatory / non-API-key settings the wizard handles itself, followed by every
+# catalogued key (in catalog order) so the written .env stays well-ordered and
+# the wizard never drifts from `heaven config` / the web-UI Settings page.
+_MANDATORY_ORDER = [
     "HEAVEN_ADMIN_USERNAME",
     "HEAVEN_ADMIN_PASSWORD",
     "HEAVEN_DB_PASSWORD",
-    "HEAVEN_LLM_PROVIDER",
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "NVD_API_KEY",
-    "SHODAN_API_KEY",
     "HEAVEN_AUTHORIZED_SCOPE",
-    "WEBHOOK_URL",
-    "HEAVEN_SPLUNK_HEC_URL",
-    "HEAVEN_SPLUNK_HEC_TOKEN",
-    "HEAVEN_ELASTIC_URL",
-    "HEAVEN_ELASTIC_API_KEY",
-    "HEAVEN_JIRA_URL",
-    "HEAVEN_JIRA_USER",
-    "HEAVEN_JIRA_TOKEN",
-    "HEAVEN_JIRA_PROJECT",
-    "HEAVEN_LINEAR_TOKEN",
-    "HEAVEN_LINEAR_TEAM_ID",
 ]
+_ENV_KEYS_ORDER = _MANDATORY_ORDER + [s.key for s in SETTINGS]
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -207,42 +194,35 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
                           hide=True, allow_empty=True)
         if api_key:
             values[key_var] = api_key
-        _print(f"  [dim]Install the SDK:  [cyan]pip install {pip_pkg}[/cyan]"
-               f"   (or  [cyan]pip install -e \".[{provider}]\"[/cyan])[/dim]")
+        # NOTE: don't print the ".[gemini]" extras form here — Rich (and the
+        # plain-text fallback) both treat the square brackets as markup and
+        # eat them, so it rendered as `pip install -e "."`. The plain package
+        # name is unambiguous and is all the user needs.
+        _print(f"  [dim]Install the SDK:  [cyan]pip install {pip_pkg}[/cyan][/dim]")
 
-    # ── Optional: external service keys ────────────────────────────────
-    _print("\n[bold]Recon enrichment[/bold] (optional)")
-    for var, label in [
-        ("NVD_API_KEY", "NVD API key (30x faster vuln-DB ingestion) — nvd.nist.gov/developers/request-an-api-key"),
-        ("SHODAN_API_KEY", "Shodan API key (passive recon) — account.shodan.io"),
-    ]:
-        v = _prompt(label, default=existing.get(var, ""), hide=True, allow_empty=True)
+    # ── Optional: API keys & integrations (recon / alerting / SIEM / ticketing) ──
+    # This is the wizard's API-key setup. It's driven by the shared settings
+    # catalog so the wizard, `heaven config`, and the web-UI Settings page always
+    # offer the EXACT same keys + help text + where-to-get links — change a key
+    # in one place (heaven/settings_catalog.py) and all three update together.
+    _print("\n[bold]API keys & integrations[/bold] "
+           "[dim](all optional — press Enter to skip any)[/dim]")
+    shown_group: Optional[str] = None
+    for spec in SETTINGS:
+        if spec.group == "AI / LLM":
+            continue  # the LLM provider + key are configured in the section above
+        if spec.group != shown_group:
+            shown_group = spec.group
+            _print(f"\n  [bold cyan]{spec.group}[/bold cyan]")
+        # A descriptive line per key: what it unlocks + where to get it.
+        hint = spec.help
+        if spec.url:
+            hint += f"   Get it: {spec.url}"
+        _print(f"    [dim]{hint}[/dim]")
+        v = _prompt(f"  {spec.label}", default=existing.get(spec.key, ""),
+                    hide=spec.secret, allow_empty=True)
         if v:
-            values[var] = v
-
-    # ── Optional: alerting + ticketing ─────────────────────────────────
-    _print("\n[bold]Alerting + ticketing[/bold] (optional)")
-    for var, label in [
-        ("WEBHOOK_URL", "Slack/Teams/Discord webhook URL"),
-        ("HEAVEN_SPLUNK_HEC_URL", "Splunk HEC endpoint"),
-        ("HEAVEN_SPLUNK_HEC_TOKEN", "Splunk HEC token"),
-        ("HEAVEN_ELASTIC_URL", "Elastic index endpoint"),
-        ("HEAVEN_ELASTIC_API_KEY", "Elastic API key"),
-        ("HEAVEN_JIRA_URL", "Jira base URL (https://yourorg.atlassian.net)"),
-        ("HEAVEN_JIRA_USER", "Jira email"),
-        ("HEAVEN_JIRA_TOKEN", "Jira API token"),
-        ("HEAVEN_JIRA_PROJECT", "Jira project key (e.g. SEC)"),
-        ("HEAVEN_LINEAR_TOKEN", "Linear API token"),
-        ("HEAVEN_LINEAR_TEAM_ID", "Linear team UUID"),
-    ]:
-        v = _prompt(
-            label,
-            default=existing.get(var, ""),
-            hide=("token" in var.lower() or "password" in var.lower() or "key" in var.lower()),
-            allow_empty=True,
-        )
-        if v:
-            values[var] = v
+            values[spec.key] = v
 
     _write_env(env_path, values)
     _print(f"\n[green]✓ Wrote[/green] {env_path}")

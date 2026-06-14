@@ -3,7 +3,8 @@ import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import LiveTerminal from '../components/LiveTerminal'
 import FirstRunGuide from '../components/FirstRunGuide'
-import { Engagement, Dashboard as DashApi } from '../api'
+import { Engagement, Dashboard as DashApi, Demo } from '../api'
+import { useToast } from '../components/Toast.jsx'
 
 // three.js + r3f + drei are heavy (~600 KB). Load them only when the dashboard
 // mounts, not in the app's first paint — keeps login/findings/etc. lightweight.
@@ -76,17 +77,33 @@ export default function Dashboard() {
   const [eng, setEng] = useState(null)
   const [dash, setDash] = useState(null)
   const [activeScanId] = useState(localStorage.getItem('heaven_active_scan') || '')
+  const [seeding, setSeeding] = useState(false)
   const navigate = useNavigate()
+  const toast = useToast()
+
+  const refresh = () => {
+    Engagement.summary().then(setEng).catch(() => {})
+    DashApi.get().then(setDash).catch(() => {})
+  }
 
   useEffect(() => {
-    const load = () => {
-      Engagement.summary().then(setEng).catch(() => {})
-      DashApi.get().then(setDash).catch(() => {})
-    }
-    load()
-    const t = setInterval(load, 8000)
+    refresh()
+    const t = setInterval(refresh, 8000)
     return () => clearInterval(t)
   }, [])
+
+  const loadSampleData = async () => {
+    setSeeding(true)
+    try {
+      const r = await Demo.seed()
+      toast.success(`Loaded ${r.findings} sample findings — explore away`)
+      refresh()
+    } catch (e) {
+      toast.error(e.message || 'Could not load sample data')
+    } finally {
+      setSeeding(false)
+    }
+  }
 
   const stats = eng?.stats || {}
   const hosts = dash?.assets || []
@@ -148,11 +165,21 @@ export default function Dashboard() {
                 Launch your first scan to populate the dashboard — findings, severity
                 breakdown and topology fill in automatically.
               </div>
-              <button className="btn btn-primary" onClick={() => navigate('/scans')}>
-                Launch a scan →
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" onClick={() => navigate('/scans')}>
+                  Launch a scan →
+                </button>
+                <button className="btn" onClick={loadSampleData} disabled={seeding}>
+                  {seeding ? 'Loading…' : 'Load sample data'}
+                </button>
+              </div>
               <div className="dim" style={{ fontSize: 11, marginTop: 12 }}>
-                Prefer the terminal? <code>heaven scan -t 10.0.0.1 --i-have-authorization</code>
+                Just exploring? <b>Load sample data</b> fills every page with a realistic
+                example engagement — nothing is scanned.
+              </div>
+              <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>
+                Prefer the terminal? <code>heaven demo</code> (sample) ·
+                <code>heaven scan -t 10.0.0.1 --i-have-authorization</code>
               </div>
             </div>
           ) : (

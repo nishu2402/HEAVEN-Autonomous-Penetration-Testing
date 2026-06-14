@@ -65,12 +65,39 @@ if HAS_CLICK:
                     )
                 raise
 
+        def invoke(self, ctx):  # type: ignore[override]
+            """Render uncaught errors as a friendly one-liner instead of a raw
+            Python traceback — unless --debug (or HEAVEN_DEBUG) is set, where the
+            full trace is more useful. Click's own usage/abort errors pass through
+            untouched (they're already friendly)."""
+            import os as _os
+            try:
+                return super().invoke(ctx)
+            except (click.exceptions.ClickException, click.exceptions.Abort,
+                    KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as e:  # noqa: BLE001
+                debug = bool(ctx.params.get("debug")) or \
+                    _os.environ.get("HEAVEN_DEBUG", "").lower() in ("1", "true", "yes")
+                if debug:
+                    raise
+                from heaven.cli._helpers import _print
+                _print(f"[red]✗ {type(e).__name__}[/red]: {e}")
+                _print("[dim]Tip: re-run with [cyan]--debug[/cyan] for the full "
+                       "traceback, or run [cyan]heaven doctor[/cyan] to check your "
+                       "setup.[/dim]")
+                ctx.exit(1)
+
     @click.group(cls=HeavenGroup, invoke_without_command=True)
     @click.version_option(version=__version__, prog_name="HEAVEN")
     @click.option("--debug", is_flag=True, help="Enable debug logging")
+    @click.option("--quiet", "-q", is_flag=True,
+                  help="Suppress informational log output (clean output for scripts/CI). "
+                       "Combine with a command's --format json for machine-readable results.")
     @click.option("--config-file", type=click.Path(), help="Path to .env config file")
     @click.pass_context
-    def cli(ctx: click.Context, debug: bool, config_file: Optional[str]) -> None:
+    def cli(ctx: click.Context, debug: bool, quiet: bool,
+            config_file: Optional[str]) -> None:
         """HEAVEN — Automated Vulnerability Scanner & Risk Triage Platform"""
         # Always load environment from a .env file, so the flow
         #   heaven init  →  writes .env  →  heaven serve / heaven autonomous
@@ -101,6 +128,9 @@ if HAS_CLICK:
         if debug:
             cfg.debug = True
             cfg.log_level = "DEBUG"
+        elif quiet:
+            # Quiet: keep only warnings/errors so stdout is clean for piping.
+            cfg.log_level = "ERROR"
 
         setup_logging(level=cfg.log_level)
 
@@ -113,15 +143,18 @@ if HAS_CLICK:
 
     # Wire up every subcommand module
     from heaven.cli import (
-        audit, autonomous, completion, coverage, db, diff, engage, exploitdb,
-        findings, info, init as init_module, knowledge, lateral, methodology,
-        mitre, replay, sast, scan, server, status as status_module, tickets,
-        train, update as update_module, use as use_module, watch,
+        audit, autonomous, completion, config_cmd, coverage, db, demo as demo_module,
+        diff, engage, exploitdb, findings, info, init as init_module, knowledge,
+        lateral, methodology, mitre, replay, sast, scan, server,
+        status as status_module, tickets, train, update as update_module,
+        use as use_module, watch,
     )
     audit.register(cli)
     autonomous.register(cli)
     completion.register(cli)
+    config_cmd.register(cli)
     coverage.register(cli)
+    demo_module.register(cli)
     db.register(cli)
     diff.register(cli)
     engage.register(cli)

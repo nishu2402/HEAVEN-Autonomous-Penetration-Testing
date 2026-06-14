@@ -46,6 +46,13 @@ const GROUPS = [
       { to: "/methodology", label: "Methodology",  icon: "§" },
     ],
   },
+  {
+    name: "System",
+    items: [
+      { to: "/health",      label: "System Health", icon: "🩺" },
+      { to: "/settings",    label: "Settings",      icon: "⚙" },
+    ],
+  },
 ];
 
 

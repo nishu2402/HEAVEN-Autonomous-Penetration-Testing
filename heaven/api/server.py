@@ -1051,6 +1051,141 @@ def create_app() -> FastAPI:
         return {"ok": True, "message": "Password changed", "persisted": persisted}
 
     # ══════════════════════════════════════════════════════════════════
+    # Settings — API keys & integrations (the web-UI Settings page)
+    # ══════════════════════════════════════════════════════════════════
+    # One catalog (heaven/settings_catalog.py) backs the CLI, the wizard and
+    # this page. Writes land in .env + os.environ, so a key entered in the
+    # browser is live immediately, survives a restart, and the next CLI command
+    # sees it too. Secrets are returned masked only — never in full.
+
+    @app.get("/api/settings")
+    async def get_settings(user: User = Depends(require_permission("config.modify"))):
+        """List every configurable key, its group/help/where-to-get link, and
+        whether it's currently set (secrets masked)."""
+        from heaven.settings_catalog import catalog_status
+        return catalog_status()
+
+    @app.post("/api/settings")
+    async def update_settings(
+        body: dict, user: User = Depends(require_permission("config.modify")),
+    ):
+        """Persist ``{key: value}`` updates. Empty value unsets the key.
+
+        Unknown keys are rejected (422). Returns the changed keys + fresh status.
+        """
+        from heaven.settings_catalog import apply_settings
+        updates = (body or {}).get("settings", body) or {}
+        if not isinstance(updates, dict):
+            raise HTTPException(422, "expected a JSON object of {key: value}")
+        try:
+            result = apply_settings({str(k): ("" if v is None else str(v))
+                                     for k, v in updates.items()})
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        logger.info("Settings updated by %s: %s", user.username, result["changed"])
+        return {"ok": True, **result}
+
+    @app.post("/api/settings/test-llm")
+    async def test_llm(user: User = Depends(require_permission("config.modify"))):
+        """Report whether the current LLM configuration is usable.
+
+        Cheap check only — confirms a provider is selected, a key is present and
+        the SDK is importable. Does not make a billed API call.
+        """
+        try:
+            from heaven.ai.llm_gateway import LLMGateway
+            gw = LLMGateway()
+            return {
+                "provider": gw.provider or None,
+                "model": gw.model or None,
+                "available": bool(gw.available),
+                "reason": (
+                    "ready" if gw.available else
+                    "no provider/key configured" if not (gw.provider and gw.api_key) else
+                    "provider SDK not installed (pip install the provider extra)"
+                ),
+            }
+        except Exception as e:  # noqa: BLE001
+            return {"provider": None, "model": None, "available": False,
+                    "reason": f"error: {e}"}
+
+    # ══════════════════════════════════════════════════════════════════
+    # System health — the web-UI equivalent of `heaven doctor`
+    # ══════════════════════════════════════════════════════════════════
+
+    # Install hints surfaced next to any missing external tool, so the operator
+    # knows exactly how to enable a degraded capability.
+    _TOOL_HINTS = {
+        "nmap": "apt install nmap  ·  brew install nmap",
+        "nuclei": "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
+        "sqlmap": "apt install sqlmap  ·  pip install sqlmap",
+        "ffuf": "go install github.com/ffuf/ffuf/v2@latest",
+        "searchsploit": "apt install exploitdb",
+        "semgrep": "pip install semgrep",
+        "docker": "https://docs.docker.com/get-docker/",
+    }
+    _TOOL_PURPOSE = {
+        "nmap": "Network port/service scanning",
+        "nuclei": "Template-based vulnerability checks",
+        "sqlmap": "Automated SQL-injection exploitation proof",
+        "ffuf": "Content/directory fuzzing",
+        "searchsploit": "Local Exploit-DB PoC lookup",
+        "semgrep": "Static analysis (SAST)",
+        "docker": "Container/Kubernetes recon + DVWA benchmark",
+    }
+
+    @app.get("/api/system/health")
+    async def system_health(user: User = Depends(require_permission("scan.view"))):
+        """Web-UI System Health — mirrors `heaven doctor`.
+
+        Reports external tools (with install hints), optional integrations, which
+        API keys are configured (masked), Python module health, and actionable
+        next steps — so an operator can see at a glance whether a capability is
+        missing vs. genuinely broken.
+        """
+        from heaven.cli.status import _collect_status, _next_steps
+        from heaven.cli._helpers import check_module_health
+        from heaven.settings_catalog import catalog_status
+
+        report = _collect_status(None)
+        # Enrich external tools with purpose + install hint.
+        tools = []
+        for name, present in (report.get("external_tools") or {}).items():
+            tools.append({
+                "name": name, "present": bool(present),
+                "purpose": _TOOL_PURPOSE.get(name, ""),
+                "hint": "" if present else _TOOL_HINTS.get(name, ""),
+            })
+        report["tools"] = tools
+        report["modules"] = check_module_health()
+        report["settings"] = catalog_status()
+        # Strip Rich markup so the UI gets plain strings.
+        report["next_steps"] = [
+            re.sub(r"\[/?[^\]]+\]", "", s) for s in _next_steps(report)
+        ]
+        return report
+
+    # ══════════════════════════════════════════════════════════════════
+    # Demo / sample data — "Load sample data" button on a fresh install
+    # ══════════════════════════════════════════════════════════════════
+
+    @app.post("/api/demo/seed")
+    async def seed_demo_data(user: User = Depends(require_permission("scan.create"))):
+        """Populate the active engagement with realistic sample findings.
+
+        Backs the web-UI "Load sample data" button so a fresh install shows a
+        full dashboard instantly. Writes to the same store the dashboard reads;
+        idempotent (content-hashed IDs dedupe). Shares its data with
+        `heaven demo` via heaven/demo.py.
+        """
+        from heaven.demo import seed_demo
+        store = _engagement_store_factory()
+        result = seed_demo(store)
+        logger.info("Demo data seeded by %s: %s findings", user.username,
+                    result.get("findings"))
+        return {"ok": True, **result}
+
+    # ══════════════════════════════════════════════════════════════════
     # New API surface — exposes the publication-gap features to the UI
     # ══════════════════════════════════════════════════════════════════
 

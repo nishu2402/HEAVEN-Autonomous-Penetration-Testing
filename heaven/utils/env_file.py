@@ -76,3 +76,25 @@ def set_env_var(path: Union[str, Path], key: str, value: str) -> Path:
     except OSError:
         pass  # non-POSIX FS or insufficient perms — value is still persisted
     return p
+
+
+def unset_env_var(path: Union[str, Path], key: str) -> Path:
+    """Remove the (non-commented) ``KEY=...`` line from the .env file at ``path``.
+
+    No-op if the file or the key is absent. Preserves every other line and
+    keeps perms at 0600. Returns the resolved path.
+    """
+    p = Path(path)
+    if not p.exists():
+        return p
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    kept = [
+        raw for raw in p.read_text(encoding="utf-8").splitlines()
+        if not (pattern.match(raw) and not raw.lstrip().startswith("#"))
+    ]
+    p.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    try:
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
+    return p

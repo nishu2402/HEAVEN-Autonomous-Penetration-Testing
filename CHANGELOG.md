@@ -11,6 +11,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] — 2026-06-09
 
+### Added — onboarding & user-friendliness pass
+
+- **Sample data in one step.** New `heaven demo` (CLI) and a **Load sample data**
+  button on the dashboard seed a realistic example engagement (12 findings,
+  critical→info, with evidence) into the same store the dashboard reads — so a
+  fresh install shows a full Dashboard / Findings / Kill-chain / Reports
+  instantly instead of an empty screen. Idempotent and fully offline
+  (`heaven/demo.py`; `POST /api/demo/seed`).
+- **System Health page (web UI)** — the browser equivalent of `heaven doctor`.
+  Shows external tools (nmap/nuclei/sqlmap/ffuf/searchsploit/semgrep/docker)
+  with install hints, which API keys/integrations are configured, Python-module
+  health, and recommended next steps — so "is it broken or just missing a tool?"
+  is answerable at a glance (`GET /api/system/health`; `doctor` now also probes
+  ffuf + searchsploit).
+- **Friendlier CLI.** Uncaught errors now render a one-line, actionable message
+  (with a "re-run with `--debug`" hint) instead of a raw traceback. A new global
+  `--quiet`/`-q` flag silences informational logs so output pipes cleanly — pair
+  it with a command's `--format json` (e.g. `heaven --quiet findings --format
+  json | jq …`) for scripting/CI.
+- **Docs** — `docs/FAQ.md` (troubleshooting), `pipx install heaven-pentest` and
+  `docker run` one-liners, and a "See it in 60 seconds" quickstart in the README.
+
+### Added — in-app API-key management (web UI + CLI, one source of truth)
+
+- **Entering API keys no longer means hand-editing `.env`.** A new
+  **Settings** page in the web UI (`/settings`) lists every configurable key —
+  LLM (Gemini / Anthropic / OpenAI), NVD, Shodan, Slack/Teams webhook, Splunk &
+  Elastic SIEM, Jira & Linear — grouped, each with a one-line description, a
+  *“how to get it”* link, and a masked indicator of whether it's already set.
+  Paste a value, click **Save**, and it's applied to the running server
+  immediately *and* persisted — survives a restart, and the CLI picks it up too.
+- **One catalog backs everything** (`heaven/settings_catalog.py`): the web
+  Settings page, the new **`heaven config`** command (`list` / `get` / `set` /
+  `unset`), and the `heaven init` wizard all read & write the **same `.env`**
+  plus `os.environ`, so a key set on any surface is live everywhere. No more
+  "I set it in the CLI but the web app didn't see it".
+- New endpoints `GET/POST /api/settings` (+ `POST /api/settings/test-llm` for a
+  no-cost "is my LLM key working?" check), gated by `config.modify`. Secrets are
+  **never** returned in full — only a short masked preview. New
+  `heaven/utils/env_file.unset_env_var()` cleanly removes a key.
+- Tests: `tests/test_settings.py` (14 cases) covers masking, persistence,
+  unset, unknown-key rejection, and the API surface.
+
+### Changed — friendlier, leaner install (`install.sh`)
+
+- **`install.sh` now creates `.env` for you** with a generated admin password on
+  first run (`heaven init --non-interactive`), so the web UI / API work out of
+  the box — no manual `export HEAVEN_ADMIN_PASSWORD`. It points you at the
+  Settings page / `heaven config` for API keys.
+- **Lean core by default, resilient extras.** It installs the lightweight core
+  first (guaranteed) then attempts each optional feature pack
+  (`recon` / `reports` / `mitre` / `scheduling` / `lateral` / `deploy`)
+  *independently*, so one heavy dependency that needs system libraries can't
+  abort the whole install. `HEAVEN_CORE_ONLY=1` skips extras entirely; LLM SDKs
+  stay opt-in.
+
 ### Added — wider injection coverage: LFI / RFI / OS command injection
 
 - The injection scanner is no longer SQLi+XSS only. It now tests every GET param

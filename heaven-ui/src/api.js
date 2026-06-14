@@ -249,6 +249,28 @@ export const Dashboard = {
   get: () => api("/dashboard"),
 };
 
+// System health — GET /api/system/health mirrors `heaven doctor`: external
+// tools (with install hints), optional integrations, configured keys, module health.
+export const System = {
+  health: () => api("/system/health"),
+};
+
+// Demo / sample data — POST /api/demo/seed populates the active engagement with
+// realistic example findings so a fresh install shows a full dashboard.
+export const Demo = {
+  seed: () => api("/demo/seed", { method: "POST" }),
+};
+
+// Settings — API keys & integrations. Backed by GET/POST /api/settings, which
+// persist to .env + the running process (shared with `heaven config` + the
+// wizard). Secrets come back masked only; sending an empty value clears a key.
+export const Settings = {
+  get: () => api("/settings"),
+  update: (settings) =>
+    api("/settings", { method: "POST", body: JSON.stringify({ settings }) }),
+  testLlm: () => api("/settings/test-llm", { method: "POST" }),
+};
+
 // ── New API surface (publication-gap features) ──
 // Mirrors the FastAPI endpoints added in heaven/api/server.py.
 // Each helper degrades gracefully when the backend isn't running new code yet:

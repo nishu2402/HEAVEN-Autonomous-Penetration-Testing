@@ -112,11 +112,13 @@ def _collect_status(engagement: Optional[str]) -> dict:
 
     # External tools
     report["external_tools"] = {
-        "nmap":     shutil.which("nmap") is not None,
-        "nuclei":   shutil.which("nuclei") is not None,
-        "sqlmap":   shutil.which("sqlmap") is not None,
-        "semgrep":  shutil.which("semgrep") is not None,
-        "docker":   shutil.which("docker") is not None,
+        "nmap":         shutil.which("nmap") is not None,
+        "nuclei":       shutil.which("nuclei") is not None,
+        "sqlmap":       shutil.which("sqlmap") is not None,
+        "ffuf":         shutil.which("ffuf") is not None,
+        "searchsploit": shutil.which("searchsploit") is not None,
+        "semgrep":      shutil.which("semgrep") is not None,
+        "docker":       shutil.which("docker") is not None,
     }
 
     # Active engagement (flag > HEAVEN_ENGAGEMENT env > `heaven use` context)

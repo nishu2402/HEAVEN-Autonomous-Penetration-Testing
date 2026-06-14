@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  HEAVEN — Autonomous Penetration Testing Framework
-#  Installer v2.2
+#  Installer v1.0
 # ==============================================================================
 
 set -euo pipefail
@@ -43,7 +43,7 @@ fi
 [ -d "$TARGET_HOME" ] || fail "Cannot determine home directory (TARGET_HOME='$TARGET_HOME')"
 
 # ── 1. Python check ───────────────────────────────────────────────────────────
-step "Step 1/8 — Checking Python..."
+step "Step 1/9 — Checking Python..."
 
 if command -v python3 >/dev/null 2>&1; then
     PYTHON_CMD="python3"
@@ -62,7 +62,7 @@ fi
 ok "Python $PY_VER"
 
 # ── 2. Virtual environment ────────────────────────────────────────────────────
-step "Step 2/8 — Setting up virtual environment..."
+step "Step 2/9 — Setting up virtual environment..."
 if [ ! -d "$INSTALL_DIR/venv" ]; then
     $PYTHON_CMD -m venv "$INSTALL_DIR/venv"
     ok "Created venv at $INSTALL_DIR/venv"
@@ -78,22 +78,38 @@ VENV_PIP="$INSTALL_DIR/venv/bin/pip"
     || fail "venv Python is broken. Delete '$INSTALL_DIR/venv' and re-run."
 
 # ── 3. Pip toolchain ──────────────────────────────────────────────────────────
-step "Step 3/8 — Upgrading pip toolchain..."
+step "Step 3/9 — Upgrading pip toolchain..."
 "$VENV_PIP" install --upgrade pip setuptools wheel -q
 ok "pip / setuptools / wheel up to date"
 
 # ── 4. Install HEAVEN ─────────────────────────────────────────────────────────
-step "Step 4/8 — Installing HEAVEN and dependencies..."
+step "Step 4/9 — Installing HEAVEN..."
 
-if [ -f "$INSTALL_DIR/requirements.txt" ]; then
-    "$VENV_PIP" install -r "$INSTALL_DIR/requirements.txt" -q \
-        || warn "Some optional dependencies failed to install — core features unaffected"
+# Lean core first — small, fast, reliable. This alone gives you the CLI, API,
+# web UI, scanning, the zero-config SQLite store, auth, and ML risk scoring.
+"$VENV_PIP" install -e "$INSTALL_DIR" -q || fail "Core install failed — see errors above."
+ok "HEAVEN core installed (editable mode)"
+
+# Optional feature packs, attempted INDEPENDENTLY so one extra that needs system
+# libraries (weasyprint, impacket, …) can't abort the whole install. Every
+# feature degrades gracefully when its extra is absent.
+#   • Set HEAVEN_CORE_ONLY=1 for the leanest footprint (skip all extras).
+#   • LLM SDKs stay opt-in — add a key later in the web UI → Settings.
+if [ "${HEAVEN_CORE_ONLY:-0}" = "1" ]; then
+    info "HEAVEN_CORE_ONLY=1 — skipping optional feature packs"
+else
+    info "Installing optional feature packs (failures here are non-fatal)..."
+    for extra in recon reports mitre scheduling lateral deploy; do
+        if "$VENV_PIP" install -e "$INSTALL_DIR[$extra]" -q 2>/dev/null; then
+            ok "  + $extra"
+        else
+            warn "  - $extra skipped  (add later: pip install -e \".[$extra]\")"
+        fi
+    done
 fi
-"$VENV_PIP" install -e "$INSTALL_DIR" -q
-ok "HEAVEN installed (editable mode)"
 
 # ── 5. Install global 'heaven' command ────────────────────────────────────────
-step "Step 5/8 — Installing global 'heaven' command..."
+step "Step 5/9 — Installing global 'heaven' command..."
 
 # After 'pip install -e .' the venv already has a working heaven script.
 VENV_HEAVEN="$INSTALL_DIR/venv/bin/heaven"
@@ -155,7 +171,7 @@ ok "heaven command: $WRAPPER_PATH"
 
 # ── 6. External tools check ───────────────────────────────────────────────────
 echo ""
-step "Step 6/8 — Checking external tools..."
+step "Step 6/9 — Checking external tools..."
 echo ""
 
 check_tool() {
@@ -173,7 +189,7 @@ check_tool "sqlmap"  "sqlmap"  "pip install sqlmap  |  apt install sqlmap"
 
 # ── 7. Frontend build ─────────────────────────────────────────────────────────
 echo ""
-step "Step 7/8 — Building web UI..."
+step "Step 7/9 — Building web UI..."
 
 # Attempt to install Node.js via the system package manager when it is missing.
 # Without a built UI, 'heaven serve' only exposes the API + a placeholder page.
@@ -236,9 +252,28 @@ else
     fi
 fi
 
-# ── 8. Smoke test ─────────────────────────────────────────────────────────────
+# ── 8. First-run configuration (.env) ──────────────────────────────────────────
 echo ""
-step "Step 8/8 — Smoke test..."
+step "Step 8/9 — First-run configuration..."
+
+if [ -f "$INSTALL_DIR/.env" ]; then
+    ok ".env already present — leaving your configuration untouched"
+else
+    # Generate strong admin + DB passwords and write .env so the web UI and API
+    # work out of the box — no manual exports. The generated admin password is
+    # printed once below; copy it (or change it later in the web UI → Settings).
+    if ( cd "$INSTALL_DIR" && "$VENV_PYTHON" -m heaven.main init --non-interactive ); then
+        ok "Created .env with generated credentials (admin password shown above)"
+        info "Change it anytime:  web UI → Settings  ·  or  heaven config set HEAVEN_ADMIN_PASSWORD"
+        info "Add API keys (LLM / Shodan / NVD / Jira …) the same way — in the Settings page."
+    else
+        warn "Could not auto-create .env — run 'heaven init' after install"
+    fi
+fi
+
+# ── 9. Smoke test ─────────────────────────────────────────────────────────────
+echo ""
+step "Step 9/9 — Smoke test..."
 
 if "$VENV_PYTHON" -m heaven.main --version >/dev/null 2>&1; then
     HEAVEN_VER=$("$VENV_PYTHON" -m heaven.main --version 2>&1 | head -1)
@@ -262,10 +297,13 @@ if [ -n "${ADDED_RC:-}" ]; then
     echo ""
 fi
 
-# ── Required config ───────────────────────────────────────────────────────────
-echo -e "${BOLD}Set your admin password (required for web UI / API):${NC}"
-echo -e "  ${CYAN}export HEAVEN_ADMIN_PASSWORD='your-strong-password'${NC}"
-echo -e "  ${DIM}Add to ~/.bashrc or ~/.zshrc to persist across sessions.${NC}"
+# ── Configuration pointer ───────────────────────────────────────────────────
+echo -e "${BOLD}Configuration:${NC}"
+echo -e "  ${DIM}Your admin login + a generated password are saved in ${NC}${CYAN}.env${NC}${DIM} (above).${NC}"
+echo -e "  ${DIM}Add API keys (LLM / Shodan / NVD / Jira / Slack …) the easy way:${NC}"
+echo -e "    ${CYAN}heaven serve${NC}  ${DIM}→ open the web UI → ${NC}${CYAN}Settings${NC}  ${DIM}(paste keys, click Save)${NC}"
+echo -e "    ${CYAN}heaven config list${NC}   ${DIM}/${NC}   ${CYAN}heaven config set GEMINI_API_KEY${NC}   ${DIM}(same keys, from the CLI)${NC}"
+echo -e "  ${DIM}All three (wizard, CLI, web UI) write the same ${NC}${CYAN}.env${NC}${DIM} — set once, works everywhere.${NC}"
 echo ""
 
 # ── Quick start ───────────────────────────────────────────────────────────────

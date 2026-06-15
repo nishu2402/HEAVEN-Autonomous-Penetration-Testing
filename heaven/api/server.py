@@ -1110,6 +1110,46 @@ def create_app() -> FastAPI:
                     "reason": f"error: {e}"}
 
     # ══════════════════════════════════════════════════════════════════
+    # "Fix this first" — highest-risk findings + remediation
+    # ══════════════════════════════════════════════════════════════════
+
+    @app.get("/api/engagement/top-findings")
+    async def engagement_top_findings(
+        limit: int = Query(5, ge=1, le=25),
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """The 'fix this first' list — findings ranked by risk_score (then
+        severity), each with a one-line remediation so an operator knows the
+        highest-impact next action at a glance."""
+        from heaven.devsecops.vuln_kb import lookup as kb_lookup
+        store = _engagement_store_factory()
+        results = store.list_findings(limit=2000)
+        sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+        results.sort(
+            key=lambda f: (
+                float(getattr(f, "risk_score", 0) or 0),
+                sev_rank.get((getattr(f, "severity", "") or "").lower(), 0),
+            ),
+            reverse=True,
+        )
+        top = []
+        for f in results[:limit]:
+            ev = getattr(f, "evidence", {}) or {}
+            remediation = (ev.get("remediation")
+                           or kb_lookup(getattr(f, "vuln_type", "")).get("remediation") or "")
+            top.append({
+                "id": getattr(f, "id", ""),
+                "title": getattr(f, "title", ""),
+                "severity": getattr(f, "severity", ""),
+                "vuln_type": getattr(f, "vuln_type", ""),
+                "target": getattr(f, "target", ""),
+                "risk_score": getattr(f, "risk_score", 0),
+                "confidence": getattr(f, "confidence", 0),
+                "remediation": remediation,
+            })
+        return {"findings": top, "total": len(results)}
+
+    # ══════════════════════════════════════════════════════════════════
     # System health — the web-UI equivalent of `heaven doctor`
     # ══════════════════════════════════════════════════════════════════
 
@@ -1184,6 +1224,59 @@ def create_app() -> FastAPI:
         logger.info("Demo data seeded by %s: %s findings", user.username,
                     result.get("findings"))
         return {"ok": True, **result}
+
+    @app.post("/api/demo/scan")
+    async def run_demo_scan(user: User = Depends(require_permission("scan.create"))):
+        """Run an animated demo scan so a new user experiences the full loop.
+
+        Streams realistic phase progress through ``active_scans`` (so the Scans
+        page shows it run live, like a real scan), then lands the sample findings
+        under its own scan id. Offline and safe — nothing is sent to any target.
+        """
+        scan_id = f"demo-scan-{uuid.uuid4().hex[:8]}"
+        now = datetime.now(timezone.utc).isoformat()
+        active_scans[scan_id] = {
+            "scan_id": scan_id, "status": "running", "progress_pct": 0,
+            "name": "Demo scan (sample)", "mode": "full", "created": now,
+            "phase": "Starting", "findings_count": 0, "demo": True,
+        }
+
+        # Per-phase delay (seconds). Overridable so tests can run it instantly.
+        try:
+            phase_delay = float(os.environ.get("HEAVEN_DEMO_SCAN_DELAY", "2.2"))
+        except ValueError:
+            phase_delay = 2.2
+
+        async def _run() -> None:
+            from heaven.demo import insert_findings
+            store = _engagement_store_factory()
+            try:
+                store.record_scan_start(scan_id, name="Demo scan (sample)", mode="full")
+                phases = [
+                    ("Reconnaissance", 20), ("Crawling endpoints", 45),
+                    ("Injection testing", 70), ("Risk scoring + reporting", 90),
+                ]
+                for label, pct in phases:
+                    await asyncio.sleep(phase_delay)
+                    if active_scans.get(scan_id, {}).get("status") == "cancelled":
+                        return
+                    active_scans[scan_id]["phase"] = label
+                    active_scans[scan_id]["progress_pct"] = pct
+                res = insert_findings(store, scan_id)
+                store.record_scan_complete(scan_id, res["summary"])
+                active_scans[scan_id].update(
+                    status="completed", progress_pct=100, phase="Done",
+                    findings_count=res["findings"],
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Demo scan failed: %s", e)
+                if scan_id in active_scans:
+                    active_scans[scan_id].update(status="failed", phase=str(e))
+
+        task = asyncio.create_task(_run())
+        _background_scan_tasks.add(task)
+        task.add_done_callback(lambda t: _background_scan_tasks.discard(t))
+        return {"ok": True, "scan_id": scan_id, "message": "Demo scan started"}
 
     # ══════════════════════════════════════════════════════════════════
     # New API surface — exposes the publication-gap features to the UI

@@ -5,15 +5,37 @@ Pure helpers used across the heaven.cli subcommands. No click dependency.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from heaven.utils.logger import HAS_RICH, get_logger
 
 logger = get_logger("cli.helpers")
+
+
+# ── Global JSON output mode (set by the root `--json` flag) ──────────────────
+# When on, commands that support structured output emit machine-readable JSON to
+# stdout instead of a pretty table, so HEAVEN can be scripted / piped into jq.
+_JSON_OUTPUT = False
+
+
+def set_json_output(on: bool) -> None:
+    global _JSON_OUTPUT
+    _JSON_OUTPUT = bool(on)
+
+
+def json_output() -> bool:
+    """True when the user passed the global ``--json`` flag."""
+    return _JSON_OUTPUT
+
+
+def emit_json(data: Any) -> None:
+    """Print ``data`` as indented JSON on stdout (the machine-readable channel)."""
+    print(json.dumps(data, indent=2, default=str))
 
 
 # Target validation regex — single-escaped (these are normal Python strings, not raw)

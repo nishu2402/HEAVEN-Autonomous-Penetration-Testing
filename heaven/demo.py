@@ -49,7 +49,7 @@ def _f(severity: str, vuln_type: str, title: str, *, target: str, risk: float,
 # ── The sample findings: 3 critical · 3 high · 4 medium · 2 low ──────────────
 _FINDINGS: list[dict] = [
     _f("critical", "sqli", "SQL injection (error-based) in 'id'",
-       target=WEB, endpoint=f"{WEB}/vulnerabilities/sqli/", param="id", risk=9.8,
+       target=WEB, endpoint=f"{WEB}/vulnerabilities/sqli/", param="id", risk=96.0,
        confidence=0.98, cwe="CWE-89", owasp="A03:2021",
        payload="id=1' AND 1=CONVERT(int,@@version)--",
        description="The 'id' parameter is concatenated into a SQL query. A single "
@@ -58,7 +58,7 @@ _FINDINGS: list[dict] = [
        remediation="Use parameterised queries / prepared statements; never build "
                    "SQL by string concatenation."),
     _f("critical", "cmdi", "OS command injection in 'ip'",
-       target=WEB, endpoint=f"{WEB}/vulnerabilities/exec/", param="ip", risk=9.8,
+       target=WEB, endpoint=f"{WEB}/vulnerabilities/exec/", param="ip", risk=95.0,
        confidence=0.97, cwe="CWE-78", owasp="A03:2021", method="POST",
        payload="ip=127.0.0.1;id",
        description="The 'ip' field is passed to a shell. Appending ';id' returns "
@@ -67,7 +67,7 @@ _FINDINGS: list[dict] = [
        remediation="Avoid shell calls with user input; use an allowlist and a "
                    "no-shell exec API (e.g. subprocess with a fixed arg list)."),
     _f("critical", "docker_socket_exposed", "Docker daemon socket exposed (2375/tcp)",
-       target=f"{HOST}:2375", risk=9.8, confidence=0.95, cwe="CWE-284",
+       target=f"{HOST}:2375", risk=94.0, confidence=0.95, cwe="CWE-284",
        description="The Docker Engine API is reachable unauthenticated on 2375/tcp. "
                    "Anyone who can reach it can start a privileged container.",
        impact="Trivial host takeover — mount the host FS or run --privileged.",
@@ -75,13 +75,13 @@ _FINDINGS: list[dict] = [
                    "to the local UNIX socket only."),
 
     _f("high", "xss", "Reflected XSS in 'q'",
-       target=WEB, endpoint=f"{WEB}/search", param="q", risk=7.4, confidence=0.9,
+       target=WEB, endpoint=f"{WEB}/search", param="q", risk=78.0, confidence=0.9,
        cwe="CWE-79", owasp="A03:2021", payload="q=<script>alert(document.domain)</script>",
        description="The search term is reflected into the page unencoded.",
        impact="Session theft / account takeover via crafted links.",
        remediation="Context-aware output encoding; a strict Content-Security-Policy."),
     _f("high", "idor", "IDOR — other users' records via 'user_id'",
-       target=WEB, endpoint=f"{WEB}/api/account", param="user_id", risk=8.1,
+       target=WEB, endpoint=f"{WEB}/api/account", param="user_id", risk=82.0,
        confidence=0.88, cwe="CWE-639", owasp="A01:2021", method="GET",
        payload="user_id=1002",
        description="Changing user_id returns another user's account object; no "
@@ -89,44 +89,44 @@ _FINDINGS: list[dict] = [
        impact="Horizontal privilege escalation; PII disclosure.",
        remediation="Enforce per-object authorization on every request."),
     _f("high", "default_credentials", "Default SSH credentials (admin/admin)",
-       target=f"{HOST}:22", risk=8.0, confidence=0.85, cwe="CWE-1392",
+       target=f"{HOST}:22", risk=80.0, confidence=0.85, cwe="CWE-1392",
        description="The SSH service accepts the vendor-default admin/admin login.",
        impact="Interactive shell access to the host.",
        remediation="Disable default accounts; enforce key-based auth + strong "
                    "passwords."),
 
     _f("medium", "open_redirect", "Open redirect in 'next'",
-       target=WEB, endpoint=f"{WEB}/login", param="next", risk=5.4, confidence=0.8,
+       target=WEB, endpoint=f"{WEB}/login", param="next", risk=56.0, confidence=0.8,
        cwe="CWE-601", owasp="A01:2021", payload="next=https://evil.example",
        description="The 'next' parameter is used as a redirect target without "
                    "validation.",
        impact="Phishing / OAuth token theft via trusted-domain redirects.",
        remediation="Allow only relative paths or an explicit host allowlist."),
     _f("medium", "security_misconfig", "Missing security headers",
-       target=WEB, risk=5.0, confidence=0.9, cwe="CWE-693", owasp="A05:2021",
+       target=WEB, risk=52.0, confidence=0.9, cwe="CWE-693", owasp="A05:2021",
        description="Responses lack Content-Security-Policy, X-Content-Type-Options, "
                    "and Strict-Transport-Security.",
        impact="Increases the blast radius of XSS / MIME-sniffing / SSL-strip.",
        remediation="Add CSP, X-Content-Type-Options: nosniff, and HSTS."),
     _f("medium", "weak_tls", "Weak TLS configuration (TLS 1.0 enabled)",
-       target=f"{WEB}:443", risk=5.3, confidence=0.86, cwe="CWE-327",
+       target=f"{WEB}:443", risk=55.0, confidence=0.86, cwe="CWE-327",
        description="The server negotiates TLS 1.0 and offers CBC cipher suites.",
        impact="Susceptible to downgrade / BEAST-class attacks.",
        remediation="Disable TLS < 1.2; prefer AEAD cipher suites."),
     _f("medium", "csrf", "Cross-site request forgery on profile update",
-       target=WEB, endpoint=f"{WEB}/profile/update", risk=5.1, confidence=0.78,
+       target=WEB, endpoint=f"{WEB}/profile/update", risk=53.0, confidence=0.78,
        cwe="CWE-352", owasp="A01:2021", method="POST",
        description="The profile-update form has no anti-CSRF token.",
        impact="Attacker can change a victim's email/password via a crafted page.",
        remediation="Add per-session CSRF tokens; set SameSite=Lax/Strict cookies."),
 
     _f("low", "server_version_disclosure", "Server version disclosure",
-       target=WEB, risk=3.1, confidence=0.9, cwe="CWE-200",
+       target=WEB, risk=32.0, confidence=0.9, cwe="CWE-200",
        description="The Server header reveals 'Apache/2.4.29 (Ubuntu)'.",
        impact="Aids attackers in matching known CVEs to the exact version.",
        remediation="Suppress version banners (ServerTokens Prod)."),
     _f("low", "info_disclosure", "Verbose error leaks a stack trace",
-       target=WEB, endpoint=f"{WEB}/api/orders", risk=2.8, confidence=0.82,
+       target=WEB, endpoint=f"{WEB}/api/orders", risk=28.0, confidence=0.82,
        cwe="CWE-209", owasp="A05:2021",
        description="A malformed request returns a full framework stack trace.",
        impact="Discloses file paths, library versions and internal logic.",
@@ -152,11 +152,14 @@ def resolve_demo_store(name: Optional[str] = None):
     return EngagementStore(p)
 
 
-def seed_demo(store: Any) -> dict:
-    """Idempotently seed ``store`` with the demo engagement + findings.
+def insert_findings(store: Any, scan_id: str) -> dict:
+    """Create the demo engagement/scope and upsert the sample findings under
+    ``scan_id`` (without touching scan start/complete). Returns a summary dict
+    including a ``summary`` sub-dict suitable for ``record_scan_complete``.
 
-    Returns a summary: ``{engagement, scan_id, findings, by_severity, targets}``.
-    Safe to call repeatedly — content-hashed IDs dedupe.
+    Factored out so both the instant "Load sample data" path (:func:`seed_demo`)
+    and the animated "Run demo scan" path (the API's background task) share the
+    exact same findings.
     """
     store.create_engagement(
         DEMO_ENGAGEMENT,
@@ -171,24 +174,29 @@ def seed_demo(store: Any) -> dict:
     ]:
         store.add_scope(target, kind=kind, criticality=crit, notes="sample scope")
 
-    store.record_scan_start(DEMO_SCAN_ID, name="Demo web + network scan", mode="full")
     by_sev: dict[str, int] = {}
     for finding in _FINDINGS:
-        store.upsert_finding(DEMO_SCAN_ID, finding)
+        store.upsert_finding(scan_id, finding)
         by_sev[finding["severity"]] = by_sev.get(finding["severity"], 0) + 1
 
     summary = {
-        "findings": len(_FINDINGS),
-        "by_severity": by_sev,
-        "targets": 3,
-        "duration_seconds": 47,
-        "demo": True,
+        "findings": len(_FINDINGS), "by_severity": by_sev,
+        "targets": 3, "duration_seconds": 47, "demo": True,
     }
-    store.record_scan_complete(DEMO_SCAN_ID, summary)
     return {
-        "engagement": DEMO_ENGAGEMENT,
-        "scan_id": DEMO_SCAN_ID,
-        "findings": len(_FINDINGS),
-        "by_severity": by_sev,
-        "targets": 3,
+        "engagement": DEMO_ENGAGEMENT, "scan_id": scan_id,
+        "findings": len(_FINDINGS), "by_severity": by_sev, "targets": 3,
+        "summary": summary,
     }
+
+
+def seed_demo(store: Any, scan_id: str = DEMO_SCAN_ID) -> dict:
+    """Idempotently seed ``store`` with the demo engagement + a completed scan.
+
+    Returns ``{engagement, scan_id, findings, by_severity, targets}``. Safe to
+    call repeatedly — content-hashed IDs dedupe.
+    """
+    store.record_scan_start(scan_id, name="Demo web + network scan", mode="full")
+    res = insert_findings(store, scan_id)
+    store.record_scan_complete(scan_id, res["summary"])
+    return {k: res[k] for k in ("engagement", "scan_id", "findings", "by_severity", "targets")}

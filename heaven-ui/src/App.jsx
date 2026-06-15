@@ -10,6 +10,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import Header from "./components/Header.jsx";
 import { ToastProvider, useToast } from "./components/Toast.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
+import Tour from "./components/Tour.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import ForcedPasswordChange from "./components/ForcedPasswordChange.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
@@ -92,19 +93,25 @@ export default function App() {
 
 function Shell() {
   const [mustChange, setMustChange] = useState(needsPasswordChange());
+  const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
     return onAuthChange(() => setMustChange(needsPasswordChange()));
   }, []);
 
+  // Close the mobile nav whenever the route changes.
+  useEffect(() => { setNavOpen(false); }, [location.pathname]);
+
   return (
-    <div className="app-shell">
+    <div className={"app-shell" + (navOpen ? " nav-open" : "")}>
       {mustChange && <ForcedPasswordChange onDone={() => setMustChange(false)} />}
+      {!mustChange && <Tour />}
       <CommandPalette />
       <Sidebar />
+      <div className="nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />
       <div className="main-pane">
-        <Header />
+        <Header onMenu={() => setNavOpen((o) => !o)} />
         <div className="content">
           {/* Keyed by path so navigating to another route clears a crashed page. */}
           <ErrorBoundary key={location.pathname}>

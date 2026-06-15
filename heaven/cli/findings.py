@@ -9,7 +9,7 @@ from typing import Optional
 
 import click
 
-from heaven.cli._helpers import _engagement_db_path, _print
+from heaven.cli._helpers import _engagement_db_path, _print, json_output
 from heaven.utils.logger import HAS_RICH
 
 
@@ -31,6 +31,9 @@ def findings(engagement: Optional[str], severity: Optional[str],
              vuln_type: Optional[str], min_confidence: float,
              limit: int, fmt: str) -> None:
     """List findings from the engagement DB."""
+    # Global --json forces machine-readable output regardless of --format.
+    if json_output():
+        fmt = "json"
     from heaven.engagement import EngagementStore
     store = EngagementStore(_engagement_db_path(engagement))
     results = store.list_findings(
@@ -38,7 +41,10 @@ def findings(engagement: Optional[str], severity: Optional[str],
         vuln_type=vuln_type, min_confidence=min_confidence, limit=limit,
     )
     if not results:
-        _print("[yellow]No findings match.[/yellow]")
+        if fmt == "json":
+            print("[]")
+        else:
+            _print("[yellow]No findings match.[/yellow]")
         return
 
     if fmt == "json":

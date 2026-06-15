@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Engagement } from '../api'
 import { EmptyState } from '../components/Skeleton.jsx'
+import HelpTip from '../components/HelpTip.jsx'
 
 const PHASES = [
   { name: 'Recon',       icon: '🔍', keys: ['scan', 'enum', 'recon', 'fingerprint', 'osint', 'shodan'] },
@@ -57,7 +58,7 @@ export default function KillChain() {
     <div className="page">
       {/* Header */}
       <div className="card">
-        <div className="card-title">Cyber Kill Chain Coverage</div>
+        <div className="card-title">Cyber Kill Chain Coverage<HelpTip term="killchain" /></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 48, fontWeight: 700, color: pct > 60 ? 'var(--crit)' : pct > 30 ? 'var(--med)' : 'var(--text-0)',

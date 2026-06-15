@@ -1,6 +1,19 @@
-import React, { useEffect, useState } from "react";
-import { Scans as ScansApi, Replay } from "../api";
+import React, { useEffect, useMemo, useState } from "react";
+import { Scans as ScansApi, Replay, Demo, Engagement } from "../api";
 import { useToast } from "../components/Toast.jsx";
+import HelpTip from "../components/HelpTip.jsx";
+
+// Live target validation — classify each entry so the operator gets instant
+// feedback instead of a server-side rejection after clicking Launch.
+const _IP = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+const _URL = /^https?:\/\/[^\s/$.?#][^\s]*$/i;
+const _HOST = /^([a-z0-9-]+\.)+[a-z]{2,}$/i;
+function classifyTarget(t) {
+  if (_URL.test(t)) return "url";
+  if (_IP.test(t)) return "ip/cidr";
+  if (_HOST.test(t)) return "host";
+  return null;
+}
 
 const MODES = ["web", "network", "full", "ad", "cloud"];
 const STEALTH = [
@@ -52,6 +65,36 @@ export default function Scans() {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Engagement summary → scope context in the launcher.
+  const [engSummary, setEngSummary] = useState(null);
+  useEffect(() => { Engagement.summary().then(setEngSummary).catch(() => {}); }, []);
+  const scopeCount = engSummary?.stats?.scope_targets ?? 0;
+  const engName = engSummary?.engagement?.name;
+
+  // Parse + classify targets live for inline validation feedback.
+  const parsed = useMemo(() => {
+    const raw = targets.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+    const valid = [], invalid = [];
+    for (const t of raw) (classifyTarget(t) ? valid : invalid).push(t);
+    return { valid, invalid };
+  }, [targets]);
+
+  const [demoRunning, setDemoRunning] = useState(false);
+  async function runDemoScan() {
+    setDemoRunning(true);
+    try {
+      await Demo.scan();
+      toast.success("Demo scan started — watch it run in the list below");
+      // Re-poll a few times so the running → completed loop is visible quickly
+      // (the demo scan runs ~10s; the default poll is every 8s).
+      [500, 2500, 5000, 8000, 11000, 14000].forEach((ms) => setTimeout(load, ms));
+    } catch (e) {
+      toast.error(e.message || "Could not start demo scan");
+    } finally {
+      setDemoRunning(false);
+    }
+  }
 
   async function launchScan(e) {
     e.preventDefault();
@@ -113,6 +156,30 @@ export default function Scans() {
                   outline: "none", resize: "vertical", boxSizing: "border-box",
                 }}
               />
+              {targets.trim() && (
+                <div style={{ fontSize: 11, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  {parsed.valid.length > 0 && (
+                    <span style={{ color: "var(--brand)" }}>
+                      ✓ {parsed.valid.length} valid target{parsed.valid.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                  {parsed.invalid.length > 0 && (
+                    <span style={{ color: "var(--med)" }}>
+                      ⚠ {parsed.invalid.length} unrecognized: {parsed.invalid.slice(0, 3).join(", ")}
+                      {parsed.invalid.length > 3 ? "…" : ""}
+                    </span>
+                  )}
+                  {parsed.valid.length > 0 && (
+                    <span className="dim">
+                      → added to scope{engName ? ` in “${engName}”` : ""} on launch
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                Scope: {scopeCount} target{scopeCount !== 1 ? "s" : ""} currently in
+                {engName ? ` “${engName}”` : " this engagement"}.
+              </div>
             </div>
 
             <div>
@@ -131,7 +198,10 @@ export default function Scans() {
             </div>
 
             <div>
-              <label className="form-label" style={{ marginBottom: 4, display: "block" }}>Stealth Level</label>
+              <label className="form-label" style={{ marginBottom: 4, display: "block" }}>
+                Stealth Level
+                <HelpTip text="How aggressive/evasive the scan is. 1 = paranoid (slow, low noise, honeypot-aware) → 4 = aggressive (fast, loud). Lower is stealthier but slower." />
+              </label>
               <select
                 value={stealth}
                 onChange={e => setStealth(e.target.value)}
@@ -177,6 +247,7 @@ export default function Scans() {
             <span>
               I confirm I have <strong>written authorization</strong> from the target system owner.
               Unauthorized scanning is illegal. HEAVEN logs all scan activity.
+              <HelpTip text="Active scanning sends real traffic to the target. HEAVEN refuses to launch without this confirmation, and every action is written to an HMAC-signed audit log." />
             </span>
           </label>
 
@@ -195,17 +266,27 @@ export default function Scans() {
             }}>✓ {launchSuccess}</div>
           )}
 
-          <button
-            type="submit"
-            disabled={launching || !authorized}
-            className="btn"
-            style={{
-              opacity: (!authorized || launching) ? 0.5 : 1,
-              borderColor: "var(--text-0)", color: "var(--text-0)",
-            }}
-          >
-            {launching ? "⏳ Launching..." : "⚡ Launch Scan"}
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="submit"
+              disabled={launching || !authorized || parsed.valid.length === 0}
+              className="btn"
+              style={{
+                opacity: (!authorized || launching || parsed.valid.length === 0) ? 0.5 : 1,
+                borderColor: "var(--text-0)", color: "var(--text-0)",
+              }}
+            >
+              {launching ? "⏳ Launching..." : "⚡ Launch Scan"}
+            </button>
+            <button type="button" onClick={runDemoScan} disabled={demoRunning} className="btn">
+              {demoRunning ? "Starting…" : "▶ Run demo scan"}
+            </button>
+          </div>
+          <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>
+            New here? <b>Run demo scan</b> simulates the full loop (recon →
+            findings → report) against sample data — no target, no authorization
+            needed.
+          </div>
         </form>
       </div>
 

@@ -43,6 +43,15 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("api")
 
+
+def _safe_unlink(path: str) -> None:
+    """Best-effort delete of a temp file once a FileResponse has been streamed."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 # URL regex — single-escaped (was double-escaped, broken)
 _URL_REGEX = re.compile(r"^https?://[^\s/$.?#][^\s]*$", re.IGNORECASE)
 
@@ -970,16 +979,24 @@ def create_app() -> FastAPI:
                         503, "PDF export needs reportlab — `pip install reportlab`. "
                         "Use HTML/Markdown export, which need no extra dependency.")
                 import tempfile
+
+                from starlette.background import BackgroundTask
                 from heaven.devsecops.pdf_report import PDFReportGenerator
                 tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
                 tmp.close()
                 ok = PDFReportGenerator().generate(
                     {"engagement": eng_name, "vulnerabilities": findings,
                      "findings": findings}, tmp.name)
-                if not ok:
+                if not ok or not os.path.getsize(tmp.name):
+                    try:
+                        os.unlink(tmp.name)
+                    except OSError:
+                        pass
                     raise HTTPException(500, "PDF generation failed (reportlab installed?)")
+                # Delete the temp file once the response has been streamed.
                 return FileResponse(tmp.name, media_type="application/pdf",
-                                    filename=f"heaven-report-{safe}.pdf")
+                                    filename=f"heaven-report-{safe}.pdf",
+                                    background=BackgroundTask(_safe_unlink, tmp.name))
             if fmt == "html":
                 from heaven.devsecops.compliance_report import ComplianceReportGenerator
                 body = ComplianceReportGenerator().generate_html_report(

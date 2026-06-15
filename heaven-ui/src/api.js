@@ -216,6 +216,7 @@ export const Engagement = {
     return api(`/engagement/findings?${q.toString()}`);
   },
   evidence: (id) => api(`/engagement/findings/${id}/evidence`),
+  topFindings: (limit = 5) => api(`/engagement/top-findings?limit=${limit}`),
   setStatus: (id, status, notes = "") =>
     api(`/engagement/findings/${id}/status`, {
       method: "PUT",
@@ -259,6 +260,7 @@ export const System = {
 // realistic example findings so a fresh install shows a full dashboard.
 export const Demo = {
   seed: () => api("/demo/seed", { method: "POST" }),
+  scan: () => api("/demo/scan", { method: "POST" }),
 };
 
 // Settings — API keys & integrations. Backed by GET/POST /api/settings, which

@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 470" font-family="'JetBrains Mono','Fira Code',ui-monospace,monospace" role="img" aria-label="HEAVEN demo: heaven quickstart loads sample data, heaven serve starts the web UI, dashboard shows ranked findings">
+  <title>HEAVEN — quickstart → serve → dashboard</title>
+
+  <!-- window -->
+  <rect x="8" y="8" width="824" height="454" rx="14" fill="#0B0F1A" stroke="#1b2438" stroke-width="1.5"/>
+  <!-- title bar -->
+  <rect x="8" y="8" width="824" height="40" rx="14" fill="#0e1424"/>
+  <rect x="8" y="34" width="824" height="14" fill="#0e1424"/>
+  <circle cx="32" cy="28" r="6" fill="#FF5F57"/>
+  <circle cx="52" cy="28" r="6" fill="#FEBC2E"/>
+  <circle cx="72" cy="28" r="6" fill="#28C840"/>
+  <text x="420" y="33" fill="#64718C" font-size="13" text-anchor="middle">heaven — terminal</text>
+
+  <!-- ── terminal lines (fade in sequentially, 13s loop) ── -->
+  <g opacity="0">
+    <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
+             keyTimes="0;0.04;0.06;0.96;1" values="0;0;1;1;0"/>
+    <text x="30" y="92" font-size="15.5"><tspan fill="#34E5A3">$ </tspan><tspan fill="#ECEFF7">heaven quickstart</tspan></text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
+             keyTimes="0;0.10;0.12;0.96;1" values="0;0;1;1;0"/>
+    <text x="30" y="120" font-size="14.5" fill="#22D3EE">▸ HEAVEN quickstart</text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
+             keyTimes="0;0.16;0.18;0.96;1" values="0;0;1;1;0"/>
+    <text x="30" y="148" font-size="14.5"><tspan fill="#34E5A3">✓ </tspan><tspan fill="#9BA7C0">Created .env  ·  login </tspan><tspan fill="#ECEFF7">admin</tspan><tspan fill="#9BA7C0"> / </tspan><tspan fill="#ECEFF7">••••••••••</tspan></text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
+             keyTimes="0;0.22;0.24;0.96;1" values="0;0;1;1;0"/>
+    <text x="30" y="176" font-size="14.5"><tspan fill="#34E5A3">✓ </tspan><tspan fill="#9BA7C0">Loaded </tspan><tspan fill="#ECEFF7">12 sample findings</tspan><tspan fill="#9BA7C0"> — every page populated</tspan></text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
+             keyTimes="0;0.30;0.32;0.96;1" values="0;0;1;1;0"/>
+    <text x="30" y="212" font-size="15.5"><tspan fill="#34E5A3">$ </tspan><tspan fill="#ECEFF7">heaven serve</tspan></text>
+  </g>
+  <g opacity="0">
+    <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
+             keyTimes="0;0.36;0.38;0.96;1" values="0;0;1;1;0"/>
+    <text x="30" y="240" font-size="14.5"><tspan fill="#22D3EE">→ </tspan><tspan fill="#9BA7C0">web UI ready at </tspan><tspan fill="#34E5A3">http://localhost:8443</tspan></text>
+  </g>
+
+  <!-- ── dashboard card (fades in last) ── -->
+  <g opacity="0">
+    <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
+             keyTimes="0;0.44;0.48;0.96;1" values="0;0;1;1;0"/>
+    <rect x="30" y="266" width="780" height="176" rx="12" fill="#111726" stroke="#1b2438"/>
+    <text x="48" y="296" font-size="13" fill="#64718C" letter-spacing="1.5">DASHBOARD  ·  demo (sample data)</text>
+
+    <!-- severity bars -->
+    <g font-size="13" fill="#9BA7C0">
+      <rect x="48"  y="312" width="135" height="14" rx="3" fill="#FF4D6A"/><text x="192" y="324">3 Critical</text>
+      <rect x="48"  y="336" width="135" height="14" rx="3" fill="#FF8A3D"/><text x="192" y="348">3 High</text>
+      <rect x="48"  y="360" width="180" height="14" rx="3" fill="#FFC53D"/><text x="237" y="372">4 Medium</text>
+      <rect x="48"  y="384" width="90"  height="14" rx="3" fill="#38BDF8"/><text x="147" y="396">2 Low</text>
+    </g>
+
+    <!-- fix-this-first -->
+    <line x1="430" y1="312" x2="430" y2="420" stroke="#1b2438"/>
+    <text x="460" y="318" font-size="13" fill="#64718C" letter-spacing="1.5">FIX THIS FIRST</text>
+    <g font-size="13.5">
+      <circle cx="468" cy="342" r="5" fill="#FF4D6A"/><text x="482" y="347" fill="#ECEFF7">SQL injection (error-based)</text><text x="792" y="347" fill="#64718C" text-anchor="end">96</text>
+      <circle cx="468" cy="368" r="5" fill="#FF4D6A"/><text x="482" y="373" fill="#ECEFF7">OS command injection</text><text x="792" y="373" fill="#64718C" text-anchor="end">95</text>
+      <circle cx="468" cy="394" r="5" fill="#FF4D6A"/><text x="482" y="399" fill="#ECEFF7">Docker socket exposed</text><text x="792" y="399" fill="#64718C" text-anchor="end">94</text>
+    </g>
+  </g>
+</svg>

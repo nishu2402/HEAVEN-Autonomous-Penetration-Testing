@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import click
 
-from heaven.cli._helpers import _print
+from heaven.cli._helpers import _print, emit_json, json_output
 
 _SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 
@@ -29,6 +29,10 @@ def demo_cmd(engagement: str | None) -> None:
 
     store = resolve_demo_store(engagement)
     result = seed_demo(store)
+
+    if json_output():
+        emit_json({"ok": True, "db_path": str(store.db_path), **result})
+        return
 
     _print(f"[green]✓ Loaded sample data[/green] into engagement "
            f"[bold]{DEMO_ENGAGEMENT}[/bold]  [dim]({store.db_path})[/dim]")

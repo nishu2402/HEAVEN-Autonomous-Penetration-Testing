@@ -5,6 +5,7 @@ import LiveTerminal from '../components/LiveTerminal'
 import FirstRunGuide from '../components/FirstRunGuide'
 import { Engagement, Dashboard as DashApi, Demo } from '../api'
 import { useToast } from '../components/Toast.jsx'
+import HelpTip from '../components/HelpTip.jsx'
 
 // three.js + r3f + drei are heavy (~600 KB). Load them only when the dashboard
 // mounts, not in the app's first paint — keeps login/findings/etc. lightweight.
@@ -27,7 +28,7 @@ const SEV = {
   info:     { color: '#8593AD', label: 'Info' },
 }
 
-function StatCard({ label, value, color, sub, delay = 0 }) {
+function StatCard({ label, value, color, sub, delay = 0, help }) {
   return (
     <motion.div
       className="stat-card"
@@ -36,7 +37,7 @@ function StatCard({ label, value, color, sub, delay = 0 }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1], delay }}
     >
-      <div className="stat-label">{label}</div>
+      <div className="stat-label">{label}{help && <HelpTip term={help} />}</div>
       <div className="stat-value" style={{ color }}>{value ?? '—'}</div>
       {sub && <div className="stat-sub">{sub}</div>}
     </motion.div>
@@ -78,12 +79,14 @@ export default function Dashboard() {
   const [dash, setDash] = useState(null)
   const [activeScanId] = useState(localStorage.getItem('heaven_active_scan') || '')
   const [seeding, setSeeding] = useState(false)
+  const [topFindings, setTopFindings] = useState([])
   const navigate = useNavigate()
   const toast = useToast()
 
   const refresh = () => {
     Engagement.summary().then(setEng).catch(() => {})
     DashApi.get().then(setDash).catch(() => {})
+    Engagement.topFindings(5).then(d => setTopFindings(d.findings || [])).catch(() => {})
   }
 
   useEffect(() => {
@@ -146,10 +149,12 @@ export default function Dashboard() {
 
         <div className="stat-grid">
           <StatCard label="Critical" value={bySev.critical ?? 0} color={SEV.critical.color}
-                    sub={(bySev.critical ?? 0) > 0 ? 'Needs attention' : 'All clear'} delay={0.02} />
+                    sub={(bySev.critical ?? 0) > 0 ? 'Needs attention' : 'All clear'} delay={0.02}
+                    help="severity" />
           <StatCard label="High" value={bySev.high ?? 0} color={SEV.high.color} delay={0.06} />
           <StatCard label="Total findings" value={totalFindings} color="#6D7CFF" delay={0.10}
-                    sub={`${stats.scans_run ?? 0} scan${stats.scans_run !== 1 ? 's' : ''} run`} />
+                    sub={`${stats.scans_run ?? 0} scan${stats.scans_run !== 1 ? 's' : ''} run`}
+                    help="risk_score" />
           <StatCard label="Targets" value={stats.scope_targets ?? 0} color="#34E5A3" delay={0.14}
                     sub="In scope" />
         </div>
@@ -198,6 +203,56 @@ export default function Dashboard() {
         {!noEng && totalFindings > 0 && (
           <div style={{ borderBottom: '1px solid var(--border)' }}>
             <SeverityBars bySeverity={bySev} total={totalFindings} />
+          </div>
+        )}
+
+        {!noEng && topFindings.length > 0 && (
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+            <div className="stat-label" style={{ marginBottom: 6 }}>
+              Fix this first<HelpTip term="risk_score" />
+            </div>
+            <div className="dim" style={{ fontSize: 11.5, marginBottom: 10, lineHeight: 1.5 }}>
+              {(bySev.critical ?? 0)} critical · {(bySev.high ?? 0)} high across{' '}
+              {stats.scope_targets ?? 0} target{(stats.scope_targets ?? 0) !== 1 ? 's' : ''}.
+              {topFindings[0] && (
+                <> Top risk: <span style={{ color: 'var(--text-0)' }}>{topFindings[0].title}</span>{' '}
+                ({Number(topFindings[0].risk_score || 0).toFixed(0)}).</>
+              )}
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {topFindings.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => navigate(`/findings/${f.id}`)}
+                  style={{
+                    textAlign: 'left', background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                    padding: '9px 11px', cursor: 'pointer', color: 'var(--text-0)',
+                    fontFamily: 'var(--font-ui)',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--border-strong)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                                   background: SEV[f.severity]?.color || 'var(--text-2)' }} />
+                    <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1, overflow: 'hidden',
+                                   textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.title}</span>
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--text-2)' }}>
+                      {Number(f.risk_score || 0).toFixed(1)}
+                    </span>
+                  </div>
+                  {f.remediation && (
+                    <div className="dim" style={{ fontSize: 11, marginTop: 3, lineHeight: 1.45,
+                                                  overflow: 'hidden', textOverflow: 'ellipsis',
+                                                  display: '-webkit-box', WebkitLineClamp: 2,
+                                                  WebkitBoxOrient: 'vertical' }}>
+                      {f.remediation}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

@@ -94,6 +94,40 @@ def set_cmd(key: str, value: str | None) -> None:
         _print(f"[dim]{key} unchanged (same value).[/dim]")
 
 
+@config_grp.command(name="test-nvd")
+def test_nvd_cmd() -> None:
+    """Live-check NVD reachability + that NVD_API_KEY (if set) is valid.
+
+    Makes one real lookup. NVD answers a good query with HTTP 200 (key valid or
+    no key) but HTTP 404 when the key is rejected — so this tells you whether CVE
+    enrichment will actually return results before you run a scan.
+    """
+    import asyncio
+
+    from heaven.vulnscan.nvd_client import NVDClient
+
+    async def _run() -> dict:
+        client = NVDClient()
+        try:
+            return await client.test_connectivity()
+        finally:
+            await client.close()
+
+    res = asyncio.run(_run())
+    if json_output():
+        emit_json(res)
+        return
+    if res.get("ok"):
+        _print(f"[green]✓ NVD reachable[/green] — {res['reason']}")
+        if res.get("sample_results") is not None:
+            _print(f"  [dim]sample query returned {res['sample_results']} CVEs[/dim]")
+    else:
+        _print(f"[red]✗ NVD check failed[/red] — {res['reason']}")
+        if res.get("status_code"):
+            _print(f"  [dim]HTTP {res['status_code']}[/dim]")
+        raise SystemExit(1)
+
+
 @config_grp.command(name="unset")
 @click.argument("key")
 def unset_cmd(key: str) -> None:

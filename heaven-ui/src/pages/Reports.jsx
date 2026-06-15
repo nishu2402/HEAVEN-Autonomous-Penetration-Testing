@@ -10,13 +10,13 @@
 // of what will be in the report so it's clear the output reflects current data.
 
 import React, { useEffect, useState } from "react";
-import { Engagement, downloadReport } from "../api";
+import { Engagement, downloadReport, previewReport } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
 
+// Secondary data exports (the headline professional report lives in the hero).
 const FORMATS = [
-  { id: "pdf", label: "PDF report", hint: "Client deliverable" },
-  { id: "html", label: "HTML report", hint: "Compliance-mapped, shareable" },
+  { id: "pdf", label: "PDF report", hint: "Needs reportlab" },
   { id: "markdown", label: "Markdown", hint: "Wiki / Git" },
   { id: "csv", label: "CSV", hint: "Spreadsheet / triage" },
   { id: "json", label: "JSON", hint: "Automation / re-import" },
@@ -45,14 +45,30 @@ export default function Reports() {
       .catch((e) => setError(e.message));
   }, []);
 
+  function engOpts() {
+    const eng = summary?.engagement?.name;
+    return eng ? { engagement: eng } : {};
+  }
+
   async function pick(fmt) {
     setBusy(fmt);
     try {
-      const eng = summary?.engagement?.name;
-      const name = await downloadReport(fmt, eng ? { engagement: eng } : {});
+      const name = await downloadReport(fmt, engOpts());
       toast.success(`Downloaded ${name}`);
     } catch (e) {
       toast.error(e.message || "Export failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function preview() {
+    setBusy("preview");
+    try {
+      await previewReport(engOpts());
+      toast.info("Report opened in a new tab — use Print → Save as PDF for a PDF copy");
+    } catch (e) {
+      toast.error(e.message || "Preview failed");
     } finally {
       setBusy("");
     }
@@ -128,10 +144,69 @@ export default function Reports() {
         </div>
       </div>
 
+      {/* Hero: the professional deliverable, one click */}
+      <div className="card" style={{
+        marginTop: 12, border: "1px solid var(--brand)",
+        background: "linear-gradient(180deg, rgba(31,111,235,0.08), transparent)",
+      }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
+              📄 Professional penetration test report
+            </div>
+            <p className="dim" style={{ fontSize: 12, margin: "6px 0 0", lineHeight: 1.6 }}>
+              A complete, client-ready deliverable: cover page, executive summary, scope &amp;
+              methodology, risk ratings, detailed findings with evidence &amp; remediation, OWASP
+              mapping and a prioritised roadmap. Print-ready — open it and use
+              <strong style={{ color: "var(--text-0)" }}> Print → Save as PDF</strong>.
+            </p>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+          <button
+            onClick={() => pick("html")}
+            disabled={!!busy}
+            style={{
+              flex: "1 1 220px", padding: "13px 18px", fontSize: 14, fontWeight: 700,
+              background: "var(--brand)", color: "#fff", border: "none",
+              borderRadius: "var(--radius-md)", cursor: busy ? "wait" : "pointer",
+              fontFamily: "var(--font-ui)",
+            }}
+          >
+            {busy === "html" ? "Preparing…" : "⬇  Download report (HTML)"}
+          </button>
+          <button
+            onClick={preview}
+            disabled={!!busy}
+            style={{
+              flex: "1 1 180px", padding: "13px 18px", fontSize: 14, fontWeight: 600,
+              background: "rgba(255,255,255,0.04)", color: "var(--text-0)",
+              border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
+              cursor: busy ? "wait" : "pointer", fontFamily: "var(--font-ui)",
+            }}
+          >
+            {busy === "preview" ? "Opening…" : "👁  Preview in browser"}
+          </button>
+          <button
+            onClick={() => pick("pdf")}
+            disabled={!!busy}
+            style={{
+              flex: "1 1 150px", padding: "13px 18px", fontSize: 14, fontWeight: 600,
+              background: "rgba(255,255,255,0.04)", color: "var(--text-0)",
+              border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
+              cursor: busy ? "wait" : "pointer", fontFamily: "var(--font-ui)",
+            }}
+            title="Direct PDF export (requires the reportlab package on the server)"
+          >
+            {busy === "pdf" ? "Preparing…" : "⬇  Download PDF"}
+          </button>
+        </div>
+      </div>
+
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase",
                       color: "var(--text-2)", fontWeight: 600, marginBottom: 10 }}>
-          Choose a format to download
+          Other formats &amp; data exports
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
                       gap: 10 }}>

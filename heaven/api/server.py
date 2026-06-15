@@ -1109,6 +1109,25 @@ def create_app() -> FastAPI:
             return {"provider": None, "model": None, "available": False,
                     "reason": f"error: {e}"}
 
+    @app.post("/api/settings/test-nvd")
+    async def test_nvd(user: User = Depends(require_permission("config.modify"))):
+        """Live-test NVD connectivity and the configured API key.
+
+        Makes one real lookup so the operator can confirm the key works (and CVE
+        enrichment will return results) instead of discovering empty scans later.
+        Distinguishes 'key valid', 'key rejected', and 'no key / slow tier'.
+        """
+        try:
+            from heaven.vulnscan.nvd_client import NVDClient
+            client = NVDClient()
+            try:
+                return await client.test_connectivity()
+            finally:
+                await client.close()
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "has_key": False, "status_code": None,
+                    "sample_results": None, "reason": f"error: {e}"}
+
     # ══════════════════════════════════════════════════════════════════
     # "Fix this first" — highest-risk findings + remediation
     # ══════════════════════════════════════════════════════════════════

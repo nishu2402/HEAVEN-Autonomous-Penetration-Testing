@@ -55,6 +55,7 @@ class NVDClient:
         self._cache: dict[str, list[CVERecord]] = {}
         self._kev_cves: set[str] = set()
         self._client: Optional[httpx.AsyncClient] = None
+        self._warned_invalid_key = False  # warn once if a set key keeps 404-ing
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -83,7 +84,16 @@ class NVDClient:
             logger.warning(f"Failed to load KEV catalog: {e}")
 
     async def search_by_cpe(self, cpe: str) -> list[CVERecord]:
-        """Search NVD for CVEs matching a CPE string."""
+        """Search NVD for CVEs affecting a CPE.
+
+        Uses NVD's ``virtualMatchString`` rather than ``cpeName``. ``cpeName``
+        requires an *exact* CPE 2.3 name with a concrete version and returns
+        HTTP 404 for the wildcard-version CPEs HEAVEN typically generates from
+        banner fingerprints — i.e. it would silently find nothing. ``virtualMatchString``
+        accepts partial / wildcard CPEs, applies NVD's own version-range matching,
+        and returns 0 results (not 404) for unknown products.
+        """
+        cpe = _normalize_cpe(cpe)
         if cpe in self._cache:
             return self._cache[cpe]
 
@@ -91,11 +101,33 @@ class NVDClient:
         client = await self._get_client()
 
         try:
-            params: dict[str, str | int] = {"cpeName": cpe, "resultsPerPage": 50}
+            params: dict[str, str | int] = {
+                "virtualMatchString": cpe,
+                "resultsPerPage": 50,
+                "noRejected": "",
+            }
             resp = await client.get(NVD_BASE_URL, params=params)
 
+            if resp.status_code == 404:
+                # A 404 on a well-formed query almost always means the API key
+                # was rejected — NVD returns 404 (not 401/403) for a bad apiKey.
+                # Without a key a valid query returns 200, so flag the likely cause.
+                if self.api_key and not self._warned_invalid_key:
+                    self._warned_invalid_key = True
+                    logger.warning(
+                        "NVD returned 404 with an API key set — the key is likely "
+                        "invalid or malformed. Verify NVD_API_KEY (Settings → "
+                        "Recon enrichment, or `heaven config get NVD_API_KEY`)."
+                    )
+                self._cache[cpe] = []
+                return []
+
+            if resp.status_code == 429:
+                logger.warning("NVD API rate-limited (429) — add NVD_API_KEY to raise the limit")
+                return []
+
             if resp.status_code != 200:
-                logger.warning(f"NVD API returned {resp.status_code} for CPE {cpe}")
+                logger.warning(f"NVD API returned {resp.status_code} for {cpe}")
                 return []
 
             data = resp.json()
@@ -147,6 +179,9 @@ class NVDClient:
                 )
                 records.append(record)
 
+            # NVD returns oldest-first; surface KEV-listed + highest-CVSS CVEs
+            # first so the most actionable results lead (and survive any cap).
+            records.sort(key=lambda r: (r.in_kev, r.cvss_base), reverse=True)
             self._cache[cpe] = records
             logger.debug(f"NVD: {len(records)} CVEs for {cpe}")
             return records
@@ -178,6 +213,55 @@ class NVDClient:
                 logger.debug(f"EPSS lookup error: {e}")
 
         return scores
+
+    async def test_connectivity(self) -> dict[str, Any]:
+        """Live check of NVD reachability and API-key validity.
+
+        Makes one cheap real request. Because NVD answers a well-formed query
+        with HTTP 200 when no key is set but HTTP 404 when a *bad* key is sent,
+        we can tell "key works" from "key rejected" from "no key / slower tier".
+        """
+        sample = "cpe:2.3:a:openbsd:openssh"
+        try:
+            client = await self._get_client()
+            resp = await client.get(
+                NVD_BASE_URL,
+                params={"virtualMatchString": sample, "resultsPerPage": 1},
+            )
+            status = resp.status_code
+            if status == 200:
+                total = resp.json().get("totalResults")
+                return {
+                    "ok": True,
+                    "has_key": bool(self.api_key),
+                    "status_code": status,
+                    "sample_results": total,
+                    "rate_limit_s": self._rate_limit,
+                    "reason": (
+                        "API key valid — fast tier (50 req / 30s)"
+                        if self.api_key else
+                        "Reachable without a key — slow tier (5 req / 30s); "
+                        "add NVD_API_KEY for ~10× faster CVE lookups"
+                    ),
+                }
+            if status == 404 and self.api_key:
+                return {
+                    "ok": False, "has_key": True, "status_code": status,
+                    "sample_results": None, "rate_limit_s": self._rate_limit,
+                    "reason": "API key rejected (NVD returns 404 for an invalid "
+                              "key). Re-check NVD_API_KEY for typos / extra spaces.",
+                }
+            return {
+                "ok": False, "has_key": bool(self.api_key), "status_code": status,
+                "sample_results": None, "rate_limit_s": self._rate_limit,
+                "reason": f"NVD returned HTTP {status}",
+            }
+        except Exception as e:  # noqa: BLE001
+            return {
+                "ok": False, "has_key": bool(self.api_key), "status_code": None,
+                "sample_results": None, "rate_limit_s": self._rate_limit,
+                "reason": f"could not reach NVD: {e}",
+            }
 
     async def close(self):
         if self._client:
@@ -217,6 +301,24 @@ async def lookup_vulnerabilities(scan_id: str = "", cpes: Optional[list[str]] = 
     await client.close()
     stats["total_cves"] = len(all_vulns)
     return {**stats, "vulnerabilities": all_vulns}
+
+
+def _normalize_cpe(cpe: str) -> str:
+    """Normalise a CPE to 2.3 URI form for NVD's ``virtualMatchString``.
+
+    nmap emits CPE 2.2 (``cpe:/a:vendor:product:version``); NVD's v2 API only
+    understands 2.3 (``cpe:2.3:a:vendor:product:version:*:*:...``) and 404s on
+    2.2 input. Already-2.3 strings (and anything unrecognised) pass through.
+    """
+    cpe = (cpe or "").strip()
+    if cpe.startswith("cpe:2.3:"):
+        return cpe
+    if cpe.startswith("cpe:/"):
+        parts = cpe[len("cpe:/"):].split(":")          # [part, vendor, product, version, ...]
+        comps = (parts + ["*"] * 11)[:11]              # 2.3 has 11 fields after the prefix
+        comps = [c if c not in ("", "-") else "*" for c in comps]
+        return "cpe:2.3:" + ":".join(comps)
+    return cpe
 
 
 def _score_to_severity(score: float) -> str:

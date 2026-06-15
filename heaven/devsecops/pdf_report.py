@@ -1,813 +1,668 @@
 """
-HEAVEN — Professional Penetration Test Report Generator
-Produces a client-deliverable PDF report indistinguishable from one written
-by a senior penetration tester.  Sections:
+HEAVEN — Professional Penetration-Test Report Generator (PDF)
 
-  1. Cover page (title, client, tester, date, classification)
-  2. Table of contents
-  3. Executive Summary (risk overview, key metrics, severity doughnut)
-  4. Scope & Methodology
-  5. Attack Surface Summary (network, web, auth, API)
-  6. Detailed Findings — one section per finding:
-       CVSS v3.1 breakdown, PoC steps, evidence snippet, MITRE ATT&CK mapping,
-       CWE reference, remediation priority, fix deadline
-  7. Remediation Roadmap (sorted by severity / effort)
-  8. Appendix A: Tools Used
-  9. Appendix B: Vulnerability Classification Reference
+Produces a client-ready PDF deliverable using **reportlab** (pure Python — no
+system libraries, installs cleanly on macOS/Linux/Windows). The structure mirrors
+the HTML report (:mod:`heaven.devsecops.compliance_report`) exactly, and the two
+share the same severity palette, OWASP mapping and knowledge-base enrichment so a
+finding looks identical whether exported as HTML or PDF:
 
-Rendering: WeasyPrint (HTML→PDF) + Jinja2 templating.
-Falls back to writing an HTML file when WeasyPrint is not installed.
+  1. Cover page (classification, engagement, overall-risk badge, metadata)
+  2. Confidentiality notice
+  3. Document control + revision history
+  4. Table of contents (real page numbers, two-pass build)
+  5. Executive summary (narrative + severity KPIs + distribution + key findings)
+  6. Scope & methodology (targets, phases, standards)
+  7. Risk-rating methodology (severity scale + remediation SLAs)
+  8. Findings summary table
+  9. Detailed findings (metadata, description, impact, evidence/PoC, remediation, refs)
+ 10. OWASP Top 10 coverage
+ 11. Remediation roadmap (prioritised)
+ 12. Appendix (tooling, glossary, disclaimer)
+
+If reportlab is not installed, :meth:`PDFReportGenerator.generate` degrades
+gracefully by writing the professional HTML report to a ``.html`` file instead.
 """
 
 from __future__ import annotations
 
 import datetime
-import json
 import os
 from typing import Any, Optional
+from xml.sax.saxutils import escape as _xml_escape
 
+from heaven.devsecops.compliance_report import SEVERITY_META, ComplianceReportGenerator
 from heaven.utils.logger import get_logger
 
 logger = get_logger("devsecops.pdf")
 
-# ─────────────────────────────────────────────────────────────────
-# Severity metadata
-# ─────────────────────────────────────────────────────────────────
+_SEV_ORDER = {k: v["order"] for k, v in SEVERITY_META.items()}
+_OWASP = ComplianceReportGenerator()  # reuse OWASP_MAP / _owasp_for — keeps reports in sync
 
-_SEV_META = {
-    "critical": {"color": "#c0392b", "bg": "#fdecea", "icon": "💀", "sla": "24 hours"},
-    "high":     {"color": "#e67e22", "bg": "#fef5e7", "icon": "🔴", "sla": "7 days"},
-    "medium":   {"color": "#f39c12", "bg": "#fefde7", "icon": "🟠", "sla": "30 days"},
-    "low":      {"color": "#27ae60", "bg": "#eafaf1", "icon": "🟡", "sla": "90 days"},
-    "info":     {"color": "#2980b9", "bg": "#eaf4fb", "icon": "ℹ️",  "sla": "Best effort"},
-}
-
+# CVSS v3.1 vectors per vuln class (illustrative; shown when known)
 _CVSS_VECTORS = {
-    "sqli":               "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-    "sqli_confirmed":     "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-    "xss":                "AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
-    "ssrf":               "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
-    "idor":               "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
-    "mass_assignment":    "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
-    "default_credentials":"AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-    "ssti":               "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-    "ssl_weak":           "AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
-    "cors":               "AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:N",
-    "open_redirect":      "AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
-    "directory_listing":  "AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
-    "sensitive_file":     "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
-    "exposed_database":   "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "sqli": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "sql_injection": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "xss": "AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "ssrf": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "idor": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    "ssti": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "command_injection": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "default_credentials": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
 }
 
-_MITRE = {
-    "sqli":               "T1190 — Exploit Public-Facing Application",
-    "xss":                "T1059.007 — JavaScript",
-    "ssrf":               "T1090 — Proxy / T1210 Internal Discovery",
-    "idor":               "T1548 — Abuse Elevation Control Mechanism",
-    "default_credentials":"T1078 — Valid Accounts",
-    "ssti":               "T1059 — Command and Scripting Interpreter",
-    "ssl_weak":           "T1557 — Adversary-in-the-Middle",
-    "directory_listing":  "T1083 — File and Directory Discovery",
-    "sensitive_file":     "T1552 — Unsecured Credentials",
-    "exposed_database":   "T1210 — Exploitation of Remote Services",
-}
 
-# ─────────────────────────────────────────────────────────────────
-# HTML Template (single string, rendered by Jinja2)
-# ─────────────────────────────────────────────────────────────────
-
-HTML_TEMPLATE = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>HEAVEN Penetration Test Report — {{ client_name }}</title>
-<style>
-/* ── Page layout ── */
-@page {
-    size: A4;
-    margin: 2.2cm 2.0cm 2.5cm 2.0cm;
-    @bottom-center {
-        content: "CONFIDENTIAL — " string(doc-title);
-        font-family: 'Helvetica Neue', Arial, sans-serif;
-        font-size: 8pt;
-        color: #aaa;
-    }
-    @bottom-right {
-        content: "Page " counter(page) " of " counter(pages);
-        font-family: 'Helvetica Neue', Arial, sans-serif;
-        font-size: 8pt;
-        color: #aaa;
-    }
-}
-@page cover { margin: 0; }
-@page toc   { margin: 2.2cm 2.0cm 2.5cm 2.0cm; }
-
-/* ── Base ── */
-body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    font-size: 10pt;
-    color: #2c3e50;
-    line-height: 1.65;
-}
-h1,h2,h3,h4 { font-weight: 700; color: #1a252f; margin-top: 1.4em; margin-bottom: 0.4em; }
-h1 { font-size: 22pt; }
-h2 { font-size: 15pt; border-bottom: 2px solid #1a6bae; padding-bottom: 4px; }
-h3 { font-size: 12pt; }
-h4 { font-size: 10pt; color: #1a6bae; }
-p  { margin: 0.5em 0; }
-a  { color: #1a6bae; }
-code, pre { font-family: 'Courier New', monospace; font-size: 9pt; }
-pre {
-    background: #f4f6f8;
-    border: 1px solid #dce1e7;
-    border-radius: 4px;
-    padding: 10px 14px;
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
-}
-table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-th, td { border: 1px solid #dce1e7; padding: 8px 12px; text-align: left; vertical-align: top; }
-th { background: #f0f4f8; font-weight: 700; font-size: 9pt; }
-tr:nth-child(even) { background: #f9fbfc; }
-
-/* ── Cover ── */
-.cover {
-    page: cover;
-    height: 297mm;
-    display: flex;
-    flex-direction: column;
-    background: #0d1b2a;
-    color: #fff;
-    padding: 0;
-}
-.cover-header {
-    background: #1a6bae;
-    padding: 28px 40px 22px;
-}
-.cover-header .tool-name {
-    font-size: 42pt;
-    font-weight: 900;
-    letter-spacing: 8px;
-    color: #fff;
-    margin: 0;
-}
-.cover-header .tool-sub {
-    font-size: 11pt;
-    color: #d0e8ff;
-    margin: 4px 0 0;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-}
-.cover-body {
-    flex: 1;
-    padding: 50px 40px 40px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-}
-.cover-title {
-    font-size: 26pt;
-    font-weight: 800;
-    color: #d0e8ff;
-    margin: 0 0 8px;
-}
-.cover-subtitle {
-    font-size: 14pt;
-    color: #90b8e0;
-    margin: 0 0 40px;
-}
-.cover-meta table { border: none; width: auto; }
-.cover-meta td { border: none; padding: 5px 20px 5px 0; color: #c0d8f0; font-size: 10pt; }
-.cover-meta td:first-child { color: #7ab3d8; font-weight: 700; }
-.cover-classification {
-    display: inline-block;
-    background: #c0392b;
-    color: #fff;
-    font-weight: 900;
-    font-size: 11pt;
-    letter-spacing: 3px;
-    padding: 8px 20px;
-    border-radius: 4px;
-    margin-top: 30px;
-}
-.cover-footer {
-    background: #0a1520;
-    padding: 18px 40px;
-    color: #6090b8;
-    font-size: 9pt;
-}
-
-/* ── Severity badges ── */
-.sev { display:inline-block; padding:2px 10px; border-radius:12px; font-weight:700; font-size:9pt; }
-.sev-critical { background:#fdecea; color:#c0392b; }
-.sev-high     { background:#fef5e7; color:#e67e22; }
-.sev-medium   { background:#fefde7; color:#f39c12; }
-.sev-low      { background:#eafaf1; color:#27ae60; }
-.sev-info     { background:#eaf4fb; color:#2980b9; }
-
-/* ── Executive summary boxes ── */
-.metric-row { display:flex; gap:16px; margin:20px 0; }
-.metric-box {
-    flex:1; border:1px solid #dce1e7; border-radius:6px;
-    padding:16px 20px; text-align:center; background:#f9fbfc;
-}
-.metric-box .metric-num { font-size:28pt; font-weight:900; color:#1a6bae; }
-.metric-box .metric-lbl { font-size:9pt; color:#666; text-transform:uppercase; letter-spacing:1px; }
-.metric-box.crit .metric-num { color:#c0392b; }
-.metric-box.high .metric-num { color:#e67e22; }
-.metric-box.med  .metric-num { color:#f39c12; }
-.metric-box.low  .metric-num { color:#27ae60; }
-
-/* ── Risk summary table ── */
-.risk-table th { background:#1a6bae; color:#fff; }
-
-/* ── Finding card ── */
-.finding {
-    page-break-inside: avoid;
-    border:1px solid #dce1e7;
-    border-radius:6px;
-    margin:24px 0;
-    overflow:hidden;
-}
-.finding-header {
-    padding:12px 18px;
-    font-weight:700;
-    font-size:11pt;
-    display:flex;
-    align-items:center;
-    gap:12px;
-}
-.finding-body { padding:16px 18px; }
-.finding-row { display:flex; gap:16px; margin:10px 0; }
-.finding-label { font-weight:700; color:#555; min-width:130px; font-size:9pt; }
-.finding-value { flex:1; }
-
-/* ── CVSS bar ── */
-.cvss-bar-wrap { height:10px; background:#e8ecf0; border-radius:5px; margin-top:4px; }
-.cvss-bar { height:100%; border-radius:5px; }
-
-/* ── Page break controls ── */
-.page-break { page-break-after: always; }
-.no-break   { page-break-inside: avoid; }
-
-/* ── Appendix ── */
-.appendix-table th { background:#34495e; color:#fff; }
-</style>
-</head>
-<body>
-<string name="doc-title">{{ client_name }} — HEAVEN Pentest Report</string>
-
-<!-- ════════════════════════════════════════════════
-     COVER PAGE
-     ════════════════════════════════════════════════ -->
-<div class="cover">
-  <div class="cover-header">
-    <p class="tool-name">HEAVEN</p>
-    <p class="tool-sub">Autonomous Penetration Testing Platform</p>
-  </div>
-  <div class="cover-body">
-    <div>
-      <p class="cover-title">Penetration Test Report</p>
-      <p class="cover-subtitle">{{ engagement_type | default("Web Application &amp; Network Assessment") }}</p>
-      <div class="cover-meta">
-        <table>
-          <tr><td>Client</td><td>{{ client_name }}</td></tr>
-          <tr><td>Engagement ID</td><td>{{ engagement_id | default("N/A") }}</td></tr>
-          <tr><td>Report Date</td><td>{{ report_date }}</td></tr>
-          <tr><td>Scan Duration</td><td>{{ scan_duration | default("N/A") }}</td></tr>
-          <tr><td>Lead Tester</td><td>{{ tester_name | default("Nisarg Chasmawala (Shroff)") }}</td></tr>
-          <tr><td>Tool Version</td><td>HEAVEN v1.0</td></tr>
-        </table>
-      </div>
-      <div class="cover-classification">{{ classification | default("CONFIDENTIAL") }}</div>
-    </div>
-  </div>
-  <div class="cover-footer">
-    This document contains sensitive security findings. Distribution is restricted to authorised personnel only.
-    Developed by Nisarg Chasmawala (Shroff) — HEAVEN Penetration Testing Platform.
-  </div>
-</div>
-
-<div class="page-break"></div>
-
-<!-- ════════════════════════════════════════════════
-     TABLE OF CONTENTS
-     ════════════════════════════════════════════════ -->
-<h2>Table of Contents</h2>
-<table>
-  <tr><td>1. Executive Summary</td><td style="text-align:right">p. 3</td></tr>
-  <tr><td>2. Scope &amp; Methodology</td><td style="text-align:right">p. 4</td></tr>
-  <tr><td>3. Attack Surface Summary</td><td style="text-align:right">p. 5</td></tr>
-  <tr><td>4. Detailed Findings</td><td style="text-align:right">p. 6</td></tr>
-  <tr><td>5. Remediation Roadmap</td><td style="text-align:right">p. {{ roadmap_page | default("—") }}</td></tr>
-  <tr><td>6. Appendix A: Tools Used</td><td style="text-align:right">p. —</td></tr>
-  <tr><td>7. Appendix B: Vulnerability Classification</td><td style="text-align:right">p. —</td></tr>
-</table>
-
-<div class="page-break"></div>
-
-<!-- ════════════════════════════════════════════════
-     1. EXECUTIVE SUMMARY
-     ════════════════════════════════════════════════ -->
-<h2>1. Executive Summary</h2>
-<p>
-HEAVEN conducted an autonomous penetration test against <strong>{{ client_name }}</strong>
-{% if scope_count %}targeting <strong>{{ scope_count }}</strong> in-scope assets{% endif %}
-between <strong>{{ start_date | default(report_date) }}</strong> and
-<strong>{{ end_date | default(report_date) }}</strong>.
-The assessment identified <strong>{{ total_findings }}</strong> security vulnerabilities
-across the tested attack surface.
-</p>
-
-<div class="metric-row">
-  <div class="metric-box crit">
-    <div class="metric-num">{{ counts.critical | default(0) }}</div>
-    <div class="metric-lbl">Critical</div>
-  </div>
-  <div class="metric-box high">
-    <div class="metric-num">{{ counts.high | default(0) }}</div>
-    <div class="metric-lbl">High</div>
-  </div>
-  <div class="metric-box med">
-    <div class="metric-num">{{ counts.medium | default(0) }}</div>
-    <div class="metric-lbl">Medium</div>
-  </div>
-  <div class="metric-box low">
-    <div class="metric-num">{{ counts.low | default(0) }}</div>
-    <div class="metric-lbl">Low / Info</div>
-  </div>
-  <div class="metric-box">
-    <div class="metric-num" style="color:#555">{{ risk_score | default("N/A") }}</div>
-    <div class="metric-lbl">Overall Risk Score</div>
-  </div>
-</div>
-
-{% if counts.critical > 0 %}
-<p>
-<strong>⚠ Critical findings require immediate remediation.</strong>
-{{ counts.critical }} critical-severity issue(s) were identified that could allow an attacker to
-fully compromise targeted systems, exfiltrate sensitive data, or gain administrative access.
-These must be remediated within <strong>24 hours</strong>.
-</p>
-{% endif %}
-
-<h3>Risk Summary by Vulnerability Class</h3>
-<table class="risk-table">
-  <thead>
-    <tr>
-      <th>Vulnerability Type</th>
-      <th>Count</th>
-      <th>Highest Severity</th>
-      <th>Business Impact</th>
-      <th>SLA</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for row in risk_summary %}
-  <tr>
-    <td>{{ row.vuln_type }}</td>
-    <td>{{ row.count }}</td>
-    <td><span class="sev sev-{{ row.severity }}">{{ row.severity | upper }}</span></td>
-    <td>{{ row.impact }}</td>
-    <td>{{ row.sla }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-
-<div class="page-break"></div>
-
-<!-- ════════════════════════════════════════════════
-     2. SCOPE & METHODOLOGY
-     ════════════════════════════════════════════════ -->
-<h2>2. Scope &amp; Methodology</h2>
-
-<h3>2.1 Scope of Assessment</h3>
-{% if scope_items %}
-<table>
-  <thead><tr><th>Target</th><th>Type</th><th>Status</th></tr></thead>
-  <tbody>
-  {% for item in scope_items %}
-  <tr>
-    <td><code>{{ item.target }}</code></td>
-    <td>{{ item.type | default("URL") }}</td>
-    <td>{{ item.status | default("In Scope") }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p>Scope details not recorded in this engagement.</p>
-{% endif %}
-
-<h3>2.2 Testing Methodology</h3>
-<p>The assessment was conducted using the HEAVEN autonomous penetration testing framework, following a phased approach aligned with industry standards (OWASP Testing Guide v4.2, PTES, and NIST SP 800-115).</p>
-<table>
-  <thead><tr><th>Phase</th><th>Activities</th></tr></thead>
-  <tbody>
-    <tr><td>Reconnaissance</td><td>Network scanning (nmap), subdomain enumeration, DNS analysis, Shodan OSINT, web crawling, technology fingerprinting, certificate transparency log analysis</td></tr>
-    <tr><td>Vulnerability Discovery</td><td>Injection testing (SQLi — error/boolean/time-based, XSS), directory/file fuzzing, SSL/TLS audit, authentication analysis, zero-day discovery (SSTI, LDAP, NoSQL, prototype pollution)</td></tr>
-    <tr><td>Validation</td><td>All findings validated with PoC requests before reporting to eliminate false positives. SQLi candidates submitted to sqlmap for deep confirmation.</td></tr>
-    <tr><td>Exploitation</td><td>Controlled exploitation of confirmed critical/high findings to determine actual business impact (with explicit authorisation)</td></tr>
-    <tr><td>Reporting</td><td>Findings classified by CVSS v3.1, mapped to MITRE ATT&amp;CK, prioritised by exploitability and business impact</td></tr>
-  </tbody>
-</table>
-
-<div class="page-break"></div>
-
-<!-- ════════════════════════════════════════════════
-     3. ATTACK SURFACE SUMMARY
-     ════════════════════════════════════════════════ -->
-<h2>3. Attack Surface Summary</h2>
-{% if attack_surface %}
-<table>
-  <thead><tr><th>Component</th><th>Value</th></tr></thead>
-  <tbody>
-  {% for k, v in attack_surface.items() %}
-  <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% endif %}
-
-{% if attack_graph %}
-<h3>Attack Path Graph</h3>
-<pre>{{ attack_graph }}</pre>
-{% endif %}
-
-<div class="page-break"></div>
-
-<!-- ════════════════════════════════════════════════
-     4. DETAILED FINDINGS
-     ════════════════════════════════════════════════ -->
-<h2>4. Detailed Findings</h2>
-<p>Findings are ordered by severity (Critical → High → Medium → Low → Info).</p>
-
-{% for f in findings %}
-{% set sev = f.severity | lower | default("info") %}
-{% set meta = sev_meta[sev] %}
-<div class="finding">
-  <div class="finding-header" style="background:{{ meta.bg }}; border-bottom:3px solid {{ meta.color }};">
-    <span class="sev sev-{{ sev }}">{{ sev | upper }}</span>
-    <span>#{{ loop.index }} — {{ f.title | default(f.vuln_type) }}</span>
-  </div>
-  <div class="finding-body">
-
-    <div class="finding-row">
-      <span class="finding-label">Target</span>
-      <span class="finding-value"><code>{{ f.target }}</code></span>
-    </div>
-    <div class="finding-row">
-      <span class="finding-label">Vulnerability</span>
-      <span class="finding-value">{{ f.vuln_type | upper | replace("_"," ") }}</span>
-    </div>
-    {% if f.cwe %}
-    <div class="finding-row">
-      <span class="finding-label">CWE</span>
-      <span class="finding-value">{{ f.cwe }}</span>
-    </div>
-    {% endif %}
-    {% set cvss_vec = cvss_map.get(f.vuln_type, "") %}
-    {% if cvss_vec %}
-    <div class="finding-row">
-      <span class="finding-label">CVSS v3.1 Vector</span>
-      <span class="finding-value"><code>{{ cvss_vec }}</code></span>
-    </div>
-    {% endif %}
-    {% set mitre = mitre_map.get(f.vuln_type, "") %}
-    {% if mitre %}
-    <div class="finding-row">
-      <span class="finding-label">MITRE ATT&amp;CK</span>
-      <span class="finding-value">{{ mitre }}</span>
-    </div>
-    {% endif %}
-    <div class="finding-row">
-      <span class="finding-label">Confidence</span>
-      <span class="finding-value">{{ (f.confidence * 100) | int }}%</span>
-    </div>
-    <div class="finding-row">
-      <span class="finding-label">Remediation SLA</span>
-      <span class="finding-value" style="color:{{ meta.color }}; font-weight:700">{{ meta.sla }}</span>
-    </div>
-
-    {% if f.description %}
-    <h4>Description</h4>
-    <p>{{ f.description }}</p>
-    {% endif %}
-
-    {% if f.evidence %}
-    <h4>Evidence</h4>
-    <pre>{{ f.evidence | to_json }}</pre>
-    {% endif %}
-
-    {% if f.remediation %}
-    <h4>Remediation</h4>
-    <p>{{ f.remediation }}</p>
-    {% endif %}
-
-  </div>
-</div>
-{% else %}
-<p>No findings recorded in this engagement.</p>
-{% endfor %}
-
-<div class="page-break"></div>
-
-<!-- ════════════════════════════════════════════════
-     5. REMEDIATION ROADMAP
-     ════════════════════════════════════════════════ -->
-<h2>5. Remediation Roadmap</h2>
-<p>Prioritised by severity and exploitability. Complete critical items before moving to high.</p>
-<table>
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>Finding</th>
-      <th>Severity</th>
-      <th>Target</th>
-      <th>SLA</th>
-      <th>Effort</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for f in findings | sort(attribute='_sev_order') %}
-  {% set sev = f.severity | lower | default("info") %}
-  <tr>
-    <td>{{ loop.index }}</td>
-    <td>{{ f.title | default(f.vuln_type) }}</td>
-    <td><span class="sev sev-{{ sev }}">{{ sev | upper }}</span></td>
-    <td><code>{{ f.target | truncate(45) }}</code></td>
-    <td>{{ sev_meta[sev].sla }}</td>
-    <td>{{ f._effort | default("Medium") }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-
-<div class="page-break"></div>
-
-<!-- ════════════════════════════════════════════════
-     APPENDIX A: Tools
-     ════════════════════════════════════════════════ -->
-<h2>Appendix A: Tools Used</h2>
-<table class="appendix-table">
-  <thead><tr><th>Tool</th><th>Purpose</th><th>Version</th></tr></thead>
-  <tbody>
-    <tr><td>HEAVEN Framework</td><td>Autonomous penetration testing orchestration</td><td>v1.0</td></tr>
-    <tr><td>nmap</td><td>Network port scanning and service fingerprinting</td><td>7.x</td></tr>
-    <tr><td>Nuclei</td><td>Template-based vulnerability scanning</td><td>3.x</td></tr>
-    <tr><td>sqlmap</td><td>SQL injection detection and exploitation</td><td>1.x</td></tr>
-    <tr><td>Metasploit Framework</td><td>Exploitation and post-exploitation (if used)</td><td>6.x</td></tr>
-    <tr><td>Impacket</td><td>Active Directory and Kerberos attacks</td><td>0.11.x</td></tr>
-    <tr><td>Scapy</td><td>Custom packet crafting and network analysis</td><td>2.5.x</td></tr>
-    <tr><td>asyncssh</td><td>SSH credential testing</td><td>2.x</td></tr>
-    <tr><td>aiohttp</td><td>Async HTTP request engine</td><td>3.9.x</td></tr>
-  </tbody>
-</table>
-
-<!-- ════════════════════════════════════════════════
-     APPENDIX B: Vuln Classification Reference
-     ════════════════════════════════════════════════ -->
-<h2>Appendix B: Vulnerability Classification Reference</h2>
-<table class="appendix-table">
-  <thead><tr><th>Severity</th><th>CVSS v3.1 Score Range</th><th>Description</th><th>Required SLA</th></tr></thead>
-  <tbody>
-    <tr><td><span class="sev sev-critical">CRITICAL</span></td><td>9.0 – 10.0</td><td>Immediate full compromise possible without authentication. Data breach highly likely.</td><td>24 hours</td></tr>
-    <tr><td><span class="sev sev-high">HIGH</span></td><td>7.0 – 8.9</td><td>Significant compromise possible with minimal preconditions. High business impact.</td><td>7 days</td></tr>
-    <tr><td><span class="sev sev-medium">MEDIUM</span></td><td>4.0 – 6.9</td><td>Moderate impact; may require additional conditions or chaining.</td><td>30 days</td></tr>
-    <tr><td><span class="sev sev-low">LOW</span></td><td>0.1 – 3.9</td><td>Minor impact, limited exploitability. Defence-in-depth improvements.</td><td>90 days</td></tr>
-    <tr><td><span class="sev sev-info">INFO</span></td><td>0.0</td><td>Informational observations. No direct security impact.</td><td>Best effort</td></tr>
-  </tbody>
-</table>
-
-<p style="text-align:center; margin-top:60px; color:#aaa; font-size:9pt;">
-  End of Report — Generated by HEAVEN Penetration Testing Platform<br>
-  Developed by Nisarg Chasmawala (Shroff) — {{ report_date }}<br>
-  CONFIDENTIAL — For authorised recipients only
-</p>
-
-</body>
-</html>
-"""
+def _sev_of(f: dict) -> str:
+    s = (f.get("severity") or "info").lower()
+    return s if s in SEVERITY_META else "info"
 
 
-# ─────────────────────────────────────────────────────────────────
-# Data preparation helpers
-# ─────────────────────────────────────────────────────────────────
+def _esc(value: Any) -> str:
+    return _xml_escape("" if value is None else str(value))
 
-_SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-
-
-def _enrich_findings(findings: list[dict]) -> list[dict]:
-    """Add sort key, effort estimate, and template-required defaults to each finding."""
-    out = []
-    for f in findings:
-        f = dict(f)
-        sev = (f.get("severity") or "info").lower()
-        f["_sev_order"] = _SEV_ORDER.get(sev, 5)
-        # Effort heuristic
-        vtype = (f.get("vuln_type") or "").lower()
-        if vtype in ("xss", "open_redirect", "cors", "crlf"):
-            f["_effort"] = "Low"
-        elif vtype in ("sqli", "sqli_confirmed", "ssti", "ssrf"):
-            f["_effort"] = "Medium"
-        elif vtype in ("default_credentials", "exposed_database"):
-            f["_effort"] = "Low"
-        else:
-            f["_effort"] = "Medium"
-        # Ensure all keys accessed unconditionally in the HTML template are present
-        # so Jinja2 never returns Undefined (Undefined * 100 raises UndefinedError).
-        f.setdefault("confidence", 0.0)
-        f.setdefault("cwe", "")
-        f.setdefault("description", "")
-        f.setdefault("evidence", {})
-        f.setdefault("remediation", "")
-        out.append(f)
-    return sorted(out, key=lambda x: x["_sev_order"])
-
-
-def _build_risk_summary(findings: list[dict]) -> list[dict]:
-    from collections import defaultdict
-    by_type: dict[str, list] = defaultdict(list)
-    for f in findings:
-        by_type[f.get("vuln_type", "unknown")].append(f)
-
-    _impact = {
-        "sqli": "Data exfiltration, authentication bypass, full DB compromise",
-        "xss": "Session hijacking, credential theft, defacement",
-        "ssrf": "Internal network access, cloud metadata exposure",
-        "idor": "Unauthorized access to other users' data",
-        "default_credentials": "Full system compromise",
-        "ssti": "Remote code execution",
-        "ssl_weak": "Traffic decryption (MitM)",
-        "directory_listing": "Information disclosure",
-        "sensitive_file": "Credential / secret exposure",
-        "exposed_database": "Direct database access",
-    }
-
-    rows = []
-    for vtype, flist in sorted(by_type.items()):
-        sevs = [_SEV_ORDER.get((f.get("severity") or "info").lower(), 5) for f in flist]
-        best_sev = min(sevs)
-        best_sev_name = ["critical", "high", "medium", "low", "info"][best_sev]
-        rows.append({
-            "vuln_type": vtype.replace("_", " ").title(),
-            "count": len(flist),
-            "severity": best_sev_name,
-            "impact": _impact.get(vtype, "Security posture degradation"),
-            "sla": _SEV_META[best_sev_name]["sla"],
-        })
-    return sorted(rows, key=lambda r: _SEV_ORDER.get(r["severity"], 5))
-
-
-def _count_by_severity(findings: list[dict]) -> dict:
-    counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    for f in findings:
-        sev = (f.get("severity") or "info").lower()
-        counts[sev] = counts.get(sev, 0) + 1
-    return counts
-
-
-def _risk_score(counts: dict) -> str:
-    score = (
-        counts.get("critical", 0) * 10.0 +
-        counts.get("high", 0) * 7.0 +
-        counts.get("medium", 0) * 4.0 +
-        counts.get("low", 0) * 1.5
-    )
-    if score >= 30:
-        return f"CRITICAL ({score:.0f})"
-    if score >= 15:
-        return f"HIGH ({score:.0f})"
-    if score >= 5:
-        return f"MEDIUM ({score:.0f})"
-    return f"LOW ({score:.0f})"
-
-
-# ─────────────────────────────────────────────────────────────────
-# Report generator
-# ─────────────────────────────────────────────────────────────────
 
 class PDFReportGenerator:
-    """Generates professional PDF penetration test reports."""
+    """Generate professional PDF penetration-test reports via reportlab."""
 
     def __init__(self) -> None:
-        self._weasyprint = None
-        self._jinja2 = None
         try:
-            import weasyprint
-            import jinja2
-            self._weasyprint = weasyprint
-            self._jinja2 = jinja2
+            import reportlab  # noqa: F401
             self.available = True
         except ImportError:
             self.available = False
-            logger.warning("WeasyPrint or Jinja2 not installed — HTML fallback active")
+            logger.warning("reportlab not installed — PDF export will fall back to HTML "
+                           "(pip install reportlab)")
 
-    def _build_context(self, data: dict[str, Any]) -> dict:
-        findings_raw = data.get("findings") or data.get("vulnerabilities") or []
-        findings = _enrich_findings(findings_raw)
-        counts = _count_by_severity(findings)
-        now = datetime.datetime.now()
-
-        def to_json(obj):
-            try:
-                if isinstance(obj, dict):
-                    return json.dumps(obj, indent=2, default=str)
-                return str(obj)
-            except Exception:
-                return str(obj)
-
-        env = self._jinja2.Environment() if self._jinja2 else None
-        if env:
-            env.filters["to_json"] = to_json
-
-        return {
-            "client_name": data.get("client_name") or data.get("target") or "Unknown Client",
-            "engagement_id": data.get("scan_id") or data.get("engagement_id") or "—",
-            "engagement_type": data.get("engagement_type") or "Web Application & Network Assessment",
-            "report_date": now.strftime("%B %d, %Y"),
-            "start_date": data.get("start_date") or now.strftime("%B %d, %Y"),
-            "end_date": data.get("end_date") or now.strftime("%B %d, %Y"),
-            "scan_duration": data.get("scan_duration") or "—",
-            "tester_name": data.get("tester_name") or "Nisarg Chasmawala (Shroff)",
-            "classification": data.get("classification") or "CONFIDENTIAL",
-            "scope_items": data.get("scope_items") or [],
-            "scope_count": len(data.get("scope_items") or []),
-            "findings": findings,
-            "total_findings": len(findings),
-            "counts": counts,
-            "risk_score": _risk_score(counts),
-            "risk_summary": _build_risk_summary(findings),
-            "attack_surface": data.get("attack_surface") or {},
-            "attack_graph": data.get("attack_graph") or "",
-            "sev_meta": _SEV_META,
-            "cvss_map": _CVSS_VECTORS,
-            "mitre_map": _MITRE,
-        }
-
-    def _render_html(self, data: dict[str, Any]) -> str:
-        if self._jinja2 is None:
-            raise ImportError("jinja2 is required for HTML report rendering. pip install jinja2")
-        ctx = self._build_context(data)
-        env = self._jinja2.Environment(undefined=self._jinja2.Undefined)
-
-        def to_json(obj):
-            try:
-                return json.dumps(obj, indent=2, default=str)
-            except Exception:
-                return str(obj)
-
-        env.filters["to_json"] = to_json
-        template = env.from_string(HTML_TEMPLATE)
-        return template.render(**ctx)
+    # ── public API ──────────────────────────────────────────────────
 
     def generate(self, data: dict[str, Any], output_path: str) -> bool:
-        """
-        Render report and write to output_path.
-        Writes PDF if WeasyPrint is available; falls back to .html.
-        """
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        """Render the report to ``output_path`` (.pdf). Returns True on success.
 
-        if not (self._weasyprint and self._jinja2):
-            # HTML fallback
-            html_path = output_path.replace(".pdf", ".html") if output_path.endswith(".pdf") else output_path + ".html"
-            try:
-                import jinja2
-                self._jinja2 = jinja2
-                html = self._render_html(data)
-                with open(html_path, "w", encoding="utf-8") as fh:
-                    fh.write(html)
-                logger.info(f"HTML report written to {html_path} (install WeasyPrint for PDF)")
-                return True
-            except Exception as exc:
-                logger.error(f"Report generation failed: {exc}")
-                return False
-
+        Without reportlab, writes the professional HTML report to a sibling
+        ``.html`` file (same content, different container) and returns True.
+        """
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
+        if not self.available:
+            return self._html_fallback(data, output_path)
         try:
-            html = self._render_html(data)
-            self._weasyprint.HTML(string=html, base_url=".").write_pdf(output_path)
+            self._build_pdf(data, output_path)
             logger.info(f"PDF report written to {output_path}")
             return True
-        except Exception as exc:
-            logger.error(f"PDF generation failed: {exc}")
-            # Try HTML fallback
-            try:
-                html_path = output_path.replace(".pdf", ".html")
-                with open(html_path, "w", encoding="utf-8") as fh:
-                    fh.write(self._render_html(data))
-                logger.info(f"Fell back to HTML: {html_path}")
-                return True
-            except Exception:
-                return False
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"PDF generation failed ({exc}); falling back to HTML")
+            return self._html_fallback(data, output_path)
+
+    def _html_fallback(self, data: dict[str, Any], output_path: str) -> bool:
+        try:
+            from pathlib import Path
+            html_path = (output_path[:-4] + ".html") if output_path.endswith(".pdf") \
+                else output_path + ".html"
+            findings = self._findings(data)
+            html = ComplianceReportGenerator().generate_html_report(
+                findings, engagement_name=self._engagement(data))
+            Path(html_path).write_text(html, encoding="utf-8")
+            logger.info(f"HTML report written to {html_path} (install reportlab for PDF)")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Report generation failed: {exc}")
+            return False
+
+    # ── data prep (shared shape with the HTML report) ───────────────
+
+    @staticmethod
+    def _engagement(data: dict) -> str:
+        return (data.get("engagement") or data.get("client_name")
+                or data.get("target") or "HEAVEN Engagement")
+
+    @staticmethod
+    def _findings(data: dict) -> list[dict]:
+        from heaven.devsecops.vuln_kb import enrich_finding
+        raw = data.get("findings") or data.get("vulnerabilities") or []
+        enriched = [enrich_finding(dict(f)) for f in raw]
+        return sorted(enriched, key=lambda f: (_SEV_ORDER.get(_sev_of(f), 4),
+                                               -float(f.get("risk_score") or 0)))
+
+    # ── PDF construction ────────────────────────────────────────────
+
+    def _build_pdf(self, data: dict[str, Any], output_path: str) -> None:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas
+        from reportlab.platypus import (
+            PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+        )
+        from reportlab.platypus.tableofcontents import TableOfContents
+
+        eng = self._engagement(data)
+        findings = self._findings(data)
+        counts = {k: 0 for k in SEVERITY_META}
+        for f in findings:
+            counts[_sev_of(f)] += 1
+        overall = self._overall(counts)
+        scope = data.get("scope") or sorted({str(f.get("target")) for f in findings if f.get("target")})
+        now = datetime.datetime.now(datetime.UTC)
+        gen_date = now.strftime("%d %B %Y, %H:%M UTC")
+        version = str(data.get("version") or "1.0")
+
+        ink = colors.HexColor("#1a1f29")
+        muted = colors.HexColor("#5b6472")
+        line = colors.HexColor("#d7dde7")
+
+        ss = getSampleStyleSheet()
+        styles = {
+            "body": ParagraphStyle("body", parent=ss["BodyText"], fontName="Helvetica",
+                                   fontSize=9.5, leading=14, textColor=ink, spaceAfter=6),
+            "small": ParagraphStyle("small", parent=ss["BodyText"], fontName="Helvetica",
+                                    fontSize=8, leading=11, textColor=muted),
+            "h2": ParagraphStyle("h2", parent=ss["Heading2"], fontName="Helvetica-Bold",
+                                 fontSize=15, textColor=ink, spaceBefore=4, spaceAfter=10),
+            "h3": ParagraphStyle("h3", parent=ss["Heading3"], fontName="Helvetica-Bold",
+                                 fontSize=11, textColor=ink, spaceBefore=8, spaceAfter=4),
+            "label": ParagraphStyle("label", parent=ss["BodyText"], fontName="Helvetica-Bold",
+                                    fontSize=7.5, textColor=muted, spaceBefore=8, spaceAfter=2),
+            "cell": ParagraphStyle("cell", parent=ss["BodyText"], fontName="Helvetica",
+                                   fontSize=8.5, leading=12, textColor=ink),
+            "cellb": ParagraphStyle("cellb", parent=ss["BodyText"], fontName="Helvetica-Bold",
+                                    fontSize=8.5, leading=12, textColor=ink),
+            "th": ParagraphStyle("th", parent=ss["BodyText"], fontName="Helvetica-Bold",
+                                 fontSize=8.5, leading=12, textColor=colors.HexColor("#33405a")),
+            "pre": ParagraphStyle("pre", parent=ss["Code"], fontName="Courier",
+                                  fontSize=7.5, leading=10, textColor=colors.HexColor("#d6deeb"),
+                                  wordWrap="CJK"),
+        }
+        cw = A4[0] - 28 * mm  # content width
+
+        def heading(num: str, text: str) -> Paragraph:
+            p = Paragraph(f"{num}&nbsp;&nbsp;{_esc(text)}", styles["h2"])
+            p._toc_text = f"{num}  {text}"  # picked up by afterFlowable
+            return p
+
+        def pill(sev: str) -> Table:
+            m = SEVERITY_META[sev]
+            t = Table([[Paragraph(f'<font color="white"><b>{m["label"]}</b></font>',
+                                  styles["cell"])]], colWidths=[26 * mm], rowHeights=[6 * mm])
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(m["color"])),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+            ]))
+            return t
+
+        def table(rows, col_widths, header=True, zebra=True, font=8.5):
+            t = Table(rows, colWidths=col_widths, repeatRows=1 if header else 0)
+            cmds = [
+                ("GRID", (0, 0), (-1, -1), 0.5, line),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTSIZE", (0, 0), (-1, -1), font),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+            if header:
+                cmds += [("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f3f8")),
+                         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold")]
+            if zebra:
+                cmds.append(("ROWBACKGROUNDS", (0, 1 if header else 0), (-1, -1),
+                             [colors.white, colors.HexColor("#f7f9fc")]))
+            t.setStyle(TableStyle(cmds))
+            return t
+
+        story: list[Any] = []
+
+        # ── 1. Cover ──
+        story.append(Spacer(1, 22 * mm))
+        band = Table([[Paragraph('<font color="white"><b>HEAVEN</b></font>',
+                                 ParagraphStyle("brand", fontName="Helvetica-Bold",
+                                                fontSize=30, textColor=colors.white, leading=34))]],
+                     colWidths=[cw], rowHeights=[20 * mm])
+        band.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0d1b2a")),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                                  ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+        story.append(band)
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph("Autonomous Penetration-Testing Platform", styles["small"]))
+        story.append(Spacer(1, 18 * mm))
+        story.append(Paragraph("Penetration Test Report",
+                               ParagraphStyle("ctitle", fontName="Helvetica-Bold", fontSize=30,
+                                              textColor=ink, leading=34)))
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph(_esc(eng), ParagraphStyle("csub", fontName="Helvetica",
+                     fontSize=14, textColor=muted)))
+        story.append(Spacer(1, 10 * mm))
+        ocol = colors.HexColor(self._overall_color(overall))
+        badge = Table([[Paragraph(f'<font color="white"><b>Overall Risk: {_esc(overall)}</b></font>',
+                                  ParagraphStyle("badge", fontName="Helvetica-Bold", fontSize=13,
+                                                 textColor=colors.white, alignment=TA_CENTER))]],
+                      colWidths=[70 * mm], rowHeights=[11 * mm])
+        badge.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), ocol),
+                                   ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                   ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+        story.append(badge)
+        story.append(Spacer(1, 14 * mm))
+        meta = [
+            ["Findings", f"{len(findings)}  ({counts['critical']} critical, {counts['high']} high, "
+                         f"{counts['medium']} medium, {counts['low']} low)"],
+            ["Targets in scope", str(len(scope))],
+            ["Report date", gen_date],
+            ["Version", version],
+            ["Classification", "CONFIDENTIAL"],
+            ["Prepared by", "HEAVEN Autonomous Penetration-Testing Platform"],
+        ]
+        mt = Table([[Paragraph(k, styles["cellb"]), Paragraph(_esc(v), styles["cell"])]
+                    for k, v in meta], colWidths=[45 * mm, cw - 45 * mm])
+        mt.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
+        story.append(mt)
+        story.append(PageBreak())
+
+        # ── 2. Confidentiality ──
+        story.append(heading("", "Confidentiality Notice"))
+        note = Table([[Paragraph(
+            f"This document contains confidential and proprietary information about the security "
+            f"posture of <b>{_esc(eng)}</b>. It is intended solely for the named recipient and "
+            f"authorised stakeholders. It details vulnerabilities that could be exploited to "
+            f"compromise systems and data; unauthorised disclosure, copying, or distribution is "
+            f"strictly prohibited.", styles["body"])]], colWidths=[cw])
+        note.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff8e6")),
+                                  ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#f0d98c")),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                                  ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                                  ("TOPPADDING", (0, 0), (-1, -1), 10),
+                                  ("BOTTOMPADDING", (0, 0), (-1, -1), 10)]))
+        story.append(note)
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Distribute on a strict need-to-know basis and store per your "
+                               "organisation's data-classification policy.", styles["small"]))
+
+        # ── 3. Document control ──
+        story.append(Spacer(1, 8))
+        story.append(heading("", "Document Control"))
+        dc = [[Paragraph("Field", styles["th"]), Paragraph("Detail", styles["th"])]]
+        for k, v in [("Engagement", eng), ("Assessor", "HEAVEN Autonomous Penetration-Testing Platform"),
+                     ("Report version", version), ("Date generated", gen_date),
+                     ("Targets in scope", str(len(scope))), ("Total findings", str(len(findings))),
+                     ("Overall risk rating", overall), ("Classification", "CONFIDENTIAL")]:
+            dc.append([Paragraph(_esc(k), styles["cell"]), Paragraph(_esc(v), styles["cell"])])
+        story.append(table(dc, [50 * mm, cw - 50 * mm]))
+        story.append(Paragraph("Revision History", styles["h3"]))
+        rev = [[Paragraph(h, styles["th"]) for h in ("Version", "Date", "Author", "Description")],
+               [Paragraph(version, styles["cell"]), Paragraph(gen_date, styles["cell"]),
+                Paragraph("HEAVEN", styles["cell"]),
+                Paragraph("Automated assessment report generated from engagement findings.",
+                          styles["cell"])]]
+        story.append(table(rev, [22 * mm, 45 * mm, 25 * mm, cw - 92 * mm]))
+        story.append(PageBreak())
+
+        # ── 4. Table of Contents ──
+        story.append(Paragraph("Table of Contents", styles["h2"]))
+        toc = TableOfContents()
+        toc.levelStyles = [ParagraphStyle("toc1", fontName="Helvetica", fontSize=10,
+                                          leading=18, textColor=ink)]
+        story.append(toc)
+        story.append(PageBreak())
+
+        # ── 5. Executive Summary ──
+        story.append(heading("1.", "Executive Summary"))
+        story.append(Paragraph(self._posture(eng, counts, len(findings), overall, len(scope)),
+                               styles["body"]))
+        # KPI row
+        kpi_cells = []
+        for sev in ("critical", "high", "medium", "low", "info"):
+            m = SEVERITY_META[sev]
+            kpi_cells.append(Paragraph(
+                f'<para align="center"><font size="20" color="{m["color"]}"><b>{counts[sev]}</b>'
+                f'</font><br/><font size="7" color="#5b6472">{m["label"].upper()}</font></para>',
+                styles["cell"]))
+        kpit = Table([kpi_cells], colWidths=[cw / 5.0] * 5)
+        kpit.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, line),
+                                  ("INNERGRID", (0, 0), (-1, -1), 0.5, line),
+                                  ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                  ("TOPPADDING", (0, 0), (-1, -1), 10),
+                                  ("BOTTOMPADDING", (0, 0), (-1, -1), 10)]))
+        story.append(Spacer(1, 4))
+        story.append(kpit)
+        # Severity distribution bar
+        story.append(Paragraph("Severity Distribution", styles["h3"]))
+        story.append(self._sev_bar(findings, counts, cw, styles))
+        # Key findings
+        story.append(Paragraph("Key Findings", styles["h3"]))
+        kf = [[Paragraph("Severity", styles["th"]), Paragraph("Finding", styles["th"]),
+               Paragraph("Target", styles["th"])]]
+        for f in findings[:5]:
+            kf.append([pill(_sev_of(f)),
+                       Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
+                       Paragraph(_esc(f.get("target") or "—"), styles["small"])])
+        if len(kf) == 1:
+            kf.append([Paragraph("—", styles["cell"]), Paragraph("No findings.", styles["cell"]),
+                       Paragraph("", styles["cell"])])
+        story.append(table(kf, [30 * mm, cw - 90 * mm, 60 * mm]))
+        story.append(PageBreak())
+
+        # ── 6. Scope & Methodology ──
+        story.append(heading("2.", "Scope & Methodology"))
+        story.append(Paragraph("In-Scope Targets", styles["h3"]))
+        if scope:
+            srows = [[Paragraph("#", styles["th"]), Paragraph("Target", styles["th"])]]
+            for i, t in enumerate(scope, 1):
+                srows.append([Paragraph(str(i), styles["cell"]), Paragraph(_esc(t), styles["cell"])])
+            story.append(table(srows, [12 * mm, cw - 12 * mm]))
+        else:
+            story.append(Paragraph("No explicit scope recorded; findings list their own targets.",
+                                   styles["small"]))
+        story.append(Paragraph("Testing Approach", styles["h3"]))
+        story.append(Paragraph(
+            "Testing followed a structured methodology aligned with industry standards, progressing "
+            "through reconnaissance, enumeration, vulnerability identification, exploitation (where "
+            "safe and authorised), and impact analysis. Each finding was validated to reduce false "
+            "positives and rated using the CVSS-based scale in the next section.", styles["body"]))
+        story.append(Paragraph("Standards & Frameworks Referenced", styles["h3"]))
+        std = [[Paragraph("Framework", styles["th"]), Paragraph("Use", styles["th"])]]
+        for fw, use in [("OWASP Top 10 (2021)", "Web application risk categorisation"),
+                        ("PTES", "Penetration Testing Execution Standard phases"),
+                        ("NIST SP 800-115", "Technical assessment methodology"),
+                        ("MITRE ATT&CK", "Adversary technique mapping (where applicable)"),
+                        ("CVSS v3.1 / EPSS / CISA KEV",
+                         "Severity, exploit-likelihood & known-exploited enrichment")]:
+            std.append([Paragraph(_esc(fw), styles["cell"]), Paragraph(_esc(use), styles["cell"])])
+        story.append(table(std, [55 * mm, cw - 55 * mm]))
+        story.append(PageBreak())
+
+        # ── 7. Risk methodology ──
+        story.append(heading("3.", "Risk Rating Methodology"))
+        story.append(Paragraph(
+            "Each finding's severity derives from its CVSS v3.1 base score, adjusted for real-world "
+            "exploitability (EPSS) and presence on the CISA Known Exploited Vulnerabilities catalog. "
+            "Remediation SLAs are guidance and should be tailored to the organisation's risk appetite.",
+            styles["body"]))
+        rm = [[Paragraph("Severity", styles["th"]), Paragraph("CVSS range", styles["th"]),
+               Paragraph("Recommended remediation SLA", styles["th"])]]
+        for sev, m in SEVERITY_META.items():
+            rm.append([pill(sev), Paragraph(m["cvss"], styles["cell"]),
+                       Paragraph(m["sla"], styles["cell"])])
+        story.append(table(rm, [30 * mm, 40 * mm, cw - 70 * mm]))
+        story.append(PageBreak())
+
+        # ── 8. Findings summary ──
+        story.append(heading("4.", "Findings Summary"))
+        if findings:
+            fs = [[Paragraph(h, styles["th"]) for h in
+                   ("#", "Finding", "Severity", "CVSS", "Target", "Status")]]
+            for i, f in enumerate(findings, 1):
+                cvss = f.get("predicted_cvss_score") or f.get("typical_cvss") or "—"
+                fs.append([Paragraph(str(i), styles["cell"]),
+                           Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
+                           pill(_sev_of(f)), Paragraph(_esc(cvss), styles["small"]),
+                           Paragraph(_esc(f.get("target") or "—"), styles["small"]),
+                           Paragraph(_esc((f.get("status") or "open").title()), styles["small"])])
+            story.append(table(fs, [9 * mm, cw - 119 * mm, 26 * mm, 14 * mm, 50 * mm, 20 * mm]))
+        else:
+            story.append(Paragraph("No findings recorded.", styles["small"]))
+        story.append(PageBreak())
+
+        # ── 9. Detailed findings ──
+        story.append(heading("5.", "Detailed Findings"))
+        if not findings:
+            story.append(Paragraph("No findings recorded.", styles["small"]))
+        for i, f in enumerate(findings, 1):
+            story.extend(self._finding_block(i, f, cw, styles, pill))
+        story.append(PageBreak())
+
+        # ── 10. OWASP coverage ──
+        story.append(heading("6.", "OWASP Top 10 (2021) Coverage"))
+        story.append(self._owasp_table(findings, cw, styles, table))
+        story.append(PageBreak())
+
+        # ── 11. Roadmap ──
+        story.append(heading("7.", "Remediation Roadmap"))
+        story.append(Paragraph("Recommended remediation order, prioritised by severity. Address "
+                               "higher-severity items first; SLAs are guidance.", styles["body"]))
+        actionable = [f for f in findings if _sev_of(f) in ("critical", "high", "medium")] or findings[:10]
+        if actionable:
+            rr = [[Paragraph(h, styles["th"]) for h in
+                   ("#", "Severity", "Finding", "Recommended action", "SLA")]]
+            for i, f in enumerate(actionable[:25], 1):
+                ev = f.get("evidence") or {}
+                action = str(ev.get("remediation") or f.get("remediation")
+                             or "Review and remediate per finding detail.")
+                if len(action) > 160:
+                    action = action[:160] + "…"
+                rr.append([Paragraph(str(i), styles["cell"]), pill(_sev_of(f)),
+                           Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
+                           Paragraph(_esc(action), styles["small"]),
+                           Paragraph(SEVERITY_META[_sev_of(f)]["sla"], styles["small"])])
+            story.append(table(rr, [8 * mm, 24 * mm, 48 * mm, cw - 110 * mm, 30 * mm]))
+        story.append(PageBreak())
+
+        # ── 12. Appendix ──
+        story.append(heading("8.", "Appendix"))
+        story.append(Paragraph("Tooling", styles["h3"]))
+        story.append(Paragraph(
+            "Assessment performed with the HEAVEN Autonomous Penetration-Testing Platform, which "
+            "orchestrates reconnaissance, vulnerability scanning, NVD/EPSS/KEV enrichment, and "
+            "ML-assisted risk scoring.", styles["body"]))
+        story.append(Paragraph("Glossary", styles["h3"]))
+        gloss = [["CVSS", "Common Vulnerability Scoring System — a 0–10 severity score."],
+                 ["EPSS", "Exploit Prediction Scoring System — probability a vuln will be exploited."],
+                 ["CISA KEV", "Catalog of vulnerabilities known to be actively exploited."],
+                 ["CWE", "Common Weakness Enumeration — category of the underlying weakness."],
+                 ["OWASP Top 10", "The ten most critical web application security risks."]]
+        gt = [[Paragraph(t, styles["cellb"]), Paragraph(d, styles["cell"])] for t, d in gloss]
+        story.append(table(gt, [32 * mm, cw - 32 * mm], header=False))
+        story.append(Paragraph("Disclaimer", styles["h3"]))
+        story.append(Paragraph(
+            "This assessment reflects the security posture observed at the time of testing within the "
+            "agreed scope. It does not guarantee the absence of other vulnerabilities. Re-testing is "
+            "recommended after remediation and following significant environment changes.", styles["small"]))
+
+        # ── Build (two-pass for the ToC) with footer canvas ──
+        title_str = f"CONFIDENTIAL — HEAVEN Penetration Test Report — {eng}"
+
+        class _NumberedCanvas(canvas.Canvas):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self._saved: list[dict] = []
+
+            def showPage(self):
+                self._saved.append(dict(self.__dict__))
+                self._startPage()
+
+            def save(self):
+                total = len(self._saved)
+                for st in self._saved:
+                    self.__dict__.update(st)
+                    if self._pageNumber > 1:  # skip cover
+                        self.setFont("Helvetica", 7)
+                        self.setFillColor(colors.HexColor("#9aa3b2"))
+                        self.drawString(14 * mm, 10 * mm, title_str[:90])
+                        self.drawRightString(A4[0] - 14 * mm, 10 * mm,
+                                             f"Page {self._pageNumber} of {total}")
+                    super().showPage()
+                super().save()
+
+        class _Doc(SimpleDocTemplate):
+            def afterFlowable(self, flowable):
+                toc_text = getattr(flowable, "_toc_text", None)
+                if toc_text:
+                    self.notify("TOCEntry", (0, toc_text, self.page))
+
+        doc = _Doc(output_path, pagesize=A4, topMargin=16 * mm, bottomMargin=18 * mm,
+                   leftMargin=14 * mm, rightMargin=14 * mm, title=f"Penetration Test Report — {eng}",
+                   author="HEAVEN")
+        doc.multiBuild(story, canvasmaker=_NumberedCanvas)
+
+    # ── section helpers ─────────────────────────────────────────────
+
+    @staticmethod
+    def _overall(counts: dict[str, int]) -> str:
+        for sev in ("critical", "high", "medium", "low"):
+            if counts.get(sev):
+                return SEVERITY_META[sev]["label"]
+        return "Informational"
+
+    @staticmethod
+    def _overall_color(overall: str) -> str:
+        for m in SEVERITY_META.values():
+            if m["label"] == overall:
+                return m["color"]
+        return "#1f6feb"
+
+    @staticmethod
+    def _posture(eng, counts, total, overall, scope_n) -> str:
+        crit, high = counts["critical"], counts["high"]
+        if crit or high:
+            tail = (f"The assessment identified <b>{crit} critical</b> and <b>{high} high</b>-severity "
+                    "issues that require prompt remediation; exploitation could lead to unauthorised "
+                    "access, data exposure, or full system compromise.")
+        elif counts["medium"]:
+            tail = ("No critical or high-severity issues were identified. The medium-severity findings "
+                    "should be remediated to reduce residual risk.")
+        else:
+            tail = ("No significant vulnerabilities were identified; the environment demonstrated a "
+                    "strong security posture.")
+        return (f"This report presents the results of a penetration test of <b>{_esc(eng)}</b>, "
+                f"covering <b>{scope_n}</b> in-scope target(s). A total of <b>{total}</b> finding(s) "
+                f"were identified, yielding an overall risk rating of <b>{_esc(overall)}</b>. {tail}")
+
+    @staticmethod
+    def _sev_bar(findings, counts, cw, styles):
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+        total = len(findings) or 1
+        cells, widths, cmds = [], [], []
+        col = 0
+        for sev, m in SEVERITY_META.items():
+            n = counts[sev]
+            if not n:
+                continue
+            widths.append(max(cw * (n / total), 10))
+            cells.append(Paragraph(f'<font color="white" size="7"><b>{n}</b></font>', styles["cell"]))
+            cmds.append(("BACKGROUND", (col, 0), (col, 0), colors.HexColor(m["color"])))
+            col += 1
+        if not cells:
+            return Spacer(1, 1)
+        t = Table([cells], colWidths=widths, rowHeights=[7 * mm])
+        cmds += [("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                 ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]
+        t.setStyle(TableStyle(cmds))
+        return t
+
+    def _finding_block(self, idx, f, cw, styles, pill) -> list:
+        """Return the flowables for one finding. The header+metadata are kept
+        together; the (possibly long) narrative/evidence is allowed to flow."""
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
+        from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
+        line = colors.HexColor("#d7dde7")
+        sev = _sev_of(f)
+        m = SEVERITY_META[sev]
+        ev = f.get("evidence") or {}
+        title = f.get("title") or f.get("vuln_type") or "Finding"
+        cvss = f.get("predicted_cvss_score") or f.get("typical_cvss") or "—"
+        owasp = f.get("owasp") or _OWASP._owasp_for(f.get("vuln_type", "")) or "—"
+
+        hdr = Table([[Paragraph(f'<font color="white" size="10"><b>{m["label"]} &nbsp; '
+                                f'#{idx} &nbsp; {_esc(title)}</b></font>', styles["cell"])]],
+                    colWidths=[cw], rowHeights=[8 * mm])
+        hdr.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(m["color"])),
+                                 ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+
+        meta_pairs = [
+            ("Target", f.get("target") or "—"), ("Severity", m["label"]),
+            ("CVSS (predicted)", cvss),
+            ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),
+            ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
+            ("CWE", f.get("cwe") or "—"), ("OWASP", owasp), ("CVE", f.get("cve_id") or "—"),
+            ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
+            ("CVSS vector", _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), "—")),
+            ("Status", (f.get("status") or "open").title()),
+        ]
+        mt = Table([[Paragraph(_esc(k), styles["cellb"]), Paragraph(_esc(v), styles["cell"])]
+                    for k, v in meta_pairs], colWidths=[38 * mm, cw - 38 * mm])
+        mt.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, line),
+                                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#fafbfd")),
+                                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+
+        out: list = [KeepTogether([hdr, Spacer(1, 3), mt])]
+
+        def section(label, text):
+            if text:
+                out.append(Paragraph(label, styles["label"]))
+                out.append(Paragraph(_esc(text), styles["body"]))
+
+        section("DESCRIPTION", ev.get("description") or f.get("description"))
+        section("IMPACT", ev.get("impact"))
+
+        for key, label in (("payload", "PAYLOAD"), ("request", "HTTP REQUEST"),
+                           ("response", "HTTP RESPONSE"), ("curl", "REPRODUCTION (CURL)"),
+                           ("proof", "PROOF"), ("poc", "PROOF OF CONCEPT")):
+            val = ev.get(key)
+            if not val:
+                continue
+            snippet = str(val)
+            if len(snippet) > 2500:
+                snippet = snippet[:2500] + "\n… (truncated)"
+            # Paragraph with wordWrap=CJK (set on the 'pre' style) wraps long
+            # unbroken tokens safely; <br/> preserves line breaks.
+            pre = Paragraph(_esc(snippet).replace("\n", "<br/>"), styles["pre"])
+            box = Table([[pre]], colWidths=[cw])
+            box.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0d1117")),
+                                     ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                                     ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                                     ("TOPPADDING", (0, 0), (-1, -1), 6),
+                                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+            out.append(Paragraph(label, styles["label"]))
+            out.append(box)
+
+        section("REMEDIATION", ev.get("remediation") or f.get("remediation"))
+
+        refs = ev.get("references") or f.get("references") or []
+        if refs:
+            out.append(Paragraph("REFERENCES", styles["label"]))
+            for r in refs:
+                out.append(Paragraph(f'• <link href="{_esc(r)}"><font color="#1f6feb">{_esc(r)}'
+                                     f'</font></link>', styles["small"]))
+        section("ASSESSOR NOTES", f.get("operator_notes"))
+        out.append(Spacer(1, 12))
+        return out
+
+    def _owasp_table(self, findings, cw, styles, table):
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph
+        coverage: dict[str, dict] = {}
+        for f in findings:
+            vt = (f.get("vuln_type") or "").lower()
+            for key, (cid, cn) in _OWASP.OWASP_MAP.items():
+                if key in vt:
+                    coverage.setdefault(cid, {"name": cn, "n": 0})
+                    coverage[cid]["n"] += 1
+        rows = [[Paragraph(h, styles["th"]) for h in ("Control", "Category", "Status", "Findings")]]
+        seen = set()
+        for _k, (cid, cn) in _OWASP.OWASP_MAP.items():
+            if cid in seen:
+                continue
+            seen.add(cid)
+            hit = cid in coverage
+            n = coverage.get(cid, {}).get("n", 0)
+            status = "Findings present" if hit else "No findings"
+            color = "#b00020" if hit else "#1a7f37"
+            rows.append([Paragraph(cid, styles["cell"]), Paragraph(_esc(cn), styles["cell"]),
+                         Paragraph(f'<font color="{color}"><b>{status}</b></font>', styles["cell"]),
+                         Paragraph(str(n), styles["cell"])])
+        return table(rows, [28 * mm, cw - 86 * mm, 38 * mm, 20 * mm])
 
 
-def generate_report(
-    data: dict[str, Any],
-    output_path: str,
-    client_name: Optional[str] = None,
-) -> bool:
-    """Convenience wrapper."""
+def generate_report(data: dict[str, Any], output_path: str,
+                    client_name: Optional[str] = None) -> bool:
+    """Convenience wrapper used by the CLI."""
     if client_name:
-        data = {**data, "client_name": client_name}
+        data = {**data, "engagement": client_name}
     return PDFReportGenerator().generate(data, output_path)

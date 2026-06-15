@@ -91,8 +91,9 @@ step "Step 4/9 — Installing HEAVEN..."
 ok "HEAVEN core installed (editable mode)"
 
 # Optional feature packs, attempted INDEPENDENTLY so one extra that needs system
-# libraries (weasyprint, impacket, …) can't abort the whole install. Every
-# feature degrades gracefully when its extra is absent.
+# libraries (impacket, python-nmap, …) can't abort the whole install. Every
+# feature degrades gracefully when its extra is absent. (PDF reporting uses
+# reportlab — pure Python — so the `reports` extra installs without system libs.)
 #   • Set HEAVEN_CORE_ONLY=1 for the leanest footprint (skip all extras).
 #   • LLM SDKs stay opt-in — add a key later in the web UI → Settings.
 if [ "${HEAVEN_CORE_ONLY:-0}" = "1" ]; then

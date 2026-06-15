@@ -161,6 +161,28 @@ export async function downloadReport(format, opts = {}) {
   return filename;
 }
 
+// Open the professional HTML report in a new browser tab (respects auth by
+// fetching with the bearer token, then opening a blob URL). The report has a
+// built-in "Print / Save as PDF" button for a one-click PDF.
+export async function previewReport(opts = {}) {
+  const q = new URLSearchParams({ format: "html" });
+  if (opts.engagement) q.append("engagement", opts.engagement);
+  const r = await fetch(`${API_BASE}/report/export?${q.toString()}`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+  });
+  if (!r.ok) {
+    let detail;
+    try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(detail || `Preview failed (${r.status})`);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  if (!w) throw new Error("Popup blocked — allow popups to preview the report");
+  return true;
+}
+
 export async function logout() {
   if (authToken) {
     try {
@@ -271,6 +293,7 @@ export const Settings = {
   update: (settings) =>
     api("/settings", { method: "POST", body: JSON.stringify({ settings }) }),
   testLlm: () => api("/settings/test-llm", { method: "POST" }),
+  testNvd: () => api("/settings/test-nvd", { method: "POST" }),
 };
 
 // ── New API surface (publication-gap features) ──

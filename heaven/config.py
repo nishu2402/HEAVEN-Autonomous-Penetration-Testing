@@ -187,7 +187,7 @@ class ADConfig:
 @dataclass
 class MITREConfig:
     """MITRE ATT&CK integration configuration."""
-    taxii_url: str = "https://cti-taxii.mitre.org"
+    taxii_url: str = "https://attack-taxii.mitre.org"  # cti-taxii retired by MITRE in 2022
     cache_ttl_hours: int = 24
     offline_mode: bool = False
     navigator_export: bool = True

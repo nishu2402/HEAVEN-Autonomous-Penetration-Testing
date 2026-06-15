@@ -222,7 +222,7 @@ isn't installed):
 ```bash
 pip install -e .                  # core: CLI, API, web UI, scanning, SQLite, auth
 pip install -e ".[recon]"         # dnspython / nmap / whois / shodan passive recon
-pip install -e ".[reports]"       # PDF/HTML report rendering (jinja2, weasyprint…)
+pip install -e ".[reports]"       # PDF report rendering (reportlab — pure Python)
 pip install -e ".[lateral]"       # SSH/SMB/AD lateral movement (impacket, asyncssh…)
 pip install -e ".[mitre]"         # MITRE ATT&CK / STIX enrichment
 pip install -e ".[llm]"           # all three LLM SDKs (or [gemini]/[anthropic]/[openai])

@@ -9,6 +9,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — professional penetration-test report
+
+- **Rebuilt the HTML report into a client-ready deliverable.** It now opens with
+  a cover page (classification, engagement, overall-risk badge), then a
+  confidentiality notice, document control + revision history, table of contents,
+  executive summary (narrative + severity distribution bar + KPI tiles + key
+  findings), scope & methodology (in-scope targets + standards: OWASP/PTES/NIST/
+  MITRE/CVSS), a risk-rating methodology table with remediation SLAs, a findings
+  summary table, detailed findings (per-finding metadata, description, impact,
+  evidence/PoC, remediation, references), OWASP Top 10 coverage, a prioritised
+  remediation roadmap, and an appendix (tooling, glossary, disclaimer).
+- **Print-ready.** Light, A4-friendly layout with `@page`/print CSS, page breaks
+  between sections, and a built-in **Print / Save as PDF** button — so the HTML
+  doubles as a polished PDF with one click (`heaven/devsecops/compliance_report.py`).
+- **One-click download + in-browser preview** on the web Reports page: a primary
+  "Download report (HTML)", a "Preview in browser" (opens the deliverable in a new
+  tab), and a direct "Download PDF". Other formats (Markdown/CSV/JSON/SARIF/Burp/
+  Proxy-JSONL) remain as secondary data exports.
+
+### Fixed
+- **Report no longer breaks on scan-controlled content.** All finding fields
+  (titles, targets, payloads, evidence) are HTML-escaped, so a payload like
+  `<script>…</script>` renders as text instead of injecting markup into the
+  deliverable.
+- **PDF export was mis-wired and could download an empty file.** The API gated
+  PDF export on `reportlab` but the generator actually used WeasyPrint, so with
+  reportlab-but-not-WeasyPrint installed the API served a 0-byte `.pdf`. The PDF
+  generator was rebuilt on **reportlab** (pure Python — no system libraries), so
+  the API check and the generator now agree (`heaven/devsecops/pdf_report.py`).
+
+### Changed — professional PDF report (reportlab)
+- The PDF is now a full client deliverable matching the HTML report
+  section-for-section: cover page, confidentiality notice, document control +
+  revision history, a **real table of contents with page numbers**, executive
+  summary (narrative + severity KPIs + distribution bar + key findings), scope &
+  methodology, risk-rating methodology with SLAs, findings summary, detailed
+  findings (metadata, description, impact, evidence/PoC, remediation, references),
+  OWASP Top 10 coverage, remediation roadmap, and appendix — with a
+  "CONFIDENTIAL … Page X of Y" footer on every page.
+- The PDF and HTML reports now **share** the severity palette, OWASP mapping and
+  knowledge-base enrichment, so a finding looks identical in both, and all text is
+  escaped (long unbroken payloads wrap instead of overflowing the page).
+- **Dependency reduced:** dropped WeasyPrint (which needs Pango/Cairo system
+  libraries) from the `reports` extra and `requirements.txt`. PDF export now needs
+  only `reportlab`; the HTML report needs nothing extra.
+
+### Fixed — NVD CVE enrichment now returns real results
+
+- **NVD lookups returned nothing.** The client queried NVD's `cpeName`
+  parameter, which requires an *exact* CPE 2.3 name with a concrete version and
+  answers **HTTP 404** for the wildcard-version CPEs HEAVEN generates from banner
+  fingerprints — so CVE enrichment silently found zero results. Switched to
+  `virtualMatchString`, which accepts partial/wildcard CPEs and applies NVD's own
+  version-range matching (e.g. OpenSSH wildcard: 0 → 50 CVEs; Apache 2.4.49: real
+  hits). Results are now sorted KEV-first, then by CVSS (`heaven/vulnscan/nvd_client.py`).
+- **nmap CPEs were rejected.** nmap emits CPE 2.2 (`cpe:/a:…`); NVD only
+  understands 2.3. Added `_normalize_cpe()` to convert 2.2 → 2.3 before querying.
+- **An invalid API key looked like "no vulns."** NVD returns 404 (not 401/403)
+  for a rejected `apiKey`, so a typo'd key silently produced empty scans. The
+  client now warns once when a 404 occurs with a key set, and a new
+  **connectivity test** distinguishes *key valid* / *key rejected* / *no key
+  (slow tier)*: **Settings → Recon enrichment → Test NVD connection** (web),
+  `heaven config test-nvd` (CLI, supports `--json`), and `POST
+  /api/settings/test-nvd` (API).
+
+### Fixed — other external-integration bugs (same class as the NVD one)
+
+- **`heaven update` never refreshed ExploitDB.** It looked up a
+  `refresh_csv_mirror` that didn't exist and fell back to the lazy cache loader,
+  which returns early when the file is already present — so on any existing
+  install the ExploitDB refresh was a silent no-op. Added a real
+  `refresh_csv_mirror()` that force-re-downloads the GitLab CSV mirror (~47k
+  exploit rows) and reports the new row count (`heaven/vulnscan/exploitdb_client.py`).
+- **MITRE ATT&CK TAXII pointed at a retired server.** `cti-taxii.mitre.org` was
+  shut down by MITRE in 2022 (every fetch timed out, then fell back to an empty
+  dataset). Updated to the current `attack-taxii.mitre.org` TAXII 2.1 service
+  (`/api/v21`) and the current Enterprise ATT&CK collection id
+  (`heaven/mitre/taxii_client.py`, `MITREConfig.taxii_url` default).
+- Verified-correct (no change needed): EPSS, CISA KEV, Shodan, the LLM gateway
+  (Anthropic/OpenAI/Gemini), Jira v3 + Linear ticketing, and Slack / Splunk HEC /
+  Elastic alerting all use correct endpoints, auth, and payload formats.
+
 ## [1.0.0] — 2026-06-09
 
 ### Added — onboarding & user-friendliness pass

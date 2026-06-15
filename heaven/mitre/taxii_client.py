@@ -1,7 +1,10 @@
 """
 HEAVEN — MITRE ATT&CK TAXII 2.1 Client
-Live connection to cti-taxii.mitre.org for latest threat intelligence.
+Live connection to attack-taxii.mitre.org for latest threat intelligence.
 STIX 2.1 object parsing with local caching and offline fallback.
+
+Note: MITRE retired the old cti-taxii.mitre.org server (Dec 2022). The current
+ATT&CK TAXII 2.1 service is attack-taxii.mitre.org with API root /api/v21.
 """
 
 from __future__ import annotations
@@ -22,10 +25,10 @@ try:
 except ImportError:
     HAS_HTTPX = False
 
-# MITRE ATT&CK TAXII 2.1 endpoints
-TAXII_SERVER = "https://cti-taxii.mitre.org"
-TAXII_API_ROOT = f"{TAXII_SERVER}/stix/api/v21"
-ENTERPRISE_COLLECTION_ID = "95ecc380-afe9-11e4-9b6c-751b66dd541e"
+# MITRE ATT&CK TAXII 2.1 endpoints (attack-taxii.mitre.org; cti-taxii retired 2022)
+TAXII_SERVER = "https://attack-taxii.mitre.org"
+TAXII_API_ROOT = f"{TAXII_SERVER}/api/v21"
+ENTERPRISE_COLLECTION_ID = "x-mitre-collection--1f5f1533-f617-4ca8-9ab4-6a02367fa019"
 
 # STIX object type filters
 ATTACK_PATTERN = "attack-pattern"

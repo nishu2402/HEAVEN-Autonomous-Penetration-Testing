@@ -573,8 +573,16 @@ def scan(
         try:
             if output == "pdf":
                 from heaven.devsecops.pdf_report import PDFReportGenerator
-                if PDFReportGenerator().generate(summary, output_file):
-                    _print(f"  PDF report written to: {output_file}")
+                gen = PDFReportGenerator()
+                if gen.generate(summary, output_file):
+                    if gen.available:
+                        _print(f"  PDF report written to: {output_file}")
+                    else:
+                        html_path = (output_file[:-4] + ".html"
+                                     if output_file.endswith(".pdf") else output_file + ".html")
+                        _print(f"  [yellow]reportlab not installed — wrote HTML report instead:"
+                               f"[/yellow] {html_path}")
+                        _print("  [dim]For PDF: pip install reportlab  (then re-run)[/dim]")
                 else:
                     _print("  [red]Failed to generate PDF report.[/red]")
             elif output == "sarif":

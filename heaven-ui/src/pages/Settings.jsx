@@ -19,6 +19,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [llm, setLlm] = useState(null);          // test-llm result
   const [testing, setTesting] = useState(false);
+  const [nvd, setNvd] = useState(null);          // test-nvd result
+  const [testingNvd, setTestingNvd] = useState(false);
   const toast = useToast();
 
   function load() {
@@ -61,6 +63,18 @@ export default function Settings() {
       setLlm({ available: false, reason: e.message });
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function testNvd() {
+    setTestingNvd(true);
+    setNvd(null);
+    try {
+      setNvd(await SettingsApi.testNvd());
+    } catch (e) {
+      setNvd({ ok: false, reason: e.message });
+    } finally {
+      setTestingNvd(false);
     }
   }
 
@@ -204,6 +218,26 @@ export default function Settings() {
                   {llm.model ? ` (${llm.model})` : ""} — {llm.reason}
                 </span>
               ) : null}
+            </div>
+          ) : null}
+
+          {/* NVD connectivity / key test lives in the Recon group */}
+          {group.name === "Recon enrichment" ? (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              <button type="button" onClick={testNvd} disabled={testingNvd} style={smallBtn}>
+                {testingNvd ? "Testing…" : "Test NVD connection"}
+              </button>
+              {nvd ? (
+                <span style={{ marginLeft: 10, fontSize: 12,
+                               color: nvd.ok ? "var(--ok, #46d39a)" : "var(--crit)" }}>
+                  {nvd.ok ? "✓" : "✗"} {nvd.reason}
+                  {nvd.sample_results != null ? ` (${nvd.sample_results} sample CVEs)` : ""}
+                </span>
+              ) : (
+                <span className="dim" style={{ marginLeft: 10, fontSize: 11 }}>
+                  Confirms CVE enrichment will return real results — and whether your key is valid.
+                </span>
+              )}
             </div>
           ) : null}
         </div>

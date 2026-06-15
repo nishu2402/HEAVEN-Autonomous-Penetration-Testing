@@ -13,7 +13,10 @@ def test_compliance_report_owasp():
     html = gen.generate_html_report(findings, engagement_name="test")
     assert "A03:2021" in html
     assert "SQL Injection" in html
-    assert "CRITICAL" in html
+    assert "Critical" in html                       # severity label in the new pro report
+    assert "Executive Summary" in html              # professional report structure
+    assert "Remediation Roadmap" in html
+    assert "window.print()" in html                 # one-click Print/Save-as-PDF
     assert len(html) > 1000
 
 

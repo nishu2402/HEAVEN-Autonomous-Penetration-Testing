@@ -102,9 +102,11 @@ leanest footprint, run the installer with `HEAVEN_CORE_ONLY=1`.
 
 ### PDF reports fail with a missing-dependency error.
 
-PDF rendering needs the `reports` extra (`reportlab` / `weasyprint`, which need
-system libraries): `pip install -e ".[reports]"`. All other report formats
-(HTML, Markdown, CSV, JSON, SARIF, Burp XML, proxy-JSONL) work without it.
+PDF rendering needs `reportlab` (pure Python, no system libraries):
+`pip install reportlab` or `pip install -e ".[reports]"`. Tip: the **HTML report
+needs no extra packages** — open it and use your browser's *Print → Save as PDF*
+for the same professional layout. All other formats (HTML, Markdown, CSV, JSON,
+SARIF, Burp XML, proxy-JSONL) work without any extra dependency.
 
 ### `heaven: command not found` after install.
 

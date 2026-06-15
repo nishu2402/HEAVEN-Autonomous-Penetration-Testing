@@ -64,4 +64,6 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+*.enc
+vault.enc
 *.sarif

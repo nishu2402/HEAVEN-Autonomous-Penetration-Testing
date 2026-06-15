@@ -69,6 +69,49 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, 'SF Mono', monospace;
 }
 
+/* ── Light theme (opt-in via the Header toggle: <html data-theme="light">) ──
+   Overrides only the surface/border/text/glass tokens; brand + severity accents
+   stay (they read fine on light). Everything else flows through the same vars. */
+:root[data-theme="light"] {
+  --bg-0:  #F4F6FB;
+  --bg-1:  #FFFFFF;
+  --bg-2:  #FFFFFF;
+  --bg-3:  #EEF1F8;
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-strong: rgba(255, 255, 255, 0.92);
+
+  --border:        rgba(15, 23, 42, 0.12);
+  --border-strong: rgba(15, 23, 42, 0.22);
+
+  --text-0: #0F172A;
+  --text-1: #475569;
+  --text-2: #64748B;
+  --text-3: #94A3B8;
+
+  --brand-dk: #0E9F6E;
+  --accent:   #4F46E5;
+
+  --shadow-sm:  0 1px 2px rgba(15,23,42,0.08);
+  --shadow-md:  0 4px 16px rgba(15,23,42,0.10);
+  --shadow-lg:  0 12px 40px rgba(15,23,42,0.14);
+  --glow:  0 0 0 1px rgba(79,70,229,0.18), 0 8px 30px rgba(15,23,42,0.12);
+}
+/* Tone the aurora way down in light mode so text stays readable */
+:root[data-theme="light"] body::before { opacity: 0.4; }
+/* The sidebar + active nav item are hardcoded dark; flip them in light mode so
+   the (now dark) token-coloured nav labels stay readable. */
+:root[data-theme="light"] .sidebar {
+  background: linear-gradient(180deg, #FFFFFF, #EEF1F8);
+  border-right: 1px solid var(--border);
+}
+:root[data-theme="light"] .nav-item:hover { background: rgba(15,23,42,0.05); }
+:root[data-theme="light"] .nav-item.active {
+  color: var(--accent);
+  background: rgba(79,70,229,0.10);
+  box-shadow: inset 0 0 0 1px rgba(79,70,229,0.30);
+}
+:root[data-theme="light"] .sidebar-status { color: var(--text-2); }
+
 /* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
@@ -823,4 +866,55 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
 
 @media (prefers-reduced-motion: reduce) {
   .scan-running-dot { animation: none; }
+}
+
+/* ── HelpTip: inline "?" with a hover/focus explanation ─────────────── */
+.helptip { position: relative; display: inline-flex; align-items: center; cursor: help; outline: none; vertical-align: middle; }
+.helptip-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 1px solid var(--border-strong); color: var(--text-2);
+  font-size: 9.5px; font-weight: 700; line-height: 1; margin-left: 5px;
+  transition: color .12s ease, border-color .12s ease;
+}
+.helptip:hover .helptip-icon, .helptip:focus .helptip-icon { color: var(--text-0); border-color: var(--brand); }
+.helptip-bubble {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 260px; padding: 8px 11px;
+  background: var(--bg-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); color: var(--text-1);
+  font-size: 11.5px; line-height: 1.55; font-weight: 400;
+  text-transform: none; letter-spacing: normal; text-align: left; white-space: normal;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45); z-index: 60;
+  opacity: 0; visibility: hidden; transition: opacity .12s ease; pointer-events: none;
+}
+.helptip:hover .helptip-bubble, .helptip:focus .helptip-bubble { opacity: 1; visibility: visible; }
+
+/* ── Header controls: theme toggle + mobile hamburger ───────────────── */
+.theme-toggle, .nav-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: var(--radius-md);
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-1); font-size: 15px; cursor: pointer;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.theme-toggle:hover, .nav-toggle:hover { color: var(--text-0); border-color: var(--border-strong); background: var(--bg-3); }
+.nav-toggle { display: none; margin-right: 4px; }   /* shown only on mobile */
+.nav-backdrop { display: none; }
+
+/* ── Responsive: off-canvas sidebar on narrow screens ───────────────── */
+@media (max-width: 860px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 248px; z-index: 1000;
+    transform: translateX(-100%); transition: transform .22s ease;
+  }
+  .app-shell.nav-open .sidebar { transform: none; box-shadow: var(--shadow-lg); }
+  .app-shell.nav-open .nav-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 999;
+    background: rgba(0,0,0,0.5);
+  }
+  .nav-toggle { display: inline-flex; }
+  .header { padding-left: 12px; padding-right: 12px; }
+  .header-clock { display: none; }   /* save space on small screens */
 }

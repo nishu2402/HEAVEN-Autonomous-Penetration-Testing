@@ -32,6 +32,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   json | jq …`) for scripting/CI.
 - **Docs** — `docs/FAQ.md` (troubleshooting), `pipx install heaven-pentest` and
   `docker run` one-liners, and a "See it in 60 seconds" quickstart in the README.
+- **One-click demo scan** — a "Run demo scan" button (Scans page) and
+  `POST /api/demo/scan` animate the full loop (recon → crawl → injection →
+  reporting) with live progress, then land the sample findings — so a new user
+  experiences a real-feeling scan without a target or authorization.
+- **Global `--json`** — a root flag that emits machine-readable JSON from the
+  data commands (`findings`, `doctor`, `config list`, `demo`); implies `--quiet`
+  so stdout is clean for `jq`/CI.
+- **In-app help tooltips** — a reusable `HelpTip` (?) explains CVSS / EPSS /
+  severity / confidence / risk score / kill-chain phases inline on the Dashboard
+  and Kill Chain pages.
+- **Light theme + mobile nav** — a header toggle switches light/dark (persisted
+  to `localStorage`, applied before first paint), and the sidebar collapses to an
+  off-canvas hamburger menu on narrow screens.
+- **`heaven quickstart`** — one command takes a fresh clone to a populated
+  dashboard: ensures `.env` (generating a strong admin password if missing),
+  loads sample data, and prints the next step (`--serve` launches the UI too).
+- **"Fix this first"** — a Dashboard card + `GET /api/engagement/top-findings`
+  rank findings by risk score and show a one-line remediation for each, so the
+  highest-impact next action is obvious; click through to the detail.
+- **Guided scan launcher** — the Scans launcher now validates targets live
+  (URL / IP / CIDR / host) with a valid/invalid count, disables Launch until
+  there's a valid target, shows the engagement's current scope size, and adds
+  inline help on Stealth + the authorization gate.
+- **Executive summary** on the "Fix this first" card ("N critical · M high
+  across K targets · top risk …").
+- **Animated demo** — `docs/assets/demo.svg`, a lightweight terminal cast
+  (`quickstart` → `serve` → dashboard) embedded at the top of the README's
+  "See it in 60 seconds".
+
+### Added — guided product tour
+
+- A short, skippable **in-app tour** (`heaven-ui/src/components/Tour.jsx`) orients
+  a first-time operator across Dashboard → Scans → Findings/Reports → Settings →
+  System Health, ending with a one-click **Load sample data**. Auto-opens once
+  per browser and is re-launchable anytime from the command palette
+  ("Take the tour"). Token-styled, so it renders in light and dark.
+
+### Fixed
+
+- **Light theme: the sidebar was unreadable.** `.sidebar` and `.nav-item.active`
+  were hardcoded dark (dark gradient + white active text) while nav labels use
+  theme tokens that turn dark in light mode — i.e. dark-on-dark. Added light-mode
+  overrides so the sidebar surface and active item flip correctly.
+- **`--help` / `--version` printed a spurious error and exited non-zero.** The
+  new friendly-error wrapper swallowed `click.exceptions.Exit` (raised by
+  `--help`, `--version` and any `ctx.exit(0)`), tacking on a "✗ Exit: 0" notice
+  and exiting 1. It now passes those through untouched. Regression test added.
+- **Demo `risk_score` was on a 0–10 scale** while real findings use 0–100
+  (`risk_model` caps at 100). Demo findings now use the same 0–100 scale so the
+  dashboard / "Fix this first" numbers read consistently for sample and real data.
 
 ### Added — in-app API-key management (web UI + CLI, one source of truth)
 

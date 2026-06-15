@@ -51,6 +51,7 @@ const CATALOGUE = [
     nav: "/methodology" },
 
   // --- Help
+  { group: "Help", icon: "🧭", label: "Take the tour", tour: true },
   { group: "Help", icon: "?", label: "Keyboard shortcuts",
     hint: "?",  showShortcuts: true },
   { group: "Help", icon: "📚", label: "Quick start guide",
@@ -135,6 +136,10 @@ export function CommandPalette() {
 
   function activate(item) {
     close();
+    if (item.tour) {
+      window.dispatchEvent(new CustomEvent("heaven:start-tour"));
+      return;
+    }
     if (item.reload) {
       window.location.reload();
       return;

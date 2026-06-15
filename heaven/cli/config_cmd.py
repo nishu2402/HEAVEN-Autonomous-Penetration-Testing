@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import click
 
-from heaven.cli._helpers import _print
+from heaven.cli._helpers import _print, emit_json, json_output
 from heaven.settings_catalog import (
     SETTINGS,
     apply_settings,
@@ -34,6 +34,9 @@ def config_grp() -> None:
 def list_cmd() -> None:
     """Show every configurable key, grouped, with whether it's set."""
     status = catalog_status()
+    if json_output():
+        emit_json(status)
+        return
     _print(f"[dim]Source of truth: {status['env_path']}[/dim]\n")
     for group in status["groups"]:
         _print(f"[bold cyan]{group['name']}[/bold cyan]")

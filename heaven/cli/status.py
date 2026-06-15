@@ -33,6 +33,9 @@ from heaven.cli._helpers import (
 
 def _run_status(engagement: Optional[str], fmt: str) -> None:
     """Shared implementation behind `heaven doctor` and the `sys-status` alias."""
+    from heaven.cli._helpers import json_output
+    if json_output():
+        fmt = "json"
     report = _collect_status(engagement)
     if fmt == "json":
         print(json.dumps(report, indent=2, default=str))

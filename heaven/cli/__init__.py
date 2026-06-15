@@ -73,8 +73,10 @@ if HAS_CLICK:
             import os as _os
             try:
                 return super().invoke(ctx)
-            except (click.exceptions.ClickException, click.exceptions.Abort,
-                    KeyboardInterrupt, SystemExit):
+            except (click.exceptions.ClickException, click.exceptions.Exit,
+                    click.exceptions.Abort, KeyboardInterrupt, SystemExit):
+                # click.exceptions.Exit is raised by --help / --version / ctx.exit()
+                # (including exit code 0) — these are normal control flow, not errors.
                 raise
             except Exception as e:  # noqa: BLE001
                 debug = bool(ctx.params.get("debug")) or \
@@ -92,11 +94,13 @@ if HAS_CLICK:
     @click.version_option(version=__version__, prog_name="HEAVEN")
     @click.option("--debug", is_flag=True, help="Enable debug logging")
     @click.option("--quiet", "-q", is_flag=True,
-                  help="Suppress informational log output (clean output for scripts/CI). "
-                       "Combine with a command's --format json for machine-readable results.")
+                  help="Suppress informational log output (clean output for scripts/CI).")
+    @click.option("--json", "json_out", is_flag=True,
+                  help="Emit machine-readable JSON where supported (findings, doctor, "
+                       "config, coverage, demo). Implies --quiet.")
     @click.option("--config-file", type=click.Path(), help="Path to .env config file")
     @click.pass_context
-    def cli(ctx: click.Context, debug: bool, quiet: bool,
+    def cli(ctx: click.Context, debug: bool, quiet: bool, json_out: bool,
             config_file: Optional[str]) -> None:
         """HEAVEN — Automated Vulnerability Scanner & Risk Triage Platform"""
         # Always load environment from a .env file, so the flow
@@ -124,6 +128,12 @@ if HAS_CLICK:
                 logger.warning("python-dotenv not installed — .env file ignored")
         reload_config()
 
+        # --json implies --quiet so log lines never pollute the JSON on stdout.
+        from heaven.cli._helpers import set_json_output
+        set_json_output(json_out)
+        if json_out:
+            quiet = True
+
         cfg = get_config()
         if debug:
             cfg.debug = True
@@ -145,9 +155,9 @@ if HAS_CLICK:
     from heaven.cli import (
         audit, autonomous, completion, config_cmd, coverage, db, demo as demo_module,
         diff, engage, exploitdb, findings, info, init as init_module, knowledge,
-        lateral, methodology, mitre, replay, sast, scan, server,
-        status as status_module, tickets, train, update as update_module,
-        use as use_module, watch,
+        lateral, methodology, mitre, quickstart as quickstart_module, replay,
+        sast, scan, server, status as status_module, tickets, train,
+        update as update_module, use as use_module, watch,
     )
     audit.register(cli)
     autonomous.register(cli)
@@ -166,6 +176,7 @@ if HAS_CLICK:
     lateral.register(cli)
     methodology.register(cli)
     mitre.register(cli)
+    quickstart_module.register(cli)
     replay.register(cli)
     sast.register(cli)
     scan.register(cli)

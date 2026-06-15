@@ -2,14 +2,24 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Engagement, SIEM, Scans, getUser, logout } from "../api";
 
-export default function Header() {
+export default function Header({ onMenu }) {
   const [eng, setEng] = useState(null);
   const [siem, setSiem] = useState(null);
   const [running, setRunning] = useState(0);
   const [clock, setClock] = useState(new Date().toLocaleTimeString());
+  const [light, setLight] = useState(
+    () => document.documentElement.dataset.theme === "light"
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const user = getUser();
+
+  function toggleTheme() {
+    const next = !light;
+    setLight(next);
+    document.documentElement.dataset.theme = next ? "light" : "dark";
+    try { localStorage.setItem("heaven.theme", next ? "light" : "dark"); } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     Engagement.summary().then(setEng).catch(() => {});
@@ -46,6 +56,14 @@ export default function Header() {
   return (
     <header className="header">
       <div className="header-left">
+        <button
+          type="button"
+          className="nav-toggle"
+          onClick={onMenu}
+          aria-label="Toggle navigation menu"
+        >
+          ☰
+        </button>
         {hasEngagement ? (
           <div className="eng-chip">
             <span className="eng-label">Engagement</span>
@@ -91,6 +109,15 @@ export default function Header() {
             SIEM {siem.siem_backends_active.length ? "✓" : "—"}
           </span>
         )}
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={toggleTheme}
+          title={light ? "Switch to dark theme" : "Switch to light theme"}
+          aria-label={light ? "Switch to dark theme" : "Switch to light theme"}
+        >
+          {light ? "☾" : "☀"}
+        </button>
         <span className="header-clock">{clock}</span>
         {user && (
           <span

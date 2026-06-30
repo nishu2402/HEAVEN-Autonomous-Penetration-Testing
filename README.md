@@ -732,7 +732,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<img src="https://img.shields.io/github/stars/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social" alt="Stars"/>
-<img src="https://img.shields.io/github/forks/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social" alt="Forks"/>
-<img src="https://img.shields.io/github/watchers/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social" alt="Watchers"/>
+<img src="https://img.shields.io/github/stars/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Stars"/>
+<img src="https://img.shields.io/github/forks/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Forks"/>
+<img src="https://img.shields.io/github/watchers/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Watchers"/>
 </p>

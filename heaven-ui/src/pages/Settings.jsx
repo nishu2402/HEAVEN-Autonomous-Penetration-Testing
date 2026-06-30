@@ -6,7 +6,7 @@
 // exact same keys `heaven config` and `heaven init` manage. Secrets are never
 // sent back to the browser in full; we only show a masked preview + "is it set".
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Settings as SettingsApi } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
@@ -21,6 +21,7 @@ export default function Settings() {
   const [testing, setTesting] = useState(false);
   const [nvd, setNvd] = useState(null);          // test-nvd result
   const [testingNvd, setTestingNvd] = useState(false);
+  const nvdAutoTested = useRef(false);           // run the auto-check at most once
   const toast = useToast();
 
   function load() {
@@ -29,6 +30,29 @@ export default function Settings() {
   useEffect(load, []);
 
   const dirtyKeys = useMemo(() => Object.keys(draft), [draft]);
+
+  // Is an NVD API key actually configured? (used to proactively validate it)
+  const nvdKeySet = useMemo(() => {
+    if (!status) return false;
+    for (const g of status.groups) {
+      for (const s of g.settings) {
+        if (s.key === "NVD_API_KEY") return !!s.is_set;
+      }
+    }
+    return false;
+  }, [status]);
+
+  // A configured-but-invalid NVD key fails *silently* (NVD answers 404, which looks
+  // identical to "no vulnerabilities"). So if a key is set, validate it on load and
+  // surface the result without making the user know to click "Test".
+  useEffect(() => {
+    if (nvdKeySet && !nvdAutoTested.current) {
+      nvdAutoTested.current = true;
+      testNvd();
+    }
+  }, [nvdKeySet]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const nvdKeyInvalid = !!(nvd && nvd.has_key && !nvd.ok);
 
   function setVal(key, value) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -105,6 +129,34 @@ export default function Settings() {
           preview. Source of truth: <code>{status.env_path}</code>
         </p>
       </div>
+
+      {/* Prominent, proactive warning — a bad NVD key fails silently (404 looks like
+          "no CVEs"), so we hoist it to the top where it can't be missed. */}
+      {nvdKeyInvalid ? (
+        <div className="card" style={{
+          marginTop: 12, borderColor: "var(--crit)",
+          background: "color-mix(in srgb, var(--crit) 10%, transparent)",
+          display: "flex", gap: 12, alignItems: "flex-start",
+        }}>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>⚠️</span>
+          <div style={{ display: "grid", gap: 4 }}>
+            <strong style={{ color: "var(--crit)", fontSize: 14 }}>
+              Your NVD API key appears invalid
+            </strong>
+            <span className="dim" style={{ fontSize: 12, lineHeight: 1.6 }}>
+              NVD answered <code>HTTP {nvd.status_code || "404"}</code> for this key, which it
+              returns for a malformed or rejected key. Because that looks identical to
+              “no vulnerabilities found,” CVE enrichment is <strong style={{ color: "var(--text-0)" }}>
+              silently degraded</strong> — scans may under-report. Replace it below with a valid
+              key, or clear it (NVD still works without a key, just rate-limited).{" "}
+              <a href="https://nvd.nist.gov/developers/request-an-api-key" target="_blank"
+                 rel="noopener noreferrer" style={{ color: "var(--brand)" }}>
+                Request a new key →
+              </a>
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {status.groups.map((group) => (
         <div className="card" key={group.name} style={{ marginTop: 12 }}>
@@ -227,11 +279,19 @@ export default function Settings() {
               <button type="button" onClick={testNvd} disabled={testingNvd} style={smallBtn}>
                 {testingNvd ? "Testing…" : "Test NVD connection"}
               </button>
-              {nvd ? (
+              {testingNvd && !nvd ? (
+                <span className="dim" style={{ marginLeft: 10, fontSize: 12 }}>
+                  Checking NVD{nvdKeySet ? " key" : ""}…
+                </span>
+              ) : nvd ? (
                 <span style={{ marginLeft: 10, fontSize: 12,
                                color: nvd.ok ? "var(--ok, #46d39a)" : "var(--crit)" }}>
                   {nvd.ok ? "✓" : "✗"} {nvd.reason}
                   {nvd.sample_results != null ? ` (${nvd.sample_results} sample CVEs)` : ""}
+                  {nvd.ok && nvd.rate_limit_s != null ? (
+                    <span className="dim"> · {nvd.rate_limit_s}s between requests
+                      {nvd.has_key ? "" : " — add a key to go ~10× faster"}</span>
+                  ) : null}
                 </span>
               ) : (
                 <span className="dim" style={{ marginLeft: 10, fontSize: 11 }}>

@@ -45,9 +45,13 @@ export default function Reports() {
       .catch((e) => setError(e.message));
   }, []);
 
+  // Export the *active* engagement — the same store this page's summary was
+  // loaded from. We deliberately do NOT pass the engagement's display name as a
+  // selector: the server resolves a name to a DB file, and a display name that
+  // differs from the DB stem (e.g. set via `heaven init`) would point at a
+  // different, empty store — which produced the "No findings to report" error.
   function engOpts() {
-    const eng = summary?.engagement?.name;
-    return eng ? { engagement: eng } : {};
+    return {};
   }
 
   async function pick(fmt) {

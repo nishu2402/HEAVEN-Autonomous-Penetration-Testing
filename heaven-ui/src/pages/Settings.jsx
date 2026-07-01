@@ -7,7 +7,7 @@
 // sent back to the browser in full; we only show a masked preview + "is it set".
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Settings as SettingsApi } from "../api";
+import { Settings as SettingsApi, changePassword, getUser } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 
@@ -22,7 +22,29 @@ export default function Settings() {
   const [nvd, setNvd] = useState(null);          // test-nvd result
   const [testingNvd, setTestingNvd] = useState(false);
   const nvdAutoTested = useRef(false);           // run the auto-check at most once
+  // Voluntary password change (distinct from the forced-change-on-first-login flow)
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNext, setPwNext] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
   const toast = useToast();
+  const account = getUser();
+
+  async function submitPasswordChange(e) {
+    e.preventDefault();
+    if (pwNext.length < 8) { toast.error("New password must be at least 8 characters"); return; }
+    if (pwNext !== pwConfirm) { toast.error("New passwords do not match"); return; }
+    setPwBusy(true);
+    try {
+      await changePassword(pwCurrent, pwNext);
+      setPwCurrent(""); setPwNext(""); setPwConfirm("");
+      toast.success("Password changed");
+    } catch (err) {
+      toast.error(err.message || "Password change failed");
+    } finally {
+      setPwBusy(false);
+    }
+  }
 
   function load() {
     SettingsApi.get().then(setStatus).catch((e) => setError(e.message));
@@ -128,6 +150,51 @@ export default function Settings() {
           Secrets are stored encrypted-at-rest server-side and only ever shown here as a masked
           preview. Source of truth: <code>{status.env_path}</code>
         </p>
+      </div>
+
+      {/* Account — change the signed-in operator's password anytime (not just on
+          the forced first-login change). */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div style={{
+          fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase",
+          color: "var(--text-2)", fontWeight: 600, marginBottom: 12,
+        }}>
+          Account{account ? ` · ${account.username}` : ""}
+        </div>
+        <form onSubmit={submitPasswordChange} style={{ display: "grid", gap: 10, maxWidth: 420 }}>
+          <input type="text" name="username" autoComplete="username"
+                 value={account?.username || ""} readOnly hidden />
+          <div style={{ display: "grid", gap: 4 }}>
+            <label htmlFor="pw-current" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-0)" }}>
+              Current password
+            </label>
+            <input id="pw-current" type="password" autoComplete="current-password"
+                   value={pwCurrent} onChange={(e) => setPwCurrent(e.target.value)}
+                   style={{ ...inputStyle, fontFamily: "var(--font-mono, monospace)" }} />
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <label htmlFor="pw-next" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-0)" }}>
+              New password <span className="dim" style={{ fontWeight: 400 }}>(min 8 characters)</span>
+            </label>
+            <input id="pw-next" type="password" autoComplete="new-password"
+                   value={pwNext} onChange={(e) => setPwNext(e.target.value)}
+                   style={{ ...inputStyle, fontFamily: "var(--font-mono, monospace)" }} />
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <label htmlFor="pw-confirm" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-0)" }}>
+              Confirm new password
+            </label>
+            <input id="pw-confirm" type="password" autoComplete="new-password"
+                   value={pwConfirm} onChange={(e) => setPwConfirm(e.target.value)}
+                   style={{ ...inputStyle, fontFamily: "var(--font-mono, monospace)" }} />
+          </div>
+          <button type="submit"
+                  disabled={pwBusy || !pwCurrent || !pwNext || !pwConfirm}
+                  style={{ ...primaryBtn, justifySelf: "start",
+                           opacity: (pwBusy || !pwCurrent || !pwNext || !pwConfirm) ? 0.5 : 1 }}>
+            {pwBusy ? "Changing…" : "Change password"}
+          </button>
+        </form>
       </div>
 
       {/* Prominent, proactive warning — a bad NVD key fails silently (404 looks like

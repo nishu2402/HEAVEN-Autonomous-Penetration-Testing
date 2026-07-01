@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Scans as ScansApi, Replay, Demo, Engagement } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import HelpTip from "../components/HelpTip.jsx";
+
+const SEV_COLOR = {
+  critical: "var(--crit)", high: "#ff8a3d", medium: "#ffd24d",
+  low: "var(--cyan)", info: "var(--text-2)",
+};
 
 // Live target validation — classify each entry so the operator gets instant
 // feedback instead of a server-side rejection after clicking Launch.
@@ -27,7 +33,10 @@ export default function Scans() {
   const [scans, setScans]   = useState(null);
   const [error, setError]   = useState(null);
   const [selected, setSelected] = useState(null);
+  const [details, setDetails]   = useState({});   // scanId -> {loading, findings, error}
+  const [deleting, setDeleting] = useState({});    // scanId -> bool
   const [refreshing, setRefreshing] = useState(false);
+  const navigate = useNavigate();
 
   // Launcher form
   const [targets, setTargets]   = useState("");
@@ -122,6 +131,39 @@ export default function Scans() {
       setLaunchError(err.message || "Launch failed");
     } finally {
       setLaunching(false);
+    }
+  }
+
+  // Expand a scan row to show the findings it produced (fetched on demand).
+  function toggleScan(id) {
+    const opening = selected !== id;
+    setSelected(opening ? id : null);
+    if (opening && !details[id]) {
+      setDetails((d) => ({ ...d, [id]: { loading: true } }));
+      ScansApi.findings(id)
+        .then((r) => setDetails((d) => ({ ...d, [id]: { loading: false, findings: r.findings || [] } })))
+        .catch((e) => setDetails((d) => ({ ...d, [id]: { loading: false, error: e.message } })));
+    }
+  }
+
+  // Cancel a running scan, or permanently remove a finished one.
+  async function removeScan(id, status) {
+    const running = status === "running" || status === "pending";
+    const msg = running
+      ? "Cancel this running scan?"
+      : "Remove this scan and its findings permanently? This cannot be undone.";
+    if (!window.confirm(msg)) return;
+    setDeleting((d) => ({ ...d, [id]: true }));
+    try {
+      const r = await ScansApi.remove(id);
+      toast.success(r.status === "cancelled" ? "Scan cancelled" : "Scan removed");
+      if (selected === id) setSelected(null);
+      setDetails((d) => { const n = { ...d }; delete n[id]; return n; });
+      load();
+    } catch (e) {
+      toast.error("Could not remove scan", e.message);
+    } finally {
+      setDeleting((d) => { const n = { ...d }; delete n[id]; return n; });
     }
   }
 
@@ -344,10 +386,15 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                   const id = s.scan_id || s.id || `scan-${i}`;
                   const progress = s.progress_pct ?? null;
                   const isActive = selected === id;
+                  const det = details[id];
                   return (
-                    <tr key={id} onClick={() => setSelected(isActive ? null : id)}
+                    <React.Fragment key={id}>
+                    <tr onClick={() => toggleScan(id)}
                         style={{ cursor: "pointer", background: isActive ? "var(--border)" : "" }}>
                       <td>
+                        <span style={{ color: "var(--text-2)", marginRight: 4 }}>
+                          {isActive ? "▾" : "▸"}
+                        </span>
                         <code style={{ fontSize: 11 }}>{id.slice(0, 8)}</code>
                       </td>
                       <td>{s.mode || s.config?.scan_type || "full"}</td>
@@ -392,32 +439,55 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
                         }
                       </td>
                       <td>
-                        {(s.status === "completed" || s.status === "failed") && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {(s.status === "completed" || s.status === "failed") && (
+                            <button
+                              className="btn-small"
+                              title="Re-execute this scan with the stored seed (Gap 8: reproducibility)"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const r = await Replay.scan(id, {});
+                                  toast.success(
+                                    "Replay started",
+                                    `New scan ${String(r.new_scan_id || "").slice(0, 8)}` +
+                                    (r.seed != null
+                                      ? ` · seed ${r.seed} (deterministic)`
+                                      : " · no seed stored (non-deterministic)")
+                                  );
+                                  load();
+                                } catch (err) {
+                                  toast.error("Replay failed", err.message);
+                                }
+                              }}
+                            >
+                              ↻ Replay
+                            </button>
+                          )}
                           <button
                             className="btn-small"
-                            title="Re-execute this scan with the stored seed (Gap 8: reproducibility)"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              try {
-                                const r = await Replay.scan(id, {});
-                                toast.success(
-                                  "Replay started",
-                                  `New scan ${String(r.new_scan_id || "").slice(0, 8)}` +
-                                  (r.seed != null
-                                    ? ` · seed ${r.seed} (deterministic)`
-                                    : " · no seed stored (non-deterministic)")
-                                );
-                                load();
-                              } catch (err) {
-                                toast.error("Replay failed", err.message);
-                              }
-                            }}
+                            disabled={!!deleting[id]}
+                            title={s.status === "running" || s.status === "pending"
+                              ? "Cancel this running scan"
+                              : "Remove this scan and its findings"}
+                            style={{ borderColor: "var(--crit)", color: "var(--crit)" }}
+                            onClick={(e) => { e.stopPropagation(); removeScan(id, s.status); }}
                           >
-                            ↻ Replay
+                            {deleting[id]
+                              ? "…"
+                              : (s.status === "running" || s.status === "pending" ? "✕ Cancel" : "🗑 Remove")}
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
+                    {isActive && (
+                      <tr>
+                        <td colSpan={7} style={{ background: "var(--bg-1)", padding: 0 }}>
+                          <ScanDetail det={det} status={s.status} navigate={navigate} />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -425,6 +495,69 @@ heaven resume --engagement my-eng --i-have-authorization`}</pre>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Inline result panel shown when a scan row is expanded. Lists the findings that
+// scan produced (fetched on demand); each is clickable through to its detail.
+function ScanDetail({ det, status, navigate }) {
+  if (!det || det.loading) {
+    return <div className="dim" style={{ padding: "12px 16px", fontSize: 12 }}>Loading findings…</div>;
+  }
+  if (det.error) {
+    return (
+      <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--crit)" }}>
+        Could not load findings: {det.error}
+      </div>
+    );
+  }
+  const findings = det.findings || [];
+  if (findings.length === 0) {
+    const running = status === "running" || status === "pending";
+    return (
+      <div className="dim" style={{ padding: "12px 16px", fontSize: 12 }}>
+        {running
+          ? "Scan in progress — findings will appear here as they're confirmed."
+          : "No findings recorded for this scan."}
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: "10px 14px", display: "grid", gap: 6 }}>
+      <div className="dim" style={{ fontSize: 11, marginBottom: 2 }}>
+        {findings.length} finding{findings.length !== 1 ? "s" : ""} — click any row to open it
+      </div>
+      {findings.map((f) => (
+        <button
+          key={f.id}
+          onClick={() => navigate(`/findings/${f.id}`)}
+          style={{
+            display: "flex", alignItems: "center", gap: 10, textAlign: "left",
+            background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)", padding: "8px 11px", cursor: "pointer",
+            color: "var(--text-0)", fontFamily: "var(--font-ui)", width: "100%",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
+        >
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+            background: SEV_COLOR[(f.severity || "info").toLowerCase()] || "var(--text-2)",
+          }} />
+          <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, overflow: "hidden",
+                         textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {f.title || f.vuln_type || "Finding"}
+          </span>
+          <span className="dim" style={{ fontSize: 11, overflow: "hidden",
+                         textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>
+            {f.target}
+          </span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--text-2)", flexShrink: 0 }}>
+            {Number(f.risk_score || 0).toFixed(1)}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }

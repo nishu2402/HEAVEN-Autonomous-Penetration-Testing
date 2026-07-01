@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import LiveTerminal from '../components/LiveTerminal'
 import FirstRunGuide from '../components/FirstRunGuide'
-import { Engagement, Dashboard as DashApi, Demo } from '../api'
+import { Engagement, Dashboard as DashApi, Demo, Engagements } from '../api'
 import { useToast } from '../components/Toast.jsx'
 import HelpTip from '../components/HelpTip.jsx'
 
@@ -80,6 +80,8 @@ export default function Dashboard() {
   const [activeScanId] = useState(localStorage.getItem('heaven_active_scan') || '')
   const [seeding, setSeeding] = useState(false)
   const [topFindings, setTopFindings] = useState([])
+  const [engList, setEngList] = useState([])
+  const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
   const toast = useToast()
 
@@ -87,6 +89,22 @@ export default function Dashboard() {
     Engagement.summary().then(setEng).catch(() => {})
     DashApi.get().then(setDash).catch(() => {})
     Engagement.topFindings(5).then(d => setTopFindings(d.findings || [])).catch(() => {})
+    Engagements.list().then(d => setEngList(d.engagements || [])).catch(() => {})
+  }
+
+  // Switch which engagement the whole app is viewing (dashboard, findings, reports).
+  const switchEngagement = async (name) => {
+    if (!name) return
+    setSwitching(true)
+    try {
+      await Engagements.setActive(name)
+      refresh()
+      toast.success(`Now viewing “${name}”`)
+    } catch (e) {
+      toast.error(e.message || 'Could not switch engagement')
+    } finally {
+      setSwitching(false)
+    }
   }
 
   useEffect(() => {
@@ -163,6 +181,28 @@ export default function Dashboard() {
       {/* Right rail */}
       <div className="dashboard-right">
         <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
+          {engList.length > 1 && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="stat-label" style={{ marginBottom: 5 }}>Viewing engagement</div>
+              <select
+                value={engList.find((e) => e.active)?.name || ''}
+                disabled={switching}
+                onChange={(e) => switchEngagement(e.target.value)}
+                style={{
+                  width: '100%', background: 'var(--bg-1)', color: 'var(--text-0)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                  padding: '8px 10px', fontSize: 12.5, fontFamily: 'var(--font-ui)',
+                  cursor: switching ? 'wait' : 'pointer', outline: 'none',
+                }}
+              >
+                {engList.map((e) => (
+                  <option key={e.name} value={e.name}>
+                    {e.display_name}{e.findings ? ` — ${e.findings} findings` : ' — empty'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {noEng ? (
             <div>
               <div className="card-title" style={{ marginBottom: 10 }}>Quick start</div>

@@ -265,13 +265,56 @@ def require_permission(permission: str):
     return _checker
 
 
+def _active_engagement_file() -> Path:
+    """Pointer file that records which engagement the web UI is currently viewing."""
+    from heaven.config import get_config
+    return get_config().data_dir / ".active_engagement"
+
+
+def _get_active_engagement() -> Optional[str]:
+    """The most-recently-selected engagement (set when a scan is launched or the
+    operator switches engagements). None when nothing has been selected yet."""
+    try:
+        p = _active_engagement_file()
+        if p.exists():
+            name = p.read_text(encoding="utf-8").strip()
+            return name or None
+    except Exception:  # noqa: BLE001 — a missing/corrupt pointer just means "default"
+        pass
+    return None
+
+
+def _set_active_engagement(name: Optional[str]) -> None:
+    """Persist the active engagement so the dashboard, findings and reports all
+    read the same store the latest scan wrote to."""
+    if not name:
+        return
+    try:
+        p = _active_engagement_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(name).strip(), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Could not persist active engagement '{name}': {e}")
+
+
+def _resolve_engagement_name(name: Optional[str] = None) -> str:
+    """Single source of truth for 'which engagement is the app looking at'.
+
+    Priority: explicit arg > HEAVEN_ENGAGEMENT env > active-engagement pointer >
+    'default'. Every reader (dashboard, findings, reports) and the scan writer go
+    through this, so they can never disagree about which store holds the data.
+    """
+    return (name or os.environ.get("HEAVEN_ENGAGEMENT")
+            or _get_active_engagement() or "default")
+
+
 def _engagement_store_factory(name: Optional[str] = None):
-    """Resolve engagement store. Falls back to env var, then a default DB."""
+    """Resolve engagement store. Falls back to env var, active pointer, then default."""
     from heaven.config import get_config
     from heaven.engagement import EngagementStore
 
     data_dir = get_config().data_dir
-    path = name or os.environ.get("HEAVEN_ENGAGEMENT") or "default"
+    path = _resolve_engagement_name(name)
     # If it's just a name (no path separator), put it in data_dir
     p = Path(path)
     if not p.suffix and not p.is_absolute() and "/" not in path and "\\" not in path:
@@ -601,11 +644,16 @@ def create_app() -> FastAPI:
             severity=AuditSeverity.INFO,
         )
 
-        # Resolve engagement: explicit field > env var
-        if not req.engagement:
-            req.engagement = os.environ.get("HEAVEN_ENGAGEMENT")
+        # Resolve engagement: explicit field > env var > active pointer > default.
+        # Persist it as the active engagement so the dashboard, findings and
+        # reports immediately follow this scan's data (previously they always
+        # read the fixed "default" store, so a named-engagement scan vanished
+        # from the UI and the report said "no findings").
+        req.engagement = _resolve_engagement_name(req.engagement)
+        _set_active_engagement(req.engagement)
 
         active_scans[scan_id]["scan_id"] = scan_id
+        active_scans[scan_id]["engagement"] = req.engagement
         # Keep a strong reference to the task in a module-level set. Without it,
         # asyncio only holds a weak ref and the GC can kill a running scan
         # mid-flight. The ref must NOT live in active_scans — that dict is
@@ -653,21 +701,86 @@ def create_app() -> FastAPI:
     @app.get("/api/scans/{scan_id}")
     async def get_scan(
         scan_id: str,
+        include_findings: bool = False,
         user: User = Depends(require_permission("scan.view")),
     ):
-        if scan_id not in active_scans:
-            raise HTTPException(404, "Scan not found")
-        return active_scans[scan_id]
+        """A single scan's live/persisted state. Falls back to the engagement
+        store when the scan is no longer in memory (e.g. after a server restart),
+        so clicking a completed scan always shows its result. With
+        ``include_findings=true`` the scan's deduped findings are attached."""
+        detail: dict = {}
+        if scan_id in active_scans:
+            detail = dict(active_scans[scan_id])
+        else:
+            store = _engagement_store_factory()
+            row = None
+            try:
+                row = store.get_scan(scan_id)
+            except Exception:  # noqa: BLE001
+                row = None
+            if not row:
+                raise HTTPException(404, "Scan not found")
+            detail = {
+                "scan_id": scan_id,
+                "id": scan_id,
+                "name": row.get("name") or "HEAVEN Scan",
+                "mode": row.get("mode", ""),
+                "status": row.get("status", "completed"),
+                "created": row.get("started_at", ""),
+                "started_at": row.get("started_at", ""),
+                "completed_at": row.get("completed_at", ""),
+                "findings_count": row.get("findings_count", 0),
+            }
+
+        if include_findings:
+            store = _engagement_store_factory()
+            try:
+                rows = store.list_findings(scan_id=scan_id, limit=1000)
+                detail["findings"] = [f.__dict__ for f in rows]
+            except Exception:  # noqa: BLE001
+                detail["findings"] = []
+        return detail
 
     @app.delete("/api/scans/{scan_id}")
-    async def cancel_scan(
+    async def delete_scan(
         scan_id: str,
         user: User = Depends(require_permission("scan.cancel")),
     ):
-        if scan_id not in active_scans:
+        """Cancel a running scan, or permanently remove a finished one.
+
+        - Running/pending scans are *cancelled* (findings kept).
+        - Otherwise the scan is *deleted*: its findings, checkpoints, the report
+          JSON file and the in-memory record are all removed. This backs the
+          web-UI "Remove scan" action.
+        """
+        mem = active_scans.get(scan_id)
+        if mem and mem.get("status") in ("running", "pending"):
+            mem["status"] = "cancelled"
+            return {"status": "cancelled", "scan_id": scan_id}
+
+        removed = False
+        # 1. Report JSON file (powers the dashboard's report-file fallback)
+        try:
+            rp = _data_dir() / f"report_{scan_id}.json"
+            if rp.exists():
+                rp.unlink()
+                removed = True
+        except OSError as e:
+            logger.warning(f"Could not delete report file for {scan_id}: {e}")
+        # 2. Engagement store rows (findings + scan + checkpoints)
+        try:
+            if _engagement_store_factory().delete_scan(scan_id):
+                removed = True
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not delete scan {scan_id} from store: {e}")
+        # 3. In-memory record
+        if scan_id in active_scans:
+            active_scans.pop(scan_id, None)
+            removed = True
+
+        if not removed:
             raise HTTPException(404, "Scan not found")
-        active_scans[scan_id]["status"] = "cancelled"
-        return {"status": "cancelled", "scan_id": scan_id}
+        return {"status": "deleted", "scan_id": scan_id}
 
     # ── Vulnerabilities ──
     @app.get("/api/vulnerabilities")
@@ -813,6 +926,56 @@ def create_app() -> FastAPI:
                 "no_engagement": True,
             }
 
+    @app.get("/api/engagements")
+    async def list_engagements(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """List every engagement store on disk, with finding/scan counts and
+        which one is currently active. Backs the dashboard engagement switcher
+        so an operator can flip between the targets they've scanned."""
+        from heaven.config import get_config
+        from heaven.engagement import EngagementStore
+        eng_dir = get_config().data_dir / "engagements"
+        active = _resolve_engagement_name()
+        out: list[dict] = []
+        seen: set[str] = set()
+        if eng_dir.exists():
+            for db in sorted(eng_dir.glob("*.db")):
+                name = db.stem
+                seen.add(name)
+                try:
+                    st = EngagementStore(db)
+                    stats = st.stats()
+                    eng = st.get_engagement()
+                    out.append({
+                        "name": name,
+                        "display_name": (eng.name if eng else name) or name,
+                        "findings": stats.get("total_findings", 0),
+                        "scans": stats.get("scans_run", 0),
+                        "active": name == active,
+                    })
+                except Exception:  # noqa: BLE001 — skip unreadable/locked DBs
+                    continue
+        # The active engagement may not have a DB yet (nothing scanned) — still
+        # surface it so the switcher shows a consistent current selection.
+        if active not in seen:
+            out.insert(0, {"name": active, "display_name": active,
+                           "findings": 0, "scans": 0, "active": True})
+        out.sort(key=lambda e: (not e["active"], -e["findings"], e["name"]))
+        return {"engagements": out, "active": active}
+
+    @app.post("/api/engagements/active")
+    async def set_active_engagement_endpoint(
+        body: dict,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Switch which engagement the dashboard, findings and reports show."""
+        name = str((body or {}).get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "name is required")
+        _set_active_engagement(name)
+        return {"ok": True, "active": name}
+
     @app.get("/api/engagement/findings")
     async def engagement_findings(
         severity: Optional[str] = None,
@@ -820,14 +983,16 @@ def create_app() -> FastAPI:
         target: Optional[str] = None,
         vuln_type: Optional[str] = None,
         min_confidence: float = 0.0,
+        scan_id: Optional[str] = None,
         limit: int = Query(100, ge=1, le=10000),
         user: User = Depends(require_permission("vuln.view")),
     ):
-        """List findings from the active engagement."""
+        """List findings from the active engagement (optionally one scan)."""
         store = _engagement_store_factory()
         results = store.list_findings(
             severity=severity, status=status, target=target,
             vuln_type=vuln_type, min_confidence=min_confidence, limit=limit,
+            scan_id=scan_id,
         )
         return {
             "findings": [

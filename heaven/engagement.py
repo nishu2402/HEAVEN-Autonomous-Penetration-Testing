@@ -500,6 +500,36 @@ class EngagementStore:
                 (now, status, json.dumps(summary), scan_id),
             )
 
+    def delete_scan(self, scan_id: str) -> bool:
+        """Delete a scan and everything it produced (findings + checkpoints).
+
+        Returns True if the scan row (or any of its findings) existed. Used by
+        the API's "remove scan" action so an operator can prune runs from the
+        engagement without hand-editing the SQLite file.
+        """
+        with self._conn() as c:
+            existed = c.execute(
+                "SELECT 1 FROM scans WHERE id = ? "
+                "UNION SELECT 1 FROM findings WHERE scan_id = ? LIMIT 1",
+                (scan_id, scan_id),
+            ).fetchone()
+            c.execute("DELETE FROM findings WHERE scan_id = ?", (scan_id,))
+            c.execute("DELETE FROM scan_checkpoints WHERE scan_id = ?", (scan_id,))
+            c.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+            return existed is not None
+
+    def get_scan(self, scan_id: str) -> Optional[dict]:
+        """Fetch a single scan row (with its deduped finding count), or None."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT *, "
+                "(SELECT COUNT(*) FROM findings WHERE findings.scan_id = scans.id) "
+                "AS findings_count "
+                "FROM scans WHERE id = ?",
+                (scan_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
     def list_scans(self, limit: int = 50) -> list[dict]:
         """List scans, each annotated with its deduped finding count."""
         with self._conn() as c:
@@ -714,9 +744,13 @@ class EngagementStore:
         self, severity: Optional[str] = None, status: Optional[str] = None,
         target: Optional[str] = None, vuln_type: Optional[str] = None,
         min_confidence: float = 0.0, limit: int = 1000,
+        scan_id: Optional[str] = None,
     ) -> list[Finding]:
         sql = "SELECT * FROM findings WHERE 1=1"
         args: list = []
+        if scan_id:
+            sql += " AND scan_id = ?"
+            args.append(scan_id)
         if severity:
             sql += " AND severity = ?"
             args.append(severity)

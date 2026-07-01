@@ -250,8 +250,22 @@ export const Scans = {
   create: (req) =>
     api("/scans", { method: "POST", body: JSON.stringify(req) }),
   list: (limit = 20) => api(`/scans?limit=${limit}`),
-  get: (id) => api(`/scans/${id}`),
-  cancel: (id) => api(`/scans/${id}`, { method: "DELETE" }),
+  get: (id, includeFindings = false) =>
+    api(`/scans/${encodeURIComponent(id)}${includeFindings ? "?include_findings=true" : ""}`),
+  // Findings produced by one scan (deduped rows from the engagement store).
+  findings: (id) =>
+    api(`/engagement/findings?scan_id=${encodeURIComponent(id)}&limit=1000`),
+  // Cancel a running scan, or permanently remove a finished one.
+  cancel: (id) => api(`/scans/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  remove: (id) => api(`/scans/${encodeURIComponent(id)}`, { method: "DELETE" }),
+};
+
+// Engagements — list all scanned engagements and switch which one the whole
+// app (dashboard, findings, reports) is currently viewing.
+export const Engagements = {
+  list: () => api("/engagements"),
+  setActive: (name) =>
+    api("/engagements/active", { method: "POST", body: JSON.stringify({ name }) }),
 };
 
 export const Vulns = {

@@ -1,16 +1,19 @@
 // HEAVEN — Methodology mapping viewer (Gap 9)
 //
-// Renders the OWASP / NIST / PTES mapping docs the operator can show
-// reviewers so they know which scanner output maps to which test ID.
+// Renders the OWASP / NIST / PTES mapping docs (Markdown with coverage tables)
+// so reviewers can see which scanner output maps to which standard test ID.
+// Previously the raw Markdown was dumped into a <pre>, so the mapping tables
+// showed as unreadable pipe-delimited text — now they render as real tables.
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Methodology as M } from "../api";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import Markdown from "../components/Markdown.jsx";
 
-const PRETTY = {
-  owasp_testing_guide: "OWASP Testing Guide v4",
-  nist_800_115:        "NIST SP 800-115",
-  ptes:                "Penetration Testing Execution Standard",
+const META = {
+  owasp_testing_guide: { title: "OWASP Testing Guide", sub: "WSTG v4.2" },
+  nist_800_115:        { title: "NIST SP 800-115", sub: "Technical assessment" },
+  ptes:                { title: "PTES", sub: "Execution standard" },
 };
 
 export default function Methodology() {
@@ -21,11 +24,17 @@ export default function Methodology() {
   useEffect(() => {
     M.list()
       .then((d) => {
-        setDocs(d.docs || []);
-        if (d.docs?.length) setActive(d.docs[0].name);
+        const list = d.docs || [];
+        setDocs(list);
+        if (list.length) setActive(list[0].name);
       })
       .catch((e) => setError(e.message));
   }, []);
+
+  const current = useMemo(
+    () => (docs || []).find((d) => d.name === active),
+    [docs, active],
+  );
 
   if (error) {
     return (
@@ -34,55 +43,63 @@ export default function Methodology() {
       </div>
     );
   }
-
   if (!docs) {
-    return (
-      <div className="page">
-        <SkeletonCard lines={6} />
-      </div>
-    );
+    return <div className="page"><SkeletonCard lines={8} /></div>;
   }
-
-  const current = docs.find((d) => d.name === active);
 
   return (
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>§ Methodology Mapping</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
-          Which HEAVEN scanner maps to which test ID in each standard.
-          Use this to satisfy enterprise procurement and academic review.
+        <p className="dim" style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 0 }}>
+          Which HEAVEN scanner maps to which test ID in each industry standard —
+          use it to satisfy enterprise procurement and academic review. Rows marked{" "}
+          <code>(manual)</code> are intentionally out of scope for automation.
         </p>
+      </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {docs.map((d) => (
-            <button
-              key={d.name}
-              className={"btn-small" + (active === d.name ? " active" : "")}
-              onClick={() => setActive(d.name)}
-            >
-              {PRETTY[d.name] || d.name}
-            </button>
-          ))}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 220px) 1fr",
+                    gap: 12, marginTop: 12, alignItems: "start" }}>
+        {/* Standard selector */}
+        <div className="card" style={{ padding: 10, position: "sticky", top: 12 }}>
+          <div style={{ fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase",
+                        color: "var(--text-2)", fontWeight: 600, margin: "2px 6px 8px" }}>
+            Standards
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            {docs.map((d) => {
+              const meta = META[d.name] || { title: d.name, sub: "" };
+              const on = active === d.name;
+              return (
+                <button
+                  key={d.name}
+                  onClick={() => setActive(d.name)}
+                  style={{
+                    textAlign: "left", padding: "9px 11px", borderRadius: "var(--radius-md)",
+                    border: "1px solid", cursor: "pointer", fontFamily: "var(--font-ui)",
+                    borderColor: on ? "var(--brand)" : "var(--border)",
+                    background: on ? "color-mix(in srgb, var(--brand) 12%, transparent)"
+                                   : "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-0)" }}>
+                    {meta.title}
+                  </div>
+                  {meta.sub && (
+                    <div className="dim" style={{ fontSize: 11 }}>{meta.sub}</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {current && (
-          <pre
-            style={{
-              padding: 12,
-              background: "rgba(0,0,0,0.4)",
-              border: "1px solid var(--border)",
-              fontFamily: "monospace",
-              fontSize: 12,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              maxHeight: "70vh",
-              overflowY: "auto",
-            }}
-          >
-            {current.content}
-          </pre>
-        )}
+        {/* Rendered doc */}
+        <div className="card" style={{ minWidth: 0 }}>
+          {current
+            ? <Markdown>{current.content}</Markdown>
+            : <div className="dim" style={{ fontSize: 12 }}>No methodology documents found.</div>}
+        </div>
       </div>
     </div>
   );

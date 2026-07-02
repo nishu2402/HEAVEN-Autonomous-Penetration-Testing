@@ -39,6 +39,17 @@ def _docker_available() -> bool:
     return shutil.which("docker") is not None
 
 
+# When the live benchmark isn't explicitly enabled, don't even *collect* the
+# DVWA test — so the default `pytest` run reports 0 skipped instead of a
+# permanent "1 skipped". The genuine unit tests in this dir (test_metrics.py,
+# test_adapters.py) are unaffected and always run. Enable the live run with
+# HEAVEN_RUN_BENCHMARKS=1 (exactly what CI's benchmark job sets), which both
+# un-ignores this file and lets the fixture bring the Docker target up.
+collect_ignore: list[str] = []
+if not _benchmarks_enabled():
+    collect_ignore.append("test_dvwa_baseline.py")
+
+
 def _compose_cmd(*args: str) -> list[str]:
     # Prefer the modern `docker compose` (subcommand) over the legacy binary.
     return ["docker", "compose", "-f", str(_COMPOSE_FILE), *args]

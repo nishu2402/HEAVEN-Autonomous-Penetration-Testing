@@ -12,7 +12,12 @@ services:
     image: vulnerables/web-dvwa:latest
     container_name: heaven-bench-dvwa
     ports:
-      - "8080:80"
+      # SECURITY: bind to loopback ONLY. DVWA is deliberately vulnerable
+      # (SQLi / command-injection → RCE, default admin/password creds). A bare
+      # "8080:80" publishes it on 0.0.0.0, so anyone on the LAN — or the
+      # internet if the host is exposed — could pop the machine running the
+      # benchmark. The benchmark only ever reaches it via localhost:8080.
+      - "127.0.0.1:8080:80"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/login.php"]
       interval: 5s

@@ -67,8 +67,41 @@ Out of scope (but please still report via DM if you're unsure):
 - **RBAC on every API endpoint** — see `heaven/security/auth.py`
   for the permission matrix. Admin-only actions (postex, lateral,
   train-priors) require `config.modify`.
+- **SSRF / injection guard on scan targets** — every target submitted to
+  the API (`POST /api/scans`) is validated before it reaches nmap / nuclei /
+  sqlmap or any HTTP client: argument-injection (a leading `-`), shell/SQL
+  metacharacters, and reserved ranges (cloud metadata `169.254.169.254`,
+  multicast, TEST-NETs) are rejected. See
+  `heaven/security/sanitizer.py::InputSanitizer.sanitize_target`.
+- **Path-traversal hardening** — an engagement name becomes a DB filename and
+  a scan id becomes part of a report filename, so both are validated at the
+  HTTP boundary; values with `..`, path separators or an absolute path are
+  rejected before any filesystem operation.
+- **Defense-in-depth HTTP headers** — the API sets a strict
+  `Content-Security-Policy` (script-src `'self'`), `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, HSTS (outside dev) and a locked-down
+  `Permissions-Policy` on every response.
 - **Self-audit on every release** — `heaven self-audit` returns a
   graded score; CI enforces grade ≥ A.
+
+## Hardening a shared / hosted deployment
+
+The defaults optimise for the common single-operator, scan-your-own-lab case.
+For a multi-user or internet-exposed deployment, also:
+
+- Set `HEAVEN_ALLOW_LOCALHOST=0` and `HEAVEN_ALLOW_PRIVATE=0` so an operator
+  can't pivot the scanner at loopback / internal-network services (cloud
+  metadata and reserved ranges are blocked regardless).
+- **Never** set `HEAVEN_DISABLE_AUTH=1` — it bypasses all authentication and
+  is for local tests/CI only. The server logs an error at startup when it's on.
+- Set a strong `HEAVEN_ADMIN_PASSWORD` (the seeded `admin/admin` forces a
+  change on first login, but don't rely on that in production).
+- If you use PostgreSQL, set `ssl_mode=verify-full` with `ssl_ca_cert` — the
+  weaker modes encrypt but do **not** verify the server certificate (MITM
+  exposure); HEAVEN warns once at connect time when verification is off.
+- Verify the shipped `NVD_model.pkl` against the checksum in its model card
+  before use — it is deserialised with joblib/pickle, so only load a model
+  file you trust (an attacker who can replace it on disk gains code execution).
 
 ## Supported versions
 

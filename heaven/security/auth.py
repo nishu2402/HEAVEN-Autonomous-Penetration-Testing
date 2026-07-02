@@ -95,6 +95,10 @@ class AuthManager:
         self._users: dict[str, User] = {}
         self._sessions: dict[str, Session] = {}
         self._api_keys: dict[str, str] = {}  # api_key → user_id
+        # A throwaway hash used to spend the same PBKDF2 time on a login for a
+        # non-existent user as for a real one — closes the username-enumeration
+        # timing side channel.
+        self._dummy_hash = self._hash_password(os.urandom(16).hex())
         self._setup_default_admin()
 
     def _setup_default_admin(self) -> None:
@@ -171,6 +175,9 @@ class AuthManager:
     def authenticate(self, username: str, password: str, source_ip: str = "") -> Optional[dict]:
         user = next((u for u in self._users.values() if u.username == username), None)
         if not user:
+            # Spend the same PBKDF2 cost as a real login so response time does
+            # not reveal whether the username exists.
+            self._verify_password(password, self._dummy_hash)
             return None
         if not user.is_active:
             logger.warning(f"Login attempt for disabled user: {username}")
@@ -224,6 +231,11 @@ class AuthManager:
             token = pyjwt.encode(payload, self._jwt_secret, algorithm="HS256")
         else:
             token = f"hv4_session_{os.urandom(32).hex()}"
+        # Opportunistically drop expired sessions so the in-memory store can't
+        # grow without bound over a long-running server.
+        if len(self._sessions) > 64:
+            self._sessions = {t: s for t, s in self._sessions.items()
+                              if s.expires_at > now}
         self._sessions[token] = Session(
             token=token, user_id=user.id, role=user.role,
             created_at=now, expires_at=now + self.TOKEN_EXPIRY, source_ip=source_ip,

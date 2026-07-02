@@ -308,6 +308,34 @@ def _resolve_engagement_name(name: Optional[str] = None) -> str:
             or _get_active_engagement() or "default")
 
 
+# ── Path-traversal guards for HTTP-supplied identifiers ──
+# The engagement name becomes a DB *filename* and the scan id becomes part of a
+# report *filename*, so an attacker-controlled value containing path separators,
+# "..", or an absolute path could make the server read/write/delete files outside
+# the data dir. These validate only values that arrive over HTTP; trusted sources
+# (HEAVEN_ENGAGEMENT env, the CLI passing real paths) are intentionally exempt.
+_SAFE_SCAN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _validate_http_engagement(name: Optional[str]) -> Optional[str]:
+    """Reject an engagement name supplied in a request body/query if it could
+    escape the engagements directory. Returns the name unchanged when safe;
+    ``None`` passes straight through (means 'use the resolver default')."""
+    if name is None:
+        return None
+    raw = str(name)
+    if ("/" in raw or "\\" in raw or "\x00" in raw
+            or ".." in raw or Path(raw).is_absolute()
+            or raw.strip() in ("", ".", "..")):
+        raise HTTPException(status_code=400, detail="Invalid engagement name")
+    return raw
+
+
+def _is_safe_scan_id(scan_id: Optional[str]) -> bool:
+    """True when a scan id is safe to interpolate into a report filename."""
+    return bool(scan_id) and bool(_SAFE_SCAN_ID_RE.match(scan_id or ""))
+
+
 def _engagement_store_factory(name: Optional[str] = None):
     """Resolve engagement store. Falls back to env var, active pointer, then default."""
     from heaven.config import get_config
@@ -315,10 +343,20 @@ def _engagement_store_factory(name: Optional[str] = None):
 
     data_dir = get_config().data_dir
     path = _resolve_engagement_name(name)
-    # If it's just a name (no path separator), put it in data_dir
+    # A plain name is sandboxed to data_dir/engagements/<name>.db. Anything with a
+    # path separator, "..", an absolute path or a suffix would be used as a raw
+    # filesystem path — that's only safe when it comes from operator config
+    # (HEAVEN_ENGAGEMENT), never from an HTTP request or the active-engagement
+    # pointer, so a non-plain value that doesn't match the env var is rejected as
+    # a path-traversal attempt. This is the single choke point every reader and
+    # the scan writer pass through.
     p = Path(path)
-    if not p.suffix and not p.is_absolute() and "/" not in path and "\\" not in path:
+    is_plain = (not p.suffix and not p.is_absolute()
+                and "/" not in path and "\\" not in path and ".." not in path)
+    if is_plain:
         p = data_dir / "engagements" / f"{path}.db"
+    elif path != os.environ.get("HEAVEN_ENGAGEMENT"):
+        raise HTTPException(status_code=400, detail="Invalid engagement name")
     return EngagementStore(p)
 
 
@@ -396,6 +434,32 @@ def create_app() -> FastAPI:
     # Security headers middleware — defense-in-depth for the API
     from starlette.middleware.base import BaseHTTPMiddleware
 
+    # Strict CSP for the SPA + API. The bundled UI loads its own JS/CSS from
+    # 'self' (Vite output, no inline <script>), so script-src can stay tight —
+    # the main defence-in-depth win against injected script. Inline *styles* are
+    # allowed because the UI uses element style attributes throughout. The
+    # interactive docs (/api/docs, /api/redoc) pull Swagger/ReDoc + an inline
+    # bootstrap script from a CDN, so they get a relaxed policy rather than a
+    # broken page.
+    # script-src stays 'self' (the Vite bundle has no inline <script>) — the key
+    # anti-XSS win. The other sources match exactly what the shipped UI loads:
+    # Google Fonts (stylesheet + font files) and same-origin WebSockets for the
+    # live scan/log streams. Widen only if the UI genuinely starts loading more.
+    _CSP_APP = (
+        "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
+        "object-src 'none'; img-src 'self' data:; "
+        "font-src 'self' data: https://fonts.gstatic.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "script-src 'self'; connect-src 'self' ws: wss:"
+    )
+    _CSP_DOCS = (
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'"
+    )
+    _DOCS_PATHS = ("/api/docs", "/api/redoc", "/api/openapi.json")
+
     class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             response = await call_next(request)
@@ -404,6 +468,10 @@ def create_app() -> FastAPI:
             response.headers["X-XSS-Protection"] = "1; mode=block"
             response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
             response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+            path = request.url.path
+            response.headers["Content-Security-Policy"] = (
+                _CSP_DOCS if path.startswith(_DOCS_PATHS) else _CSP_APP
+            )
             if not os.environ.get("HEAVEN_DEV"):
                 response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
             return response
@@ -417,6 +485,12 @@ def create_app() -> FastAPI:
     def _get_latest_report_data(scan_id: Optional[str] = None) -> dict:
         d = _data_dir()
         if scan_id:
+            # scan_id lands in a filename — a value with "../" must never escape
+            # the data dir. Unsafe ids just yield "no report" rather than 400,
+            # since these read endpoints treat a missing report as empty.
+            if not _is_safe_scan_id(scan_id):
+                logger.warning("Rejected unsafe scan_id in report lookup: %r", scan_id)
+                return {}
             file_path = d / f"report_{scan_id}.json"
             if file_path.exists():
                 try:
@@ -617,6 +691,9 @@ def create_app() -> FastAPI:
                 detail="i_have_authorization must be true — operator must confirm written authorization for all targets",
             )
 
+        # Engagement name becomes a DB filename — block traversal from the request.
+        _validate_http_engagement(req.engagement)
+
         scan_id = uuid.uuid4().hex[:8]
 
         # Sort targets into ips and urls
@@ -627,6 +704,35 @@ def create_app() -> FastAPI:
                 urls.append(t)
             else:
                 ips.append(t)
+
+        # ── SSRF / injection guard ──
+        # Validate every target before it reaches the orchestrator → scanners →
+        # nmap/nuclei/sqlmap argv and HTTP clients. Blocks argument-injection
+        # (leading '-'), shell/SQL metacharacters, and SSRF-to-infrastructure
+        # (cloud metadata 169.254.169.254, reserved ranges — always; loopback/
+        # private per policy). Localhost/private are allowed by default because
+        # scanning your own lab is the common case; set HEAVEN_ALLOW_LOCALHOST=0
+        # / HEAVEN_ALLOW_PRIVATE=0 to lock a shared/hosted deployment down.
+        from heaven.security.sanitizer import InputSanitizer
+
+        def _flag(name: str, default: str) -> bool:
+            return os.environ.get(name, default).lower() in ("1", "true", "yes")
+
+        sanitizer = InputSanitizer(
+            allow_private=_flag("HEAVEN_ALLOW_PRIVATE", "1"),
+            allow_localhost=_flag("HEAVEN_ALLOW_LOCALHOST", "1"),
+        )
+        target_errors: list[str] = []
+        for t in ips + urls:
+            r = sanitizer.sanitize_target(t)
+            if not r.valid:
+                target_errors.extend(r.errors)
+        if target_errors:
+            raise HTTPException(
+                status_code=400,
+                detail="Target validation failed: " + "; ".join(target_errors[:10]),
+            )
+
         req.targets = ips
         req.urls = urls
 
@@ -753,6 +859,11 @@ def create_app() -> FastAPI:
           JSON file and the in-memory record are all removed. This backs the
           web-UI "Remove scan" action.
         """
+        # scan_id is interpolated into a filename below (report_<id>.json) and
+        # passed to the store — reject traversal/oddball ids before any file op.
+        if not _is_safe_scan_id(scan_id):
+            raise HTTPException(status_code=400, detail="Invalid scan id")
+
         mem = active_scans.get(scan_id)
         if mem and mem.get("status") in ("running", "pending"):
             mem["status"] = "cancelled"
@@ -973,6 +1084,9 @@ def create_app() -> FastAPI:
         name = str((body or {}).get("name", "")).strip()
         if not name:
             raise HTTPException(400, "name is required")
+        # This name is persisted to the pointer file and later becomes a DB
+        # filename — block traversal before it can poison the resolver.
+        _validate_http_engagement(name)
         _set_active_engagement(name)
         return {"ok": True, "active": name}
 
@@ -1511,6 +1625,10 @@ def create_app() -> FastAPI:
             body = {}
         engagement = body.get("engagement")
         new_engagement = body.get("new_engagement", "")
+        # Both become DB filenames — reject traversal. (`engagement` also flows
+        # through the factory guard, but validate here for a clean 400.)
+        _validate_http_engagement(engagement)
+        _validate_http_engagement(new_engagement or None)
 
         store = _engagement_store_factory(engagement)
         all_scans = store.list_all_scans()

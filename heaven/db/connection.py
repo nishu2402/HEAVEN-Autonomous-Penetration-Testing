@@ -59,6 +59,7 @@ _sqlite_path: Optional[str] = None
 # ── Backend mode ─────────────────────────────────────────────────────────────
 
 _backend: str = "none"   # "postgres" | "sqlite" | "none"
+_ssl_verify_warned: bool = False  # emit the unverified-TLS warning only once
 
 
 def get_backend() -> str:
@@ -83,6 +84,18 @@ def _build_ssl_context(cfg) -> ssl.SSLContext | bool:
     ctx = ssl.create_default_context()
     ctx.check_hostname = ssl_mode in ("verify-full",)
     ctx.verify_mode = ssl.CERT_REQUIRED if ssl_mode in ("verify-ca", "verify-full") else ssl.CERT_NONE
+    global _ssl_verify_warned
+    if ctx.verify_mode == ssl.CERT_NONE and not _ssl_verify_warned:
+        # TLS is on but the server certificate isn't verified — the connection is
+        # encrypted yet still open to an active MITM. Fine for local dev; for
+        # production set ssl_mode=verify-full (+ ssl_ca_cert). Warn once so it's
+        # a deliberate choice, not a silent default.
+        logger.warning(
+            "PostgreSQL TLS mode '%s' does not verify the server certificate "
+            "(MITM-exposed). Use ssl_mode=verify-full with ssl_ca_cert in production.",
+            ssl_mode,
+        )
+        _ssl_verify_warned = True
     ca_cert = getattr(cfg, "ssl_ca_cert", None)
     if ca_cert:
         ctx.load_verify_locations(ca_cert)

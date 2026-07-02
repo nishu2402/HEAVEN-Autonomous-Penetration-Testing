@@ -80,6 +80,23 @@ class InputSanitizer:
         self._allow_private = allow_private
         self._allow_localhost = allow_localhost
 
+    def _ip_range_error(self, ip_obj) -> str | None:
+        """Return an error string if this IP must not be scanned, else None.
+
+        BLOCKED_RANGES (link-local incl. the 169.254.169.254 cloud-metadata
+        endpoint, multicast, TEST-NETs, reserved) are *always* rejected —
+        independent of allow_private/allow_localhost — because they represent
+        SSRF-against-infrastructure rather than legitimate targets.
+        """
+        if not self._allow_localhost and ip_obj.is_loopback:
+            return "Localhost scanning is disabled for security"
+        if not self._allow_private and ip_obj.is_private:
+            return "Private range scanning is disabled"
+        for blocked in BLOCKED_RANGES:
+            if ip_obj in blocked:
+                return f"IP {ip_obj} is in blocked range {blocked}"
+        return None
+
     def sanitize_ip(self, ip_str: str) -> SanitizationResult:
         result = SanitizationResult(sanitized_value=ip_str.strip())
         # Check for injection
@@ -99,22 +116,11 @@ class InputSanitizer:
             else:
                 ip_obj = ipaddress.ip_address(ip_str.strip())
 
-            # Check localhost
-            if not self._allow_localhost and ip_obj.is_loopback:
+            err = self._ip_range_error(ip_obj)
+            if err:
                 result.valid = False
-                result.errors.append("Localhost scanning is disabled for security")
+                result.errors.append(err)
                 return result
-            # Check private ranges
-            if not self._allow_private and ip_obj.is_private:
-                result.valid = False
-                result.errors.append("Private range scanning is disabled")
-                return result
-            # Check blocked ranges
-            for blocked in BLOCKED_RANGES:
-                if ip_obj in blocked:
-                    result.valid = False
-                    result.errors.append(f"IP {ip_str} is in blocked range {blocked}")
-                    return result
 
         except ValueError:
             result.valid = False
@@ -143,22 +149,88 @@ class InputSanitizer:
                 result.errors.append("URL has no hostname")
                 return result
             hostname = parsed.hostname.lower()
-            if not self._allow_localhost:
-                if hostname in LOCALHOST_PATTERNS or hostname == "localhost":
+            if not self._allow_localhost and (
+                hostname in LOCALHOST_PATTERNS or hostname == "localhost"
+            ):
+                result.valid = False
+                result.errors.append("Localhost URLs are blocked for security")
+                return result
+            # If the host is an IP literal, apply the same range policy as a bare
+            # IP target. This is what blocks SSRF to cloud-metadata via a URL such
+            # as http://169.254.169.254/ — previously only bare-IP targets were
+            # range-checked, so URL-form metadata reads slipped through.
+            try:
+                ip = ipaddress.ip_address(hostname)
+                err = self._ip_range_error(ip)
+                if err:
                     result.valid = False
-                    result.errors.append("Localhost URLs are blocked for security")
+                    result.errors.append(err)
                     return result
-                try:
-                    ip = ipaddress.ip_address(hostname)
-                    if ip.is_loopback:
-                        result.valid = False
-                        result.errors.append("Loopback IP in URL is blocked")
-                        return result
-                except ValueError:
-                    pass  # Not an IP — that's fine
+            except ValueError:
+                pass  # Not an IP — that's fine
         except Exception as e:
             result.valid = False
             result.errors.append(f"Invalid URL: {e}")
+        return result
+
+    def sanitize_target(self, target: str) -> SanitizationResult:
+        """Validate a single scan target of *any* form — IP, CIDR, hostname or URL.
+
+        This is the one entry point the API boundary should use, because a scan
+        request mixes all of those in its ``targets``/``urls`` lists. It blocks:
+          - argument injection: a target starting with ``-`` would be parsed as a
+            flag by nmap/sqlmap/nuclei (they receive argv, not a shell string, so
+            this is the residual injection vector once shell=False is guaranteed);
+          - command/SQL/XSS/traversal metacharacters (INJECTION_PATTERNS);
+          - SSRF-to-infrastructure ranges (cloud metadata, loopback/private per
+            policy) for both bare IPs and IP-literal URLs.
+        Ordinary hostnames pass through — the scanner resolves them.
+        """
+        t = (target or "").strip()
+        result = SanitizationResult(sanitized_value=t)
+        if not t:
+            result.valid = False
+            result.errors.append("Empty target")
+            return result
+        if t.startswith("-"):
+            result.valid = False
+            result.errors.append(f"Target may not start with '-' (argument injection): {t}")
+            return result
+        for pattern in INJECTION_PATTERNS:
+            if re.search(pattern, t.split("?")[0]):
+                result.valid = False
+                result.errors.append(f"Injection pattern in target: {t}")
+                return result
+        if "://" in t:
+            return self.sanitize_url(t)
+        # IP or CIDR?
+        try:
+            if "/" in t:
+                net = ipaddress.ip_network(t, strict=False)
+                if net.num_addresses > MAX_IPS_PER_SCAN:
+                    result.valid = False
+                    result.errors.append(
+                        f"Network too large: {net.num_addresses} addresses (max {MAX_IPS_PER_SCAN})")
+                    return result
+                ip_obj: Any = net.network_address
+            else:
+                ip_obj = ipaddress.ip_address(t)
+            err = self._ip_range_error(ip_obj)
+            if err:
+                result.valid = False
+                result.errors.append(err)
+            return result
+        except ValueError:
+            pass  # Not an IP/CIDR — treat as a hostname below.
+        # Hostname — injection chars already rejected above; enforce a safe charset
+        # so nothing exotic reaches the scanners' argv.
+        if not self._allow_localhost and t.lower() == "localhost":
+            result.valid = False
+            result.errors.append("Localhost scanning is disabled for security")
+            return result
+        if not re.match(r"^[A-Za-z0-9._-]{1,253}$", t):
+            result.valid = False
+            result.errors.append(f"Invalid target hostname: {t}")
         return result
 
     def sanitize_port_range(self, port_range: str) -> SanitizationResult:

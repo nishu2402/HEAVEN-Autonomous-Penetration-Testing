@@ -289,11 +289,30 @@ class SelfAuditor:
                 description="heaven/security/sanitizer.py not found",
                 remediation="Create input sanitization module",
             ))
-        else:
+            return
+        # A sanitizer that exists but is never called is false comfort — verify
+        # the API scan boundary actually invokes it before targets reach the
+        # scanners. This check exists because it was previously *unwired*.
+        server_path = self._root / "heaven" / "api" / "server.py"
+        wired = False
+        if server_path.exists():
+            content = server_path.read_text()
+            wired = ("InputSanitizer" in content
+                     and ("sanitize_target" in content or "sanitize_targets" in content))
+        if wired:
             self._findings.append(AuditFinding(
                 category="input_validation", severity="info",
-                title="Input sanitizer present",
-                description="Sanitization module for scan targets is configured",
+                title="Input sanitizer wired into scan API",
+                description="InputSanitizer validates scan targets at the API boundary",
+            ))
+        else:
+            self._findings.append(AuditFinding(
+                category="input_validation", severity="high",
+                title="Input sanitizer present but not enforced",
+                description="sanitizer.py exists but the scan API does not call it, "
+                            "so targets reach the scanners unvalidated (SSRF/injection).",
+                remediation="Call InputSanitizer.sanitize_target() on every scan "
+                            "target in the create-scan endpoint.",
             ))
 
     def _check_tls_config(self) -> None:

@@ -223,6 +223,59 @@ def export(engagement: Optional[str], output: str, fmt: str,
 
 
 @click.command()
+@click.argument("finding_id")
+@click.option("--engagement", help="Engagement name")
+def remediate(finding_id: str, engagement: Optional[str]) -> None:
+    """Generate AI-assisted remediation guidance for one finding.
+
+    Uses the configured LLM provider (ANTHROPIC / OPENAI / GEMINI). When no key
+    is set it falls back to the finding's knowledge-base remediation, so the
+    command always returns something actionable.
+    """
+    from heaven.engagement import EngagementStore
+    from heaven.devsecops.ai_remediation import AIRemediationEngine
+    from heaven.devsecops.vuln_kb import enrich_finding
+    store = EngagementStore(_engagement_db_path(engagement))
+    f = store.get_finding(finding_id)
+    if not f:
+        _print(f"[red]Finding not found:[/red] {finding_id}")
+        sys.exit(2)
+
+    enriched = enrich_finding({
+        "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
+        "title": f.title, "severity": f.severity, "cve_id": f.cve_id,
+        "evidence": f.evidence,
+    })
+    ev = enriched.get("evidence") or {}
+    finding_dict = {
+        "title": f.title, "target": f.target, "vuln_type": f.vuln_type,
+        "description": ev.get("description") or f.title,
+        # Static KB remediation is the graceful fallback used when no LLM is set.
+        "patch": ev.get("remediation") or "",
+    }
+
+    engine = AIRemediationEngine()
+    text = engine.generate_patch(finding_dict)
+
+    if json_output():
+        print(json.dumps({"finding_id": finding_id, "remediation": text,
+                          "ai_generated": bool(engine.available)}, indent=2))
+        return
+
+    if not engine.available:
+        _print("[yellow]No LLM configured — showing knowledge-base remediation. "
+               "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY for "
+               "AI-tailored guidance.[/yellow]")
+    if HAS_RICH:
+        from rich.markdown import Markdown
+        from heaven.utils.logger import console
+        if console:
+            console.print(Markdown(text))
+            return
+    print(text)
+
+
+@click.command()
 @click.option("--engagement")
 @click.option("--output", "-o", required=True, type=click.Path())
 @click.option("--framework",
@@ -258,5 +311,6 @@ def register(cli: click.Group) -> None:
     cli.add_command(show)
     cli.add_command(mark)
     cli.add_command(replay)
+    cli.add_command(remediate)
     cli.add_command(export)
     cli.add_command(report)

@@ -183,6 +183,32 @@ export async function previewReport(opts = {}) {
   return true;
 }
 
+// Download the CycloneDX SBOM (discovered services + CVE findings) for the
+// active engagement. Same auth-header constraint as report export, so it goes
+// through fetch + blob rather than a bare <a download>.
+export async function downloadSbom(opts = {}) {
+  const q = new URLSearchParams({ download: "true" });
+  if (opts.engagement) q.append("engagement", opts.engagement);
+  const r = await fetch(`${API_BASE}/sbom?${q.toString()}`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+  });
+  if (!r.ok) {
+    let detail;
+    try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(detail || `SBOM export failed (${r.status})`);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "heaven-sbom.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return "heaven-sbom.json";
+}
+
 export async function logout() {
   if (authToken) {
     try {
@@ -238,6 +264,11 @@ export const Engagement = {
     return api(`/engagement/findings?${q.toString()}`);
   },
   evidence: (id) => api(`/engagement/findings/${id}/evidence`),
+  // AI-assisted remediation for one finding. Falls back to the knowledge-base
+  // remediation server-side when no LLM key is set (response.ai_generated says
+  // which path produced the text).
+  remediate: (id) =>
+    api(`/findings/${encodeURIComponent(id)}/remediation`, { method: "POST" }),
   topFindings: (limit = 5) => api(`/engagement/top-findings?limit=${limit}`),
   setStatus: (id, status, notes = "") =>
     api(`/engagement/findings/${id}/status`, {

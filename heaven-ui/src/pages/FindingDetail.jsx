@@ -235,13 +235,9 @@ export default function FindingDetail() {
         </div>
       )}
 
-      {/* Remediation */}
-      {ev.remediation && (
-        <div className="card">
-          <div className="card-title">Remediation</div>
-          <div className="evidence-block">{ev.remediation}</div>
-        </div>
-      )}
+      {/* Remediation — static KB text + on-demand AI-tailored guidance */}
+      <RemediationCard id={id} staticText={ev.remediation} />
+
 
       {/* References */}
       {ev.references?.length > 0 && (
@@ -257,6 +253,62 @@ export default function FindingDetail() {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Sub-component: remediation (static KB text + on-demand AI guidance) ──
+
+function RemediationCard({ id, staticText }) {
+  const [loading, setLoading] = useState(false);
+  const [ai, setAi]           = useState(null);   // { remediation, ai_generated }
+  const [error, setError]     = useState(null);
+
+  async function generate() {
+    setLoading(true);
+    setError(null);
+    try {
+      setAi(await Engagement.remediate(id));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Nothing to show at all until there's KB text or the user asks for AI text.
+  if (!staticText && !ai && !error && !loading) {
+    return (
+      <div className="card">
+        <div className="card-title">Remediation</div>
+        <button className="btn" onClick={generate} disabled={loading}>
+          ✨ Generate AI remediation
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">Remediation</div>
+      {staticText && <div className="evidence-block">{staticText}</div>}
+      {ai && (
+        <div style={{ marginTop: staticText ? 12 : 0 }}>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>
+            {ai.ai_generated
+              ? "✨ AI-tailored remediation"
+              : "Knowledge-base remediation (set an LLM key for AI-tailored guidance)"}
+          </div>
+          <div className="evidence-block" style={{ whiteSpace: "pre-wrap" }}>
+            {ai.remediation}
+          </div>
+        </div>
+      )}
+      {error && <div className="evidence-block" style={{ color: "var(--red)" }}>{error}</div>}
+      <button className="btn" onClick={generate} disabled={loading}
+              style={{ marginTop: 12 }}>
+        {loading ? "Generating…" : ai ? "↻ Regenerate" : "✨ Generate AI remediation"}
+      </button>
     </div>
   );
 }

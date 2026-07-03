@@ -156,8 +156,8 @@ if HAS_CLICK:
         audit, autonomous, completion, config_cmd, coverage, db, demo as demo_module,
         diff, engage, exploitdb, findings, info, init as init_module, knowledge,
         lateral, methodology, mitre, quickstart as quickstart_module, replay,
-        sast, scan, server, status as status_module, tickets, train,
-        update as update_module, use as use_module, watch,
+        sast, sbom as sbom_module, scan, server, status as status_module, tickets,
+        train, update as update_module, use as use_module, watch,
     )
     audit.register(cli)
     autonomous.register(cli)
@@ -179,6 +179,7 @@ if HAS_CLICK:
     quickstart_module.register(cli)
     replay.register(cli)
     sast.register(cli)
+    sbom_module.register(cli)
     scan.register(cli)
     server.register(cli)
     status_module.register(cli)

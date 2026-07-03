@@ -15,6 +15,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from collections.abc import Iterable
 from typing import Any, Generic, TypeVar
 
 logger = logging.getLogger("heaven.db.repository")
@@ -80,6 +81,22 @@ __all__ = [
 # ===========================================================================
 # 1. Generic BaseRepository
 # ===========================================================================
+
+def _reject_unknown_columns(repo: type, keys: Iterable[str]) -> None:
+    """Guard for the raw-SQL repositories that interpolate column *names* into
+    INSERT/UPDATE statements. Restrict those names to the owning repository's
+    ``_COLUMNS`` allowlist so a dict key can never smuggle SQL — even if raw
+    request data were ever forwarded straight into ``create``/``update``.
+    (Values are always passed as bound parameters, never interpolated.)
+    """
+    allowed: frozenset[str] = getattr(repo, "_COLUMNS", frozenset())
+    unknown = sorted(k for k in keys if k not in allowed)
+    if unknown:
+        raise ValueError(
+            f"{repo.__name__}: refusing to write unknown column(s) {unknown}; "
+            f"allowed: {sorted(allowed)}"
+        )
+
 
 class BaseRepository(Generic[T]):
     """
@@ -576,6 +593,12 @@ class EngagementRepository(BaseRepository):  # type: ignore[type-arg]
 
     _TABLE = "engagements"
     _SCOPE_TABLE = "engagement_scope"
+    # Column allowlist for the raw-SQL create()/update() below (see
+    # _reject_unknown_columns). Mirrors the engagements table in schema.sql.
+    _COLUMNS = frozenset({
+        "id", "name", "client_name", "operator",
+        "status", "created_at", "updated_at", "notes", "config",
+    })
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -604,6 +627,7 @@ class EngagementRepository(BaseRepository):  # type: ignore[type-arg]
         return [dict(r) for r in result.mappings()]
 
     async def create(self, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        _reject_unknown_columns(type(self), kwargs.keys())
         cols = ", ".join(kwargs.keys())
         placeholders = ", ".join(f":{k}" for k in kwargs.keys())
         result = await self._session.execute(
@@ -620,6 +644,7 @@ class EngagementRepository(BaseRepository):  # type: ignore[type-arg]
         if not kwargs:
             return await self.get(id)
         kwargs["updated_at"] = datetime.now(timezone.utc)
+        _reject_unknown_columns(type(self), kwargs.keys())
         set_clause = ", ".join(f"{k} = :{k}" for k in kwargs.keys())
         kwargs["_id"] = id
         result = await self._session.execute(
@@ -729,6 +754,11 @@ class WebPathRepository(BaseRepository):  # type: ignore[type-arg]
     """Repository for the ``web_paths`` table (raw SQL until ORM model lands)."""
 
     _TABLE = "web_paths"
+    _COLUMNS = frozenset({
+        "id", "scan_id", "asset_id", "url", "http_status", "content_type",
+        "response_size", "title", "is_sensitive", "path_category",
+        "redirect_url", "tech_stack", "discovered_at",
+    })
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -757,6 +787,7 @@ class WebPathRepository(BaseRepository):  # type: ignore[type-arg]
         return [dict(r) for r in result.mappings()]
 
     async def create(self, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        _reject_unknown_columns(type(self), kwargs.keys())
         cols = ", ".join(kwargs.keys())
         placeholders = ", ".join(f":{k}" for k in kwargs.keys())
         result = await self._session.execute(
@@ -771,6 +802,7 @@ class WebPathRepository(BaseRepository):  # type: ignore[type-arg]
     async def update(self, id: uuid.UUID, **kwargs: Any) -> dict[str, Any] | None:  # type: ignore[override]
         if not kwargs:
             return await self.get(id)
+        _reject_unknown_columns(type(self), kwargs.keys())
         set_clause = ", ".join(f"{k} = :{k}" for k in kwargs.keys())
         kwargs["_id"] = id
         result = await self._session.execute(
@@ -846,6 +878,10 @@ class NotificationRepository(BaseRepository):  # type: ignore[type-arg]
     """Repository for the ``notifications`` table."""
 
     _TABLE = "notifications"
+    _COLUMNS = frozenset({
+        "id", "scan_id", "severity", "category", "title", "message",
+        "is_read", "delivered_at", "created_at",
+    })
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -874,6 +910,7 @@ class NotificationRepository(BaseRepository):  # type: ignore[type-arg]
         return [dict(r) for r in result.mappings()]
 
     async def create(self, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        _reject_unknown_columns(type(self), kwargs.keys())
         cols = ", ".join(kwargs.keys())
         placeholders = ", ".join(f":{k}" for k in kwargs.keys())
         result = await self._session.execute(
@@ -888,6 +925,7 @@ class NotificationRepository(BaseRepository):  # type: ignore[type-arg]
     async def update(self, id: uuid.UUID, **kwargs: Any) -> dict[str, Any] | None:  # type: ignore[override]
         if not kwargs:
             return await self.get(id)
+        _reject_unknown_columns(type(self), kwargs.keys())
         set_clause = ", ".join(f"{k} = :{k}" for k in kwargs.keys())
         kwargs["_id"] = id
         result = await self._session.execute(
@@ -1049,6 +1087,11 @@ class ReportRepository(BaseRepository):  # type: ignore[type-arg]
     """Repository for the ``reports`` table."""
 
     _TABLE = "reports"
+    _COLUMNS = frozenset({
+        "id", "scan_id", "engagement_id", "report_type", "format",
+        "file_path", "file_size", "finding_count", "generated_at",
+        "generated_by", "checksum",
+    })
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -1077,6 +1120,7 @@ class ReportRepository(BaseRepository):  # type: ignore[type-arg]
         return [dict(r) for r in result.mappings()]
 
     async def create(self, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        _reject_unknown_columns(type(self), kwargs.keys())
         cols = ", ".join(kwargs.keys())
         placeholders = ", ".join(f":{k}" for k in kwargs.keys())
         result = await self._session.execute(
@@ -1091,6 +1135,7 @@ class ReportRepository(BaseRepository):  # type: ignore[type-arg]
     async def update(self, id: uuid.UUID, **kwargs: Any) -> dict[str, Any] | None:  # type: ignore[override]
         if not kwargs:
             return await self.get(id)
+        _reject_unknown_columns(type(self), kwargs.keys())
         set_clause = ", ".join(f"{k} = :{k}" for k in kwargs.keys())
         kwargs["_id"] = id
         result = await self._session.execute(

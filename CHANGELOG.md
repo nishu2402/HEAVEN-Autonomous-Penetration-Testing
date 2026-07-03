@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nuclei parser could abort a scan on malformed output.** The `-jsonl`
+  parser assumed every stdout line was a JSON object with a dict `info` block;
+  a bare non-object line (string/array/number) or a `null` `info` raised an
+  `AttributeError` that escaped the `except json.JSONDecodeError` and killed the
+  scan. Parsing is now shape-guarded, decodes with `errors="replace"` (invalid
+  UTF-8 in matched banners no longer crashes), and was extracted into a testable
+  `_parse_nuclei_output` with regression tests (`heaven/vulnscan/nuclei_scanner.py`,
+  `tests/test_nuclei_parse.py`).
+- **Version strings synced to `1.0.0`** across the project — the ML risk model's
+  internal version (`2.0.0`), the uninstaller banner (`1.3.0`), and the installer
+  comment, plus the README header counts (tests/modules/CLI commands).
+
+### Security
+
+- **Column allowlist on the raw-SQL repositories.** `EngagementRepository`,
+  `WebPathRepository`, `NotificationRepository` and `ReportRepository` build
+  `INSERT`/`UPDATE` statements by interpolating column *names* from
+  `kwargs.keys()` (values were always bound parameters). Added a per-table
+  `_COLUMNS` allowlist enforced by `_reject_unknown_columns()` so a dict key can
+  never smuggle SQL, even if raw request data were ever forwarded into
+  `create`/`update` — defense-in-depth, not a known-exploitable path
+  (`heaven/db/repository.py`).
+
 ### Added — SBOM + AI remediation (wired from previously-dead code)
 
 - **CycloneDX SBOM export.** `heaven sbom` and `GET /api/sbom` generate a

@@ -16,7 +16,7 @@ required.
 ```bash
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing
 cd HEAVEN-Autonomous-Penetration-Testing
-./install.sh          # creates venv, installs deps, builds React UI
+./scripts/install.sh  # creates venv, installs deps, builds React UI
 ```
 
 ---

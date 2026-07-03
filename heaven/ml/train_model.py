@@ -66,13 +66,16 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
     joblib.dump(model, model_dir / "cvss_regressor.joblib")
     (model_dir / "feature_names.json").write_text(json.dumps(feature_names))
 
-    # Also overwrite the root NVD_model.pkl so the risk_model loader picks it up
-    root_model = Path(__file__).parent.parent.parent / "NVD_model.pkl"
-    joblib.dump(model, root_model)
-    feat_json = Path(__file__).parent.parent.parent / "nvd_data" / "feature_names_nvd.json"
+    # Also write NVD_model.pkl to its canonical home (data/models/, next to the
+    # model card) so the risk_model loader picks it up.
+    _repo_root = Path(__file__).parent.parent.parent
+    nvd_model_out = _repo_root / "data" / "models" / "NVD_model.pkl"
+    nvd_model_out.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, nvd_model_out)
+    feat_json = _repo_root / "nvd_data" / "feature_names_nvd.json"
     feat_json.parent.mkdir(parents=True, exist_ok=True)
     feat_json.write_text(json.dumps(feature_names))
-    print(f"NVD_model.pkl updated → {root_model}")
+    print(f"NVD_model.pkl updated → {nvd_model_out}")
 
     metrics = {
         "r2": round(r2, 4), "rmse": round(rmse, 4),

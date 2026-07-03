@@ -36,7 +36,7 @@ What did happen. Include the full error message + stack trace if any.
 - HEAVEN version: `heaven --version` → ...
 - Python version: `python --version` → ...
 - OS: macOS 14 / Ubuntu 22.04 / Windows 11
-- Install method: `./install.sh` / Docker / `pip install -e .`
+- Install method: `./scripts/install.sh` / Docker / `pip install -e .`
 - Optional dependencies installed: nmap, nuclei, sqlmap, semgrep (delete those not present)
 
 ## Engagement context

@@ -177,7 +177,11 @@ def extract_features(vuln_data: dict) -> VulnFeatures:
 
 
 def batch_extract(vuln_list: list[dict]) -> tuple[np.ndarray, list[str]]:
-    """Extract features for a batch of vulnerabilities."""
+    """Extract features for a batch of vulnerabilities.
+
+    Retained as a small public helper for external callers / notebooks even
+    though the in-tree scan path scores findings one at a time.
+    """
     feature_vectors = []
     vuln_ids = []
     for v in vuln_list:

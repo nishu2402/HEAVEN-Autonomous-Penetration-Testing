@@ -20,7 +20,7 @@ pen-test tool become bugs in real engagements.
 ```bash
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing
 cd HEAVEN-Autonomous-Penetration-Testing
-./install.sh                 # creates venv, installs deps, builds React UI
+./scripts/install.sh         # creates venv, installs deps, builds React UI
 
 # OR a minimal Python-only setup for backend work:
 python3 -m venv venv

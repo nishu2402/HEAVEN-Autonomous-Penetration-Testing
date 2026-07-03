@@ -93,7 +93,7 @@ editing `.env`).
 
 ## Install
 
-### `./install.sh` reported some optional packs were skipped.
+### `./scripts/install.sh` reported some optional packs were skipped.
 
 That's fine — the core install is complete and those features degrade
 gracefully. Install a pack later with `pip install -e ".[recon]"` (or
@@ -126,7 +126,7 @@ the same engagement store — by default the dashboard reads
 
 ### `heaven serve` shows a placeholder page, not the app.
 
-The web UI wasn't built. Re-run `./install.sh`, or build it manually:
+The web UI wasn't built. Re-run `./scripts/install.sh`, or build it manually:
 `cd heaven-ui && npm install --legacy-peer-deps && npm run build`.
 
 ---

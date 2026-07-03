@@ -20,11 +20,12 @@ info() { echo -e "${CYAN}[*]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 fail() { echo -e "${RED}[✗]${NC} $*"; }
 
-INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Repo root — this script lives in scripts/, so resolve one level up.
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}${BOLD}║                    HEAVEN Uninstaller v1.3.0                   ║${NC}"
+echo -e "${CYAN}${BOLD}║                    HEAVEN Uninstaller v1.0.0                   ║${NC}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 info "Project directory: ${BOLD}${INSTALL_DIR}${NC}"
@@ -213,5 +214,5 @@ if [ "$_cleaned_rc" -eq 1 ]; then
     echo ""
 fi
 
-echo -e "  Re-install any time:  ${CYAN}cd \"${INSTALL_DIR}\" && ./install.sh${NC}"
+echo -e "  Re-install any time:  ${CYAN}cd \"${INSTALL_DIR}\" && ./scripts/install.sh${NC}"
 echo ""

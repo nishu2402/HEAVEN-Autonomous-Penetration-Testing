@@ -94,7 +94,7 @@ HEAVEN is a **production-grade penetration-testing platform** that automates the
 
 It runs three ways from the **same engagement dataset**:
 
-- **CLI** — 38 commands for scriptable, CI-friendly workflows.
+- **CLI** — 42 commands for scriptable, CI-friendly workflows.
 - **Web UI** — a 21-page React command centre (scan launcher, live findings, kill-chain, reports).
 - **REST + WebSocket API** — 55 RBAC-protected routes for automation and integration.
 
@@ -115,10 +115,10 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 370 passing, 2 skipped (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 434 passing, 0 skipped (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 136 |
-| ⌨️ **CLI Commands** | 38 |
+| 🧩 **Modules** | 134 |
+| ⌨️ **CLI Commands** | 42 |
 | 🌐 **API Routes** | 55 RBAC-protected routes |
 | 🖥️ **UI Pages** | 21 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
@@ -147,15 +147,15 @@ It runs three ways from the **same engagement dataset**:
 
 | Area | What It Does |
 |---|---|
-| 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud (AWS/GCP/Azure) · containers & Kubernetes (Docker socket / K8s API / RBAC) · IoT/SCADA · wireless · Git secrets · email OSINT · honeypot detection |
+| 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud (AWS/GCP/Azure) · containers & Kubernetes (Docker socket / K8s API / RBAC) · IoT/SCADA · Git secrets · email OSINT · honeypot detection |
 | 🎯 **Vuln Detection** | SQLi (error/boolean/time-blind) · XSS · SSRF · XXE · CORS · CRLF · open redirect · IDOR · mass assignment · dir/file fuzzing · JWT attacks · race conditions · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
 | 🧬 **API Security** | OWASP API Top 10 — BOLA/IDOR · broken auth · mass assignment · excessive data exposure (REST + GraphQL) |
 | 💥 **Verified Exploitation** | Active proof, not guesses — sqlmap SQLi dump · RCE canary file drop/read · SSRF out-of-band callback listener |
 | 🔓 **Post-Exploitation** | linPEAS privesc enum · BloodHound AD collection · SSH/SMB/PsExec lateral movement · credential reuse / pass-the-hash |
-| 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini) · **deterministic fallback needs no API key** |
+| 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini) · **deterministic fallback needs no API key** |
 | 📊 **Risk Scoring** | CVSS-v3 ML predictor (R²=0.9925, 13-feature ExtraTrees) · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
-| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · SBOM · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
+| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
 | 📄 **Reporting** | 8 formats from CLI and web UI — PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL |
 | 🔇 **FP Suppression** | Two-stage confirmation pass · sub-0.40-confidence results discarded · optional LLM second opinion |
 
@@ -380,7 +380,7 @@ deterministic heuristic (or pass `--no-llm`).
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,33:7400B8,66:FF36AB,100:FF6E00"/>
 </p>
 
-38 commands. Run `heaven <command> --help` for full options.
+42 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
 
@@ -389,8 +389,8 @@ deterministic heuristic (or pass `--no-llm`).
 | `scan` | Launch a vulnerability scan (`-m web\|network\|full`, `--stealth 1-5`, `--auto-prove`, `--autonomous`) |
 | `serve` | Start the API server + web UI |
 | `engage` · `scope` · `use` | Manage engagements · in-scope targets · select the active engagement (stops repeating `--engagement`) |
-| `findings` · `show` · `mark` | List findings · full detail · set triage status |
-| `export` · `report` | Export findings (8 formats) · generate compliance HTML/PDF |
+| `findings` · `show` · `mark` · `remediate` | List findings · full detail · set triage status · AI-assisted remediation |
+| `export` · `report` · `sbom` | Export findings (8 formats) · compliance HTML/PDF · CycloneDX SBOM |
 | `kill-chain` · `coverage` | Kill-chain phase coverage · OWASP coverage grade |
 | `autonomous` | LLM-driven observe→plan→act loop (bounded budget) |
 | `watch` | Continuous monitoring — diffs each run, alerts only on change |
@@ -573,7 +573,6 @@ Every finding carries a defensible **evidence package**: request/response, copy-
 | **sqlmap** | Auto-runs on confirmed SQLi candidates |
 | **searchsploit / Exploit-DB** | CVE → PoC · product/version → PoC lookup |
 | **Shodan** | `export SHODAN_API_KEY=…` → merged into recon |
-| **Metasploit** | `msfrpcd` + `HEAVEN_MSF_*` env · `--enable-exploitation` |
 | **Jira / Linear** | `HEAVEN_JIRA_*` / `HEAVEN_LINEAR_*` env → `heaven tickets` |
 | **Splunk / Elastic** | SIEM forwarding via `HEAVEN_SPLUNK_HEC_*` / `HEAVEN_ELASTIC_*` |
 
@@ -629,8 +628,8 @@ Model provenance and caveats are documented in [`data/models/NVD_model.MODEL_CAR
 </p>
 
 ```
-heaven/                   ← Python package (136 modules)
-├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · wireless · Git · email
+heaven/                   ← Python package (134 modules)
+├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               linPEAS · BloodHound · lateral movement · credential reuse
 ├── ai/                   LLM gateway · recon agent · attack-chain planner · FP review · knowledge graph
@@ -640,10 +639,10 @@ heaven/                   ← Python package (136 modules)
 ├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
 ├── api/                  FastAPI server + WebSocket (55 routes)
-└── cli/                  Click CLI — one module per command group (38 commands)
+└── cli/                  Click CLI — one module per command group (42 commands)
 
 heaven-ui/                React + Vite web console (21 pages)
-tests/                    372 pytest tests + DVWA benchmark suite
+tests/                    434 pytest tests + DVWA benchmark suite
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 ```
@@ -728,7 +727,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>372 tests · 136 modules · 38 CLI commands · 55 API routes · 21 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>434 tests · 134 modules · 42 CLI commands · 55 API routes · 21 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

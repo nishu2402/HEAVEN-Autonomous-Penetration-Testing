@@ -13,6 +13,43 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("vulnscan.nuclei")
 
+
+def _parse_nuclei_output(stdout: bytes) -> list[dict[str, Any]]:
+    """Parse Nuclei ``-jsonl`` stdout into findings, tolerant of malformed lines.
+
+    Nuclei normally emits one JSON object per line, but a stray non-object line
+    (string/array/number) or a ``null`` ``info`` block must not abort the whole
+    scan — those lines are skipped rather than raising.
+    """
+    findings: list[dict[str, Any]] = []
+    for line in stdout.decode(errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        info = data.get("info")
+        if not isinstance(info, dict):
+            info = {}
+        findings.append({
+            "target": data.get("host", ""),
+            "type": "nuclei",
+            "severity": info.get("severity", "info"),
+            "title": info.get("name", "Nuclei Finding"),
+            "description": info.get("description", ""),
+            "confidence": 0.9,  # Nuclei is generally high confidence
+            "evidence": {
+                "template": data.get("template-id", ""),
+                "matched": data.get("matched-at", ""),
+                "extracted": data.get("extracted-results", []),
+            },
+        })
+    return findings
+
+
 async def scan_nuclei(targets: list[str], severity: str = "low,medium,high,critical", timeout: float = 600.0, stealth_level: str = "normal") -> dict[str, Any]:
     """Run Nuclei against a list of targets and parse the JSONL output."""
     if not targets:
@@ -76,28 +113,7 @@ async def scan_nuclei(targets: list[str], severity: str = "low,medium,high,criti
             logger.warning("Nuclei scan timed out")
 
         if stdout:
-            for line in stdout.decode().splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    data = json.loads(line)
-                    info = data.get("info", {})
-                    finding = {
-                        "target": data.get("host", ""),
-                        "type": "nuclei",
-                        "severity": info.get("severity", "info"),
-                        "title": info.get("name", "Nuclei Finding"),
-                        "description": info.get("description", ""),
-                        "confidence": 0.9, # Nuclei is generally high confidence
-                        "evidence": {
-                            "template": data.get("template-id", ""),
-                            "matched": data.get("matched-at", ""),
-                            "extracted": data.get("extracted-results", [])
-                        }
-                    }
-                    findings.append(finding)
-                except json.JSONDecodeError:
-                    continue
+            findings.extend(_parse_nuclei_output(stdout))
                     
         logger.info(f"Nuclei scan complete: {len(findings)} findings.")
     finally:

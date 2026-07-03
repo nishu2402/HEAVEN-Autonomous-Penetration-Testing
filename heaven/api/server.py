@@ -1719,6 +1719,67 @@ def create_app() -> FastAPI:
             "exploit_proof": out.get("evidence", {}).get("exploit_proof", []),
         }
 
+    @app.post("/api/findings/{finding_id}/remediation")
+    async def remediation_finding_endpoint(
+        finding_id: str,
+        engagement: Optional[str] = Query(None),
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """AI-assisted remediation for one finding.
+
+        Uses the configured LLM provider; when none is set it returns the
+        knowledge-base remediation, so ``ai_generated`` tells the caller which
+        path produced the text. Same engine backs ``heaven remediate``.
+        """
+        store = _engagement_store_factory(engagement)
+        f = store.get_finding(finding_id)
+        if not f:
+            raise HTTPException(404, f"Finding {finding_id} not found")
+
+        from heaven.devsecops.ai_remediation import AIRemediationEngine
+        from heaven.devsecops.vuln_kb import enrich_finding
+        enriched = enrich_finding({
+            "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
+            "title": f.title, "severity": f.severity, "cve_id": f.cve_id,
+            "evidence": f.evidence,
+        })
+        ev = enriched.get("evidence") or {}
+        finding_dict = {
+            "title": f.title, "target": f.target, "vuln_type": f.vuln_type,
+            "description": ev.get("description") or f.title,
+            "patch": ev.get("remediation") or "",
+        }
+        engine = AIRemediationEngine()
+        text = engine.generate_patch(finding_dict)
+        return {
+            "finding_id": finding_id,
+            "remediation": text,
+            "ai_generated": bool(engine.available),
+        }
+
+    # ── SBOM (CycloneDX) export ──
+    @app.get("/api/sbom")
+    async def export_sbom(
+        engagement: Optional[str] = Query(None),
+        download: bool = Query(False),
+        user: User = Depends(require_permission("report.view")),
+    ):
+        """CycloneDX 1.5 SBOM for an engagement.
+
+        components = discovered services (product/version per open port),
+        vulnerabilities = CVE-bearing findings. Same generator as
+        ``heaven sbom``. ``download=true`` sets an attachment filename.
+        """
+        from heaven.devsecops.sbom import collect_scan_data, generate_cyclonedx_sbom
+        store = _engagement_store_factory(engagement)
+        scan_data = collect_scan_data(store)
+        doc = generate_cyclonedx_sbom(scan_data, output_path=None)
+        if download:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(doc, headers={
+                "Content-Disposition": 'attachment; filename="heaven-sbom.json"'})
+        return doc
+
     # ── Gap 6: Agentic AI — manual triggers ──
 
     @app.post("/api/ai/{kind}/run")

@@ -10,7 +10,7 @@
 // of what will be in the report so it's clear the output reflects current data.
 
 import React, { useEffect, useState } from "react";
-import { Engagement, downloadReport, previewReport } from "../api";
+import { Engagement, downloadReport, previewReport, downloadSbom } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
 
@@ -73,6 +73,18 @@ export default function Reports() {
       toast.info("Report opened in a new tab — use Print → Save as PDF for a PDF copy");
     } catch (e) {
       toast.error(e.message || "Preview failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function sbom() {
+    setBusy("sbom");
+    try {
+      const name = await downloadSbom(engOpts());
+      toast.success(`Downloaded ${name}`);
+    } catch (e) {
+      toast.error(e.message || "SBOM export failed");
     } finally {
       setBusy("");
     }
@@ -238,6 +250,28 @@ export default function Reports() {
               </span>
             </button>
           ))}
+          <button
+            onClick={sbom}
+            disabled={!!busy}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              textAlign: "left", gap: 10, padding: "12px 14px",
+              background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)", color: "var(--text-0)",
+              cursor: busy ? "wait" : "pointer", fontFamily: "var(--font-ui)",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
+            title="CycloneDX SBOM — discovered services + CVE findings"
+          >
+            <span>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>SBOM (CycloneDX)</div>
+              <div style={{ fontSize: 11, color: "var(--text-2)" }}>Services + CVEs, JSON</div>
+            </span>
+            <span style={{ fontSize: 12, color: "var(--text-2)" }}>
+              {busy === "sbom" ? "…" : "↓"}
+            </span>
+          </button>
         </div>
       </div>
     </div>

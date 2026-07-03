@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — SBOM + AI remediation (wired from previously-dead code)
+
+- **CycloneDX SBOM export.** `heaven sbom` and `GET /api/sbom` generate a
+  CycloneDX 1.5 SBOM whose components are the services HEAVEN discovered
+  (product/version/CPE per open port) and whose `vulnerabilities` section
+  folds in CVE-bearing findings. A "SBOM (CycloneDX)" download was added to the
+  web Reports page. The generator now consumes the real scanner asset shape
+  (`{host, open_ports:[…]}`) — previously it expected a shape the scanner never
+  produced, so it always emitted an empty SBOM (`heaven/devsecops/sbom.py`).
+- **AI-assisted remediation.** `heaven remediate <finding-id>` and
+  `POST /api/findings/{id}/remediation` generate remediation guidance via the
+  configured LLM provider, falling back to the knowledge-base remediation when
+  no key is set (`ai_generated` flags which path produced the text). A
+  "Generate AI remediation" button was added to the finding detail page
+  (`heaven/devsecops/ai_remediation.py`).
+
+### Removed — dead code + documentation overclaims
+
+- Deleted two orphaned modules with no callers: `recon/wireless_recon.py`
+  (PCAP wireless parsing — needed operator-supplied captures, never wired into
+  the scan flow) and `vulnscan/msf_client.py` (Metasploit RPC — required an
+  external `msfrpcd` and an uninstalled optional dependency).
+- Removed the corresponding README claims that had no backing code: "wireless"
+  reconnaissance and the Metasploit integration row (which referenced a
+  `--enable-exploitation` flag that did not exist).
+- Refreshed the drifted project statistics (tests, modules, CLI-command count).
+
 ### Added — professional penetration-test report
 
 - **Rebuilt the HTML report into a client-ready deliverable.** It now opens with

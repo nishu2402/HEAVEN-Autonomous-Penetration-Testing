@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  HEAVEN — Autonomous Penetration Testing Framework
-#  Installer v1.0
+#  Installer v1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -29,8 +29,8 @@ echo -e "${CYAN}${BOLD}║        Autonomous Penetration Testing Framework      
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
 echo -e ""
 
-# ── Resolve install directory ──────────────────────────────────────────────
-INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ── Resolve install directory (repo root — this script lives in scripts/) ──
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 info "Install directory: ${BOLD}$INSTALL_DIR${NC}"
 
 # ── Detect target user (handle sudo correctly) ────────────────────────────────

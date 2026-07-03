@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20372%20Tests%20%C2%B7%20136%20Modules%20%C2%B7%2038%20CLI%20Commands%20%C2%B7%2055%20API%20Routes&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20434%20Tests%20%C2%B7%20134%20Modules%20%C2%B7%2042%20CLI%20Commands%20%C2%B7%2055%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;372+Tests+%C2%B7+136+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;434+Tests+%C2%B7+134+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
 </p>
 
 <p align="center">
@@ -19,14 +19,14 @@
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI_55_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/badge/Tests-370_Passing-B8FF00?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
+    <img src="https://img.shields.io/badge/Tests-434_Passing-B8FF00?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
     <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
     <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-136-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
-    <img src="https://img.shields.io/badge/CLI_Commands-38-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
+    <img src="https://img.shields.io/badge/Modules-134-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/CLI_Commands-42-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-21-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
@@ -99,7 +99,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API** — 55 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="540" alt="HEAVEN overview" src="https://github.com/user-attachments/assets/76d75a34-463f-4063-b4c5-97d759bb0219" />
+<img width="760" alt="HEAVEN — Autonomous Penetration Testing Platform v1.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -128,7 +128,7 @@ It runs three ways from the **same engagement dataset**:
 | 🗺️ **Threat Intel** | MITRE ATT&CK mapping · Lockheed Kill Chain · TAXII feed |
 | 📄 **Report Formats** | 8 (PDF · HTML · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL) |
 | 🔒 **Security** | JWT RBAC · AES-256-GCM vault · HMAC-signed audit log · LLM credential redaction |
-| 📦 **Install** | `./install.sh` |
+| 📦 **Install** | `./scripts/install.sh` |
 | 🐳 **Container** | `docker compose up` (bundles PostgreSQL) |
 | 🔁 **CI** | ruff · mypy · pytest · pip-audit · Bandit · self-audit · Docker smoke-test |
 
@@ -211,10 +211,10 @@ It runs three ways from the **same engagement dataset**:
 ```bash
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git
 cd HEAVEN-Autonomous-Penetration-Testing
-chmod +x install.sh && ./install.sh      # venv + deps + builds the web UI
+chmod +x scripts/install.sh && ./scripts/install.sh   # venv + deps + builds the web UI
 ```
 
-`install.sh` installs everything from `requirements.txt`. If you instead install
+`scripts/install.sh` installs everything from `requirements.txt`. If you instead install
 the package with `pip`, the base install is intentionally lean and each feature
 group is an **optional extra** (the feature degrades gracefully when its extra
 isn't installed):
@@ -383,6 +383,10 @@ deterministic heuristic (or pass `--no-llm`).
 42 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
+<img width="820" alt="heaven CLI dashboard — module status + live command reference (v1.0.0)" src="docs/screenshots/Heaven_cli.png" />
+</div>
+
+<div align="center">
 
 | Command | Purpose |
 |---|---|
@@ -440,7 +444,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 `heaven serve` → open `http://localhost:8443`. A dark, glassmorphic React console (Inter + JetBrains Mono) with a command palette (⌘K), live log streaming, and a 3D network-topology view.
 
 <div align="center">
-<img width="1600" alt="HEAVEN web UI" src="https://github.com/user-attachments/assets/6e40d32d-67a4-4ab3-8faf-46a5fb4e3192" />
+<img width="900" alt="HEAVEN web UI — Dashboard: 3D attack-surface topology, severity distribution, and Fix-This-First priorities" src="docs/screenshots/web-app_dashboard.png" />
 </div>
 
 **21 pages:**
@@ -471,6 +475,19 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 | **System Health** | `doctor` in the browser — tools / keys / module status + install hints |
 | **Settings** | API keys & integrations — paste keys, masked state, how-to-get links |
 
+</div>
+
+<div align="center">
+<table>
+<tr>
+<td align="center" width="50%"><img alt="Findings — triage table with severity, confidence, status and report download" src="docs/screenshots/findings_dashboard.png" /><br/><sub><b>Findings</b> — filter · triage · download report</sub></td>
+<td align="center" width="50%"><img alt="Kill Chain — Lockheed Martin 7-phase coverage with chained attack path" src="docs/screenshots/kill_chain_dashboard.png" /><br/><sub><b>Kill Chain</b> — phase coverage · chained attack path</sub></td>
+</tr>
+<tr>
+<td align="center" width="50%"><img alt="Scans page — guided scan launcher with authorization gate + CLI reference" src="docs/screenshots/scanning_dashboard.png" /><br/><sub><b>Scans</b> — guided launcher · authorization gate</sub></td>
+<td align="center" width="50%"><img alt="Reports — client-ready PDF/HTML and 8 export formats incl. CycloneDX SBOM" src="docs/screenshots/reports_dashboard.png" /><br/><sub><b>Reports</b> — client-ready PDF/HTML · 8 export formats</sub></td>
+</tr>
+</table>
 </div>
 
 > **First login:** ships with `admin/admin` and **forces a password change** on first sign-in. Set `HEAVEN_ADMIN_PASSWORD` (and optionally `HEAVEN_ADMIN_USERNAME`) beforehand to skip the prompt. A password changed in the Web UI is **persisted to `.env`**, so it survives a server restart (`.env` is the source of truth that `heaven serve` re-reads on boot). JWTs are held in memory only — never `localStorage`.
@@ -645,6 +662,7 @@ heaven-ui/                React + Vite web console (21 pages)
 tests/                    434 pytest tests + DVWA benchmark suite
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
+scripts/                  install.sh · uninstall.sh
 ```
 
 ---

@@ -23,7 +23,9 @@ Three SQLi detection techniques:
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
+import html
 import re
 import time
 from typing import Optional
@@ -216,6 +218,94 @@ def _finding_key(target: str, vuln_type: str, param: str) -> str:
     return hashlib.sha256(f"{target}|{vuln_type}|{param}".encode()).hexdigest()[:16]
 
 
+# ── Boolean-blind SQLi decision (pure — unit-tested in tests/) ──────
+# Boolean-blind detection is precision-sensitive: any page whose length or
+# content depends on the input value (search boxes that echo the query, file
+# includes that name the missing file, login forms) can *look* like a boolean
+# oracle. The classic false positive is a page that simply reflects the payload
+# — `1) AND (1=1)--` vs `1) AND (1=2)--` then differ only by the reflected text,
+# not by any SQL result. We neutralise that by stripping the reflected payload
+# and requiring the TRUE/FALSE responses to differ by a meaningful *absolute*
+# amount (page-size-independent) while TRUE still tracks the baseline.
+
+def _collapse_ws(text: str) -> str:
+    """Collapse runs of whitespace so incidental re-render noise (indentation,
+    line endings) doesn't register as a content difference."""
+    return " ".join(text.split())
+
+
+def _strip_reflection(body: str, payload: str) -> str:
+    """Remove reflections of the injected payload from a response body, so an
+    echoing page can't masquerade as a boolean-condition difference.
+
+    HTML entities are decoded first, because apps typically escape reflected
+    input (`htmlspecialchars` turns ``'`` into ``&#039;``), which would otherwise
+    hide the reflection from a verbatim match.
+    """
+    body = html.unescape(body)
+    if payload and payload in body:
+        body = body.replace(payload, "")
+    return body
+
+
+def _diff_char_count(a: str, b: str, cap: int = 4000) -> int:
+    """Number of characters that differ between two bodies. 0 == identical;
+    grows with the size of the real content change.
+
+    The common prefix/suffix are trimmed first (O(n)) so the super-linear matcher
+    only ever runs on the region that actually differs — this keeps it fast and
+    bounded on large or highly repetitive pages, where a naive char-level
+    ``SequenceMatcher`` over the whole body is pathologically slow.
+    """
+    if a == b:
+        return 0
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    j = 0
+    while j < n - i and a[-1 - j] == b[-1 - j]:
+        j += 1
+    ra = a[i: len(a) - j][:cap]
+    rb = b[i: len(b) - j][:cap]
+    sm = difflib.SequenceMatcher(None, ra, rb, autojunk=False)
+    matched = sum(block.size for block in sm.get_matching_blocks())
+    return max(len(ra), len(rb)) - matched
+
+
+def _boolean_sqli_confirmed(
+    baseline_body: str,
+    body_true: str,
+    body_false: str,
+    true_payload: str,
+    false_payload: str,
+    min_delta: int = 12,
+) -> bool:
+    """True iff the TRUE/FALSE responses show a genuine boolean-blind SQLi oracle.
+
+    A real oracle: the TRUE condition reproduces the baseline (the row is still
+    returned) while the FALSE condition hides it — so, once any reflected payload
+    is removed, TRUE and FALSE differ by the size of that row while TRUE stays
+    close to the baseline. A reflective/echoing page collapses to near-identical
+    TRUE and FALSE bodies after stripping and is rejected.
+    """
+    if not (baseline_body and body_true and body_false):
+        return False
+    # All three go through _strip_reflection (which also HTML-decodes) so the
+    # comparison is consistent and reflected payloads are neutralised.
+    base = _collapse_ws(_strip_reflection(baseline_body, ""))
+    bt = _collapse_ws(_strip_reflection(body_true, true_payload))
+    bf = _collapse_ws(_strip_reflection(body_false, false_payload))
+
+    delta_tf = _diff_char_count(bt, bf)      # TRUE vs FALSE (reflection removed)
+    delta_tb = _diff_char_count(bt, base)    # TRUE vs baseline
+
+    # TRUE≈FALSE after stripping → the "difference" was reflection/noise, not a
+    # SQL result. Require a real, sizable TRUE/FALSE divergence that is driven by
+    # the FALSE branch (TRUE must stay markedly closer to the baseline).
+    return delta_tf >= min_delta and delta_tf > delta_tb * 2
+
+
 def _inject_param(url: str, param: str, payload: str) -> str:
     """Return a new URL with `param` replaced by `payload`."""
     parsed = urlparse(url)
@@ -344,11 +434,10 @@ class InjectionScanner:
             if not body_true or not body_false:
                 continue
 
-            # True payload → similar to baseline; False payload → significantly different
-            true_close = abs(len(body_true) - len(baseline_body)) < max(len(baseline_body) * 0.08, 20)
-            false_diff = abs(len(body_false) - len(baseline_body)) > max(len(baseline_body) * 0.10, 30)
-
-            if true_close and false_diff:
+            # Reflection-resistant oracle check (see _boolean_sqli_confirmed):
+            # a page that merely echoes the payload is NOT a boolean-blind SQLi.
+            if _boolean_sqli_confirmed(baseline_body, body_true, body_false,
+                                       true_pl, false_pl):
                 self._add_finding(
                     target=url_true,
                     vuln_type="sqli",

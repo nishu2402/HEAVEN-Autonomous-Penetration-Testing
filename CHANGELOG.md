@@ -22,6 +22,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Version strings synced to `1.0.0`** across the project — the ML risk model's
   internal version (`2.0.0`), the uninstaller banner (`1.3.0`), and the installer
   comment, plus the README header counts (tests/modules/CLI commands).
+- **Boolean-blind SQLi false positives on reflective endpoints.** The probe used
+  a length-only comparison against the baseline and never compared the TRUE/FALSE
+  responses to each other, so pages that merely echo input (search/reflection),
+  name the missing file (LFI warnings), or return a constant error (login forms)
+  were mis-flagged as `sqli`. Verified live against DVWA (authenticated,
+  `security=low`): false `sqli` on `/vulnerabilities/{xss_r,fi,brute}/`. The
+  decision is now a reflection-resistant, page-size-independent oracle check
+  (`_boolean_sqli_confirmed`): the reflected payload is stripped (HTML-entity
+  decoded first, so `htmlspecialchars`-escaped echoes like `&#039;` are still
+  matched) and a genuine TRUE-vs-FALSE content divergence is required while TRUE
+  tracks the baseline. It runs in ~0.4 ms even on large/repetitive pages (a naive
+  char diff was super-linear). Live-validated: the clear reflection FPs are gone,
+  the real SQLi is still detected, and a genuine boolean oracle (row vs no-row)
+  is correctly confirmed. 13 regression tests
+  (`heaven/vulnscan/injection_scanner.py`, `tests/test_injection_boolean_sqli.py`).
+
+### Changed
+
+- **DVWA benchmark now scans authenticated by default.** The fixture logs into
+  DVWA (CSRF token + `security=low` cookie) and hands the scan a `--cookie-file`
+  so it exercises the real `/vulnerabilities/*` attack surface instead of only
+  the public login page; the per-scan timeout default was raised to 900 s (the
+  authenticated crawl does far more work). Closes the auto-login TODO in
+  `tests/benchmarks/conftest.py`.
 
 ### Security
 
@@ -33,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never smuggle SQL, even if raw request data were ever forwarded into
   `create`/`update` — defense-in-depth, not a known-exploitable path
   (`heaven/db/repository.py`).
+- **Patched 5 dependency advisories flagged by `pip-audit`.** Bumped
+  `cryptography` floor to `>=48.0.1` (48.0.0 had GHSA-537c-gmf6-5ccf; kept below
+  49 for pyopenssl compatibility) and added a `msgpack>=1.2.1` transitive floor
+  (GHSA-6v7p-g79w-8964, pulled in via `cachecontrol`). `starlette` and
+  `pydantic-settings` were already pinned to their fixed floors; the local env
+  had simply drifted. `pip-audit` now reports no known vulnerabilities
+  (`requirements.txt`).
 
 ### Added — SBOM + AI remediation (wired from previously-dead code)
 

@@ -10,20 +10,25 @@ Run:
 
 Optional env vars:
     HEAVEN_BENCH_RUNS         : repeat the scan N times for mean±stddev (default 1)
-    HEAVEN_BENCH_SCAN_TIMEOUT : per-scan timeout in seconds (default 600)
+    HEAVEN_BENCH_SCAN_TIMEOUT : per-scan timeout in seconds (default 900)
     HEAVEN_BENCH_REPORT_DIR   : where to save reports (default tests/benchmarks/reports/)
 
-What this benchmark does NOT do (yet)
--------------------------------------
-HEAVEN does not currently support authenticated scanning. DVWA's vulnerable
-endpoints all live under /vulnerabilities/* which require login. So the scan
-will only exercise the small public surface: /login.php, /setup.php, the
-robots.txt, the index page. Expect low recall numbers until HEAVEN gains
-cookie/session auth support.
+Authenticated vs. unauthenticated
+---------------------------------
+This baseline runs UNAUTHENTICATED. DVWA's vulnerable endpoints all live under
+/vulnerabilities/* behind a login, so a no-auth scan only exercises the public
+surface (/login.php, /setup.php, robots.txt, the index page) and recall is low
+by design. That is deliberate: it is a stable, reproducible floor that
+regressions can be measured against.
 
-The benchmark still runs in this state — it produces a real baseline number
-("here's what HEAVEN finds with zero auth") that future improvements can
-be measured against. The README documents the auth gap and how to close it.
+HEAVEN *does* support authenticated scanning — `heaven scan --cookie-file <jar>`
+or `--auth "url=/login.php,user=admin,pass=password,csrf_field=user_token"`.
+Verified live against this DVWA image: the authenticated crawl reaches the
+/vulnerabilities/* pages and the injection scanner detects the SQLi/XSS/cmdi
+there. To measure *authenticated* recall, hand the scan a cookie jar that also
+carries DVWA's `security=low` cookie (see docs/BENCHMARK_HOWTO.md, "authenticated
+DVWA scanning"). Wiring that into this fixture — and tightening boolean-blind
+SQLi precision on reflective endpoints — is tracked as a follow-up.
 """
 
 from __future__ import annotations
@@ -61,7 +66,11 @@ def _runs() -> int:
 
 
 def _scan_timeout() -> int:
-    return int(os.environ.get("HEAVEN_BENCH_SCAN_TIMEOUT", "600"))
+    # The authenticated scan crawls the whole post-login surface and fuzzes every
+    # discovered vector, so it runs longer than the old public-only baseline —
+    # especially against an emulated (amd64-on-arm64) DVWA. Raise
+    # HEAVEN_BENCH_SCAN_TIMEOUT for very slow hosts.
+    return int(os.environ.get("HEAVEN_BENCH_SCAN_TIMEOUT", "900"))
 
 
 def _report_dir() -> Path:
@@ -79,8 +88,14 @@ def _find_heaven_cli() -> str:
     return ""  # unreachable; keeps mypy happy
 
 
-def _run_heaven_scan(base_url: str, engagement_db: Path) -> tuple[Path, float]:
+def _run_heaven_scan(
+    base_url: str, engagement_db: Path, cookie_file: str | None = None
+) -> tuple[Path, float]:
     """Invoke `heaven scan` against the URL, persist findings in the given DB.
+
+    When ``cookie_file`` is provided the scan runs authenticated (DVWA's
+    vulnerable endpoints live behind the login) and bypasses the scope filter so
+    the single target URL is always in play.
 
     Returns (engagement_db_path, duration_seconds).
     """
@@ -112,6 +127,9 @@ def _run_heaven_scan(base_url: str, engagement_db: Path) -> tuple[Path, float]:
             "--i-have-authorization",
             "--skip-dep-check",
         ]
+        if cookie_file:
+            # Authenticated scan; bypass the scope filter for the single target.
+            scan_cmd += ["--cookie-file", cookie_file, "--no-use-scope"]
         start = time.time()
         result = subprocess.run(
             scan_cmd, cwd=tmp_path, capture_output=True, text=True,
@@ -176,12 +194,13 @@ def test_heaven_vs_dvwa_baseline(dvwa_target: GroundTruth) -> None:
     report_dir = _report_dir()
     report_dir.mkdir(parents=True, exist_ok=True)
 
+    cookie_file = dvwa_target.auth.get("cookie_file")
     run_results = []
     for i in range(runs):
         db = report_dir / f"dvwa_run{i + 1}.db"
         if db.exists():
             db.unlink()
-        _, duration = _run_heaven_scan(dvwa_target.base_url, db)
+        _, duration = _run_heaven_scan(dvwa_target.base_url, db, cookie_file=cookie_file)
         findings = _findings_from_db(db)
         result = evaluate(findings, dvwa_target, duration_seconds=duration)
         run_results.append(result)

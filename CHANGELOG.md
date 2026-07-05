@@ -37,6 +37,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the real SQLi is still detected, and a genuine boolean oracle (row vs no-row)
   is correctly confirmed. 13 regression tests
   (`heaven/vulnscan/injection_scanner.py`, `tests/test_injection_boolean_sqli.py`).
+- **SQLi payloads used a bare `--` comment that MySQL/MariaDB ignore, silently
+  killing blind-SQLi recall.** MySQL only treats `--` as a comment when it is
+  followed by whitespace (`-- `) or you use `#`; a bare `--` left the injected
+  quote dangling, so both the true and false boolean probes errored identically
+  and no oracle formed — the exact reason authenticated recall against DVWA
+  (which runs MySQL) collapsed. All error/boolean/time payload terminators are
+  now MySQL-safe (`-- ` / `#`), which also comment correctly on Postgres, MSSQL
+  and SQLite. Proven with a Docker-free negative control: blind-SQLi on the
+  vulnerable `id` param is detected with the fix and undetected with a bare `--`
+  (`heaven/vulnscan/injection_scanner.py`).
+- **Command-injection false positives on reflective endpoints.** The output-based
+  cmdi probe flagged any page whose body contained the echo marker
+  (`; echo h3av3n7x7`) — but a page that merely *reflects* the payload text
+  contains the marker without ever executing a shell. Surfaced by the new scored
+  benchmark: cmdi false positives on the XSS/LFI/echo endpoints. The probe now
+  strips the reflected payload (HTML-entity-decoded, covering escaped echoes)
+  before matching, so the marker/`uid=` only counts as genuine command OUTPUT
+  — the same reflection-resistant principle as the boolean-SQLi fix
+  (`heaven/vulnscan/injection_scanner.py`).
+
+### Added
+
+- **Native, Docker-free web-injection benchmark (scored).** A tiny in-process
+  Flask target (`tests/benchmarks/native/vuln_app.py`) faithfully reproduces
+  DVWA's SQLi/LFI/cmdi/XSS endpoints — *including MySQL comment semantics* — so
+  the real crawler and injection scanner are exercised end-to-end in ~1 s with no
+  QEMU or Docker. Two always-on tests consume it: `test_native_sqli_recall.py`
+  asserts HEAVEN detects error-based **and** blind SQLi, LFI, command injection
+  and reflected XSS — each attributed to the correct parameter (`id`, not the
+  `Submit` button) and with no SQLi/cmdi false positives on reflective/escaped
+  endpoints; `test_native_benchmark.py` scores the same run through the existing
+  precision/recall/F1 metrics layer against a labelled ground truth
+  (`ground_truth/native.yaml`) and enforces floors (currently 100% precision,
+  100% required recall, 100% F1). The crawler-vector → scan-target conversion was
+  extracted from the orchestrator into a pure, unit-tested
+  `build_injection_targets()` (single source of truth).
 
 ### Changed
 

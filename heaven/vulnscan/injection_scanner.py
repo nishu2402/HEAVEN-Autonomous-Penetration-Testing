@@ -44,41 +44,50 @@ logger = get_logger("vulnscan.injection")
 # Probe payloads
 # ─────────────────────────────────────────────────────────────────
 
-# SQLi error-based payloads — trigger DBMS error messages
+# SQLi error-based payloads — trigger DBMS error messages.
+# NOTE ON COMMENTS: terminators use "-- " (double-dash + SPACE), never a bare
+# "--". MySQL/MariaDB only treat "--" as a comment when it is followed by
+# whitespace or a control char; a bare "--" is a parse error. DVWA (and most PHP
+# apps) run MySQL, so a bare "--" left the injected quote dangling and produced
+# an identical error for both the true and false probe — silently killing the
+# boolean oracle. "-- " (and the "#" variants below) comment correctly on MySQL,
+# MariaDB, Postgres, MSSQL and SQLite alike.
 SQLI_ERROR_PROBES: list[tuple[str, str]] = [
     ("'", "generic_quote"),
     ("''", "double_quote"),
-    ("1 OR 1=1--", "or_true"),
+    ("1 OR 1=1-- ", "or_true"),
     ("1' OR '1'='1", "or_string"),
-    ("1 AND 1=2--", "and_false"),
-    ("1;SELECT 1--", "stacked"),
+    ("1 AND 1=2-- ", "and_false"),
+    ("1;SELECT 1-- ", "stacked"),
     ("\\", "backslash"),
-    ("1' AND SLEEP(0)--", "sleep_zero"),
-    ("1 WAITFOR DELAY '0:0:0'--", "waitfor_zero"),
+    ("1' AND SLEEP(0)-- ", "sleep_zero"),
+    ("1 WAITFOR DELAY '0:0:0'-- ", "waitfor_zero"),
 ]
 
 # Boolean-based SQLi: (true_payload, false_payload, probe_name)
-# True condition → same response as baseline; False condition → different response
+# True condition → same response as baseline; False condition → different response.
+# See the comment-style note above: terminators are "-- " or "#", never bare "--".
 SQLI_BOOL_PROBES: list[tuple[str, str, str]] = [
-    ("1 AND 1=1--", "1 AND 1=2--", "and_bool_int"),
-    ("1' AND '1'='1'--", "1' AND '1'='2'--", "and_bool_str"),
-    ("1) AND (1=1)--", "1) AND (1=2)--", "and_bool_paren"),
-    ("1 OR 1=1--", "1 OR 1=2--", "or_bool_int"),
+    ("1 AND 1=1-- ", "1 AND 1=2-- ", "and_bool_int"),
+    ("1' AND '1'='1'-- ", "1' AND '1'='2'-- ", "and_bool_str"),
+    ("1) AND (1=1)-- ", "1) AND (1=2)-- ", "and_bool_paren"),
+    ("1 OR 1=1-- ", "1 OR 1=2-- ", "or_bool_int"),
+    ("1' AND '1'='1'#", "1' AND '1'='2'#", "and_bool_str_hash"),
 ]
 
 # Time-based blind SQLi: (payload, sleep_seconds, probe_name)
 # We use short sleep (3s) to keep the scan reasonably fast.
 _SLEEP = 3
 SQLI_TIME_PROBES: list[tuple[str, int, str]] = [
-    (f"1; WAITFOR DELAY '0:0:{_SLEEP}'--",    _SLEEP, "mssql_waitfor"),
-    (f"1'; WAITFOR DELAY '0:0:{_SLEEP}'--",   _SLEEP, "mssql_waitfor_str"),
-    (f"1 AND SLEEP({_SLEEP})--",              _SLEEP, "mysql_sleep"),
-    (f"1' AND SLEEP({_SLEEP})--",             _SLEEP, "mysql_sleep_str"),
-    (f"1) AND SLEEP({_SLEEP})--",             _SLEEP, "mysql_sleep_paren"),
-    (f"1;SELECT pg_sleep({_SLEEP})--",        _SLEEP, "pgsql_pg_sleep"),
-    (f"1';SELECT pg_sleep({_SLEEP})--",       _SLEEP, "pgsql_pg_sleep_str"),
-    (f"1 AND 1=DBMS_PIPE.RECEIVE_MESSAGE(CHR(99),{_SLEEP})--", _SLEEP, "oracle_dbms_pipe"),
-    (f"1 RLIKE SLEEP({_SLEEP})--",            _SLEEP, "mysql_rlike_sleep"),
+    (f"1; WAITFOR DELAY '0:0:{_SLEEP}'-- ",    _SLEEP, "mssql_waitfor"),
+    (f"1'; WAITFOR DELAY '0:0:{_SLEEP}'-- ",   _SLEEP, "mssql_waitfor_str"),
+    (f"1 AND SLEEP({_SLEEP})-- ",              _SLEEP, "mysql_sleep"),
+    (f"1' AND SLEEP({_SLEEP})-- ",             _SLEEP, "mysql_sleep_str"),
+    (f"1) AND SLEEP({_SLEEP})-- ",             _SLEEP, "mysql_sleep_paren"),
+    (f"1;SELECT pg_sleep({_SLEEP})-- ",        _SLEEP, "pgsql_pg_sleep"),
+    (f"1';SELECT pg_sleep({_SLEEP})-- ",       _SLEEP, "pgsql_pg_sleep_str"),
+    (f"1 AND 1=DBMS_PIPE.RECEIVE_MESSAGE(CHR(99),{_SLEEP})-- ", _SLEEP, "oracle_dbms_pipe"),
+    (f"1 RLIKE SLEEP({_SLEEP})-- ",            _SLEEP, "mysql_rlike_sleep"),
 ]
 
 # Time differential threshold: response must be >= (sleep - 0.5) seconds
@@ -313,6 +322,81 @@ def _inject_param(url: str, param: str, payload: str) -> str:
     qs[param] = [payload]
     new_query = urlencode(qs, doseq=True)
     return urlunparse(parsed._replace(query=new_query))
+
+
+def build_injection_targets(
+    endpoints: list[dict],
+    seed_urls: Optional[list[str]] = None,
+) -> tuple[list[str], dict[str, list]]:
+    """Turn crawler endpoints into (urls, forms_by_url) for the injection scanner.
+
+    Each crawler endpoint carries ``input_vectors`` (form fields + URL params)
+    discovered on a page. This converts that raw attack surface into concrete
+    scan targets:
+
+    * **GET params** for a given action are combined into a SINGLE URL that
+      carries *every* param at once. Many apps only execute the vulnerable query
+      when all form fields are present (DVWA's SQLi page needs both ``id`` AND
+      ``Submit``); a single-param URL would never trigger the bug. The scanner
+      then fuzzes each param in turn while holding the others, so every parameter
+      — including the *right* one (``id``) rather than only the submit button —
+      is exercised on the combined URL.
+    * **POST fields** become ``{action: [form_dict]}`` entries. The scanner only
+      tests a POST form whose action is also a scan target, so every action URL
+      is appended to ``urls``.
+
+    Pure and side-effect free so it can be unit-tested without a live crawl.
+    Mirrors (and is the single source of truth for) the orchestrator's
+    injection-discovery wiring.
+    """
+    urls: list[str] = list(seed_urls or [])
+    forms_by_url: dict[str, list] = {}
+    get_params: dict[str, set] = {}
+
+    def _add_post_field(action: str, param: str) -> None:
+        forms_by_url.setdefault(action, [])
+        form = next((f for f in forms_by_url[action] if f.get("action") == action), None)
+        if form is None:
+            form = {"action": action, "method": "POST", "fields": []}
+            forms_by_url[action].append(form)
+        if not any(fl.get("name") == param for fl in form["fields"]):
+            form["fields"].append({"name": param, "value": "test"})
+
+    for ep in endpoints:
+        if not isinstance(ep, dict):
+            continue
+        ep_url = ep.get("url", "")
+        if ep_url and ep_url not in urls:
+            urls.append(ep_url)
+        for iv in ep.get("input_vectors", []):
+            if not isinstance(iv, dict):
+                continue
+            param = iv.get("param")
+            iv_url = iv.get("url") or ep_url
+            if not param or not iv_url:
+                continue
+            iv_url = iv_url.split("#", 1)[0]  # form action="#" → page URL
+            if (iv.get("method") or "GET").upper() == "POST":
+                _add_post_field(iv_url, param)
+            else:
+                get_params.setdefault(iv_url, set()).add(param)
+
+    # Build ONE GET URL per action carrying all of its params (see docstring).
+    for base_url, params in get_params.items():
+        parsed = urlparse(base_url)
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        for p in params:
+            qs.setdefault(p, ["1"])
+        test_url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
+        if test_url not in urls:
+            urls.append(test_url)
+
+    # Every POST form action must also be a scan target.
+    for action in forms_by_url:
+        if action not in urls:
+            urls.append(action)
+
+    return urls, forms_by_url
 
 
 async def _get(session, url: str, headers: Optional[dict] = None, timeout: float = 8.0) -> tuple[int, str]:
@@ -731,8 +815,15 @@ class InjectionScanner:
             _, body = await _probe(payload, timeout=20.0)
             if not body:
                 continue
+            # Reflection guard: an app that merely echoes the payload back would
+            # contain our echo marker (`h3av3n7x7`) inside the reflected payload
+            # text — that is NOT command execution. Strip the reflected payload
+            # first (HTML-entity-decoding, so escaped echoes are covered too), so
+            # the marker/`uid=` only counts when it survives as real command
+            # OUTPUT rather than as a verbatim echo of the input.
+            probed = _strip_reflection(body, payload)
             for pat in CMDI_PATTERNS:
-                if pat.search(body) and not pat.search(baseline_body):
+                if pat.search(probed) and not pat.search(baseline_body):
                     self._add_finding(
                         target=url, vuln_type="cmdi",
                         title=f"OS Command Injection — param '{param}'",

@@ -1051,69 +1051,28 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # ═══ Phase: INJECTION DISCOVERY (XSS + SQLi first-pass) ═══
     async def _injection_scan(**kw):
         try:
-            from heaven.vulnscan.injection_scanner import scan_for_injections
+            from heaven.vulnscan.injection_scanner import (
+                build_injection_targets,
+                scan_for_injections,
+            )
         except ImportError:
             return {}
-        from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-        urls = list(targets.get("urls", []))
-        forms_by_url: dict = {}
-        get_params: dict = {}   # base GET url → set of param names (grouped per form)
-
-        def _add_post_field(action: str, param: str) -> None:
-            forms_by_url.setdefault(action, [])
-            form = next((f for f in forms_by_url[action] if f.get("action") == action), None)
-            if form is None:
-                form = {"action": action, "method": "POST", "fields": []}
-                forms_by_url[action].append(form)
-            if not any(fl.get("name") == param for fl in form["fields"]):
-                form["fields"].append({"name": param, "value": "test"})
-
+        # Gather every crawler endpoint discovered by completed tasks, then let
+        # build_injection_targets() (the single source of truth, also unit-tested)
+        # convert the raw input vectors into concrete scan targets + POST forms.
+        endpoints: list[dict] = []
         for _tid, res in orch.results.items():
             if getattr(res, "state", None) != TaskState.COMPLETED:
                 continue
             data = res.data if isinstance(res.data, dict) else {}
             for ep in data.get("endpoints", []):
-                if not isinstance(ep, dict):
-                    continue
-                ep_url = ep.get("url", "")
-                if ep_url and ep_url not in urls:
-                    urls.append(ep_url)
-                # Crawler-extracted input vectors (form fields + URL params) are
-                # the real attack surface — convert them into testable targets so
-                # the injection scanner has parameters to fuzz.
-                for iv in ep.get("input_vectors", []):
-                    if not isinstance(iv, dict):
-                        continue
-                    param = iv.get("param")
-                    iv_url = iv.get("url") or ep_url
-                    if not param or not iv_url:
-                        continue
-                    iv_url = iv_url.split("#", 1)[0]  # form action="#" → page URL
-                    if (iv.get("method") or "GET").upper() == "POST":
-                        _add_post_field(iv_url, param)
-                    else:
-                        get_params.setdefault(iv_url, set()).add(param)
+                if isinstance(ep, dict):
+                    endpoints.append(ep)
 
-        # Build ONE GET URL per form with ALL its params present. Many apps only
-        # run the query when every form field is supplied (e.g. DVWA's SQLi page
-        # needs both id AND Submit) — a single-param URL would never trigger the
-        # bug. The injection scanner then fuzzes each param while holding the
-        # others, so the combined URL covers every parameter.
-        for base_url, params in get_params.items():
-            parsed = urlparse(base_url)
-            qs = parse_qs(parsed.query, keep_blank_values=True)
-            for p in params:
-                qs.setdefault(p, ["1"])
-            test_url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
-            if test_url not in urls:
-                urls.append(test_url)
-
-        # The scanner only tests a POST form when its action URL is in `targets`,
-        # so make sure every form action is also a scan target.
-        for action in forms_by_url:
-            if action not in urls:
-                urls.append(action)
+        urls, forms_by_url = build_injection_targets(
+            endpoints, seed_urls=list(targets.get("urls", []))
+        )
 
         if not urls and not forms_by_url:
             return {"skipped": True, "reason": "no URLs for injection scanning"}

@@ -1,0 +1,91 @@
+# Ground truth for the native, Docker-free benchmark target
+# (tests/benchmarks/native/vuln_app.py). This is a controlled, reproducible
+# functional benchmark — a faithful reproduction of DVWA's injection endpoints
+# (including MySQL comment semantics), NOT a claim about any live third-party
+# app. base_url is a placeholder; the harness serves the app on an ephemeral
+# port and matching is by endpoint path, so the host/port are irrelevant.
+target_app: heaven-native-vuln-app
+version: "1.0"
+base_url: "http://127.0.0.1:5000"
+
+vulnerabilities:
+  - id: sqli_visible_id
+    endpoint: "/vulnerabilities/sqli/"
+    method: GET
+    parameter: id
+    category: sqli
+    subtypes_ok: [sqli_error, sqli_boolean]
+    owasp: "A03:2021-Injection"
+    cwe: CWE-89
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Classic error/boolean SQLi on id; the id echo is also unescaped (see xss entry)."
+
+  - id: sqli_blind_id
+    endpoint: "/vulnerabilities/sqli_blind/"
+    method: GET
+    parameter: id
+    category: sqli
+    subtypes_ok: [sqli_boolean]
+    owasp: "A03:2021-Injection"
+    cwe: CWE-89
+    severity: critical
+    difficulty: medium
+    detection_required: true
+    notes: "Errors suppressed, nothing reflected — only the boolean oracle can find it."
+
+  - id: lfi_page
+    endpoint: "/vulnerabilities/fi/"
+    method: GET
+    parameter: page
+    category: lfi
+    subtypes_ok: [path_traversal]
+    owasp: "A03:2021-Injection"
+    cwe: CWE-98
+    severity: high
+    difficulty: low
+    detection_required: true
+    notes: "Path traversal leaks /etc/passwd content."
+
+  - id: cmdi_ip
+    endpoint: "/vulnerabilities/exec/"
+    method: GET
+    parameter: ip
+    category: cmdi
+    subtypes_ok: [os_command_injection]
+    owasp: "A03:2021-Injection"
+    cwe: CWE-78
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Output-based OS command injection (chained id / echo)."
+
+  - id: xss_reflected_name
+    endpoint: "/vulnerabilities/xss_r/"
+    method: GET
+    parameter: name
+    category: xss
+    subtypes_ok: [reflected_xss]
+    owasp: "A03:2021-Injection"
+    cwe: CWE-79
+    severity: high
+    difficulty: low
+    detection_required: true
+    notes: "Unescaped reflection of name."
+
+  # Opportunistic (not required): the visible SQLi page echoes id unescaped, so
+  # it is genuinely reflected-XSS-vulnerable too. HEAVEN finds it; recording it
+  # here keeps that true finding from being scored as a false positive.
+  - id: xss_on_sqli_id
+    endpoint: "/vulnerabilities/sqli/"
+    method: GET
+    parameter: id
+    category: xss
+    subtypes_ok: [reflected_xss]
+    owasp: "A03:2021-Injection"
+    cwe: CWE-79
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "Unescaped id echo → reflected XSS co-located with the SQLi."

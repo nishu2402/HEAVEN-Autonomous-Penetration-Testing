@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20434%20Tests%20%C2%B7%20134%20Modules%20%C2%B7%2042%20CLI%20Commands%20%C2%B7%2055%20API%20Routes&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20466%20Tests%20%C2%B7%20134%20Modules%20%C2%B7%2042%20CLI%20Commands%20%C2%B7%2055%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;434+Tests+%C2%B7+134+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;466+Tests+%C2%B7+134+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
     <img src="https://img.shields.io/badge/API-FastAPI_55_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/badge/Tests-434_Passing-B8FF00?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
+    <img src="https://img.shields.io/badge/Tests-466_Passing-B8FF00?style=for-the-badge&logo=pytest&logoColor=black" alt="Tests"/>
     <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
     <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
   </p>
@@ -115,7 +115,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 434 passing, 0 skipped (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 466 passing, 0 skipped (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 134 |
 | ⌨️ **CLI Commands** | 42 |
@@ -148,7 +148,7 @@ It runs three ways from the **same engagement dataset**:
 | Area | What It Does |
 |---|---|
 | 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud (AWS/GCP/Azure) · containers & Kubernetes (Docker socket / K8s API / RBAC) · IoT/SCADA · Git secrets · email OSINT · honeypot detection |
-| 🎯 **Vuln Detection** | SQLi (error/boolean/time-blind) · XSS · SSRF · XXE · CORS · CRLF · open redirect · IDOR · mass assignment · dir/file fuzzing · JWT attacks · race conditions · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
+| 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS · CRLF · open redirect · IDOR · mass assignment · dir/file fuzzing · JWT attacks · race conditions · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
 | 🧬 **API Security** | OWASP API Top 10 — BOLA/IDOR · broken auth · mass assignment · excessive data exposure (REST + GraphQL) |
 | 💥 **Verified Exploitation** | Active proof, not guesses — sqlmap SQLi dump · RCE canary file drop/read · SSRF out-of-band callback listener |
 | 🔓 **Post-Exploitation** | linPEAS privesc enum · BloodHound AD collection · SSH/SMB/PsExec lateral movement · credential reuse / pass-the-hash |
@@ -659,7 +659,7 @@ heaven/                   ← Python package (134 modules)
 └── cli/                  Click CLI — one module per command group (42 commands)
 
 heaven-ui/                React + Vite web console (21 pages)
-tests/                    434 pytest tests + DVWA benchmark suite
+tests/                    466 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh
@@ -745,7 +745,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>434 tests · 134 modules · 42 CLI commands · 55 API routes · 21 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>466 tests · 134 modules · 42 CLI commands · 55 API routes · 21 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

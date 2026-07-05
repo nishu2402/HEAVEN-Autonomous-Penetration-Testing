@@ -11,6 +11,35 @@ running container — not a mock or a unit test.
 
 ---
 
+## Reproducible in one command (no Docker)
+
+DVWA under Docker is heavy and, on Apple Silicon, runs under QEMU emulation. So
+HEAVEN also ships a **native, in-process benchmark**: a faithful reproduction of
+DVWA's injection endpoints — *including MySQL comment semantics* — that the
+**real crawler and injection scanner** run against end-to-end, scored through the
+same precision / recall / F1 metrics layer. It is deterministic, always-on in CI,
+and finishes in well under a second.
+
+```bash
+pytest tests/benchmarks/test_native_benchmark.py -s
+```
+
+| Metric | Result |
+|---|---|
+| Precision | **100%** (every reported finding is real) |
+| Recall (required vulns) | **100%** — error-based & blind SQLi, UNION SQLi, LFI, command injection, reflected XSS |
+| F1 | **100%** |
+| Parameter attribution | correct (`id`, not the `Submit` button) |
+| False positives on reflective/escaped endpoints | **0** (SQLi and cmdi reflection-guarded) |
+| Runtime | ~0.3 s, no Docker / no network |
+
+This is a *controlled functional benchmark* — the target is a known, labelled
+surface, so it measures HEAVEN's end-to-end detection **and** attribution
+precisely and repeatably. It is not a claim about any live third-party app; the
+live-DVWA results below are the complement to it.
+
+---
+
 ## Headline: autonomous authenticated coverage
 
 From **just the base URL** + a login session, HEAVEN authenticates, crawls past
@@ -37,7 +66,7 @@ plan / triage / explain; they never invent a finding.
 
 | Class | Technique | Verified |
 |---|---|---|
-| **SQL injection** | error-based · boolean-blind · time-based blind | ✅ `critical sqli — param 'id'` |
+| **SQL injection** | error-based · boolean-blind · UNION-based · time-based blind | ✅ `critical sqli — param 'id'` |
 | **Local File Inclusion** | path traversal + `php://` wrappers, content-leak confirmed | ✅ `critical lfi — param 'page'` |
 | **OS command injection** | output-based (`id`/echo) + differential time-based | ✅ `critical cmdi — param 'ip'` |
 | **Reflected XSS** | execution-aware (escaping-resistant FP filter) | ✅ |

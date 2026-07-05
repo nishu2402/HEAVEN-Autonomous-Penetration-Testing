@@ -120,6 +120,13 @@ def test_native_end_to_end_recall():
         f"SQLi not attributed to `id` param: "
         f"{[_param_of(f) for f in sqli_hits]}"
     )
+    # ...and the UNION-based technique fires on it (marker exfiltrated via a
+    # rendered row), attributed to `id`.
+    assert any(
+        _param_of(f) == "id"
+        and (f.get("evidence") or {}).get("technique") == "union"
+        for f in sqli_hits
+    ), "UNION-based SQLi not detected on `id`"
 
     # 2. BLIND SQLi (errors suppressed, nothing reflected) is detected on
     #    sqli_blind and attributed to `id`. This can ONLY be found via the

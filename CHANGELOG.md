@@ -59,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **UNION-based SQL injection detection** — the fourth classic SQLi technique
+  (alongside error-based, boolean-blind and time-based). It sweeps the unknown
+  column count, exfiltrates a unique marker via `UNION SELECT` in both string and
+  numeric contexts, and confirms a hit only when the marker surfaces as rendered
+  query OUTPUT — the reflected payload is stripped first, so an app that merely
+  echoes the input can't trigger a false positive
+  (`heaven/vulnscan/injection_scanner.py`, verified by the native benchmark).
 - **Native, Docker-free web-injection benchmark (scored).** A tiny in-process
   Flask target (`tests/benchmarks/native/vuln_app.py`) faithfully reproduces
   DVWA's SQLi/LFI/cmdi/XSS endpoints — *including MySQL comment semantics* — so

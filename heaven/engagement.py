@@ -217,6 +217,46 @@ def _finding_identity(f: dict) -> tuple[str, str, str, str]:
     return str(target), str(vuln_type), str(param), str(endpoint)
 
 
+def _risk_value(finding: dict) -> float:
+    """Headline risk for the DB ``risk_score`` column.
+
+    The ML scoring phase annotates findings with ``predicted_cvss_score`` /
+    ``priority_score`` — **not** ``risk_score`` — so persisting only
+    ``finding.get("risk_score")`` left the column at 0 for every finding and the
+    web dashboard's risk display (avg + per-finding) was always zero even though
+    the CLI/JSON report showed the real CVSS. Fall back through the ML fields.
+    """
+    for key in ("risk_score", "predicted_cvss_score", "priority_score"):
+        v = finding.get(key)
+        try:
+            if v is not None and float(v) > 0:
+                return round(float(v), 1)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _confidence_bucket(conf: float) -> str:
+    """Human-readable confidence tier for a persisted finding.
+
+    Mirrors the thresholds of :func:`heaven.vulnscan.fp_suppress._bucket_for`
+    (so buckets are consistent whether or not a finding passed through FP
+    review) but floors at ``tentative`` — a *persisted* finding is never
+    ``discarded``. Only the FP-review path sets ``confidence_bucket`` on the
+    finding dict, so deriving it here keeps the web UI / reports from showing a
+    blank bucket for everything else.
+    """
+    if conf >= 0.95:
+        return "strong"
+    if conf >= 0.80:
+        return "high"
+    if conf >= 0.60:
+        return "medium"
+    if conf >= 0.40:
+        return "low"
+    return "tentative"
+
+
 def _is_junk_finding(f: dict) -> bool:
     """True for reportless noise: a finding carrying no usable type, no
     evidence, and no confidence signal — e.g. a stray log line or docstring that
@@ -690,15 +730,27 @@ class EngagementStore:
                 evidence["param"] = finding["param"]
             if "url" not in evidence and finding.get("request_url"):
                 evidence["url"] = finding["request_url"]
+            # Preserve the ML scoring detail so the web FindingDetail can show it
+            # (the column only holds the headline score).
+            for mlk in ("predicted_cvss_score", "priority_score", "risk_band",
+                        "epss", "in_kev"):
+                if mlk not in evidence and finding.get(mlk) is not None:
+                    evidence[mlk] = finding[mlk]
             evidence_json = json.dumps(evidence)
+            risk_score = _risk_value(finding)
+            confidence = float(finding.get("confidence", 0.0) or 0.0)
+            confidence_bucket = (
+                finding.get("confidence_bucket") or _confidence_bucket(confidence)
+            )
 
             if existing:
-                # Dedup — update last_seen_at + seen_count, preserve human-set fields
+                # Dedup — refresh last_seen_at + seen_count + the (re-computed) risk
+                # score, but preserve human-set fields (status, notes).
                 c.execute(
                     "UPDATE findings SET last_seen_at = ?, seen_count = seen_count + 1, "
-                    "scan_id = ?, evidence_json = ? "
+                    "scan_id = ?, evidence_json = ?, risk_score = ? "
                     "WHERE id = ?",
-                    (now, scan_id, evidence_json, fid),
+                    (now, scan_id, evidence_json, risk_score, fid),
                 )
             else:
                 c.execute(
@@ -711,10 +763,10 @@ class EngagementStore:
                         fid, scan_id, target, vuln_type,
                         finding.get("title", finding.get("type", "Unknown")),
                         finding.get("severity", "info"),
-                        float(finding.get("confidence", 0.0)),
-                        finding.get("confidence_bucket", ""),
+                        confidence,
+                        confidence_bucket,
                         finding.get("cve_id", ""),
-                        float(finding.get("risk_score", 0.0)),
+                        risk_score,
                         now, now,
                         evidence_json,
                     ),

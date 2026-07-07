@@ -217,6 +217,26 @@ def _finding_identity(f: dict) -> tuple[str, str, str, str]:
     return str(target), str(vuln_type), str(param), str(endpoint)
 
 
+def _is_junk_finding(f: dict) -> bool:
+    """True for reportless noise: a finding carrying no usable type, no
+    evidence, and no confidence signal — e.g. a stray log line or docstring that
+    leaked into a scanner's output (seen live: a Python ``http.cookies.Morsel``
+    deprecation string surfacing as a finding). Deliberately conservative — a
+    genuine finding always has at least one of the three — so it never drops a
+    real result.
+    """
+    vt = (f.get("vuln_type") or f.get("type") or "").strip().lower()
+    if vt and vt != "unknown":
+        return False
+    if f.get("evidence"):
+        return False
+    conf = f.get("confidence")
+    try:
+        return not (conf is not None and float(conf) > 0)
+    except (TypeError, ValueError):
+        return True
+
+
 def _richer_finding(a: dict, b: dict) -> dict:
     """
     When two findings dedup to the same identity, keep the one carrying more
@@ -247,6 +267,8 @@ def dedup_findings(findings: list) -> list:
     order: list[str] = []
     for f in findings:
         if not isinstance(f, dict):
+            continue
+        if _is_junk_finding(f):
             continue
         target, vuln_type, param, endpoint = _finding_identity(f)
         key = _finding_hash(target, vuln_type, param, endpoint)

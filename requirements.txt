@@ -46,16 +46,16 @@ passlib[bcrypt]>=1.7.4
 argon2-cffi>=23.1.0
 
 # ─── Network Reconnaissance ──────────────────────────────────────────
+# nmap / nuclei / sqlmap are SYSTEM binaries (apt/brew), not pip packages —
+# HEAVEN shells out to them, so no python-nmap wrapper is needed. Shodan recon
+# and WHOIS use plain HTTP (aiohttp), not the shodan/python-whois SDKs.
 scapy>=2.5.0
-python-nmap>=0.7.1
 dnspython>=2.6.0
-python-whois>=0.9.4
-shodan>=1.31.0
 asyncssh>=2.14.0        # SSH credential testing (CredentialSprayer.spray_ssh)
 
 # ─── Web Reconnaissance & Parsing ────────────────────────────────────
+# The crawler parses with the stdlib "html.parser" backend, so no lxml needed.
 beautifulsoup4>=4.12.0
-lxml>=5.1.0
 httpx>=0.27.0
 # selenium is optional (heavy, browser-based) — uncomment if you need JS-rendered crawling
 # selenium>=4.17.0
@@ -71,9 +71,8 @@ pyasn1>=0.6.0
 pycryptodome>=3.20.0
 
 # ─── MITRE ATT&CK Framework ──────────────────────────────────────────
-mitreattack-python>=0.0.6
-stix2>=3.0.1
-taxii2-client>=2.3.0
+# ATT&CK mapping ships a bundled dataset (heaven/mitre/*) and talks TAXII over
+# plain HTTP — no mitreattack-python / stix2 / taxii2-client packages required.
 
 # ─── Container & Kubernetes ──────────────────────────────────────────
 kubernetes>=29.0.0
@@ -89,7 +88,6 @@ boto3>=1.34.0
 # PDF reports use reportlab (pure-Python, no system libraries). The HTML
 # report needs no extra packages at all.
 jinja2>=3.1.3
-matplotlib>=3.8.0
 reportlab>=4.0.0
 
 # ─── Utilities ───────────────────────────────────────────────────────

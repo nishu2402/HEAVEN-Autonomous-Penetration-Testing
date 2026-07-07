@@ -83,6 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Leaner dependency footprint for publication.** Removed eight declared
+  packages that nothing in the codebase imports: `python-nmap` (HEAVEN shells
+  out to the `nmap` *binary*), `python-whois`, `shodan` (Shodan recon uses
+  plain HTTP), `mitreattack-python` / `stix2` / `taxii2-client` (ATT&CK mapping
+  ships a bundled dataset + HTTP TAXII), `matplotlib`, and `lxml` (the crawler
+  parses with the stdlib `html.parser`). Also moved the two heaviest guarded
+  deps out of the base install into extras — `scapy` → `[recon]`, `boto3` →
+  the new `[cloud-aws]` — so `pip install heaven-pentest` is much lighter and
+  the AWS/scapy features still degrade gracefully. No feature was removed; the
+  `[mitre]` extra is gone because it required no pip packages. 466 tests still
+  pass, base dependency count trimmed to 28.
 - **DVWA benchmark now scans authenticated by default.** The fixture logs into
   DVWA (CSRF token + `security=low` cookie) and hands the scan a `--cookie-file`
   so it exercises the real `/vulnerabilities/*` attack surface instead of only

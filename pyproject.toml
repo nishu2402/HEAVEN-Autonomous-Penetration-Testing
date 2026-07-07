@@ -64,12 +64,10 @@ dependencies = [
     "numpy>=1.26.0",
     "pandas>=2.2.0",
     "joblib>=1.3.0",
-    # Recon tools
-    "scapy>=2.5.0",
+    # Web recon (crawler uses the stdlib html.parser, so no lxml). scapy (raw
+    # packets) and boto3 (AWS) are heavy + guarded, so they live in the
+    # [recon] / [cloud-aws] extras rather than the base install.
     "beautifulsoup4>=4.12.0",
-    "lxml>=5.1.0",
-    # Cloud SDKs
-    "boto3>=1.34.0",
     # Utilities
     "pydantic>=2.6.0",
     "pydantic-settings>=2.14.2",  # 2.14.2 fixes GHSA-4xgf-cpjx-pc3j (pip-audit)
@@ -119,19 +117,24 @@ llm = ["google-genai>=1.0.0", "anthropic>=0.39.0", "openai>=1.40.0"]
 # them (the feature is skipped with a clear message), so a base `pip install`
 # works and you add only what you need. `requirements.txt` installs everything
 # for a full local dev environment.
-recon = ["dnspython>=2.6.0", "python-nmap>=0.7.1", "python-whois>=0.9.4", "shodan>=1.31.0"]
-reports = ["jinja2>=3.1.3", "reportlab>=4.0.0", "matplotlib>=3.8.0", "tabulate>=0.9.0"]
+# Network recon: DNS enumeration + scapy raw-packet probes. nmap/nuclei/sqlmap
+# are system binaries (not pip), and Shodan recon + WHOIS use plain HTTP.
+recon = ["dnspython>=2.6.0", "scapy>=2.5.0"]
+reports = ["jinja2>=3.1.3", "reportlab>=4.0.0", "tabulate>=0.9.0"]
 lateral = ["impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1"]
-mitre = ["mitreattack-python>=0.0.6", "stix2>=3.0.1", "taxii2-client>=2.3.0"]
+# MITRE ATT&CK mapping ships a bundled dataset and talks TAXII over plain HTTP,
+# so it needs no extra pip packages — hence there is no `mitre` extra.
 deploy = ["docker>=7.0.0", "kubernetes>=29.0.0"]
 scheduling = ["apscheduler>=3.10.0", "alembic>=1.13.0"]
+cloud-aws = ["boto3>=1.34.0"]
 
-# Everything except dev tooling — `pip install -e ".[all]"`
+# Every feature extra except dev tooling and the heavy cloud-provider SDKs
+# (install [cloud-aws] / [cloud-gcp] / [cloud-azure] on their own) —
+# `pip install -e ".[all]"`
 all = [
-    "dnspython>=2.6.0", "python-nmap>=0.7.1", "python-whois>=0.9.4", "shodan>=1.31.0",
-    "jinja2>=3.1.3", "reportlab>=4.0.0", "matplotlib>=3.8.0", "tabulate>=0.9.0",
+    "dnspython>=2.6.0", "scapy>=2.5.0",
+    "jinja2>=3.1.3", "reportlab>=4.0.0", "tabulate>=0.9.0",
     "impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1",
-    "mitreattack-python>=0.0.6", "stix2>=3.0.1", "taxii2-client>=2.3.0",
     "docker>=7.0.0", "kubernetes>=29.0.0",
     "apscheduler>=3.10.0", "alembic>=1.13.0",
     "google-genai>=1.0.0", "anthropic>=0.39.0", "openai>=1.40.0",

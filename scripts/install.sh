@@ -91,7 +91,7 @@ step "Step 4/9 — Installing HEAVEN..."
 ok "HEAVEN core installed (editable mode)"
 
 # Optional feature packs, attempted INDEPENDENTLY so one extra that needs system
-# libraries (impacket, python-nmap, …) can't abort the whole install. Every
+# libraries (impacket, scapy, …) can't abort the whole install. Every
 # feature degrades gracefully when its extra is absent. (PDF reporting uses
 # reportlab — pure Python — so the `reports` extra installs without system libs.)
 #   • Set HEAVEN_CORE_ONLY=1 for the leanest footprint (skip all extras).

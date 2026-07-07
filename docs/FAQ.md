@@ -97,7 +97,7 @@ editing `.env`).
 
 That's fine — the core install is complete and those features degrade
 gracefully. Install a pack later with `pip install -e ".[recon]"` (or
-`[reports]` / `[lateral]` / `[mitre]` / `[deploy]` / `[scheduling]`). For the
+`[reports]` / `[lateral]` / `[deploy]` / `[scheduling]`). For the
 leanest footprint, run the installer with `HEAVEN_CORE_ONLY=1`.
 
 ### PDF reports fail with a missing-dependency error.

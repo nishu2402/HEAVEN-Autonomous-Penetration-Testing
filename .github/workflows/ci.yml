@@ -68,6 +68,9 @@ jobs:
           pip install hypothesis pytest-cov httpx
       - name: Run pytest
         run: pytest tests/ -v --cov=heaven --cov-report=xml --cov-report=term-missing
+      - name: Check README test count is in sync
+        if: matrix.python-version == '3.12'
+        run: python scripts/sync_test_count.py --check
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5

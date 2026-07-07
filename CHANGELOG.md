@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ML risk scores never reached the web dashboard (always showed 0).** The ML
+  scoring phase annotates findings with `predicted_cvss_score` / `priority_score`,
+  but `EngagementStore.upsert_finding` persisted `finding.get("risk_score")` — a
+  key nothing sets — so the DB `risk_score` column was `0.0` for every finding.
+  The CLI/JSON report (in-memory) showed the real CVSS, but the web Command
+  Centre (which reads the DB) reported `avg_risk: 0.0` and per-finding risk of 0.
+  Persistence now falls back through the ML fields (`_risk_value`) and preserves
+  the full ML detail (CVSS/priority/EPSS/KEV/band) in `evidence_json`. Verified
+  live: the dashboard now shows the true risk. Regression tests in
+  `tests/test_finding_precision.py`.
+- **`confidence_bucket` was blank for every finding except FP-reviewed ones.**
+  Only the FP-review path set the bucket, so the web UI / reports showed an empty
+  confidence tier for most findings. `upsert_finding` now derives it from the
+  confidence score (`_confidence_bucket` — same tiers as
+  `fp_suppress._bucket_for`, floored at `tentative`) when the finding doesn't
+  carry one. Verified live: 0 blank buckets after a full scan.
+- **README test-count badge no longer goes stale.** The primary Tests badge is
+  now a **live GitHub Actions status badge**, and the decorative counts are kept
+  honest by `scripts/sync_test_count.py` (run it to sync; `--check` fails CI when
+  stale — wired into `.github/workflows/ci.yml`).
 - **Scanner precision — three false-positive classes found by a full live run.**
   (1) The Nuclei parser ingested wordlist/parameter-list helper templates as
   real findings — `top-xss-params` surfaced as a HIGH "Top 38 Parameters -
@@ -111,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deps out of the base install into extras — `scapy` → `[recon]`, `boto3` →
   the new `[cloud-aws]` — so `pip install heaven-pentest` is much lighter and
   the AWS/scapy features still degrade gracefully. No feature was removed; the
-  `[mitre]` extra is gone because it required no pip packages. 466 tests still
+  `[mitre]` extra is gone because it required no pip packages. All tests still
   pass, base dependency count trimmed to 28.
 - **DVWA benchmark now scans authenticated by default.** The fixture logs into
   DVWA (CSRF token + `security=low` cookie) and hands the scan a `--cookie-file`

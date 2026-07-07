@@ -14,7 +14,13 @@ import contextlib
 
 import pytest
 
-from heaven.engagement import _is_junk_finding, dedup_findings
+from heaven.engagement import (
+    EngagementStore,
+    _confidence_bucket,
+    _is_junk_finding,
+    _risk_value,
+    dedup_findings,
+)
 from heaven.vulnscan.advanced_attacks import RequestSmugglingDetector
 
 
@@ -96,3 +102,61 @@ async def test_web_fuzz_smuggling_no_fp_on_uniform_server():
             out = await _fuzz_request_smuggling(session, f"http://127.0.0.1:{srv.port}/")
     # every response is an identical fast 200 → no deviation → no findings
     assert out == []
+
+
+# ── ML risk score must survive the DB round-trip (web dashboard reads the DB) ──
+
+@pytest.mark.parametrize("f,expected", [
+    ({"predicted_cvss_score": 10.0}, 10.0),           # ML CVSS is used…
+    ({"priority_score": 4.2}, 4.2),                   # …else the priority score
+    ({"risk_score": 7.5, "predicted_cvss_score": 3.0}, 7.5),  # explicit wins
+    ({}, 0.0),
+    ({"predicted_cvss_score": 0}, 0.0),
+])
+def test_risk_value_fallback(f, expected):
+    assert _risk_value(f) == expected
+
+
+def test_ml_score_persists_to_db_risk_column(tmp_path):
+    # The ML phase writes predicted_cvss_score, not risk_score — persistence must
+    # map it onto the DB column so the web dashboard shows the real risk (it was
+    # always 0 before this fix).
+    import sqlite3
+    store = EngagementStore(tmp_path / "e.db")
+    fid = store.upsert_finding("s1", {
+        "target": "http://h/x", "vuln_type": "sqli", "title": "SQLi", "param": "id",
+        "severity": "critical", "confidence": 0.9,
+        "predicted_cvss_score": 10.0, "priority_score": 5.0, "risk_band": "critical",
+        "evidence": {"payload": "1' OR '1'='1"},
+    })
+    row = sqlite3.connect(str(tmp_path / "e.db")).execute(
+        "SELECT risk_score, evidence_json FROM findings WHERE id = ?", (fid,)).fetchone()
+    assert row[0] == 10.0                      # ML CVSS reached the risk_score column
+    assert "predicted_cvss_score" in row[1]    # full ML detail preserved in evidence
+
+
+# ── confidence_bucket must be populated (only the FP-review path set it) ──────
+
+@pytest.mark.parametrize("conf,bucket", [
+    (0.99, "strong"), (0.90, "high"), (0.70, "medium"), (0.45, "low"), (0.10, "tentative"),
+])
+def test_confidence_bucket_tiers(conf, bucket):
+    assert _confidence_bucket(conf) == bucket
+
+
+def test_confidence_bucket_derived_on_persist(tmp_path):
+    import sqlite3
+    store = EngagementStore(tmp_path / "e.db")
+    # no confidence_bucket supplied → derived from confidence
+    fid = store.upsert_finding("s1", {
+        "target": "http://h/y", "vuln_type": "xss", "title": "XSS", "param": "q",
+        "severity": "high", "confidence": 0.9, "evidence": {"reflected": True},
+    })
+    # an explicit bucket (e.g. from FP review) is preserved as-is
+    fid2 = store.upsert_finding("s1", {
+        "target": "http://h/z", "vuln_type": "sqli", "title": "SQLi",
+        "confidence": 0.9, "confidence_bucket": "strong", "evidence": {"x": 1},
+    })
+    conn = sqlite3.connect(str(tmp_path / "e.db"))
+    assert conn.execute("SELECT confidence_bucket FROM findings WHERE id=?", (fid,)).fetchone()[0] == "high"
+    assert conn.execute("SELECT confidence_bucket FROM findings WHERE id=?", (fid2,)).fetchone()[0] == "strong"

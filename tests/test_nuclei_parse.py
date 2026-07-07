@@ -62,3 +62,34 @@ def test_tolerates_invalid_utf8_bytes():
     out = _parse_nuclei_output(raw)
     assert len(out) == 1
     assert out[0]["severity"] == "low"
+
+
+def test_wordlist_helper_templates_are_dropped():
+    # `top-xss-params` is a parameter wordlist that feeds other templates, not a
+    # vulnerability — it must not surface as a finding (it did live, as a HIGH
+    # "Top 38 Parameters - Cross-Site Scripting" with empty vuln_type).
+    out = _parse_nuclei_output(_b(
+        '{"host":"h","template-id":"top-xss-params",'
+        '"info":{"severity":"high","name":"Top 38 Parameters - Cross-Site Scripting"}}',
+        # a real finding on the same stream must still come through
+        '{"host":"h","template-id":"cve-2021-1","info":{"severity":"high","name":"Real CVE"}}',
+    ))
+    assert [f["title"] for f in out] == ["Real CVE"]
+
+
+def test_wordlist_by_name_pattern_is_dropped():
+    # match on the "Top NN Parameters" name even if the template-id is unknown
+    out = _parse_nuclei_output(_b(
+        '{"host":"h","template-id":"misc-x",'
+        '"info":{"severity":"info","name":"Top 100 Parameters - SQLi"}}'
+    ))
+    assert out == []
+
+
+def test_real_finding_carries_nonempty_vuln_type():
+    # every emitted nuclei finding must have a concrete vuln_type so it never
+    # resolves to empty downstream in the report/persist path
+    out = _parse_nuclei_output(_b(
+        '{"host":"h","template-id":"cve-x","info":{"severity":"high","name":"T"}}'
+    ))
+    assert out[0]["vuln_type"] == "nuclei"

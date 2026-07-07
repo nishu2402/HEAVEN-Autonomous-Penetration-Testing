@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scanner precision — three false-positive classes found by a full live run.**
+  (1) The Nuclei parser ingested wordlist/parameter-list helper templates as
+  real findings — `top-xss-params` surfaced as a HIGH "Top 38 Parameters -
+  Cross-Site Scripting" with empty `vuln_type`; these are now skipped and every
+  Nuclei finding carries a concrete `vuln_type`. (2) A stray Python docstring
+  (`http.cookies.Morsel.js_output()…`) leaked in as a finding with no type,
+  evidence, or confidence; `dedup_findings` now drops such reportless noise via
+  a conservative `_is_junk_finding` guard (no real finding is ever dropped —
+  it requires *all* of empty-type, no-evidence, no-confidence). (3) Both
+  request-smuggling detectors false-positived on ordinary servers — the CL.TE
+  timing probe flagged any slow/hung origin as **critical**, and the web-fuzzer
+  checks keyed off the *response* `Content-Length` (present on nearly every
+  200). The CL.TE detector now requires a baseline timing differential and
+  reports a `medium` "possible — verify manually" indicator instead of a
+  confirmed critical; the web-fuzzer checks require a behavioural deviation from
+  a well-formed baseline and are downgraded to `low`. Verified on a live full
+  scan: the three noise classes drop to zero while every real finding
+  (cmdi/lfi/error+UNION+boolean SQLi/XSS) is retained. Regression tests:
+  `tests/test_finding_precision.py`, `tests/test_nuclei_parse.py`.
 - **Nuclei parser could abort a scan on malformed output.** The `-jsonl`
   parser assumed every stdout line was a JSON object with a dict `info` block;
   a bare non-object line (string/array/number) or a `null` `info` raised an

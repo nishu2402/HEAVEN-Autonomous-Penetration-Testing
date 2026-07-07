@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any
 
 from heaven.utils.logger import get_logger
@@ -14,12 +15,34 @@ from heaven.utils.logger import get_logger
 logger = get_logger("vulnscan.nuclei")
 
 
+# Nuclei ships parameter-wordlist / fuzzing-helper templates that emit a "match"
+# carrying no actual vulnerability — they exist to feed *other* templates. The
+# classic offender is ``top-xss-params``, which surfaces as
+# "Top 38 Parameters - Cross-Site Scripting". Reporting these inflates the
+# findings list with empty-type, non-actionable noise, so drop them at parse
+# time.
+_NUCLEI_NOISE_TEMPLATE_IDS = {
+    "top-xss-params", "top-42-params", "top-38-params", "params-fuzzing",
+}
+_NUCLEI_NOISE_NAME_RE = re.compile(r"^\s*top[\s\-]*\d+\s+param", re.IGNORECASE)
+
+
+def _is_noise_template(template_id: str, name: str) -> bool:
+    """True for Nuclei wordlist/parameter-list helper templates that are payload
+    lists rather than real findings (so they should never be reported)."""
+    if (template_id or "").strip().lower() in _NUCLEI_NOISE_TEMPLATE_IDS:
+        return True
+    return bool(_NUCLEI_NOISE_NAME_RE.match(name or ""))
+
+
 def _parse_nuclei_output(stdout: bytes) -> list[dict[str, Any]]:
     """Parse Nuclei ``-jsonl`` stdout into findings, tolerant of malformed lines.
 
     Nuclei normally emits one JSON object per line, but a stray non-object line
     (string/array/number) or a ``null`` ``info`` block must not abort the whole
-    scan — those lines are skipped rather than raising.
+    scan — those lines are skipped rather than raising. Wordlist/parameter-list
+    helper templates (:data:`_NUCLEI_NOISE_TEMPLATE_IDS`) are also skipped: they
+    are payload lists, not vulnerabilities.
     """
     findings: list[dict[str, Any]] = []
     for line in stdout.decode(errors="replace").splitlines():
@@ -34,15 +57,22 @@ def _parse_nuclei_output(stdout: bytes) -> list[dict[str, Any]]:
         info = data.get("info")
         if not isinstance(info, dict):
             info = {}
+        template_id = data.get("template-id", "")
+        name = info.get("name", "Nuclei Finding")
+        if _is_noise_template(template_id, name):
+            continue
         findings.append({
             "target": data.get("host", ""),
             "type": "nuclei",
+            # Set vuln_type explicitly so this never resolves to an empty type
+            # downstream (the report/persist path reads vuln_type directly).
+            "vuln_type": "nuclei",
             "severity": info.get("severity", "info"),
-            "title": info.get("name", "Nuclei Finding"),
+            "title": name,
             "description": info.get("description", ""),
             "confidence": 0.9,  # Nuclei is generally high confidence
             "evidence": {
-                "template": data.get("template-id", ""),
+                "template": template_id,
                 "matched": data.get("matched-at", ""),
                 "extracted": data.get("extracted-results", []),
             },

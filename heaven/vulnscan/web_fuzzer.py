@@ -361,36 +361,46 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
     """
     findings: list[dict] = []
 
-    # Check if server accepts Transfer-Encoding: chunked alongside Content-Length (CL.TE indicator)
+    # Baseline: how the server answers a *well-formed* request. Smuggling
+    # indicators are only meaningful as a deviation from this — a plain 200 to an
+    # ambiguous request is not, by itself, evidence. (Previously these checks
+    # keyed off the *response* Content-Length header, which is present on almost
+    # every 200, so they fired on nearly every server.)
     try:
-        # Send a request with both CL and TE headers — RFC 7230 says CL MUST be removed
-        # when TE is present. If both are forwarded, smuggling is possible.
-        te_headers = {
-            "Transfer-Encoding": "chunked",
-            "Content-Length": "6",
-        }
-        body = b"0\r\n\r\nG"  # Chunked terminator + smuggled byte
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as base:
+            baseline_status = base.status
+    except Exception:
+        return findings  # can't establish a baseline → can't judge an anomaly
+
+    _REJECT = (400, 501, 505)
+
+    # CL.TE: send both Content-Length and Transfer-Encoding. RFC 7230 requires CL
+    # to be dropped when TE is present; a server that instead answers the
+    # ambiguous request *differently* from a normal one is a (weak) indicator.
+    try:
+        te_headers = {"Transfer-Encoding": "chunked", "Content-Length": "6"}
+        body = b"0\r\n\r\nG"  # chunked terminator + smuggled byte
         async with session.post(url, data=body, headers=te_headers,
                                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
             status = resp.status
-            # If we get anything other than 400 (malformed), server may be vulnerable
-            if status not in (400, 501, 505):
-                te_cl = resp.headers.get("Transfer-Encoding", "")
-                cl_resp = resp.headers.get("Content-Length", "")
-                if te_cl or cl_resp:
-                    findings.append(_finding(
-                        url, "http_smuggling_indicator", "high",
-                        "HTTP Request Smuggling Indicator (CL.TE)",
-                        f"Server accepted ambiguous CL+TE headers (status {status}). "
-                        f"Manual verification required to confirm smuggling via a proxy chain.",
-                        confidence=0.65,
-                        evidence={"status": status, "te": te_cl, "cl": cl_resp},
-                        cve="CVE-2019-16278",
-                    ))
+            if status not in _REJECT and status != baseline_status:
+                findings.append(_finding(
+                    url, "http_smuggling_indicator", "low",
+                    "Possible HTTP Request Smuggling Indicator (CL.TE)",
+                    f"An ambiguous CL+TE request was answered differently "
+                    f"(status {status}) than a normal request (status "
+                    f"{baseline_status}). This is a weak indicator only and MUST "
+                    f"be verified manually via the real front-end/back-end chain.",
+                    confidence=0.35,
+                    evidence={"status": status, "baseline_status": baseline_status,
+                              "note": "manual verification required"},
+                    cve="CVE-2019-16278",
+                ))
     except Exception:
         pass
 
-    # Check for TE header obfuscation acceptance
+    # TE header obfuscation: duplicate Transfer-Encoding headers with different
+    # case. Again only report a *behavioural deviation* from the baseline.
     try:
         obf_headers = {
             "Transfer-Encoding": "chunked",
@@ -398,14 +408,17 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
         }
         async with session.post(url, headers=obf_headers, data=b"0\r\n\r\n",
                                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status not in (400, 501):
+            if resp.status not in _REJECT and resp.status != baseline_status:
                 findings.append(_finding(
-                    url, "http_smuggling_te_obfuscation", "high",
-                    "HTTP Request Smuggling — TE Header Obfuscation Accepted",
-                    "Server accepts duplicate Transfer-Encoding headers with different cases. "
-                    "This is an indicator of TE.TE smuggling potential.",
-                    confidence=0.60,
-                    evidence={"status": resp.status},
+                    url, "http_smuggling_te_obfuscation", "low",
+                    "Possible HTTP Request Smuggling — TE Header Obfuscation",
+                    f"Duplicate Transfer-Encoding headers with different cases were "
+                    f"answered differently (status {resp.status}) than a normal "
+                    f"request (status {baseline_status}) — a weak TE.TE indicator "
+                    f"that requires manual verification via a proxy chain.",
+                    confidence=0.30,
+                    evidence={"status": resp.status, "baseline_status": baseline_status,
+                              "note": "manual verification required"},
                 ))
     except Exception:
         pass

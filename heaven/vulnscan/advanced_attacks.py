@@ -326,60 +326,96 @@ class RequestSmugglingDetector:
 
     @staticmethod
     async def detect_clte(url: str, timeout: float = 10.0) -> Optional[AdvancedFinding]:
-        """Detect CL.TE request smuggling via timing differential."""
+        """Flag a *possible* CL.TE request-smuggling desync from a timing anomaly.
+
+        Timing alone cannot confirm smuggling: a single origin that merely hangs
+        on a malformed chunked body (e.g. a dev server waiting for a chunk
+        terminator) produces exactly the same stall as a vulnerable
+        front-end/back-end desync. So this first establishes a well-formed
+        baseline and only reports a **low-confidence, manually-verifiable
+        indicator** when the CL.TE probe stalls while a normal request returned
+        promptly — never a confirmed critical. This removes the false positive
+        where any slow/hung server was flagged as critical smuggling.
+        """
         from urllib.parse import urlparse
 
         parsed = urlparse(url)
         host = parsed.hostname
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if not host:
+            return None
+        path = parsed.path or "/"
 
-        # CL.TE probe: Content-Length says short, Transfer-Encoding says chunked
-        probe = (
-            f"POST {parsed.path or '/'} HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            f"Content-Length: 4\r\n"
-            f"Transfer-Encoding: chunked\r\n"
-            f"\r\n"
-            f"1\r\n"
-            f"Z\r\n"
-            f"Q\r\n"  # This should cause a timeout if CL.TE vulnerable
-        )
-
-        try:
+        async def _open() -> tuple[Any, Any]:
             if parsed.scheme == "https":
                 import ssl
                 ctx = ssl.create_default_context()
-                reader, writer = await asyncio.wait_for(
+                return await asyncio.wait_for(
                     asyncio.open_connection(host, port, ssl=ctx), timeout=5)
-            else:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port), timeout=5)
+            return await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=5)
 
+        async def _time_request(raw: str) -> float:
+            reader, writer = await _open()
             start = time.time()
-            writer.write(probe.encode())
-            await writer.drain()
-
             try:
-                await asyncio.wait_for(reader.read(4096), timeout=timeout)
-                elapsed = (time.time() - start) * 1000
-            except asyncio.TimeoutError:
-                elapsed = timeout * 1000
+                writer.write(raw.encode())
+                await writer.drain()
+                try:
+                    await asyncio.wait_for(reader.read(4096), timeout=timeout)
+                    return (time.time() - start) * 1000
+                except asyncio.TimeoutError:
+                    return timeout * 1000
+            finally:
+                writer.close()
 
-            writer.close()
+        baseline_req = (
+            f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+        )
+        # CL.TE probe: Content-Length says short, Transfer-Encoding says chunked,
+        # and the chunk stream is never terminated.
+        clte_probe = (
+            f"POST {path} HTTP/1.1\r\nHost: {host}\r\n"
+            f"Content-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n"
+            f"1\r\nZ\r\nQ\r\n"
+        )
 
-            # If response was delayed significantly → potential smuggling
-            if elapsed > timeout * 0.8:  # 80% of timeout
-                return AdvancedFinding(
-                    target=url, vuln_type="request_smuggling", severity="critical",
-                    title="HTTP Request Smuggling (CL.TE) Detected",
-                    description="Front-end uses Content-Length, back-end uses Transfer-Encoding",
-                    confidence=0.6,
-                    evidence={"technique": "CL.TE", "response_time_ms": elapsed},
-                    remediation="Configure front-end to reject ambiguous requests. Normalize Transfer-Encoding.",
-                    cwe="CWE-444",
-                )
+        try:
+            baseline = await _time_request(baseline_req)
+            probe = await _time_request(clte_probe)
         except Exception:
-            pass
+            return None
+
+        timeout_ms = timeout * 1000
+        probe_stalled = probe >= timeout_ms * 0.8
+        baseline_fast = baseline < timeout_ms * 0.3
+        # Only an indicator when the probe stalls but a normal request did not.
+        # A uniformly slow/hung server (baseline also slow) is not evidence.
+        if probe_stalled and baseline_fast:
+            return AdvancedFinding(
+                target=url, vuln_type="request_smuggling", severity="medium",
+                title="Possible HTTP Request Smuggling (CL.TE) — timing anomaly",
+                description=(
+                    "A CL.TE probe stalled while a well-formed request returned "
+                    "promptly. This is a timing indicator only and MUST be "
+                    "verified manually (e.g. a request-smuggling desync PoC through "
+                    "the actual front-end/back-end chain) before being treated as "
+                    "exploitable — an origin that simply hangs on a malformed "
+                    "chunked body yields the same signal."
+                ),
+                confidence=0.4,
+                evidence={
+                    "technique": "CL.TE",
+                    "baseline_ms": round(baseline),
+                    "probe_ms": round(probe),
+                    "note": "timing indicator — manual verification required",
+                },
+                remediation=(
+                    "Configure the front-end to reject ambiguous CL/TE requests "
+                    "and normalise Transfer-Encoding handling end to end."
+                ),
+                cwe="CWE-444",
+            )
         return None
 
 

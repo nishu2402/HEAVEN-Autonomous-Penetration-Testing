@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from heaven.ai import LLMGateway, LLMRequest
+from heaven.devsecops.vuln_kb import remediation_text
 from heaven.utils.logger import get_logger
 
 logger = get_logger("devsecops.ai_remediation")
@@ -52,10 +53,12 @@ class AIRemediationEngine:
     def generate_patch(self, vuln: dict[str, Any]) -> str:
         """Return a remediation string for the given vulnerability dict.
 
-        Falls back to vuln['patch'] (or a generic message) when the LLM is
-        not configured or the call fails — callers never see an exception.
+        The fallback (used when no LLM is configured or a call fails) is not a
+        generic one-liner: it is a full, class-accurate write-up built in-house
+        from HEAVEN's vulnerability knowledge base, so remediation is excellent
+        with *or* without an API key. Callers never see an exception.
         """
-        fallback = vuln.get("patch") or "Apply standard security patches for this vulnerability."
+        fallback = vuln.get("patch") or remediation_text(vuln)
         if not self.available:
             return fallback
 

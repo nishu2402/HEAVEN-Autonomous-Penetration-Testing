@@ -288,11 +288,298 @@ _KB: dict[str, dict[str, Any]] = {
         "remediation": "Force a credential change on first use; enforce a strong password policy + MFA.",
         "references": ["https://attack.mitre.org/techniques/T1078/001/"],
     },
+    "command_injection": {
+        "title": "OS Command Injection",
+        "cwe": "CWE-78",
+        "owasp": "A03:2021 Injection",
+        "mitre": "T1059 — Command and Scripting Interpreter",
+        "typical_cvss": 9.8,
+        "description": (
+            "User input reaches a shell command, letting an attacker run arbitrary "
+            "OS commands with the privileges of the web process."
+        ),
+        "impact": "Full server compromise, data theft, lateral movement, persistence.",
+        "remediation": (
+            "1. Never build shell strings from user input; pass an argument list "
+            "with shell=False (e.g. subprocess.run([...], shell=False)).\n"
+            "2. Avoid the shell entirely; call the target binary directly.\n"
+            "3. Strictly allowlist any values that must reach a command.\n"
+            "4. Drop privileges and sandbox the process (seccomp/AppArmor)."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html",
+            "https://cwe.mitre.org/data/definitions/78.html",
+        ],
+    },
+    "file_inclusion": {
+        "title": "File Inclusion (LFI/RFI)",
+        "cwe": "CWE-98",
+        "owasp": "A03:2021 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.1,
+        "description": (
+            "A file path or include target is taken from user input, letting an "
+            "attacker read local files (LFI) or, if remote includes are enabled, "
+            "load and execute remote code (RFI)."
+        ),
+        "impact": "Source/secret disclosure, log-poisoning to RCE, remote code execution.",
+        "remediation": (
+            "1. Never pass user input to include/require/open; map an allowlist of "
+            "identifiers to fixed server-side paths instead.\n"
+            "2. Disable remote includes (PHP allow_url_include=Off).\n"
+            "3. Canonicalise paths and confine them under a base directory.\n"
+            "4. Run with least-privilege filesystem permissions."
+        ),
+        "references": [
+            "https://owasp.org/www-community/attacks/Path_Traversal",
+            "https://cwe.mitre.org/data/definitions/98.html",
+        ],
+    },
+    "path_traversal": {
+        "title": "Path Traversal",
+        "cwe": "CWE-22",
+        "owasp": "A01:2021 Broken Access Control",
+        "mitre": "T1006 — Direct Volume Access",
+        "typical_cvss": 7.5,
+        "description": (
+            "A filename parameter containing ../ sequences escapes the intended "
+            "directory, exposing arbitrary files on disk."
+        ),
+        "impact": "Disclosure of source code, credentials, keys and system files.",
+        "remediation": (
+            "1. Resolve the path and verify it stays within the intended base "
+            "directory (os.path.realpath / Path.resolve + prefix check).\n"
+            "2. Reject any input containing path separators or ../.\n"
+            "3. Prefer opaque identifiers mapped to files server-side."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html",
+            "https://cwe.mitre.org/data/definitions/22.html",
+        ],
+    },
+    "ssti": {
+        "title": "Server-Side Template Injection",
+        "cwe": "CWE-1336",
+        "owasp": "A03:2021 Injection",
+        "mitre": "T1059 — Command and Scripting Interpreter",
+        "typical_cvss": 9.0,
+        "description": (
+            "User input is evaluated as template code, which in most engines leads "
+            "directly to remote code execution."
+        ),
+        "impact": "Remote code execution, full server takeover.",
+        "remediation": (
+            "1. Never render user input as a template; pass it as data/variables.\n"
+            "2. Use a sandboxed environment (e.g. Jinja2 SandboxedEnvironment).\n"
+            "3. Prefer logic-less templates for user-influenced content."
+        ),
+        "references": [
+            "https://portswigger.net/research/server-side-template-injection",
+        ],
+    },
+    "xxe": {
+        "title": "XML External Entity (XXE) Injection",
+        "cwe": "CWE-611",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.2,
+        "description": (
+            "An XML parser resolves external entities defined by the attacker, "
+            "enabling local file disclosure, SSRF, and denial of service."
+        ),
+        "impact": "Local file read, internal SSRF, credential theft, DoS (billion laughs).",
+        "remediation": (
+            "1. Disable DTDs and external entity resolution in every XML parser "
+            "(e.g. Python: use defusedxml; Java: setFeature disallow-doctype-decl).\n"
+            "2. Prefer JSON or a hardened parser where XML isn't required.\n"
+            "3. Never let entity URIs reach the network or filesystem."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html",
+            "https://cwe.mitre.org/data/definitions/611.html",
+        ],
+    },
+    "cors_misconfig": {
+        "title": "CORS Misconfiguration",
+        "cwe": "CWE-942",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 7.5,
+        "description": (
+            "The server reflects an arbitrary Origin into "
+            "Access-Control-Allow-Origin — especially with "
+            "Access-Control-Allow-Credentials: true — so a malicious site can read "
+            "authenticated cross-origin responses."
+        ),
+        "impact": "Cross-origin theft of authenticated data and CSRF-token exfiltration.",
+        "remediation": (
+            "1. Allowlist exact trusted origins; never reflect the request Origin.\n"
+            "2. Never combine a wildcard/reflected origin with "
+            "Allow-Credentials: true.\n"
+            "3. Add 'Vary: Origin' and keep the allowed set minimal."
+        ),
+        "references": [
+            "https://portswigger.net/web-security/cors",
+        ],
+    },
+    "insecure_cookie": {
+        "title": "Insecure Session Cookie",
+        "cwe": "CWE-1004",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1539 — Steal Web Session Cookie",
+        "typical_cvss": 5.0,
+        "description": (
+            "A session/auth cookie is missing protective attributes (HttpOnly, "
+            "Secure, SameSite), exposing it to theft or cross-site sending."
+        ),
+        "impact": "XSS-driven session theft, cookie capture over plaintext, CSRF.",
+        "remediation": (
+            "1. Set HttpOnly on all session cookies (blocks script access).\n"
+            "2. Set Secure so the cookie is only sent over HTTPS.\n"
+            "3. Set SameSite=Lax or Strict to blunt cross-site requests.\n"
+            "4. Scope with Path and a short, rotating lifetime."
+        ),
+        "references": ["https://owasp.org/www-community/HttpOnly"],
+    },
+    "jwt_weak_secret": {
+        "title": "JWT Signed With a Weak Secret",
+        "cwe": "CWE-326",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1552 — Unsecured Credentials",
+        "typical_cvss": 9.1,
+        "description": (
+            "The HMAC key used to sign JSON Web Tokens is guessable, so an attacker "
+            "can forge valid tokens with arbitrary claims (e.g. escalate to admin)."
+        ),
+        "impact": "Authentication bypass and privilege escalation via forged tokens.",
+        "remediation": (
+            "1. Rotate to a long, random secret (>=256 bits) stored in a secrets "
+            "manager, not in code.\n"
+            "2. Prefer asymmetric signing (RS256/ES256) so the verifier holds no "
+            "signing key.\n"
+            "3. Pin the expected algorithm on verification and reject others."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html",
+        ],
+    },
+    "jwt_none_algorithm": {
+        "title": "JWT Accepts alg:none",
+        "cwe": "CWE-347",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1552 — Unsecured Credentials",
+        "typical_cvss": 9.8,
+        "description": (
+            "The verifier accepts tokens using the 'none' algorithm, which carry no "
+            "signature — any client can forge a token with any claims."
+        ),
+        "impact": "Trivial authentication bypass and privilege escalation.",
+        "remediation": (
+            "1. Reject alg:none outright; pin an explicit allowed algorithm list.\n"
+            "2. Verify the signature before trusting any claim.\n"
+            "3. Upgrade the JWT library to a version that blocks alg confusion."
+        ),
+        "references": [
+            "https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/",
+        ],
+    },
+    "crlf_injection": {
+        "title": "CRLF / HTTP Response Splitting",
+        "cwe": "CWE-113",
+        "owasp": "A03:2021 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 6.1,
+        "description": (
+            "Unescaped CR/LF in user input is written into HTTP response headers, "
+            "letting an attacker inject headers or split the response."
+        ),
+        "impact": "Header injection, cache poisoning, reflected XSS, session fixation.",
+        "remediation": (
+            "1. Strip/deny CR and LF in any value placed into a header.\n"
+            "2. Use framework APIs that encode header values.\n"
+            "3. Avoid reflecting user input into Location/Set-Cookie headers."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/HTTP_Response_Splitting"],
+    },
+    "request_smuggling": {
+        "title": "HTTP Request Smuggling",
+        "cwe": "CWE-444",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.1,
+        "description": (
+            "A front-end and back-end disagree on request boundaries "
+            "(Content-Length vs Transfer-Encoding), letting an attacker smuggle a "
+            "second request past the front-end."
+        ),
+        "impact": "Cache poisoning, request hijacking, security-control bypass.",
+        "remediation": (
+            "1. Normalise/reject ambiguous Content-Length + Transfer-Encoding.\n"
+            "2. Use HTTP/2 end-to-end and a single, consistent proxy stack.\n"
+            "3. Drop conflicting or duplicate framing headers at the edge."
+        ),
+        "references": ["https://portswigger.net/web-security/request-smuggling"],
+    },
+    "subdomain_takeover": {
+        "title": "Subdomain Takeover",
+        "cwe": "CWE-350",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1584 — Compromise Infrastructure",
+        "typical_cvss": 7.4,
+        "description": (
+            "A DNS record points at a de-provisioned third-party service, letting "
+            "an attacker claim it and serve content from your domain."
+        ),
+        "impact": "Phishing under your brand, cookie theft, OAuth/callback abuse.",
+        "remediation": (
+            "1. Remove dangling DNS records for decommissioned services.\n"
+            "2. Claim/park the backing resource before releasing it.\n"
+            "3. Continuously monitor CNAMEs for unclaimed targets."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/Subdomain_takeover"],
+    },
 }
 
 # Severity → typical CVSS fallback when the class is unknown.
 _SEV_FALLBACK_CVSS = {
     "critical": 9.5, "high": 8.0, "medium": 5.5, "low": 3.5, "info": 1.0,
+}
+
+# Detectors emit many spellings for the same class. Map each to its canonical KB
+# key so a single curated entry serves every alias (normalised on both sides).
+_ALIASES: dict[str, str] = {
+    "sqli": "sql_injection",
+    "sqli_confirmed": "sql_injection",
+    "sql": "sql_injection",
+    "blind_sqli": "sql_injection",
+    "error_sqli": "sql_injection",
+    "union_sqli": "sql_injection",
+    "boolean_sqli": "sql_injection",
+    "time_sqli": "sql_injection",
+    "cmdi": "command_injection",
+    "os_command_injection": "command_injection",
+    "reflected_xss": "xss",
+    "dom_xss": "xss",
+    "stored_xss": "xss_stored",
+    "lfi": "file_inclusion",
+    "rfi": "file_inclusion",
+    "local_file_inclusion": "file_inclusion",
+    "remote_file_inclusion": "file_inclusion",
+    "cors": "cors_misconfig",
+    "security_headers": "missing_security_headers",
+    "jwt_alg_none": "jwt_none_algorithm",
+    "jwt_none": "jwt_none_algorithm",
+    "jwt": "jwt_weak_secret",
+    "cookie_no_httponly": "insecure_cookie",
+    "cookie_insecure": "insecure_cookie",
+    "bola": "idor",
+    "rce": "rce",
+    "remote_code_execution": "rce",
+    "code_injection": "rce",
+    "tls": "weak_tls",
+    "ssl": "weak_tls",
+    "weak_ssl": "weak_tls",
+    "unvalidated_redirect": "open_redirect",
 }
 
 
@@ -302,8 +589,59 @@ def normalize_key(vuln_type: str) -> str:
 
 
 def lookup(vuln_type: str) -> dict[str, Any]:
-    """Return the KB entry for a vuln type, or {} if unknown."""
-    return _KB.get(normalize_key(vuln_type), {})
+    """Return the KB entry for a vuln type (resolving aliases), or {} if unknown."""
+    key = normalize_key(vuln_type)
+    if key in _KB:
+        return _KB[key]
+    return _KB.get(_ALIASES.get(key, ""), {})
+
+
+def remediation_text(finding: dict) -> str:
+    """A complete, human-readable remediation write-up for a finding — built
+    entirely in-house from the KB, no LLM required.
+
+    This is what HEAVEN returns for "explain the fix" when no LLM key is
+    configured: a professional, class-accurate report section (summary, impact,
+    numbered fix steps, references) rather than a generic one-liner.
+    """
+    entry = lookup(finding.get("vuln_type", "") or finding.get("type", ""))
+    title = (finding.get("title") or entry.get("title")
+             or finding.get("vuln_type") or "Security Finding")
+    target = finding.get("target", "")
+    lines = [f"# Remediation — {title}"]
+    if target:
+        lines.append(f"_Affected target: {target}_")
+    if not entry:
+        # Unknown class: still better than a bare string — give the standard drill.
+        sev = (finding.get("severity") or "medium").lower()
+        lines += [
+            "",
+            f"**Severity:** {sev}",
+            "",
+            "This finding isn't in the built-in knowledge base. Apply the standard "
+            "remediation drill:",
+            "1. Reproduce and confirm the issue against the affected endpoint.",
+            "2. Treat all client input as untrusted — validate, encode, and "
+            "parameterise at the sink.",
+            "3. Apply least privilege to the affected component and its data access.",
+            "4. Patch the underlying framework/library to a fixed release.",
+            "5. Add a regression test so the fix can't silently revert.",
+        ]
+        return "\n".join(lines)
+
+    if entry.get("cwe") or entry.get("owasp"):
+        meta = "  ".join(x for x in (entry.get("cwe", ""), entry.get("owasp", "")) if x)
+        lines.append(f"_{meta}_")
+    if entry.get("description"):
+        lines += ["", "## What it is", entry["description"]]
+    if entry.get("impact"):
+        lines += ["", "## Impact", entry["impact"]]
+    if entry.get("remediation"):
+        lines += ["", "## How to fix it", entry["remediation"]]
+    refs = entry.get("references") or []
+    if refs:
+        lines += ["", "## References"] + [f"- {r}" for r in refs]
+    return "\n".join(lines)
 
 
 def enrich_finding(finding: dict) -> dict:

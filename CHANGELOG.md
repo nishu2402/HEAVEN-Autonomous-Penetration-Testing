@@ -34,6 +34,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `vuln_type` spelling resolves. `AIRemediationEngine`'s LLM-free fallback now
   returns a full, class-accurate write-up from the KB instead of a generic
   one-liner — **remediation is excellent with or without an API key**.
+- **`heaven download-model`** — fetch the pre-trained 48 MB NVD CVSS model
+  (R²≈0.99) from the GitHub Release, **SHA-256 verified**, instead of training
+  it. The model isn't bundled in the wheel or committed to git, so `pip install`
+  and `git clone` users previously fell back to heuristic CVSS; now one command
+  enables the ML scores. The loader search path gained a user-cache location
+  (`~/.cache/heaven/models/`) and a `HEAVEN_MODEL_PATH` override so the fetched
+  model is found even in read-only site-packages installs. Fully tested offline
+  (verify pass/fail, atomic install, idempotent re-run).
+- **`heaven config test-llm`** — CLI parity with the web-UI Settings LLM check.
+  A cheap check by default (provider/key/SDK present, no billed call) and a
+  `--live` flag that sends one minimal completion through the *same gateway the
+  AI layers use*, so you can confirm a key works end-to-end before a scan relies
+  on it. Fully covered by tests.
+- **Native benchmark now scores HEAVEN's full web surface, not just injection.**
+  `tests/benchmarks/test_native_benchmark.py` drives the crawler + injection +
+  misconfig + OAST out-of-band scanners against the labelled native target and
+  scores **11 categories** — SQLi (error/blind/UNION), reflected XSS, command
+  injection, LFI, **SSRF, XXE, CORS, open redirect, weak JWT, insecure cookie,
+  missing security headers** — at **100% precision / 100% recall / 100% F1**
+  (13/13 ground-truth entries, 15 findings, 0 false positives). The v1.0
+  detectors are now proven by the always-on CI benchmark, and the numbers in
+  `docs/BENCHMARK_RESULTS.md` / `docs/COMPARISON.md` reflect the expanded surface.
 
 ### Changed
 

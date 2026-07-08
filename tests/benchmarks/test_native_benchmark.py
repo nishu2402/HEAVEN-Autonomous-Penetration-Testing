@@ -44,6 +44,9 @@ def test_native_benchmark_scores() -> None:
         build_injection_targets,
         scan_for_injections,
     )
+    from heaven.vulnscan.misconfig_scanner import scan_misconfig
+    from heaven.vulnscan.oast import OASTListener
+    from heaven.vulnscan.oob_scanner import scan_oob
 
     from tests.benchmarks.native.vuln_app import serve
 
@@ -52,12 +55,26 @@ def test_native_benchmark_scores() -> None:
     async def _drive(base_url: str) -> tuple[list[dict], float]:
         start = time.time()
         crawl = await crawl_targets([base_url], stealth_level="aggressive")
-        urls, forms_by_url = build_injection_targets(
-            crawl.get("endpoints", []), seed_urls=[base_url]
-        )
-        res = await scan_for_injections(urls, forms_by_url=forms_by_url,
+        endpoints = crawl.get("endpoints", [])
+
+        # Injection scanner — the classic surface (SQLi/XSS/LFI/cmdi).
+        urls, forms_by_url = build_injection_targets(endpoints, seed_urls=[base_url])
+        inj = await scan_for_injections(urls, forms_by_url=forms_by_url,
                                         stealth_level="aggressive")
-        return res.get("findings", []), time.time() - start
+
+        # The v1.0 misconfig + out-of-band scanners run over the SAME discovered
+        # surface — param-less routes (/api/data, /login, /xxe/) that the injection
+        # target builder drops are exactly where CORS/JWT/cookie/XXE live, so feed
+        # every crawled URL plus the seed. One shared, loopback-bound collaborator
+        # observes the SSRF/XXE callbacks; the app reaches it over 127.0.0.1.
+        discovered = list({ep.get("url", "") for ep in endpoints if ep.get("url")} | {base_url})
+        mis = await scan_misconfig(discovered)
+        with OASTListener() as oast:
+            oob = await scan_oob(discovered, oast=oast)
+
+        findings = (inj.get("findings", []) + mis.get("findings", [])
+                    + oob.get("findings", []))
+        return findings, time.time() - start
 
     with serve() as base_url:
         gt.base_url = base_url  # for the report header; matching is by path

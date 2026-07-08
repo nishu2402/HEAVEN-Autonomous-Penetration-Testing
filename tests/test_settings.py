@@ -175,6 +175,92 @@ def test_test_llm_shape(client):
     assert isinstance(body["available"], bool)
 
 
+# ══════════════════════════════════════════════════════════════════
+# CLI: `heaven config test-llm` (parity with the /api/settings/test-llm check)
+# ══════════════════════════════════════════════════════════════════
+
+def _invoke_test_llm(monkeypatch, fake_gw, args=()):
+    """Invoke `config test-llm` with LLMGateway monkeypatched to fake_gw."""
+    import heaven.ai.llm_gateway as gw_mod
+    from click.testing import CliRunner
+
+    from heaven.cli.config_cmd import config_grp
+    monkeypatch.setattr(gw_mod, "LLMGateway", fake_gw)
+    return CliRunner().invoke(config_grp, ["test-llm", *args])
+
+
+def test_cli_test_llm_not_configured(monkeypatch):
+    class _GW:  # no provider/key → unavailable
+        provider = ""
+        model = ""
+        api_key = ""
+        available = False
+
+    r = _invoke_test_llm(monkeypatch, _GW)
+    assert r.exit_code == 1
+    assert "not configured" in r.output.lower()
+
+
+def test_cli_test_llm_ready_cheap(monkeypatch):
+    class _GW:
+        provider = "anthropic"
+        model = "claude-x"
+        api_key = "sk-x"
+        available = True
+
+    r = _invoke_test_llm(monkeypatch, _GW)
+    assert r.exit_code == 0
+    assert "ready" in r.output.lower()
+    # Cheap check must NOT make a call.
+    assert "round-trip" not in r.output.lower()
+
+
+def test_cli_test_llm_live_roundtrip(monkeypatch):
+    class _Resp:
+        text = "pong"
+        error = None
+        latency_ms = 12.3
+
+        def ok(self):
+            return True
+
+    class _GW:
+        provider = "openai"
+        model = "gpt-x"
+        api_key = "sk-x"
+        available = True
+
+        def complete(self, req):
+            return _Resp()
+
+    r = _invoke_test_llm(monkeypatch, _GW, args=["--live"])
+    assert r.exit_code == 0
+    assert "pong" in r.output.lower()
+
+
+def test_cli_test_llm_live_failure_exits_nonzero(monkeypatch):
+    class _Resp:
+        text = ""
+        error = "exhausted retries: 401 unauthorized"
+        latency_ms = 5.0
+
+        def ok(self):
+            return False
+
+    class _GW:
+        provider = "openai"
+        model = "gpt-x"
+        api_key = "sk-bad"
+        available = True
+
+        def complete(self, req):
+            return _Resp()
+
+    r = _invoke_test_llm(monkeypatch, _GW, args=["--live"])
+    assert r.exit_code == 1
+    assert "failed" in r.output.lower()
+
+
 # ── helper ──
 
 def _find(status: dict, key: str) -> dict:

@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-07-08
+
+### Added
+
+- **In-house OAST collaborator (`heaven/vulnscan/oast.py`) — provable SSRF & XXE.**
+  A pure-standard-library out-of-band listener binds locally and records target
+  callbacks tagged with a per-probe token. SSRF and XXE are now *proven* (the
+  target actually connects back) rather than guessed, with **no external
+  dependency** — no Burp Collaborator, no interactsh, no third-party DNS. Bind a
+  routable address via `HEAVEN_OAST_HOST` for remote engagements.
+- **Dedicated misconfiguration & session-security scanner
+  (`heaven/vulnscan/misconfig_scanner.py`).** Deterministic, confirmation-based
+  checks wired into the main VULN_SCAN phase: CORS reflected-origin **with
+  credentials**, insecure session cookies (HttpOnly/Secure/SameSite), missing
+  security headers (host-scoped), canary-confirmed open redirect, and JWT
+  weaknesses — `alg:none` acceptance plus HMAC **weak-secret cracking** (the
+  recovered secret is the proof). A new `oob_scanner.py` drives SSRF/XXE through
+  the collaborator. All classes are proven against the native vulnerable app.
+- **Expanded in-house remediation knowledge base (`heaven/devsecops/vuln_kb.py`).**
+  Added entries for XXE, CORS, insecure cookies, JWT (weak-secret + alg:none),
+  command injection, file inclusion, path traversal, SSTI, CRLF, request
+  smuggling and subdomain takeover, plus an alias map so every emitted
+  `vuln_type` spelling resolves. `AIRemediationEngine`'s LLM-free fallback now
+  returns a full, class-accurate write-up from the KB instead of a generic
+  one-liner — **remediation is excellent with or without an API key**.
+
+### Changed
+
+- **Hostile-target resilience.** Every core-path orchestrator HTTP session now
+  carries a per-request timeout ceiling, and the open-redirect check probes its
+  candidate parameters concurrently (was sequential — it multiplied a slow
+  target's latency ~20×). A new `tests/test_resilience.py` drives the live web
+  detectors against slow / 500 / connection-drop / redirect-loop servers and
+  asserts they finish fast, never crash, and emit no false findings.
+
 ### Fixed
 
 - **ML risk scores never reached the web dashboard (always showed 0).** The ML

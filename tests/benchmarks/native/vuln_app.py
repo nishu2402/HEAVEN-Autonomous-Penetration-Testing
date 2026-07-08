@@ -24,14 +24,19 @@ it genuinely injectable (that is the whole point — it is a *test target*).
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import hashlib
+import hmac
+import json
 import re
 import sqlite3
 import threading
+import urllib.request
 from html import escape
 from typing import Iterator
 
-from flask import Flask, request
+from flask import Flask, make_response, redirect, request
 
 # DVWA's default users table (user_id → names). Row 1 is admin/admin.
 _USERS = [
@@ -132,6 +137,11 @@ _INDEX = _PAGE.format(
         '<li><a href="/vulnerabilities/exec/">Command Injection</a></li>'
         '<li><a href="/vulnerabilities/xss_r/">Reflected XSS</a></li>'
         '<li><a href="/vulnerabilities/xss_d/">Escaped echo</a></li>'
+        '<li><a href="/vulnerabilities/ssrf/?url=">SSRF</a></li>'
+        '<li><a href="/vulnerabilities/xxe/">XXE</a></li>'
+        '<li><a href="/vulnerabilities/redirect/?url=">Open Redirect</a></li>'
+        '<li><a href="/api/data">CORS API</a></li>'
+        '<li><a href="/login">Login (weak JWT cookie)</a></li>'
         "</ul>"
     )
 )
@@ -174,6 +184,59 @@ _SQLI_FORM = (
     '<input type="submit" name="Submit" value="Submit">'
     "</form>"
 )
+
+
+def _fetch_url(url: str, limit: int = 512) -> str:
+    """Naive server-side fetch of a user-supplied URL — the SSRF sink itself.
+
+    A vulnerable app trusts the URL and connects out; that outbound request is
+    exactly what an OAST collaborator observes. Only http(s)/file are honoured so
+    the *test target* can't be coerced into arbitrary schemes."""
+    if url.startswith(("http://", "https://")):
+        with urllib.request.urlopen(url, timeout=2) as r:  # noqa: S310 - test target
+            return r.read(limit).decode("utf-8", "replace")
+    if url.startswith("file://"):
+        with open(url[7:], errors="replace") as fh:
+            return fh.read(limit)
+    raise ValueError(f"unsupported scheme: {url[:16]}")
+
+
+# A vulnerable XML parser resolves external SYSTEM entities. We reproduce that
+# behaviour by hand (no XML library, no new dependency): find the SYSTEM entity,
+# fetch/read its URI (the observable out-of-band or in-band leak) and substitute
+# it into the document exactly as a naive parser would.
+_XXE_ENTITY_RE = re.compile(
+    r"""<!ENTITY\s+(\w+)\s+SYSTEM\s+["']([^"']+)["']\s*>""", re.IGNORECASE
+)
+
+
+def _resolve_xxe(xml: str) -> str:
+    m = _XXE_ENTITY_RE.search(xml)
+    if not m:
+        return "XML parsed (no external entities)."
+    name, uri = m.group(1), m.group(2)
+    try:
+        leaked = _fetch_url(uri)  # http → OAST callback; file:// → local read
+    except Exception as e:  # noqa: BLE001 - a broken entity is just a failed parse
+        leaked = f"[entity error: {str(e)[:60]}]"
+    return re.sub(rf"&{re.escape(name)};", leaked, xml)
+
+
+# Deliberately weak HMAC secret — the whole point of the target is that a JWT
+# signed with it is trivially crackable, and that an alg:none forgery is accepted.
+_JWT_SECRET = "secret"
+
+
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def _mint_jwt(role: str = "user") -> str:
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    payload = _b64url(json.dumps({"sub": "admin", "role": role}).encode())
+    signing_input = f"{header}.{payload}".encode()
+    sig = _b64url(hmac.new(_JWT_SECRET.encode(), signing_input, hashlib.sha256).digest())
+    return f"{header}.{payload}.{sig}"
 
 
 def create_app() -> Flask:
@@ -270,6 +333,60 @@ def create_app() -> Flask:
         # HTML-escaped reflection → mirrors input but is NOT injectable. The
         # scanner must not raise SQLi/XSS here.
         return _PAGE.format(body=f"<div>Search: {escape(val)}</div>")
+
+    @app.route("/vulnerabilities/ssrf/")
+    def ssrf() -> str:
+        # Server-Side Request Forgery: the app fetches a user-supplied URL. A
+        # correct detector proves it out-of-band — the fetch hits the collaborator.
+        form = ('<form action="#" method="GET">'
+                'URL: <input type="text" name="url">'
+                '<input type="submit" name="Submit" value="Submit"></form>')
+        url = request.args.get("url")
+        if not url:
+            return _PAGE.format(body=form)
+        try:
+            body = _fetch_url(url)
+            return _PAGE.format(body=f"{form}<pre>fetched {len(body)} bytes</pre>")
+        except Exception as e:  # noqa: BLE001
+            return _PAGE.format(body=f"{form}<pre>fetch error: {escape(str(e)[:80])}</pre>")
+
+    @app.route("/vulnerabilities/xxe/", methods=["GET", "POST"])
+    def xxe() -> str:
+        # XML External Entity: posted XML is parsed with external entities
+        # resolved. A SYSTEM entity pointing at the collaborator proves blind XXE;
+        # a file:// entity leaks local files in-band.
+        if request.method == "GET":
+            return _PAGE.format(body="<pre>POST XML here.</pre>")
+        return _PAGE.format(body=f"<pre>{escape(_resolve_xxe(request.get_data(as_text=True)))}</pre>")
+
+    @app.route("/vulnerabilities/redirect/")
+    def open_redirect():
+        # Open Redirect: the app 302s to a user-supplied URL without validating it.
+        url = request.args.get("url")
+        if not url:
+            return _PAGE.format(body='<form action="#" method="GET">'
+                                     'URL: <input name="url"></form>')
+        return redirect(url, code=302)
+
+    @app.route("/api/data")
+    def api_data():
+        # CORS misconfiguration: reflect *any* Origin and allow credentials — a
+        # classic cross-origin data-theft primitive.
+        origin = request.headers.get("Origin", "")
+        resp = make_response('{"ok": true, "secret": "s3cr3t"}')
+        resp.headers["Content-Type"] = "application/json"
+        if origin:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+        return resp
+
+    @app.route("/login")
+    def login():
+        # Weak session management: a JWT signed with a guessable secret, delivered
+        # in a cookie with no HttpOnly/Secure/SameSite flags.
+        resp = make_response(_PAGE.format(body="<pre>Logged in as admin.</pre>"))
+        resp.headers["Set-Cookie"] = f"session={_mint_jwt()}; Path=/"
+        return resp
 
     return app
 

@@ -29,6 +29,10 @@ CANONICAL_CATEGORIES = {
     "csrf", "open_redirect", "weak_auth", "file_upload", "idor",
     "info_disclosure", "auth_bypass", "deserialization",
     "broken_access_control", "security_misconfig",
+    # Session/transport & out-of-band classes added with the v1.0 detector
+    # expansion (misconfig_scanner + oob_scanner). Kept as distinct categories
+    # so the per-category benchmark table credits each one individually.
+    "cors", "jwt", "insecure_cookie",
 }
 
 _TYPE_TO_CATEGORY: dict[str, str] = {
@@ -68,6 +72,22 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     # Open redirect
     "open_redirect": "open_redirect", "unvalidated_redirect": "open_redirect",
     "open redirection": "open_redirect", "external service interaction (http)": "open_redirect",
+    # CORS misconfiguration
+    "cors": "cors", "cors_misconfig": "cors", "cors_misconfiguration": "cors",
+    "cross-origin resource sharing": "cors", "permissive cors": "cors",
+    # JWT weaknesses (alg:none, crackable HMAC secret)
+    "jwt": "jwt", "jwt_alg_none": "jwt", "jwt_none_algorithm": "jwt",
+    "jwt_weak_secret": "jwt", "jwt_weak": "jwt", "weak_jwt": "jwt",
+    "json web token": "jwt",
+    # Insecure session cookies (missing HttpOnly / Secure / SameSite)
+    "insecure_cookie": "insecure_cookie", "cookie_no_httponly": "insecure_cookie",
+    "cookie_missing_flags": "insecure_cookie", "insecure_session_cookie": "insecure_cookie",
+    "cookie without httponly flag": "insecure_cookie",
+    "cookie without secure flag": "insecure_cookie",
+    # Missing hardening headers → security misconfiguration
+    "missing_security_headers": "security_misconfig",
+    "security headers": "security_misconfig",
+    "missing headers": "security_misconfig",
     # Authentication weaknesses
     "weak_auth": "weak_auth", "weak_credentials": "weak_auth",
     "default_credentials": "weak_auth", "no_rate_limit": "weak_auth",

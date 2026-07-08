@@ -11,6 +11,7 @@ Cross-platform: Linux, macOS, Windows.
 
 from __future__ import annotations
 
+import os
 import warnings
 from pathlib import Path
 from typing import Any, Optional
@@ -25,6 +26,43 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("ml.risk")
 warnings.filterwarnings("ignore", category=UserWarning)
+
+# The 48 MB NVD model is intentionally NOT shipped in the wheel or committed to
+# git (it's gitignored), so `pip install` and `git clone` users don't have it
+# until they fetch it with `heaven download-model`. The download lands in the
+# user cache dir below, so the search path has to include it — otherwise the
+# loader would only ever find a model in a source checkout.
+
+
+def default_model_dir() -> Path:
+    """User-writable cache dir where `heaven download-model` stores the model.
+
+    Honours ``XDG_CACHE_HOME`` (Linux/macOS convention); falls back to
+    ``~/.cache``. Always writable, so it works for pip installs where the
+    package lives in read-only site-packages.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "heaven" / "models"
+
+
+def model_search_paths() -> list[Path]:
+    """Ordered candidate locations for NVD_model.pkl (first existing one wins).
+
+    1. ``HEAVEN_MODEL_PATH`` — explicit operator override (file path).
+    2. ``<repo>/data/models/NVD_model.pkl`` — canonical home in a source checkout.
+    3. ``<repo>/NVD_model.pkl`` — legacy repo-root / Docker-image location.
+    4. ``<cache>/heaven/models/NVD_model.pkl`` — where `download-model` writes,
+       so pip-installed users get the real model.
+    """
+    root = Path(__file__).parent.parent.parent
+    paths: list[Path] = []
+    env = os.environ.get("HEAVEN_MODEL_PATH")
+    if env:
+        paths.append(Path(env))
+    paths.append(root / "data" / "models" / "NVD_model.pkl")
+    paths.append(root / "NVD_model.pkl")
+    paths.append(default_model_dir() / "NVD_model.pkl")
+    return paths
 
 
 class HeavenRiskModel:
@@ -67,8 +105,7 @@ class HeavenRiskModel:
         _root = Path(__file__).parent.parent.parent
         nvd_feat_file = _root / "nvd_data" / "feature_names_nvd.json"
         nvd_model_file = next(
-            (p for p in (_root / "data" / "models" / "NVD_model.pkl",
-                         _root / "NVD_model.pkl") if p.exists()),
+            (p for p in model_search_paths() if p.exists()),
             None,
         )
         if nvd_model_file is not None and joblib is not None:
@@ -104,7 +141,11 @@ class HeavenRiskModel:
                 logger.warning(f"Could not load regressor: {e}")
                 self._regression_mode = False
         else:
-            logger.warning("No trained model found. Run: heaven train-model")
+            logger.warning(
+                "No NVD CVSS model found — CVSS scores fall back to each finding's "
+                "own base score. Fetch the trained model with `heaven download-model` "
+                "(or train one with `heaven train-model`)."
+            )
             self._regression_mode = False
 
     def predict_cvss_score(self, vuln_features: dict) -> float:

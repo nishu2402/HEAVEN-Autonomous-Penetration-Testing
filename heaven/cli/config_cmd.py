@@ -128,6 +128,70 @@ def test_nvd_cmd() -> None:
         raise SystemExit(1)
 
 
+@config_grp.command(name="test-llm")
+@click.option("--live", is_flag=True,
+              help="Make one real minimal completion to confirm the key works "
+                   "end-to-end (a tiny billed call). Off by default.")
+def test_llm_cmd(live: bool) -> None:
+    """Check the LLM configuration used by every AI layer.
+
+    Without ``--live`` this is the same cheap check as the web-UI Settings page:
+    it confirms a provider is selected, a key is present and the SDK is importable
+    — no billed call. With ``--live`` it sends a one-token prompt through the same
+    gateway the AI layers use, so you can confirm the key actually works before a
+    scan relies on it. HEAVEN runs fully without any of this (in-house fallbacks).
+    """
+    from heaven.ai.llm_gateway import LLMGateway
+
+    gw = LLMGateway()
+    res: dict = {
+        "provider": gw.provider or None,
+        "model": gw.model or None,
+        "available": bool(gw.available),
+        "reason": (
+            "ready" if gw.available else
+            "no provider/key configured" if not (gw.provider and gw.api_key) else
+            "provider SDK not installed (pip install the provider extra)"
+        ),
+    }
+
+    if live and gw.available:
+        from heaven.ai.llm_gateway import LLMRequest
+        resp = gw.complete(LLMRequest(
+            prompt="Reply with the single word: pong",
+            max_tokens=5, temperature=0.0, redact_secrets=False,
+        ))
+        res["live_ok"] = bool(resp.ok())
+        res["latency_ms"] = round(resp.latency_ms, 1)
+        res["live_reply"] = (resp.text or "").strip()[:40]
+        if resp.error:
+            res["live_error"] = resp.error
+
+    if json_output():
+        emit_json(res)
+        if not res["available"] or (live and res.get("live_ok") is False):
+            raise SystemExit(1)
+        return
+
+    if not res["available"]:
+        _print(f"[yellow]· LLM not configured[/yellow] — {res['reason']}")
+        _print("[dim]HEAVEN runs fully without it (in-house planning, triage & "
+               "remediation). To enable: heaven config set ANTHROPIC_API_KEY[/dim]")
+        raise SystemExit(1)
+
+    _print(f"[green]✓ LLM ready[/green] — provider [bold]{res['provider']}[/bold], "
+           f"model [bold]{res['model']}[/bold]")
+    if live:
+        if res.get("live_ok"):
+            _print(f"  [green]✓ live round-trip[/green] — reply "
+                   f"'{res['live_reply']}' in {res['latency_ms']} ms")
+        else:
+            _print(f"  [red]✗ live call failed[/red] — {res.get('live_error', 'unknown')}")
+            raise SystemExit(1)
+    else:
+        _print("  [dim]Add --live to confirm the key with a real one-token call.[/dim]")
+
+
 @config_grp.command(name="unset")
 @click.argument("key")
 def unset_cmd(key: str) -> None:

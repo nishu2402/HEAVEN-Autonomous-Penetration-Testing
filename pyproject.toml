@@ -101,6 +101,11 @@ dev = [
     "black>=24.0.0",
     "ruff>=0.2.0",
     "mypy>=1.8.0",
+    # Flask backs the native offline vulnerable-app test target
+    # (tests/benchmarks/native/vuln_app.py). Without it the native detector and
+    # benchmark tests skip at collection — which both hides them from CI and made
+    # the collected test count environment-dependent (CI counted 11 fewer).
+    "flask>=3.0.0",
 ]
 cloud-gcp = ["google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0"]
 cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]

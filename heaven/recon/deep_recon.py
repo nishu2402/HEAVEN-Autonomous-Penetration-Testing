@@ -183,7 +183,9 @@ async def _check_wildcard_dns(domain: str) -> Optional[set[str]]:
         try:
             loop = asyncio.get_event_loop()
             addrs = await loop.getaddrinfo(probe, None)
-            ips = {a[4][0] for a in addrs}
+            # sockaddr[0] is typed str | int (IPv6 scope); coerce to str so this
+            # matches wildcard_ips: set[str] | None.
+            ips: set[str] = {str(a[4][0]) for a in addrs}
             if wildcard_ips is None:
                 wildcard_ips = ips
             else:

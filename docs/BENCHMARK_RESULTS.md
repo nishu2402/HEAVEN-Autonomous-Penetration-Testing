@@ -15,10 +15,12 @@ running container — not a mock or a unit test.
 
 DVWA under Docker is heavy and, on Apple Silicon, runs under QEMU emulation. So
 HEAVEN also ships a **native, in-process benchmark**: a faithful reproduction of
-DVWA's injection endpoints — *including MySQL comment semantics* — that the
-**real crawler and injection scanner** run against end-to-end, scored through the
-same precision / recall / F1 metrics layer. It is deterministic, always-on in CI,
-and finishes in well under a second.
+DVWA's injection endpoints — *including MySQL comment semantics* — plus a
+misconfiguration/out-of-band surface (SSRF, XXE, CORS, open redirect, weak JWT,
+insecure cookies). The **real crawler + injection scanner + misconfig scanner +
+OAST out-of-band prober** run against it end-to-end, scored through the same
+precision / recall / F1 metrics layer. It is deterministic, always-on in CI, and
+finishes in ~13 s (the out-of-band probes wait briefly for target callbacks).
 
 ```bash
 pytest tests/benchmarks/test_native_benchmark.py -s
@@ -26,12 +28,31 @@ pytest tests/benchmarks/test_native_benchmark.py -s
 
 | Metric | Result |
 |---|---|
-| Precision | **100%** (every reported finding is real) |
-| Recall (required vulns) | **100%** — error-based & blind SQLi, UNION SQLi, LFI, command injection, reflected XSS |
+| Precision | **100%** — 15 / 15 reported findings are real (0 false positives) |
+| Recall (required vulns) | **100%** — 11 / 11 required classes detected |
 | F1 | **100%** |
-| Parameter attribution | correct (`id`, not the `Submit` button) |
-| False positives on reflective/escaped endpoints | **0** (SQLi and cmdi reflection-guarded) |
-| Runtime | ~0.3 s, no Docker / no network |
+| Categories covered | **11** — SQLi (error/blind/UNION), LFI, cmdi, reflected XSS, **SSRF, XXE, CORS, open redirect, weak JWT, insecure cookie, missing security headers** |
+| Parameter attribution | correct (`id`, `url`, … — never the `Submit` button) |
+| Out-of-band proof | SSRF + XXE confirmed by a **real callback** to HEAVEN's in-house collaborator, not a heuristic |
+| False positives on reflective/escaped endpoints | **0** (SQLi/cmdi reflection-guarded; CORS/redirect canary-confirmed) |
+| Runtime | ~13 s, no Docker / no network |
+
+### Per-category recall (single deterministic run)
+
+| Category | Detected | Findings | Matched |
+|---|:--:|:--:|:--:|
+| SQL injection (error/blind/UNION) | 2 / 2 | 4 | 4 |
+| Reflected XSS | 2 / 2 | 2 | 2 |
+| Command injection | 1 / 1 | 1 | 1 |
+| Local File Inclusion | 1 / 1 | 1 | 1 |
+| SSRF (out-of-band) | 1 / 1 | 1 | 1 |
+| XXE (out-of-band) | 1 / 1 | 1 | 1 |
+| CORS misconfiguration | 1 / 1 | 1 | 1 |
+| Open redirect | 1 / 1 | 1 | 1 |
+| Weak JWT (cracked secret) | 1 / 1 | 1 | 1 |
+| Insecure session cookie | 1 / 1 | 1 | 1 |
+| Missing security headers | 1 / 1 | 1 | 1 |
+| **Total** | **13 / 13** | **15** | **15** |
 
 This is a *controlled functional benchmark* — the target is a known, labelled
 surface, so it measures HEAVEN's end-to-end detection **and** attribution
@@ -62,16 +83,26 @@ plan / triage / explain; they never invent a finding.
 
 ---
 
-## Detection coverage (verified on DVWA)
+## Detection coverage
+
+Two verification surfaces: **[D]** = confirmed on the live DVWA container;
+**[N]** = confirmed on the always-on native benchmark (the scored,
+Docker-free run above). Both use the same deterministic scanners.
 
 | Class | Technique | Verified |
 |---|---|---|
-| **SQL injection** | error-based · boolean-blind · UNION-based · time-based blind | ✅ `critical sqli — param 'id'` |
-| **Local File Inclusion** | path traversal + `php://` wrappers, content-leak confirmed | ✅ `critical lfi — param 'page'` |
-| **OS command injection** | output-based (`id`/echo) + differential time-based | ✅ `critical cmdi — param 'ip'` |
-| **Reflected XSS** | execution-aware (escaping-resistant FP filter) | ✅ |
-| **Remote File Inclusion** | best-effort remote-fetch detection | ✅ probe wired |
-| Security posture | headers, TLS, cookies, request-smuggling, version disclosure | ✅ |
+| **SQL injection** | error-based · boolean-blind · UNION-based · time-based blind | ✅ [D][N] `critical sqli — param 'id'` |
+| **Local File Inclusion** | path traversal + `php://` wrappers, content-leak confirmed | ✅ [D][N] `critical lfi — param 'page'` |
+| **OS command injection** | output-based (`id`/echo) + differential time-based | ✅ [D][N] `critical cmdi — param 'ip'` |
+| **Reflected XSS** | execution-aware (escaping-resistant FP filter) | ✅ [D][N] |
+| **Remote File Inclusion** | best-effort remote-fetch detection | ✅ [D] probe wired |
+| **SSRF** | out-of-band — target callback to in-house OAST collaborator | ✅ [N] `high ssrf — param 'url'` |
+| **XXE** | out-of-band — `SYSTEM` entity resolves to the collaborator | ✅ [N] `high xxe` |
+| **CORS misconfiguration** | reflected `Origin` + `Allow-Credentials`, canary origin | ✅ [N] `high cors_misconfig` |
+| **Open redirect** | canary-host `Location` match (never fires same-site) | ✅ [N] `open_redirect — param 'url'` |
+| **Weak / forgeable JWT** | `alg:none` + in-house HMAC secret crack (secret = proof) | ✅ [N] `critical jwt_weak_secret` |
+| **Insecure session cookie** | missing `HttpOnly` / `Secure` / `SameSite` | ✅ [N] `insecure_cookie` |
+| Security posture | headers, TLS, cookies, request-smuggling, version disclosure | ✅ [D][N] |
 
 ---
 
@@ -98,8 +129,13 @@ demo from a usable tool:
   production app.
 - The benchmark target ran under CPU emulation (amd64-on-arm64), so wall-clock
   scan times are slower than on native hardware; the **findings** are unaffected.
-- Coverage is strong for the injection + posture classes shown above. It is not a
-  claim of parity with commercial suites across every vuln class — see
+- Coverage spans the 11 classes scored above (injection, SSRF/XXE out-of-band,
+  CORS, open redirect, weak JWT, insecure cookies, header hardening). It is not a
+  claim of parity with commercial suites across *every* vuln class — see
   [`docs/COMPARISON.md`](COMPARISON.md) for an honest head-to-head template.
+- The SSRF/XXE out-of-band proof requires the target to reach HEAVEN's
+  collaborator. That holds for loopback/lab targets (it binds `127.0.0.1` by
+  default); for a remote target, bind it to a routable address you're authorized
+  to receive callbacks on (`HEAVEN_OAST_HOST`).
 
 Run it yourself: [`docs/BENCHMARK_HOWTO.md`](BENCHMARK_HOWTO.md).

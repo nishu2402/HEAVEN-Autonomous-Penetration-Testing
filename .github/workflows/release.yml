@@ -115,13 +115,36 @@ jobs:
             echo "No CHANGELOG entry for version ${{ steps.ver.outputs.version }} — using fallback" >&2
             echo "See CHANGELOG.md for changes." > /tmp/release-notes.md
           fi
-          head -30 /tmp/release-notes.md
+          # Append the pre-trained-model fetch instructions. The 48 MB NVD model
+          # is not in the wheel/git, so users grab it from this release with a
+          # SHA-256-verified one-liner.
+          {
+            echo ""
+            echo "### Pre-trained NVD CVSS model"
+            echo ""
+            echo "The ML CVSS model (R²≈0.99) ships as a release asset, not in the wheel."
+            echo "Fetch it once (SHA-256 verified):"
+            echo ""
+            echo '```bash'
+            echo "heaven download-model --tag ${{ github.ref_name }}"
+            echo '```'
+            echo ""
+            echo "HEAVEN runs without it (CVSS falls back to each finding's base score)."
+          } >> /tmp/release-notes.md
+          head -40 /tmp/release-notes.md
 
+      # NOTE: NVD_model.pkl is gitignored, so CI does not have it — the glob
+      # below is skipped automatically (fail_on_unmatched_files defaults false).
+      # ONE-TIME per release, the maintainer uploads data/models/NVD_model.pkl to
+      # the created GitHub Release (drag-drop in the UI, or `gh release upload
+      # <tag> data/models/NVD_model.pkl`) so `heaven download-model` can fetch it.
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
           name: "HEAVEN v${{ steps.ver.outputs.version }}"
           body_path: /tmp/release-notes.md
-          files: dist/*
+          files: |
+            dist/*
+            data/models/NVD_model.pkl
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}   # tag like v1.0.0-rc1 → prerelease

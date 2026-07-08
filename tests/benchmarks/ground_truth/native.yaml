@@ -89,3 +89,104 @@ vulnerabilities:
     difficulty: low
     detection_required: false
     notes: "Unescaped id echo → reflected XSS co-located with the SQLi."
+
+  # ── v1.0 detector expansion: misconfiguration + out-of-band classes ──────────
+  # These are proven by the misconfig_scanner (deterministic, read straight off
+  # the response) and the oob_scanner (SSRF/XXE via the in-house OAST collaborator
+  # callback), not the injection scanner. The native benchmark drives all three
+  # so the score reflects HEAVEN's full web surface, not injection alone.
+  - id: ssrf_url
+    endpoint: "/vulnerabilities/ssrf/"
+    method: GET
+    parameter: url
+    category: ssrf
+    subtypes_ok: [server_side_request_forgery]
+    owasp: "A10:2021-Server-Side Request Forgery"
+    cwe: CWE-918
+    severity: high
+    difficulty: medium
+    detection_required: true
+    notes: "Blind SSRF — the app fetches a user-supplied URL; proven out-of-band by a callback to HEAVEN's collaborator."
+
+  - id: xxe_post
+    endpoint: "/vulnerabilities/xxe/"
+    method: POST
+    parameter: null
+    category: xxe
+    subtypes_ok: [xml_external_entity]
+    owasp: "A05:2021-Security Misconfiguration"
+    cwe: CWE-611
+    severity: high
+    difficulty: medium
+    detection_required: true
+    notes: "A SYSTEM entity resolves to the collaborator — blind XXE proven out-of-band."
+
+  - id: open_redirect_url
+    endpoint: "/vulnerabilities/redirect/"
+    method: GET
+    parameter: url
+    category: open_redirect
+    subtypes_ok: [unvalidated_redirect]
+    owasp: "A01:2021-Broken Access Control"
+    cwe: CWE-601
+    severity: medium
+    difficulty: low
+    detection_required: true
+    notes: "302 Location to an attacker-controlled canary host, confirmed by exact host match (never fires same-site)."
+
+  - id: cors_api_data
+    endpoint: "/api/data"
+    method: GET
+    parameter: null
+    category: cors
+    subtypes_ok: [cors_misconfig]
+    owasp: "A05:2021-Security Misconfiguration"
+    cwe: CWE-942
+    severity: high
+    difficulty: low
+    detection_required: true
+    notes: "Reflects an arbitrary Origin with Access-Control-Allow-Credentials: true → credentialed cross-origin data theft."
+
+  - id: jwt_weak_secret_login
+    endpoint: "/login"
+    method: GET
+    parameter: null
+    category: jwt
+    subtypes_ok: [jwt_weak_secret]
+    owasp: "A02:2021-Cryptographic Failures"
+    cwe: CWE-1391
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "The session JWT is signed with a guessable HMAC secret ('secret'), cracked in-house — the token is forgeable to any role."
+
+  - id: insecure_cookie_login
+    endpoint: "/login"
+    method: GET
+    parameter: null
+    category: insecure_cookie
+    subtypes_ok: [cookie_no_httponly]
+    owasp: "A05:2021-Security Misconfiguration"
+    cwe: CWE-1004
+    severity: medium
+    difficulty: low
+    detection_required: true
+    notes: "The session cookie is set without HttpOnly/SameSite, exposing it to theft via XSS and cross-site sending."
+
+  # Opportunistic (not required): every HTML page omits CSP / X-Frame-Options /
+  # X-Content-Type-Options, so the misconfig scanner raises one origin-scoped
+  # hardening finding. It is a real gap; labelling it keeps that true finding
+  # from being scored as a false positive. The finding anchors to the origin
+  # (no path), which still contains "/" — hence the "/" endpoint match.
+  - id: missing_security_headers
+    endpoint: "/"
+    method: GET
+    parameter: null
+    category: security_misconfig
+    subtypes_ok: [missing_security_headers]
+    owasp: "A05:2021-Security Misconfiguration"
+    cwe: CWE-693
+    severity: low
+    difficulty: low
+    detection_required: false
+    notes: "HTML responses omit CSP / X-Frame-Options / X-Content-Type-Options (origin-scoped, collapses to one finding)."

@@ -409,7 +409,8 @@ class ScanOrchestrator:
                         try:
                             from heaven.vulnscan.advanced_attacks import CredentialSprayer
                             import aiohttp
-                            async with aiohttp.ClientSession() as session:
+                            async with aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                                 sprayer = CredentialSprayer()
                                 return await sprayer.spray(session, f"ssh://{ip}:{port}")
                         except Exception:
@@ -432,7 +433,8 @@ class ScanOrchestrator:
                         try:
                             from heaven.vulnscan.advanced_attacks import CredentialSprayer
                             import aiohttp
-                            async with aiohttp.ClientSession() as session:
+                            async with aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                                 sprayer = CredentialSprayer()
                                 return await sprayer.spray(session, f"http://{ip}:{port}")
                         except Exception:
@@ -710,7 +712,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             )
             import aiohttp
             results = {"subdomains": [], "js_secrets": [], "endpoints": []}
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     from urllib.parse import urlparse
                     domain = urlparse(url).hostname or ""
@@ -766,7 +769,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             import aiohttp
             intel = AdaptiveIntelligence()
             profiles = []
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     p = await intel.profile_target(session, url)
                     profiles.append({
@@ -864,7 +868,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             import aiohttp
             scanner = WebAnomalyProbe()
             candidates = []
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     found = await scanner.scan_endpoint(session, url, ["id", "q", "page", "file", "url"])
                     candidates.extend([{
@@ -898,7 +903,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 scan_data["critical_endpoints"].extend(data.get("endpoints", []))
                 for ep in data.get("forms", []):
                     scan_data["critical_endpoints"].append(ep.get("action", ""))
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     found = await run_advanced_tests(session, url, scan_data=scan_data)
                     findings.extend([{
@@ -1044,6 +1050,53 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
 
     fuzz_id = orch.add_task(
         "Web Application Fuzzing", _web_fuzz,
+        phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        concurrency_group="web", timeout=600,
+    )
+
+    # ═══ Phase: MISCONFIG & OUT-OF-BAND (CORS/cookies/JWT/redirect/SSRF/XXE) ═══
+    async def _misconfig_oob(**kw):
+        try:
+            from heaven.vulnscan.misconfig_scanner import scan_misconfig
+            from heaven.vulnscan.oast import OASTListener
+            from heaven.vulnscan.oob_scanner import scan_oob
+        except ImportError:
+            return {}
+        import os
+
+        urls = list(targets.get("urls", []))
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                if ep_url and ep_url not in urls:
+                    urls.append(ep_url)
+        if not urls:
+            return {"skipped": True, "reason": "no URLs for misconfig/OOB scan"}
+
+        findings: list[dict] = []
+        # Deterministic, in-band misconfiguration checks (no collaborator needed).
+        mis = await scan_misconfig(urls)
+        findings.extend(mis.get("findings", []))
+
+        # Out-of-band SSRF/XXE proof needs a collaborator the target can reach.
+        # Loopback by default (covers localhost/lab targets); override with
+        # HEAVEN_OAST_HOST=<routable-ip> for a remote engagement you're
+        # authorized to receive callbacks from.
+        oast_host = os.getenv("HEAVEN_OAST_HOST", "127.0.0.1")
+        try:
+            with OASTListener(host=oast_host) as oast:
+                oob = await scan_oob(urls, oast=oast)
+                findings.extend(oob.get("findings", []))
+        except OSError as e:
+            logger.debug(f"OAST collaborator unavailable ({e}); skipping OOB probes")
+
+        return {"findings": findings, "vulnerabilities": findings, "total": len(findings)}
+
+    orch.add_task(
+        "Misconfiguration & Out-of-Band Scan", _misconfig_oob,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
         concurrency_group="web", timeout=600,
     )

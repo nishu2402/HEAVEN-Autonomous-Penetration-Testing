@@ -17,7 +17,7 @@ export default function TicketsPage() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--med)", marginTop: 0 }}>🎫 Ticketing</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Auto-create Jira / Linear issues from findings. Backends are
           env-configured — once set, the "Push to ticketing" button on
           FindingDetail and bulk push via CLI start working.
@@ -46,23 +46,20 @@ export default function TicketsPage() {
         )}
 
         {status && status.configured_backends?.length === 0 && (
-          <div style={{ marginTop: 12, padding: 12, background: "var(--border)",
-                        border: "1px solid var(--med)" }}>
-            <strong>No backends configured.</strong> Set the env vars above
+          <div className="form-banner" style={{
+            marginTop: 14, color: "var(--med)",
+            background: "rgba(255,197,61,0.08)", border: "1px solid rgba(255,197,61,0.30)",
+          }}>
+            <span><strong style={{ color: "var(--text-0)" }}>No backends configured.</strong> Set the env vars above
             and restart the API server. Critical findings won't auto-create
-            tickets until at least one backend is configured.
+            tickets until at least one backend is configured.</span>
           </div>
         )}
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
         <div className="card-title">CLI usage</div>
-        <pre style={{
-          fontSize: 12, fontFamily: "monospace", padding: 12,
-          background: "rgba(0,0,0,0.4)",
-          border: "1px solid var(--border)",
-          whiteSpace: "pre-wrap",
-        }}>{`# Check backend config
+        <pre className="cli-block">{`# Check backend config
 heaven tickets status
 
 # Push one finding to every configured backend
@@ -80,13 +77,10 @@ heaven tickets bulk --engagement <name> --severity high --dry-run`}</pre>
 
 function Backend({ name, configured, env, color }) {
   return (
-    <div style={{
-      padding: 12, background: "rgba(0,0,0,0.3)",
-      border: `1px solid ${configured ? "var(--text-0)" : "var(--med)"}33`,
-    }}>
+    <div className={"status-tile " + (configured ? "is-active" : "is-inactive")}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontWeight: 700, color }}>{name}</div>
-        <div style={{ color: configured ? "var(--text-0)" : "var(--med)" }}>
+        <div style={{ color: configured ? "var(--brand)" : "var(--med)" }}>
           {configured ? "✓ configured" : "✗ not configured"}
         </div>
       </div>

@@ -36,7 +36,7 @@ export default function KnowledgePage() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🧠 Knowledge Graph</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Cross-engagement memory: (target_profile, technique, outcome)
           tuples stored in <code>~/.heaven/knowledge.db</code>. Used by the
           autonomous planner to bias next-step selection toward techniques
@@ -48,10 +48,10 @@ export default function KnowledgePage() {
         {!stats && !error && <SkeletonStatGrid count={3} />}
 
         {stats && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+          <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
             <Stat label="Target profiles"  value={stats.profiles}  color="var(--cyan)" />
             <Stat label="Total attempts"   value={stats.attempts}  color="var(--med)" />
-            <Stat label="Successes"        value={stats.successes} color="var(--text-0)" />
+            <Stat label="Successes"        value={stats.successes} color="var(--brand)" />
           </div>
         )}
       </div>
@@ -69,12 +69,12 @@ export default function KnowledgePage() {
       {stats && stats.top_techniques?.length > 0 && (
         <div className="card" style={{ marginTop: 12 }}>
           <div className="card-title">Top techniques by success count</div>
-          <table style={{ width: "100%", fontSize: 12 }}>
-            <thead><tr style={{ color: "var(--cyan)" }}>
-              <th align="left">Technique</th>
-              <th align="right">Successes</th>
-              <th align="right">Attempts</th>
-              <th align="right">Rate</th>
+          <table className="data-table">
+            <thead><tr>
+              <th>Technique</th>
+              <th className="num">Successes</th>
+              <th className="num">Attempts</th>
+              <th className="num">Rate</th>
             </tr></thead>
             <tbody>
               {stats.top_techniques.map((t) => {
@@ -82,9 +82,9 @@ export default function KnowledgePage() {
                 return (
                   <tr key={t.technique}>
                     <td>{t.technique}</td>
-                    <td align="right" style={{ color: "var(--text-0)" }}>{t.successes}</td>
-                    <td align="right">{t.attempts}</td>
-                    <td align="right">{(rate * 100).toFixed(0)}%</td>
+                    <td className="num" style={{ color: "var(--brand)" }}>{t.successes}</td>
+                    <td className="num">{t.attempts}</td>
+                    <td className="num">{(rate * 100).toFixed(0)}%</td>
                   </tr>
                 );
               })}
@@ -100,14 +100,14 @@ export default function KnowledgePage() {
           target with this fingerprint. The planner uses the same query at
           plan-time.
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, marginBottom: 10 }}>
-          <input value={profileOs} onChange={(e) => setProfileOs(e.target.value)}
-                 placeholder="OS (linux/windows)" style={{ fontSize: 12 }} />
-          <input value={webTech} onChange={(e) => setWebTech(e.target.value)}
-                 placeholder="web_tech (php,wordpress)" style={{ fontSize: 12 }} />
-          <input value={ports} onChange={(e) => setPorts(e.target.value)}
-                 placeholder="ports (22,80,443)" style={{ fontSize: 12 }} />
-          <button className="btn-small" onClick={loadRank} disabled={rankLoading}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, marginBottom: 10, alignItems: "center" }}>
+          <input className="form-input" value={profileOs} onChange={(e) => setProfileOs(e.target.value)}
+                 placeholder="OS (linux/windows)" />
+          <input className="form-input" value={webTech} onChange={(e) => setWebTech(e.target.value)}
+                 placeholder="web_tech (php,wordpress)" />
+          <input className="form-input" value={ports} onChange={(e) => setPorts(e.target.value)}
+                 placeholder="ports (22,80,443)" />
+          <button className="btn" onClick={loadRank} disabled={rankLoading}>
             {rankLoading ? "…" : "Rank"}
           </button>
         </div>
@@ -139,10 +139,9 @@ export default function KnowledgePage() {
 
 function Stat({ label, value, color }) {
   return (
-    <div style={{ padding: 12, background: "rgba(0,0,0,0.3)",
-                  border: `1px solid ${color}33`, borderRadius: 2 }}>
-      <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color }}>{value}</div>
+    <div className="mini-stat">
+      <div className="mini-stat-label">{label}</div>
+      <div className="mini-stat-value" style={{ color }}>{value}</div>
     </div>
   );
 }

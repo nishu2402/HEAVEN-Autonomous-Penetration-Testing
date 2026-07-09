@@ -70,13 +70,13 @@ export default function PostexPage() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--crit)", marginTop: 0 }}>⚡ Post-Exploitation</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Destructive operations. Every module is admin-gated server-side and
           requires <code>authorized=True</code>; this UI checkbox is the
           operator's explicit ack.
         </p>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
           {MODULES.map((m) => (
             <button key={m.key}
                     className={"btn-small" + (module === m.key ? " active" : "")}
@@ -86,20 +86,20 @@ export default function PostexPage() {
           ))}
         </div>
 
-        <label className="form-label">Body JSON</label>
-        <textarea value={bodyText} rows={10}
-                  onChange={(e) => setBodyText(e.target.value)}
-                  style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }} />
-
-        <label style={{ display: "flex", alignItems: "flex-start", gap: 8,
-                        color: authorized ? "var(--text-0)" : "var(--med)",
-                        marginTop: 10, marginBottom: 10 }}>
-          <input type="checkbox" checked={authorized}
-                 onChange={(e) => setAuthorized(e.target.checked)} />
-          <span>I have written authorization for this destructive action.</span>
+        <label className="form-group">
+          <span className="form-label">Body JSON</span>
+          <textarea className="form-input mono-input" value={bodyText} rows={10}
+                    spellCheck={false}
+                    onChange={(e) => setBodyText(e.target.value)} />
         </label>
 
-        <button className="btn" disabled={loading || !authorized} onClick={run}>
+        <label className={"consent-row" + (authorized ? " is-ack" : "")}>
+          <input type="checkbox" checked={authorized}
+                 onChange={(e) => setAuthorized(e.target.checked)} />
+          <span>I have <strong>written authorization</strong> for this destructive action.</span>
+        </label>
+
+        <button className="btn btn-danger" disabled={loading || !authorized} onClick={run}>
           {loading ? "Running…" : `Run ${module}`}
         </button>
 
@@ -113,11 +113,9 @@ export default function PostexPage() {
       {result && (
         <div className="card" style={{ marginTop: 12 }}>
           <div className="card-title">Result</div>
-          <pre style={{
-            whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 11,
-            background: "rgba(0,0,0,0.4)", padding: 10,
-            border: "1px solid rgba(255,7,58,0.2)",
-          }}>{JSON.stringify(result, null, 2)}</pre>
+          <pre className="cli-block" style={{ wordBreak: "break-word", fontSize: 11 }}>
+            {JSON.stringify(result, null, 2)}
+          </pre>
         </div>
       )}
     </div>

@@ -14,7 +14,7 @@ const GROUPS = [
       { to: "/",            label: "Dashboard",    icon: "▣" },
       { to: "/scans",       label: "Scans",        icon: "⚡" },
       { to: "/watch",       label: "Watch",        icon: "🔁" },
-      { to: "/autonomous",  label: "Autonomous",   icon: "⚙" },
+      { to: "/autonomous",  label: "Autonomous",   icon: "∞" },
       { to: "/diff",        label: "Scan Diff",    icon: "↹" },
       { to: "/sast",        label: "SAST",         icon: "🔬" },
     ],
@@ -34,7 +34,7 @@ const GROUPS = [
       { to: "/engagement",  label: "Engagement",   icon: "◈" },
       { to: "/knowledge",   label: "Knowledge",    icon: "🧠" },
       { to: "/lateral",     label: "Lateral",      icon: "↔" },
-      { to: "/postex",      label: "Post-Ex",      icon: "⚡" },
+      { to: "/postex",      label: "Post-Ex",      icon: "☣" },
     ],
   },
   {

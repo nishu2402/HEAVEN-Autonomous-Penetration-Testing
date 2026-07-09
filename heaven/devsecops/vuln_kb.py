@@ -797,6 +797,309 @@ _KB: dict[str, dict[str, Any]] = {
         "remediation": "No action required; ensure records expose only intended information.",
         "references": ["https://attack.mitre.org/techniques/T1590/"],
     },
+
+    # ── Web-app / API posture (auth, GraphQL, files, objects) ───────────
+    "csp_unsafe_inline": {
+        "title": "Content-Security-Policy Allows unsafe-inline",
+        "cwe": "CWE-693",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1185 — Browser Session Hijacking",
+        "typical_cvss": 4.6,
+        "description": (
+            "A Content-Security-Policy is present but weakened by 'unsafe-inline' "
+            "(and/or 'unsafe-eval'), which permits inline scripts/styles and largely "
+            "defeats the XSS protection CSP is meant to provide."
+        ),
+        "impact": "Injected inline script still executes — CSP gives little real protection.",
+        "remediation": (
+            "1. Remove 'unsafe-inline'/'unsafe-eval'; use nonces or hashes for any "
+            "required inline script.\n"
+            "2. Move inline handlers/styles to external files.\n"
+            "3. Validate with Google's CSP Evaluator."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html"],
+    },
+    "oauth_pkce_missing": {
+        "title": "OAuth Authorization Code Without PKCE",
+        "cwe": "CWE-287",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1550.001 — Application Access Token",
+        "typical_cvss": 5.4,
+        "description": (
+            "The OAuth 2.0 authorization-code flow does not enforce PKCE, so an "
+            "intercepted authorization code can be exchanged for a token by an "
+            "attacker (code-interception attack), especially for public clients."
+        ),
+        "impact": "Authorization-code interception leading to account/token takeover.",
+        "remediation": (
+            "1. Require PKCE (S256) for every authorization-code flow.\n"
+            "2. Reject authorization requests without a code_challenge.\n"
+            "3. Bind codes to the client and use short lifetimes / single use."
+        ),
+        "references": ["https://datatracker.ietf.org/doc/html/rfc7636"],
+    },
+    "sensitive_file_exposure": {
+        "title": "Sensitive File Exposed",
+        "cwe": "CWE-538",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1083 — File and Directory Discovery",
+        "typical_cvss": 5.3,
+        "description": (
+            "A sensitive file is reachable over HTTP (e.g. .env, .git/config, "
+            "backup/config/dump files), exposing secrets, source or configuration."
+        ),
+        "impact": "Disclosure of credentials, keys, source code or internal config.",
+        "remediation": (
+            "1. Remove sensitive files from the web root; serve nothing you don't "
+            "intend to publish.\n"
+            "2. Block dotfiles / backup extensions at the web server.\n"
+            "3. Rotate any secret that was exposed."
+        ),
+        "references": ["https://owasp.org/www-community/vulnerabilities/Information_exposure_through_query_strings_in_url"],
+    },
+    "directory_listing": {
+        "title": "Directory Listing Enabled",
+        "cwe": "CWE-548",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1083 — File and Directory Discovery",
+        "typical_cvss": 5.3,
+        "description": (
+            "The web server returns an auto-generated index of a directory's "
+            "contents, revealing files that were not meant to be enumerated."
+        ),
+        "impact": "Discloses file/dir structure and files that aid further attack.",
+        "remediation": "Disable auto-indexing (e.g. nginx 'autoindex off;', Apache 'Options -Indexes').",
+        "references": ["https://owasp.org/www-community/vulnerabilities/Directory_Indexing"],
+    },
+    "mass_assignment": {
+        "title": "Mass Assignment / Auto-Binding",
+        "cwe": "CWE-915",
+        "owasp": "A08:2021 Software and Data Integrity Failures",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 7.1,
+        "description": (
+            "The API binds client-supplied fields directly to internal objects, so "
+            "an attacker can set properties they shouldn't control (e.g. role, "
+            "is_admin, account balance)."
+        ),
+        "impact": "Privilege escalation / integrity violation via unexpected fields.",
+        "remediation": (
+            "1. Bind only an explicit allowlist of fields (DTOs).\n"
+            "2. Never bind privileged attributes from the request body.\n"
+            "3. Enforce server-side authorization on sensitive property changes."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"],
+    },
+    "race_condition": {
+        "title": "Race Condition (TOCTOU)",
+        "cwe": "CWE-362",
+        "owasp": "A04:2021 Insecure Design",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 6.5,
+        "description": (
+            "Concurrent requests can interleave between a check and its use "
+            "(time-of-check/time-of-use), allowing limits to be bypassed — e.g. "
+            "double-spend, coupon reuse, or over-withdrawal."
+        ),
+        "impact": "Business-logic bypass: duplicated actions, limit/quota evasion.",
+        "remediation": (
+            "1. Use atomic operations / row locks / idempotency keys.\n"
+            "2. Enforce server-side single-use tokens on sensitive actions.\n"
+            "3. Add unique constraints so duplicates fail at the database."
+        ),
+        "references": ["https://owasp.org/www-community/vulnerabilities/Race_Conditions"],
+    },
+    "vulnerable_component": {
+        "title": "Known-Vulnerable Component / Version",
+        "cwe": "CWE-1104",
+        "owasp": "A06:2021 Vulnerable and Outdated Components",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 7.5,
+        "description": (
+            "A detected software version matches publicly known CVEs, so an attacker "
+            "can apply an off-the-shelf exploit for that release."
+        ),
+        "impact": "Exploitation via a documented CVE for the identified version.",
+        "remediation": (
+            "1. Upgrade the component to a patched release.\n"
+            "2. Track dependencies with an SBOM and monitor advisories.\n"
+            "3. Apply virtual patching/WAF rules as an interim control."
+        ),
+        "references": ["https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/"],
+    },
+    "graphql_introspection": {
+        "title": "GraphQL Introspection Enabled",
+        "cwe": "CWE-200",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1592 — Gather Victim Host Information",
+        "typical_cvss": 5.3,
+        "description": (
+            "The GraphQL endpoint answers introspection queries, exposing the full "
+            "schema (types, fields, mutations) and easing targeted attacks."
+        ),
+        "impact": "Full API schema disclosure that accelerates attack discovery.",
+        "remediation": "Disable introspection in production; expose it only in non-prod.",
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html"],
+    },
+    "graphql_dos": {
+        "title": "GraphQL Resource Exhaustion",
+        "cwe": "CWE-770",
+        "owasp": "A04:2021 Insecure Design",
+        "mitre": "T1499 — Endpoint Denial of Service",
+        "typical_cvss": 5.3,
+        "description": (
+            "The GraphQL endpoint allows unbounded query depth/complexity or "
+            "aliasing/batching, so a single request can trigger disproportionate "
+            "server work (denial of service)."
+        ),
+        "impact": "Denial of service / resource exhaustion from a single crafted query.",
+        "remediation": (
+            "1. Enforce query depth and complexity limits.\n"
+            "2. Cap aliases/batched operations and add per-client rate limits.\n"
+            "3. Use persisted queries where possible."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html"],
+    },
+    "secret_exposure": {
+        "title": "Exposed Secret / API Key",
+        "cwe": "CWE-312",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1552 — Unsecured Credentials",
+        "typical_cvss": 7.5,
+        "description": (
+            "A credential, API key or token was found exposed (in a response, JS "
+            "bundle, config or repository), usable by anyone who retrieves it."
+        ),
+        "impact": "Unauthorized access to the associated service/account/data.",
+        "remediation": (
+            "1. Revoke and rotate the exposed secret immediately.\n"
+            "2. Move secrets to a secrets manager; never ship them to the client.\n"
+            "3. Add secret-scanning to CI to catch regressions."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"],
+    },
+    "smtp_no_starttls": {
+        "title": "SMTP Without STARTTLS",
+        "cwe": "CWE-319",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1040 — Network Sniffing",
+        "typical_cvss": 5.9,
+        "description": (
+            "The mail server does not offer/enforce STARTTLS, so mail (and any "
+            "SMTP AUTH credentials) can travel in cleartext and be intercepted."
+        ),
+        "impact": "Interception of mail contents and SMTP credentials in transit.",
+        "remediation": "Enable and require STARTTLS (or implicit TLS) with a valid certificate.",
+        "references": ["https://datatracker.ietf.org/doc/html/rfc3207"],
+    },
+    "ssh_hardening": {
+        "title": "Weak SSH Configuration",
+        "cwe": "CWE-326",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1021.004 — Remote Services: SSH",
+        "typical_cvss": 5.3,
+        "description": (
+            "The SSH service permits weak settings (password auth, root login, or "
+            "outdated ciphers/KEX/MACs), widening the attack surface."
+        ),
+        "impact": "Eases brute-force and man-in-the-middle against SSH access.",
+        "remediation": (
+            "1. Disable password auth and root login; use keys/certificates.\n"
+            "2. Restrict to modern ciphers, KEX and MAC algorithms.\n"
+            "3. Rate-limit and monitor authentication attempts."
+        ),
+        "references": ["https://www.ssh-audit.com/hardening_guides.html"],
+    },
+    "container_escape_risk": {
+        "title": "Container Escape Risk (Privileged / Dangerous Mount)",
+        "cwe": "CWE-269",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1611 — Escape to Host",
+        "typical_cvss": 8.8,
+        "description": (
+            "A container runs privileged or mounts sensitive host paths (docker.sock, "
+            "/proc, host root), giving a compromised container a direct path to the "
+            "host."
+        ),
+        "impact": "Container breakout to full host compromise.",
+        "remediation": (
+            "1. Drop --privileged; add only the specific capabilities needed.\n"
+            "2. Never bind-mount the Docker socket or host root into workloads.\n"
+            "3. Enforce a restricted PodSecurity/seccomp/AppArmor profile."
+        ),
+        "references": ["https://owasp.org/www-project-kubernetes-top-ten/"],
+    },
+    "k8s_misconfiguration": {
+        "title": "Kubernetes Misconfiguration",
+        "cwe": "CWE-284",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1610 — Deploy Container",
+        "typical_cvss": 8.2,
+        "description": (
+            "A Kubernetes control-plane/component is exposed or over-permissive "
+            "(anonymous API auth, exposed kubelet/etcd, over-privileged RBAC), "
+            "letting an attacker read secrets or schedule workloads."
+        ),
+        "impact": "Cluster compromise: secret theft, workload injection, lateral movement.",
+        "remediation": (
+            "1. Disable anonymous auth; lock down the kubelet/etcd to the control plane.\n"
+            "2. Apply least-privilege RBAC; audit ClusterRoleBindings.\n"
+            "3. Network-policy the control-plane components off the public internet."
+        ),
+        "references": ["https://owasp.org/www-project-kubernetes-top-ten/"],
+    },
+    "k8s_secrets_exposed": {
+        "title": "Kubernetes Secrets Exposed",
+        "cwe": "CWE-522",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1552.007 — Container API",
+        "typical_cvss": 8.6,
+        "description": (
+            "Kubernetes Secrets are readable (over-broad RBAC or an exposed API), "
+            "so an attacker can retrieve credentials, tokens and keys."
+        ),
+        "impact": "Theft of cluster and application credentials.",
+        "remediation": (
+            "1. Restrict 'get/list secrets' RBAC to the minimum necessary.\n"
+            "2. Enable encryption-at-rest for etcd Secrets.\n"
+            "3. Prefer an external secrets manager and rotate exposed values."
+        ),
+        "references": ["https://kubernetes.io/docs/concepts/security/secrets-good-practices/"],
+    },
+    "privilege_escalation": {
+        "title": "Privilege Escalation Vector",
+        "cwe": "CWE-269",
+        "owasp": "A04:2021 Insecure Design",
+        "mitre": "T1068 — Exploitation for Privilege Escalation",
+        "typical_cvss": 8.4,
+        "description": (
+            "A local privilege-escalation vector was identified (e.g. writable "
+            "service/cron/binary, SUID misconfig, sudo rule), letting a low-priv "
+            "user gain root/admin."
+        ),
+        "impact": "Full host/administrative compromise from a low-privilege foothold.",
+        "remediation": (
+            "1. Remove writable paths from privileged execution; fix SUID/sudo rules.\n"
+            "2. Apply least privilege to services and scheduled tasks.\n"
+            "3. Patch the kernel/components and monitor for the vector."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1068/"],
+    },
+    "anomaly_heuristic": {
+        "title": "Anomalous Behaviour (Heuristic)",
+        "cwe": "",
+        "owasp": "",
+        "mitre": "T1595 — Active Scanning",
+        "typical_cvss": 2.0,
+        "description": (
+            "A heuristic/ML check flagged behaviour that deviates from the expected "
+            "baseline. This is a lead for manual review, not a confirmed "
+            "vulnerability — validate before reporting."
+        ),
+        "impact": "May indicate an undiscovered issue; requires analyst confirmation.",
+        "remediation": "Manually investigate the flagged behaviour and confirm or dismiss it.",
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
 }
 
 # Severity → typical CVSS fallback when the class is unknown.
@@ -873,6 +1176,10 @@ _ALIASES: dict[str, str] = {
     "dkim_weak": "dkim_missing",
     "dnssec_not_enabled": "dnssec_missing",
     "dnssec_disabled": "dnssec_missing",
+    "dmarc_analysis": "dmarc_missing",
+    "dkim_not_found": "dkim_missing",
+    "dkim_weak_key": "dkim_missing",
+    "smtp_starttls_missing": "smtp_no_starttls",
     # Informational DNS / mail recon
     "mx_enumeration": "dns_info",
     "mx_records": "dns_info",
@@ -880,6 +1187,40 @@ _ALIASES: dict[str, str] = {
     "dkim_found": "dns_info",
     "dkim_selector_found": "dns_info",
     "dns_enumeration": "dns_info",
+    # Web-app / API posture
+    "oauth_pkce_not_enforced": "oauth_pkce_missing",
+    "pkce_not_enforced": "oauth_pkce_missing",
+    "sensitive_file": "sensitive_file_exposure",
+    "exposed_sensitive_file": "sensitive_file_exposure",
+    "dir_listing": "directory_listing",
+    "auto_index": "directory_listing",
+    "auto_binding": "mass_assignment",
+    "toctou": "race_condition",
+    "known_vulnerable_version": "vulnerable_component",
+    "outdated_component": "vulnerable_component",
+    "graphql_batching": "graphql_dos",
+    "graphql_complexity": "graphql_dos",
+    "graphql_alias_overloading": "graphql_dos",
+    "api_key_leakage": "secret_exposure",
+    "exposed_secret": "secret_exposure",
+    "hardcoded_secret": "secret_exposure",
+    "credential_leak": "secret_exposure",
+    # Containers / Kubernetes / infra
+    "docker_api_exposed": "docker_socket_exposed",
+    "docker_socket": "docker_socket_exposed",
+    "privileged_container": "container_escape_risk",
+    "dangerous_mount": "container_escape_risk",
+    "host_mount": "container_escape_risk",
+    "k8s_anon_auth": "k8s_misconfiguration",
+    "k8s_rbac_overprivileged": "k8s_misconfiguration",
+    "kubelet_exposed": "k8s_misconfiguration",
+    "etcd_exposed": "k8s_misconfiguration",
+    "privesc": "privilege_escalation",
+    "privilege_esc": "privilege_escalation",
+    # Anomaly / heuristic
+    "anomalous_behavior": "anomaly_heuristic",
+    "zero_day_heuristic": "anomaly_heuristic",
+    "anomaly": "anomaly_heuristic",
 }
 
 # Representative CVSS v3.1 base vectors per canonical KB class. Kept as a single
@@ -929,6 +1270,22 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "dmarc_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N",
     "dkim_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
     "dnssec_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "csp_unsafe_inline": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "oauth_pkce_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N",
+    "sensitive_file_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "directory_listing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "mass_assignment": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    "race_condition": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    "vulnerable_component": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "graphql_introspection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "graphql_dos": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+    "secret_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "smtp_no_starttls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "ssh_hardening": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "container_escape_risk": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
+    "k8s_misconfiguration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:L",
+    "k8s_secrets_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "privilege_escalation": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
 }
 
 

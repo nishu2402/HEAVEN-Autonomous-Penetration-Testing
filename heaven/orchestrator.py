@@ -446,14 +446,20 @@ class ScanOrchestrator:
                     db in service for db in ("mysql", "postgres", "mssql", "mongodb", "redis")
                 ):
                     async def _db_check(ip=ip, port=port, service=service, **kw):
+                        name = (service or {
+                            3306: "mysql", 5432: "postgresql", 1433: "mssql",
+                            27017: "mongodb", 6379: "redis",
+                        }.get(port, "database")).upper()
+                        # Emit under a plural key the aggregator harvests
+                        # (line ~585); a singular "finding" is silently dropped.
                         return {
-                            "finding": {
+                            "findings": [{
                                 "target": f"{ip}:{port}",
                                 "vuln_type": "exposed_database",
-                                "title": f"Exposed {service.upper()} port {port}",
+                                "title": f"Exposed {name} service on port {port}",
                                 "severity": "high",
                                 "confidence": 0.8,
-                            }
+                            }]
                         }
                     self.add_task(f"Exposed DB {ip}:{port}", _db_check,
                                   phase=ScanPhase.VULN_SCAN, timeout=30)

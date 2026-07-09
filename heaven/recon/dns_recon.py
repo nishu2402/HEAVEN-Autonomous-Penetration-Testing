@@ -224,19 +224,28 @@ async def _check_subdomain_takeover(subdomain: str) -> Optional[dict]:
             # Try HTTP first, then HTTPS. Only use the actual response body —
             # never use str(exception) as the body because error messages may
             # contain the service name and trigger false positives.
+            #
+            # urllib is blocking, and this coroutine is gathered across up to 50
+            # subdomains — calling urlopen() inline would freeze the whole event
+            # loop (up to 16s per host, serialised), stalling every other scan
+            # task. Run the fetch in a thread so the gather is genuinely
+            # concurrent and the loop stays responsive.
             import urllib.request
-            body = ""
-            for scheme in ("http", "https"):
-                try:
-                    req = urllib.request.Request(
-                        f"{scheme}://{subdomain}",
-                        headers={"User-Agent": "HEAVEN-TakeoverScanner/2.0"},
-                    )
-                    with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310 — scheme limited to http/https
-                        body = resp.read(8192).decode("utf-8", errors="ignore")
-                    break  # Use first successful fetch
-                except Exception:
-                    continue
+
+            def _fetch() -> str:
+                for scheme in ("http", "https"):
+                    try:
+                        req = urllib.request.Request(
+                            f"{scheme}://{subdomain}",
+                            headers={"User-Agent": "HEAVEN-TakeoverScanner/2.0"},
+                        )
+                        with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310 — scheme limited to http/https
+                            return resp.read(8192).decode("utf-8", errors="ignore")
+                    except Exception:
+                        continue
+                return ""
+
+            body = await asyncio.get_running_loop().run_in_executor(None, _fetch)
 
             for pattern in patterns:
                 if pattern.lower() in body.lower():

@@ -103,6 +103,26 @@ class TestFindingDedup:
         # Latest scan_id wins
         assert f.scan_id == "scan-2"
 
+    def test_cve_key_persists_to_cve_id_column(self, store):
+        """Detectors that set 'cve' (cve_mapper/anomaly_probe/exploitdb/nuclei),
+        not 'cve_id', must still have their CVE land in the cve_id column so the
+        report/UI CVE field isn't blank."""
+        fid = store.upsert_finding("scan-cve", {
+            "target": "https://app.example", "vuln_type": "nuclei",
+            "title": "Log4Shell", "severity": "critical", "confidence": 0.9,
+            "cve": "cve-2021-44228",  # lowercase, under the 'cve' key
+        })
+        f = store.get_finding(fid)
+        assert f.cve_id == "CVE-2021-44228"  # normalised + persisted
+
+    def test_heuristic_sentinel_not_written_as_cve(self, store):
+        """A non-CVE sentinel like 'HEAVEN-HEURISTIC' must not pollute cve_id."""
+        fid = store.upsert_finding("scan-h", {
+            "target": "h", "vuln_type": "vulnerable_component",
+            "severity": "high", "confidence": 0.7, "cve": "HEAVEN-HEURISTIC",
+        })
+        assert store.get_finding(fid).cve_id == ""
+
     def test_different_param_dedups_separately(self, store):
         f1 = {"target": "x", "vuln_type": "sqli", "param": "id",
               "severity": "high", "confidence": 0.8}

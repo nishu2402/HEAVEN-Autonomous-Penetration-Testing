@@ -15,7 +15,6 @@ updates in place instead of duplicating. Nothing here touches the network.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -135,17 +134,19 @@ _FINDINGS: list[dict] = [
 
 
 def resolve_demo_store(name: Optional[str] = None):
-    """Resolve the engagement store the web dashboard reads by default.
+    """Resolve the engagement store that holds the sample data.
 
-    Mirrors ``heaven.api.server._engagement_store_factory`` exactly so that data
-    seeded from the CLI (`heaven demo`) and from the web ("Load sample data")
-    land in the *same* SQLite file — i.e. ``<data_dir>/engagements/default.db``.
+    Sample data lives in its OWN engagement DB (``engagements/demo.db``) so it
+    never contaminates a real engagement. Both the CLI (`heaven demo`) and the
+    web ("Load sample data" / "Run demo scan") resolve to the same file, and the
+    caller switches the active pointer to it so the dashboard shows the sample.
+    An explicit *name* (e.g. `heaven demo --engagement foo`) overrides this.
     """
     from heaven.config import get_config
-    from heaven.engagement import EngagementStore
+    from heaven.engagement import DEMO_DB_NAME, EngagementStore
 
     data_dir = get_config().data_dir
-    path = name or os.environ.get("HEAVEN_ENGAGEMENT") or "default"
+    path = name or DEMO_DB_NAME
     p = Path(path)
     if not p.suffix and not p.is_absolute() and "/" not in path and "\\" not in path:
         p = data_dir / "engagements" / f"{path}.db"

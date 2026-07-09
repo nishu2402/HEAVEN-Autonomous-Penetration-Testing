@@ -26,9 +26,13 @@ def demo_cmd(engagement: str | None) -> None:
     Nothing is scanned — the targets are reserved/placeholder addresses.
     """
     from heaven.demo import DEMO_ENGAGEMENT, resolve_demo_store, seed_demo
+    from heaven.engagement import DEMO_DB_NAME, set_active_engagement
 
     store = resolve_demo_store(engagement)
     result = seed_demo(store)
+    # Point the dashboard at the sample data we just loaded (so `heaven serve`
+    # opens onto a populated dashboard) without disturbing real engagements.
+    set_active_engagement(engagement or DEMO_DB_NAME)
 
     if json_output():
         emit_json({"ok": True, "db_path": str(store.db_path), **result})

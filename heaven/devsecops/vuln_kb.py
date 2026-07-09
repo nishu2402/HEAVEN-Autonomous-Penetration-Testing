@@ -538,6 +538,265 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://owasp.org/www-community/attacks/Subdomain_takeover"],
     },
+
+    # ── HTTP security-header / posture findings ─────────────────────────
+    # These are what a live recon scan of a real site actually produces
+    # (certifiedhacker.com et al.). Without KB entries the report's
+    # CWE / OWASP / MITRE / CVSS-vector columns were left blank.
+    "csp_missing": {
+        "title": "Content-Security-Policy Not Set",
+        "cwe": "CWE-693",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1185 — Browser Session Hijacking",
+        "typical_cvss": 4.6,
+        "description": (
+            "The response does not send a Content-Security-Policy header, so the "
+            "browser applies no restrictions on where scripts, styles and other "
+            "resources may load from."
+        ),
+        "impact": "Removes a key defence-in-depth control against XSS and data injection.",
+        "remediation": (
+            "1. Add a Content-Security-Policy header, starting in report-only mode.\n"
+            "2. Use 'default-src \\'self\\''; avoid 'unsafe-inline'/'unsafe-eval'.\n"
+            "3. Verify coverage with securityheaders.com / CSP Evaluator."
+        ),
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy",
+            "https://owasp.org/www-project-secure-headers/",
+        ],
+    },
+    "clickjacking": {
+        "title": "Clickjacking — X-Frame-Options Not Set",
+        "cwe": "CWE-1021",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1185 — Browser Session Hijacking",
+        "typical_cvss": 4.6,
+        "description": (
+            "Neither X-Frame-Options nor a CSP frame-ancestors directive is set, so "
+            "the page can be embedded in an attacker-controlled <iframe> and used "
+            "for a clickjacking (UI-redress) attack."
+        ),
+        "impact": "Tricks a logged-in victim into performing unintended actions.",
+        "remediation": (
+            "1. Set 'X-Frame-Options: DENY' (or SAMEORIGIN where framing is needed).\n"
+            "2. Add CSP 'frame-ancestors \\'none\\'' as the modern equivalent.\n"
+            "3. Confirm on sensitive/state-changing pages specifically."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html",
+        ],
+    },
+    "hsts_missing": {
+        "title": "HTTP Strict Transport Security Not Configured",
+        "cwe": "CWE-319",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1557 — Adversary-in-the-Middle",
+        "typical_cvss": 4.6,
+        "description": (
+            "The site does not send a Strict-Transport-Security header, so a browser "
+            "will still attempt plaintext HTTP and can be downgraded / SSL-stripped "
+            "by a network attacker."
+        ),
+        "impact": "Man-in-the-middle downgrade, session-cookie capture over HTTP.",
+        "remediation": (
+            "1. Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains'.\n"
+            "2. Redirect all HTTP to HTTPS first, then enable HSTS.\n"
+            "3. Consider preloading once stable (hstspreload.org)."
+        ),
+        "references": ["https://owasp.org/www-project-secure-headers/#http-strict-transport-security"],
+    },
+    "x_content_type_missing": {
+        "title": "X-Content-Type-Options Not Set",
+        "cwe": "CWE-693",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1185 — Browser Session Hijacking",
+        "typical_cvss": 3.5,
+        "description": (
+            "The response omits 'X-Content-Type-Options: nosniff', so browsers may "
+            "MIME-sniff responses and interpret them as a different content type."
+        ),
+        "impact": "Enables MIME-confusion attacks that can turn uploads into script.",
+        "remediation": "Send 'X-Content-Type-Options: nosniff' on every response.",
+        "references": ["https://owasp.org/www-project-secure-headers/#x-content-type-options"],
+    },
+    "referrer_policy_missing": {
+        "title": "Referrer-Policy Not Set",
+        "cwe": "CWE-200",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1592 — Gather Victim Host Information",
+        "typical_cvss": 3.5,
+        "description": (
+            "No Referrer-Policy header is set, so full URLs (which may contain "
+            "tokens or identifiers) can leak to third-party sites via the Referer."
+        ),
+        "impact": "Leakage of sensitive URL parameters to external origins.",
+        "remediation": "Set 'Referrer-Policy: strict-origin-when-cross-origin' (or stricter).",
+        "references": ["https://owasp.org/www-project-secure-headers/#referrer-policy"],
+    },
+    "permissions_policy_missing": {
+        "title": "Permissions-Policy Not Set",
+        "cwe": "CWE-693",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1185 — Browser Session Hijacking",
+        "typical_cvss": 3.5,
+        "description": (
+            "No Permissions-Policy (formerly Feature-Policy) header is set, so "
+            "powerful browser features (camera, microphone, geolocation) are not "
+            "explicitly restricted."
+        ),
+        "impact": "Widens the attack surface available to injected/embedded content.",
+        "remediation": "Set a Permissions-Policy that disables unused features, e.g. 'camera=(), microphone=(), geolocation=()'.",
+        "references": ["https://owasp.org/www-project-secure-headers/#permissions-policy"],
+    },
+    "dangerous_http_method": {
+        "title": "Dangerous HTTP Method Enabled",
+        "cwe": "CWE-650",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 6.2,
+        "description": (
+            "The server accepts a state-changing/administrative HTTP method (e.g. "
+            "PUT, DELETE, TRACE, CONNECT) that should normally be disabled on a "
+            "public web endpoint. PUT in particular can allow arbitrary file upload."
+        ),
+        "impact": "Arbitrary file upload / content tampering, potentially leading to RCE.",
+        "remediation": (
+            "1. Restrict the endpoint to the methods it needs (usually GET/POST/HEAD).\n"
+            "2. Disable WebDAV / PUT / DELETE / TRACE at the server or proxy.\n"
+            "3. Return 405 Method Not Allowed for everything else."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/Testing_HTTP_Methods_for_Server_Config"],
+    },
+    "version_disclosure": {
+        "title": "Server / Software Version Disclosure",
+        "cwe": "CWE-200",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1592.002 — Software",
+        "typical_cvss": 3.5,
+        "description": (
+            "A response header (Server, X-Powered-By, etc.) reveals the exact "
+            "software and version, letting an attacker match known CVEs precisely."
+        ),
+        "impact": "Accelerates targeted exploitation of known vulnerabilities.",
+        "remediation": "Suppress version banners (e.g. nginx 'server_tokens off;', remove X-Powered-By).",
+        "references": ["https://owasp.org/www-project-secure-headers/"],
+    },
+    "no_rate_limit": {
+        "title": "No Rate Limiting Detected",
+        "cwe": "CWE-770",
+        "owasp": "A04:2021 Insecure Design",
+        "mitre": "T1110 — Brute Force",
+        "typical_cvss": 4.6,
+        "description": (
+            "An endpoint (often an API or login) accepted many rapid requests "
+            "without throttling, indicating missing rate limiting."
+        ),
+        "impact": "Enables credential brute-forcing, enumeration and resource-exhaustion DoS.",
+        "remediation": (
+            "1. Apply per-IP/per-account rate limits and exponential backoff.\n"
+            "2. Add lockouts and CAPTCHA on authentication endpoints.\n"
+            "3. Enforce quotas at the API gateway."
+        ),
+        "references": ["https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/"],
+    },
+    "no_forward_secrecy": {
+        "title": "No Forward Secrecy",
+        "cwe": "CWE-310",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1040 — Network Sniffing",
+        "typical_cvss": 4.6,
+        "description": (
+            "The TLS configuration does not prefer ephemeral (ECDHE/DHE) key "
+            "exchange, so a future compromise of the server's private key would "
+            "allow decryption of previously captured traffic."
+        ),
+        "impact": "Retrospective decryption of recorded sessions after a key compromise.",
+        "remediation": "Prefer ECDHE cipher suites (and TLS 1.3, which mandates forward secrecy).",
+        "references": ["https://wiki.mozilla.org/Security/Server_Side_TLS"],
+    },
+
+    # ── DNS / email authentication posture ──────────────────────────────
+    "spf_missing": {
+        "title": "SPF Record Missing or Weak",
+        "cwe": "CWE-16",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1566 — Phishing",
+        "typical_cvss": 6.2,
+        "description": (
+            "The domain has no SPF record, or an SPF policy that does not hard-fail "
+            "(no '-all'), so senders are not restricted and the domain can be "
+            "spoofed in email."
+        ),
+        "impact": "Email spoofing / phishing that appears to originate from the domain.",
+        "remediation": (
+            "1. Publish an SPF TXT record listing authorised senders.\n"
+            "2. End the record with '-all' (hard fail) once senders are confirmed.\n"
+            "3. Pair with DKIM and DMARC for full coverage."
+        ),
+        "references": ["https://datatracker.ietf.org/doc/html/rfc7208"],
+    },
+    "dmarc_missing": {
+        "title": "DMARC Record Missing or Weak",
+        "cwe": "CWE-16",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1566 — Phishing",
+        "typical_cvss": 6.2,
+        "description": (
+            "No DMARC record is published (or the policy is 'p=none'), so receiving "
+            "mail servers are not told to reject or quarantine spoofed mail even "
+            "when SPF/DKIM fail."
+        ),
+        "impact": "Domain spoofing and brand-impersonation phishing go undetected.",
+        "remediation": (
+            "1. Publish a DMARC TXT record at _dmarc.<domain>.\n"
+            "2. Start at 'p=none' with rua reporting, then move to quarantine/reject.\n"
+            "3. Align SPF and DKIM before enforcing."
+        ),
+        "references": ["https://datatracker.ietf.org/doc/html/rfc7489"],
+    },
+    "dkim_missing": {
+        "title": "DKIM Not Configured",
+        "cwe": "CWE-16",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1566 — Phishing",
+        "typical_cvss": 4.6,
+        "description": (
+            "No DKIM signing selector was found for the domain, so outbound mail "
+            "cannot be cryptographically verified by recipients."
+        ),
+        "impact": "Weakens anti-spoofing; DMARC cannot rely on DKIM alignment.",
+        "remediation": "Enable DKIM signing on the mail platform and publish the selector's public key in DNS.",
+        "references": ["https://datatracker.ietf.org/doc/html/rfc6376"],
+    },
+    "dnssec_missing": {
+        "title": "DNSSEC Not Configured",
+        "cwe": "CWE-350",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1557 — Adversary-in-the-Middle",
+        "typical_cvss": 4.6,
+        "description": (
+            "The zone is not signed with DNSSEC, so DNS responses are not "
+            "authenticated and can be spoofed via cache poisoning."
+        ),
+        "impact": "DNS cache poisoning / response forgery redirecting users or mail.",
+        "remediation": "Sign the zone with DNSSEC and publish DS records at the parent registrar.",
+        "references": ["https://www.cloudflare.com/dns/dnssec/how-dnssec-works/"],
+    },
+    "dns_info": {
+        "title": "DNS / Mail Infrastructure Information",
+        "cwe": "",
+        "owasp": "",
+        "mitre": "T1590 — Gather Victim Network Information",
+        "typical_cvss": 1.0,
+        "description": (
+            "Informational reconnaissance data enumerated from public DNS "
+            "(MX records, SOA administrative contact, DKIM selectors). No "
+            "vulnerability is implied — this is context for the assessment."
+        ),
+        "impact": "Provides an attacker with mapping/targeting information.",
+        "remediation": "No action required; ensure records expose only intended information.",
+        "references": ["https://attack.mitre.org/techniques/T1590/"],
+    },
 }
 
 # Severity → typical CVSS fallback when the class is unknown.
@@ -580,7 +839,105 @@ _ALIASES: dict[str, str] = {
     "ssl": "weak_tls",
     "weak_ssl": "weak_tls",
     "unvalidated_redirect": "open_redirect",
+    # HTTP security-header posture (detector spellings → canonical KB key)
+    "missing_csp": "csp_missing",
+    "no_csp": "csp_missing",
+    "clickjacking_no_xfo": "clickjacking",
+    "x_frame_options_missing": "clickjacking",
+    "missing_x_frame_options": "clickjacking",
+    "no_hsts": "hsts_missing",
+    "missing_hsts": "hsts_missing",
+    "no_x_content_type": "x_content_type_missing",
+    "x_content_type_options_missing": "x_content_type_missing",
+    "missing_x_content_type": "x_content_type_missing",
+    "no_referrer_policy": "referrer_policy_missing",
+    "no_permissions_policy": "permissions_policy_missing",
+    "feature_policy_missing": "permissions_policy_missing",
+    # HTTP methods / smuggling / disclosure
+    "http_smuggling_indicator": "request_smuggling",
+    "http_smuggling": "request_smuggling",
+    "cl_te": "request_smuggling",
+    "server_version_disclosure": "version_disclosure",
+    "server_banner": "version_disclosure",
+    "server_version": "version_disclosure",
+    "powered_by_disclosure": "version_disclosure",
+    "no_rate_limiting": "no_rate_limit",
+    "rate_limit": "no_rate_limit",
+    "api_no_rate_limit": "no_rate_limit",
+    "xml_accepted": "xxe",
+    "xml_input_accepted": "xxe",
+    # DNS / email authentication posture
+    "spf_analysis": "spf_missing",
+    "spf_weak": "spf_missing",
+    "dmarc_weak": "dmarc_missing",
+    "dkim_weak": "dkim_missing",
+    "dnssec_not_enabled": "dnssec_missing",
+    "dnssec_disabled": "dnssec_missing",
+    # Informational DNS / mail recon
+    "mx_enumeration": "dns_info",
+    "mx_records": "dns_info",
+    "soa_admin_email": "dns_info",
+    "dkim_found": "dns_info",
+    "dkim_selector_found": "dns_info",
+    "dns_enumeration": "dns_info",
 }
+
+# Representative CVSS v3.1 base vectors per canonical KB class. Kept as a single
+# source of truth so the report's "CVSS vector" column is never blank for a
+# known class (previously only ~8 web classes were covered). Illustrative for
+# the vulnerability *class* — not a per-target recomputation.
+_CVSS_VECTOR_BY_KEY: dict[str, str] = {
+    "sql_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "rce": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "command_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "ssti": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "ssrf": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "xss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "xss_stored": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:H/I:L/A:N",
+    "idor": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    "auth_bypass": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "default_credentials": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "file_inclusion": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "path_traversal": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "xxe": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:L",
+    "open_redirect": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "cors_misconfig": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N",
+    "insecure_cookie": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "cookie_no_httponly": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "jwt_weak_secret": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "jwt_none_algorithm": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "crlf_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "request_smuggling": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:N",
+    "subdomain_takeover": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "docker_socket_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "exposed_rdp": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "weak_tls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "no_forward_secrecy": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "missing_security_headers": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "csp_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "clickjacking": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "hsts_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "x_content_type_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "referrer_policy_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "permissions_policy_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "dangerous_http_method": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:L",
+    "version_disclosure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "info_disclosure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "verbose_errors": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "no_rate_limit": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+    "spf_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N",
+    "dmarc_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N",
+    "dkim_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
+    "dnssec_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+}
+
+
+def cvss_vector_for(vuln_type: str) -> str:
+    """Representative CVSS v3.1 vector for a vuln class (resolving aliases), or ''."""
+    key = normalize_key(vuln_type)
+    if key not in _CVSS_VECTOR_BY_KEY:
+        key = _ALIASES.get(key, key)
+    return _CVSS_VECTOR_BY_KEY.get(key, "")
 
 
 def normalize_key(vuln_type: str) -> str:
@@ -674,6 +1031,22 @@ def enrich_finding(finding: dict) -> dict:
         out["cwe"] = entry["cwe"]
     if not out.get("owasp") and entry.get("owasp"):
         out["owasp"] = entry["owasp"]
+
+    # A representative CVSS vector for the class so the report's "CVSS vector"
+    # column is populated for every known class, not just a handful.
+    if not out.get("cvss_vector"):
+        vec = cvss_vector_for(finding.get("vuln_type", ""))
+        if vec:
+            out["cvss_vector"] = vec
+
+    # Mirror the taxonomy into evidence too — the web FindingDetail falls back to
+    # evidence.cwe / evidence.owasp / evidence.mitre, so keep both in sync.
+    for src, dst in (("cwe", "cwe"), ("owasp", "owasp"), ("mitre_technique", "mitre")):
+        if out.get(src) and not ev.get(dst):
+            ev[dst] = out[src]
+    if out.get("cvss_vector"):
+        ev.setdefault("cvss_vector", out["cvss_vector"])
+    out["evidence"] = ev
 
     if not out.get("predicted_cvss_score"):
         out["typical_cvss"] = entry.get("typical_cvss") or _SEV_FALLBACK_CVSS.get(

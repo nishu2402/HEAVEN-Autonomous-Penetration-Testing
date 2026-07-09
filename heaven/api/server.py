@@ -737,7 +737,7 @@ def create_app() -> FastAPI:
 
         active_scans[scan_id] = {
             "status": "pending",
-            "config": req.dict(),
+            "config": req.model_dump(),
             "created": datetime.now(timezone.utc).isoformat(),
             "created_by": user.username,
         }
@@ -2700,7 +2700,7 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             report_data = {
                 "scan_id": scan_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "config": req.dict(),
+                "config": req.model_dump(),
                 "vulnerabilities": findings,
                 "findings": findings,
                 "assets": result.get("assets", []),

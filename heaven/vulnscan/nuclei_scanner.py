@@ -61,7 +61,21 @@ def _parse_nuclei_output(stdout: bytes) -> list[dict[str, Any]]:
         name = info.get("name", "Nuclei Finding")
         if _is_noise_template(template_id, name):
             continue
-        findings.append({
+
+        # Nuclei templates carry their own classification (cwe-id, cvss-metrics,
+        # cve-id, cvss-score). Lift it onto the finding so the report's taxonomy
+        # columns reflect the template's real metadata instead of going blank —
+        # per-finding data wins over the generic KB fallback in enrich_finding().
+        classification = info.get("classification") or {}
+        if not isinstance(classification, dict):
+            classification = {}
+
+        def _first(val):
+            if isinstance(val, (list, tuple)):
+                return val[0] if val else None
+            return val
+
+        finding: dict[str, Any] = {
             "target": data.get("host", ""),
             "type": "nuclei",
             # Set vuln_type explicitly so this never resolves to an empty type
@@ -75,8 +89,27 @@ def _parse_nuclei_output(stdout: bytes) -> list[dict[str, Any]]:
                 "template": template_id,
                 "matched": data.get("matched-at", ""),
                 "extracted": data.get("extracted-results", []),
+                "tags": info.get("tags") or [],
             },
-        })
+        }
+
+        cwe_id = _first(classification.get("cwe-id"))
+        if isinstance(cwe_id, str) and cwe_id.strip():
+            # Normalise "cwe-79" / "CWE-79" → "CWE-79"
+            finding["cwe"] = cwe_id.strip().upper()
+        cvss_vec = classification.get("cvss-metrics")
+        if isinstance(cvss_vec, str) and cvss_vec.strip():
+            finding["cvss_vector"] = cvss_vec.strip()
+        cvss_score = classification.get("cvss-score")
+        if isinstance(cvss_score, (int, float)) and cvss_score:
+            finding["predicted_cvss_score"] = float(cvss_score)
+            finding["evidence"]["cvss_score"] = float(cvss_score)
+        cve_id = _first(classification.get("cve-id"))
+        if isinstance(cve_id, str) and cve_id.strip():
+            finding["cve"] = cve_id.strip().upper()
+            finding["evidence"]["cve"] = cve_id.strip().upper()
+
+        findings.append(finding)
     return findings
 
 

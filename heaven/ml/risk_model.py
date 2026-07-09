@@ -252,7 +252,7 @@ def _extract_nvd_features(finding: dict) -> dict:
                           "jwt_none_alg", "default_credentials", "subdomain_takeover",
                           "insecure_deserialization", "request_smuggling", "smb_exposed"}
         medium_types   = {"xss", "reflected_xss", "stored_xss", "csrf", "open_redirect",
-                          "csrf", "jwt_weak_secret", "race_condition"}
+                          "cors_misconfig", "jwt_weak_secret", "race_condition"}
 
         if sev == "critical" or any(t in vtype for t in critical_types):
             av_num, ac_num, pr_num, ui_num, sc_num = 4, 2, 3, 2, 2  # N/L/N/N/C

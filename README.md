@@ -115,7 +115,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 624 passing, 0 skipped (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 624 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 137 |
 | ⌨️ **CLI Commands** | 42 |

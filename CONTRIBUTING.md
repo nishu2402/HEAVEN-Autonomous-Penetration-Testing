@@ -41,7 +41,7 @@ ruff check heaven/ tests/
 mypy --ignore-missing-imports --no-strict-optional heaven/
 
 # Tests
-pytest tests/                 # 313 tests, ~6s
+pytest tests/                 # full suite
 
 # Security audit (informational — exits 0 even on findings)
 bandit -r heaven/ -ll
@@ -51,6 +51,16 @@ heaven self-audit
 ```
 
 GitHub Actions runs the same lanes plus pip-audit on every push.
+
+**Optional:** enable the repo's pre-commit hook so the README's decorative test
+counts stay in sync automatically (CI never blocks on a stale count, but this
+keeps it tidy):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Run it manually any time with `python scripts/sync_test_count.py`.
 
 ## What we look for in a PR
 

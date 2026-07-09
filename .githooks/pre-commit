@@ -1,0 +1,48 @@
+#!/bin/sh
+# HEAVEN pre-commit hook — keep the README's decorative test-count numbers in
+# sync with reality so CI never sees drift.
+#
+# It runs scripts/sync_test_count.py (which rewrites the count via
+# `pytest --collect-only`) and re-stages README.md if the number changed. It
+# NEVER blocks the commit.
+#
+# The collected total depends on the project's optional deps: modules guarded by
+# a top-level `pytest.importorskip(...)` (aiohttp, flask, ...) drop out of
+# collection when those deps are missing, so a bare interpreter under-counts
+# (e.g. 613 instead of 624). To match CI exactly we sync ONLY from an
+# interpreter that actually has the test deps installed; otherwise we skip and
+# let CI's non-blocking warning flag any real drift.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypass for one commit:   git commit --no-verify
+set -eu
+
+# Only bother when this commit could move the number.
+if ! git diff --cached --name-only | grep -qE '^(README\.md|tests/|scripts/sync_test_count\.py)'; then
+    exit 0
+fi
+
+# Pick a full-deps interpreter (must import the modules that gate collection).
+PY=""
+for cand in "${VIRTUAL_ENV:-}/bin/python" ./venv/bin/python ./.venv/bin/python; do
+    if [ -x "$cand" ] && "$cand" -c "import aiohttp, flask" >/dev/null 2>&1; then
+        PY="$cand"
+        break
+    fi
+done
+if [ -z "$PY" ]; then
+    echo "pre-commit: no full-deps venv found — skipping README count sync." >&2
+    echo "            (CI stays green; run 'python scripts/sync_test_count.py' in your venv to refresh.)" >&2
+    exit 0
+fi
+
+# Sync is best-effort — a collection error must not block work.
+"$PY" scripts/sync_test_count.py >/dev/null 2>&1 || exit 0
+
+# If the sync touched README, fold it into this commit.
+if ! git diff --quiet -- README.md; then
+    git add README.md
+    echo "pre-commit: README test count re-synced and staged."
+fi
+
+exit 0

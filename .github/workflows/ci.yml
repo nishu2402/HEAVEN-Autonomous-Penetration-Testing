@@ -68,9 +68,15 @@ jobs:
           pip install hypothesis pytest-cov httpx
       - name: Run pytest
         run: pytest tests/ -v --cov=heaven --cov-report=xml --cov-report=term-missing
-      - name: Check README test count is in sync
+      - name: README test count in sync (non-blocking)
         if: matrix.python-version == '3.12'
-        run: python scripts/sync_test_count.py --check
+        continue-on-error: true  # decorative count drift must never block a merge
+        run: |
+          python scripts/sync_test_count.py
+          if ! git diff --quiet -- README.md; then
+            echo "::warning file=README.md::README test-count numbers drifted from the collected total. Run 'python scripts/sync_test_count.py' locally and commit. (Not blocking CI — the live Tests badge is the source of truth.)"
+            git checkout -- README.md
+          fi
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5

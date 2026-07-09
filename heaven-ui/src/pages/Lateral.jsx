@@ -65,66 +65,61 @@ export default function LateralPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--crit)", marginTop: 0 }}>↔ Lateral Movement</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>↔ Lateral Movement</h2>
+        <p className="page-lead">
           SSH key reuse + SMB PsExec + pass-the-hash. Outputs a hop graph of
           which target accepted which credential. Mirrors{" "}
           <code>heaven lateral</code> from the CLI.
         </p>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <fieldset style={{ border: "1px solid var(--border)", padding: 12 }}>
-            <legend style={{ color: "var(--cyan)", fontSize: 11 }}>SSH key reuse</legend>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <fieldset className="form-fieldset">
+            <legend>SSH key reuse</legend>
             <label className="form-label">Private key path (on this server)</label>
-            <input type="text" value={sshKey}
+            <input className="form-input" type="text" value={sshKey}
                    onChange={(e) => setSshKey(e.target.value)}
                    placeholder="/path/to/id_rsa"
-                   style={{ width: "100%", fontSize: 12, marginBottom: 8 }} />
+                   style={{ marginBottom: 10 }} />
             <label className="form-label">Usernames (one per line)</label>
-            <textarea value={sshUsers} rows={3}
-                      onChange={(e) => setSshUsers(e.target.value)}
-                      style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }} />
+            <textarea className="form-input mono-input" value={sshUsers} rows={3}
+                      onChange={(e) => setSshUsers(e.target.value)} />
           </fieldset>
 
-          <fieldset style={{ border: "1px solid rgba(255,7,58,0.2)", padding: 12 }}>
-            <legend style={{ color: "var(--crit)", fontSize: 11 }}>SMB / pass-the-hash</legend>
+          <fieldset className="form-fieldset is-danger">
+            <legend>SMB / pass-the-hash</legend>
             <label className="form-label">Username · Domain</label>
-            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-              <input type="text" value={smbUser}
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input className="form-input" type="text" value={smbUser}
                      onChange={(e) => setSmbUser(e.target.value)}
-                     placeholder="Administrator"
-                     style={{ flex: 1, fontSize: 12 }} />
-              <input type="text" value={smbDomain}
+                     placeholder="Administrator" />
+              <input className="form-input" type="text" value={smbDomain}
                      onChange={(e) => setSmbDomain(e.target.value)}
-                     placeholder="CORP"
-                     style={{ flex: 1, fontSize: 12 }} />
+                     placeholder="CORP" />
             </div>
             <label className="form-label">Password (or NT hash for pass-the-hash)</label>
-            <input type="password" value={smbPass}
+            <input className="form-input" type="password" value={smbPass}
                    onChange={(e) => setSmbPass(e.target.value)}
                    placeholder="password (leave blank for PtH)"
-                   style={{ width: "100%", fontSize: 12, marginBottom: 6 }} />
-            <input type="text" value={smbNthash}
+                   style={{ marginBottom: 8 }} />
+            <input className="form-input mono-input" type="text" value={smbNthash}
                    onChange={(e) => setSmbNthash(e.target.value)}
-                   placeholder="NT hash hex (32 chars)"
-                   style={{ width: "100%", fontSize: 12, fontFamily: "monospace" }} />
+                   placeholder="NT hash hex (32 chars)" />
           </fieldset>
         </div>
 
-        <label className="form-label" style={{ marginTop: 12 }}>Targets (host:port, one per line)</label>
-        <textarea value={targetsText} rows={4}
-                  onChange={(e) => setTargetsText(e.target.value)}
-                  style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }} />
+        <label className="form-label" style={{ marginTop: 14, display: "block", marginBottom: 6 }}>
+          Targets (host:port, one per line)
+        </label>
+        <textarea className="form-input mono-input" value={targetsText} rows={4}
+                  onChange={(e) => setTargetsText(e.target.value)} />
 
-        <label style={{ display: "flex", alignItems: "flex-start", gap: 8,
-                        color: authorized ? "var(--text-0)" : "var(--med)",
-                        marginTop: 12, marginBottom: 12 }}>
+        <label className={"consent-row" + (authorized ? " is-ack" : "")}>
           <input type="checkbox" checked={authorized}
                  onChange={(e) => setAuthorized(e.target.checked)} />
-          <span>I have written authorization to spray these credentials.</span>
+          <span>I have <strong>written authorization</strong> to spray these credentials.</span>
         </label>
 
-        <button className="btn" disabled={loading || !authorized} onClick={run}>
+        <button className="btn btn-primary" disabled={loading || !authorized} onClick={run}>
           {loading ? "Spraying…" : "Run lateral movement"}
         </button>
 

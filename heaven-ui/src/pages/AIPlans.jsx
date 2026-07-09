@@ -55,7 +55,7 @@ export default function AIPlans() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>✦ AI Attack-Chain Planner</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Layer D — LLM proposes multi-step attack chains from a finding list.
           Requires <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, or{" "}
           <code>GEMINI_API_KEY</code> on the server. If none is set the endpoint
@@ -77,24 +77,25 @@ export default function AIPlans() {
         </div>
 
         <textarea
+          className="form-input mono-input"
           value={findingsJson}
           onChange={(e) => setFindingsJson(e.target.value)}
           rows={12}
+          spellCheck={false}
           placeholder='[{"target":"http://x","vuln_type":"ssrf","severity":"high","evidence":{}}]'
-          style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
         />
 
-        <div style={{ marginTop: 8, marginBottom: 8 }}>
+        <div style={{ marginTop: 10, marginBottom: 10 }}>
           <input
+            className="form-input"
             type="text"
             value={objective}
             onChange={(e) => setObjective(e.target.value)}
             placeholder="Optional objective hint (e.g. 'aim for AD compromise')"
-            style={{ width: "100%", fontSize: 12 }}
           />
         </div>
 
-        <button className="btn" disabled={loading} onClick={plan}>
+        <button className="btn btn-primary" disabled={loading} onClick={plan}>
           {loading ? "Planning…" : "Plan attack chains"}
         </button>
 

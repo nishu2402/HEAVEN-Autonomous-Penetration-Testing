@@ -23,13 +23,11 @@ export default function Benchmark() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>≡ Benchmark — HEAVEN vs. DVWA</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Latest aggregated report from <code>tests/benchmarks/reports/dvwa_aggregated.md</code>.
           To produce / refresh, run on the server:
-          <code style={{ display: "block", marginTop: 4 }}>
-            HEAVEN_RUN_BENCHMARKS=1 HEAVEN_BENCH_RUNS=3 pytest tests/benchmarks/test_dvwa_baseline.py -v
-          </code>
         </p>
+        <pre className="cli-block" style={{ marginBottom: 12 }}>{`HEAVEN_RUN_BENCHMARKS=1 HEAVEN_BENCH_RUNS=3 pytest tests/benchmarks/test_dvwa_baseline.py -v`}</pre>
         <button className="btn-small" onClick={load}>Refresh</button>
 
         {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
@@ -51,18 +49,7 @@ export default function Benchmark() {
         )}
 
         {data && data.available && (
-          <pre
-            style={{
-              marginTop: 12,
-              padding: 12,
-              background: "rgba(0,0,0,0.4)",
-              border: "1px solid var(--border)",
-              fontFamily: "monospace",
-              fontSize: 12,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
+          <pre className="cli-block" style={{ marginTop: 12, wordBreak: "break-word" }}>
             {data.markdown}
           </pre>
         )}

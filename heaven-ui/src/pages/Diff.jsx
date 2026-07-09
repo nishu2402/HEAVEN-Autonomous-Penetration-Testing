@@ -2,13 +2,10 @@
 // Mirrors `heaven diff <baseline> <current>` from the CLI.
 
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Diff, Scans } from "../api";
 import { EmptyState, SkeletonCard } from "../components/Skeleton.jsx";
-
-const SEV_COLOR = {
-  critical: "var(--crit)", high: "var(--high)", medium: "var(--med)",
-  low: "var(--cyan)", info: "#888",
-};
+import { sevColor } from "../theme";
 
 export default function DiffPage() {
   const [scans, setScans] = useState([]);
@@ -17,6 +14,7 @@ export default function DiffPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     Scans.list(50).then((d) => setScans(d.scans || [])).catch((e) => setError(e.message));
@@ -48,16 +46,15 @@ export default function DiffPage() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--cyan)", marginTop: 0 }}>↹ Scan Diff</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Compare two scans of the same engagement. Bucketed output: NEW · RESOLVED ·
           REGRESSED · UNCHANGED. <strong>Regressed</strong> = a finding that was marked
           <code> fixed</code> / <code>false_positive</code> / <code>accepted_risk</code>
           but was observed again in the current scan.
         </p>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, marginBottom: 10 }}>
-          <select value={baseline} onChange={(e) => setBaseline(e.target.value)}
-                  style={{ fontSize: 12, padding: "6px 8px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 10, alignItems: "center" }}>
+          <select className="form-select" value={baseline} onChange={(e) => setBaseline(e.target.value)}>
             <option value="">— Baseline scan —</option>
             {scans.map((s) => {
               const id = s.scan_id || s.id;
@@ -68,8 +65,7 @@ export default function DiffPage() {
               );
             })}
           </select>
-          <select value={current} onChange={(e) => setCurrent(e.target.value)}
-                  style={{ fontSize: 12, padding: "6px 8px" }}>
+          <select className="form-select" value={current} onChange={(e) => setCurrent(e.target.value)}>
             <option value="">— Current scan —</option>
             {scans.map((s) => {
               const id = s.scan_id || s.id;
@@ -80,7 +76,7 @@ export default function DiffPage() {
               );
             })}
           </select>
-          <button className="btn" disabled={loading} onClick={run}>
+          <button className="btn btn-primary" disabled={loading} onClick={run}>
             {loading ? "Diffing…" : "Compute diff"}
           </button>
         </div>
@@ -106,7 +102,7 @@ export default function DiffPage() {
         <>
           <div className="card" style={{ marginTop: 12 }}>
             <div className="card-title">Summary</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+            <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
               <Stat label="🆕 New" value={report.summary.new}
                     color="var(--text-0)" sub={`${report.summary.critical_new} critical`} />
               <Stat label="✅ Resolved" value={report.summary.resolved} color="var(--cyan)" />
@@ -114,13 +110,13 @@ export default function DiffPage() {
                     color="var(--crit)"
                     sub={`${report.summary.regressed_critical_or_high} crit/high`}
                     highlight={report.summary.regressed_critical_or_high > 0} />
-              <Stat label="= Unchanged" value={report.summary.unchanged} color="#888" />
+              <Stat label="= Unchanged" value={report.summary.unchanged} color="var(--text-2)" />
             </div>
             {report.summary.regressed_critical_or_high > 0 && (
               <div style={{
-                marginTop: 12, padding: 12,
-                background: "rgba(255,7,58,0.07)",
-                border: "1px solid rgba(255,7,58,0.3)",
+                marginTop: 12, padding: 12, borderRadius: "var(--radius-md)",
+                background: "rgba(255,77,106,0.08)",
+                border: "1px solid rgba(255,77,106,0.32)",
                 color: "var(--crit)", fontWeight: 600,
               }}>
                 🚨 {report.summary.regressed_critical_or_high} previously-fixed critical/high finding(s) came back. Treat as P0.
@@ -128,9 +124,9 @@ export default function DiffPage() {
             )}
           </div>
 
-          <FindingBucket title="🆕 New findings" rows={report.new} />
-          <FindingBucket title="⚠️ Regressed (closed → reopened)" rows={report.regressed} />
-          <FindingBucket title="✅ Resolved" rows={report.resolved} dim />
+          <FindingBucket title="🆕 New findings" rows={report.new} onOpen={navigate} />
+          <FindingBucket title="⚠️ Regressed (closed → reopened)" rows={report.regressed} onOpen={navigate} />
+          <FindingBucket title="✅ Resolved" rows={report.resolved} dim onOpen={navigate} />
         </>
       )}
     </div>
@@ -139,39 +135,36 @@ export default function DiffPage() {
 
 function Stat({ label, value, color, sub, highlight }) {
   return (
-    <div style={{
-      padding: 12,
-      background: highlight ? "rgba(255,7,58,0.07)" : "rgba(0,0,0,0.3)",
-      border: `1px solid ${color}33`,
-    }}>
-      <div className="dim" style={{ fontSize: 11 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color }}>{value}</div>
-      {sub && <div className="dim" style={{ fontSize: 10, marginTop: 2 }}>{sub}</div>}
+    <div className={"mini-stat" + (highlight ? " is-alert" : "")}>
+      <div className="mini-stat-label">{label}</div>
+      <div className="mini-stat-value" style={{ color }}>{value}</div>
+      {sub && <div className="mini-stat-sub">{sub}</div>}
     </div>
   );
 }
 
-function FindingBucket({ title, rows, dim }) {
+function FindingBucket({ title, rows, dim, onOpen }) {
   if (!rows || rows.length === 0) return null;
   return (
     <div className="card" style={{ marginTop: 12, opacity: dim ? 0.85 : 1 }}>
       <div className="card-title">{title} ({rows.length})</div>
-      <table style={{ width: "100%", fontSize: 12 }}>
-        <thead><tr style={{ color: "var(--cyan)" }}>
-          <th align="left" style={{ width: 60 }}>Sev</th>
-          <th align="left">Type</th>
-          <th align="left">Target</th>
-          <th align="right" style={{ width: 60 }}>Conf</th>
+      <table className="data-table">
+        <thead><tr>
+          <th style={{ width: 60 }}>Sev</th>
+          <th>Type</th>
+          <th>Target</th>
+          <th className="num" style={{ width: 60 }}>Conf</th>
         </tr></thead>
         <tbody>
           {rows.slice(0, 50).map((r) => (
-            <tr key={r.id}>
-              <td><span style={{ color: SEV_COLOR[r.severity] || "#888" }}>
-                {r.severity}
-              </span></td>
+            <tr key={r.id}
+                className={r.id ? "is-clickable" : ""}
+                onClick={r.id ? () => onOpen(`/findings/${r.id}`) : undefined}
+                title={r.id ? "Open finding detail" : undefined}>
+              <td style={{ color: sevColor(r.severity), fontWeight: 600 }}>{r.severity}</td>
               <td><code>{r.vuln_type}</code></td>
               <td style={{ wordBreak: "break-all" }}>{r.target}</td>
-              <td align="right">{r.confidence?.toFixed?.(2) ?? "—"}</td>
+              <td className="num">{r.confidence?.toFixed?.(2) ?? "—"}</td>
             </tr>
           ))}
         </tbody>

@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { changePassword } from "../api";
 
-// Blocking overlay shown after login when the account is still on the default
-// admin/admin credential. The user can't proceed until they set a strong one.
+// Blocking overlay shown after login when the account is still on its
+// generated first-run password. The user can't proceed until they set a strong
+// one of their own.
 export default function ForcedPasswordChange({ onDone }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -45,15 +46,15 @@ export default function ForcedPasswordChange({ onDone }) {
         </div>
         <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Set a new password</div>
         <div style={{ color: "var(--text-2)", fontSize: 13, marginBottom: 24, lineHeight: 1.6 }}>
-          This account is using the default <span className="mono">admin/admin</span> credential.
-          Choose a strong password to continue — HEAVEN won't let you in until you do.
+          This account is still using its <span className="mono">first-run password</span>.
+          Choose a strong password of your own to continue — HEAVEN won't let you in until you do.
         </div>
 
         <div className="login-field">
           <label>Current password</label>
           <input className="form-input" type="password" value={current}
                  onChange={(e) => setCurrent(e.target.value)} autoFocus
-                 placeholder="admin (the default)" />
+                 placeholder="your first-run password" />
         </div>
         <div className="login-field">
           <label>New password</label>

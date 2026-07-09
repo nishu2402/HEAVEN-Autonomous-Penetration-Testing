@@ -431,6 +431,7 @@ class ComplianceReportGenerator:
             ("OWASP", owasp or "—"),
             ("CVE", f.get("cve_id") or "—"),
             ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
+            ("CVSS vector", f.get("cvss_vector") or "—"),
             ("Status", (f.get("status") or "open").title()),
         ]
         meta_html = "".join(f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in meta_rows)

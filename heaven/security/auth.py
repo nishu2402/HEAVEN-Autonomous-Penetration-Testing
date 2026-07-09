@@ -111,17 +111,27 @@ class AuthManager:
             # Operator supplied a strong password via env — trust it, no forced change.
             self.create_user(admin_user, admin_pass, Role.ADMIN)
             return
-        # No env password: ship a usable default (admin/admin) so a fresh install
-        # works out-of-the-box, but FORCE a password change on first login and let
-        # `self-audit` flag the unchanged default as critical. Balances zero-friction
-        # onboarding with "no weak default credentials in production".
-        user = self.create_user(admin_user, "admin", Role.ADMIN)
+        # No env password: generate a strong RANDOM admin password instead of a
+        # weak static default (admin/admin). It is printed ONCE below so the
+        # operator can sign in, and a password change is still forced on first
+        # login. Zero-config onboarding with no shipped weak credential.
+        import secrets
+        generated = secrets.token_urlsafe(12)  # ~16 URL-safe chars
+        user = self.create_user(admin_user, generated, Role.ADMIN)
         user.must_change_password = True
         logger.warning(
-            "No HEAVEN_ADMIN_PASSWORD set — seeded default %s/admin with a FORCED "
-            "password change on first login. Set HEAVEN_ADMIN_PASSWORD (and optionally "
-            "HEAVEN_ADMIN_USERNAME) in your .env or run `heaven init` for production use.",
-            admin_user,
+            "\n"
+            "  ┌──────────────────────────────────────────────────────────────┐\n"
+            "  │  HEAVEN — first-run admin credentials (shown once)             │\n"
+            "  │  No HEAVEN_ADMIN_PASSWORD set, so a random one was generated.  │\n"
+            "  ├──────────────────────────────────────────────────────────────┤\n"
+            "  │  username: %-51s│\n"
+            "  │  password: %-51s│\n"
+            "  ├──────────────────────────────────────────────────────────────┤\n"
+            "  │  You must change this password on first login. To pin a        │\n"
+            "  │  persistent one, set HEAVEN_ADMIN_PASSWORD in .env / heaven init│\n"
+            "  └──────────────────────────────────────────────────────────────┘",
+            admin_user, generated,
         )
 
     def verify_user_password(self, username: str, password: str) -> bool:

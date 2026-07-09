@@ -182,8 +182,12 @@ class PDFReportGenerator:
 
         def pill(sev: str) -> Table:
             m = SEVERITY_META[sev]
+            # 20mm — must stay narrower than its host cell (Severity column is
+            # 26mm and carries 12pt of left+right padding); a 26mm pill overflowed
+            # into the adjacent CVSS column. 20mm leaves clear margin in both the
+            # summary (26mm) and key-findings (30mm) tables.
             t = Table([[Paragraph(f'<font color="white"><b>{m["label"]}</b></font>',
-                                  styles["cell"])]], colWidths=[26 * mm], rowHeights=[6 * mm])
+                                  styles["cell"])]], colWidths=[20 * mm], rowHeights=[6 * mm])
             t.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(m["color"])),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
@@ -579,7 +583,8 @@ class PDFReportGenerator:
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
             ("CWE", f.get("cwe") or "—"), ("OWASP", owasp), ("CVE", f.get("cve_id") or "—"),
             ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
-            ("CVSS vector", _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), "—")),
+            ("CVSS vector", f.get("cvss_vector")
+             or _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), "—")),
             ("Status", (f.get("status") or "open").title()),
         ]
         mt = Table([[Paragraph(_esc(k), styles["cellb"]), Paragraph(_esc(v), styles["cell"])]

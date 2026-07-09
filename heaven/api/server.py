@@ -265,36 +265,12 @@ def require_permission(permission: str):
     return _checker
 
 
-def _active_engagement_file() -> Path:
-    """Pointer file that records which engagement the web UI is currently viewing."""
-    from heaven.config import get_config
-    return get_config().data_dir / ".active_engagement"
-
-
-def _get_active_engagement() -> Optional[str]:
-    """The most-recently-selected engagement (set when a scan is launched or the
-    operator switches engagements). None when nothing has been selected yet."""
-    try:
-        p = _active_engagement_file()
-        if p.exists():
-            name = p.read_text(encoding="utf-8").strip()
-            return name or None
-    except Exception:  # noqa: BLE001 — a missing/corrupt pointer just means "default"
-        pass
-    return None
-
-
-def _set_active_engagement(name: Optional[str]) -> None:
-    """Persist the active engagement so the dashboard, findings and reports all
-    read the same store the latest scan wrote to."""
-    if not name:
-        return
-    try:
-        p = _active_engagement_file()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(str(name).strip(), encoding="utf-8")
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Could not persist active engagement '{name}': {e}")
+# The active-engagement pointer helpers live in heaven.engagement so the CLI,
+# the web API and the demo seeder all read/write one file the same way.
+from heaven.engagement import (  # noqa: E402
+    get_active_engagement as _get_active_engagement,
+    set_active_engagement as _set_active_engagement,
+)
 
 
 def _resolve_engagement_name(name: Optional[str] = None) -> str:
@@ -369,11 +345,32 @@ def create_app() -> FastAPI:
         admin_pwd_set = bool(os.environ.get("HEAVEN_ADMIN_PASSWORD"))
         if not admin_pwd_set:
             logger.warning(
-                "HEAVEN_ADMIN_PASSWORD not set — random admin password was generated at startup. "
-                "Check earlier log lines for the value, then SET HEAVEN_ADMIN_PASSWORD in your environment."
+                "HEAVEN_ADMIN_PASSWORD not set — a random admin password was generated "
+                "at startup (see the boxed 'first-run admin credentials' log line above) "
+                "and a password change is forced on first login. Set HEAVEN_ADMIN_PASSWORD "
+                "in your .env (or run `heaven init`) to pin a persistent password."
             )
         if _auth_disabled():
             logger.error("HEAVEN_DISABLE_AUTH is enabled — DO NOT USE IN PRODUCTION")
+        # One-time self-heal: older builds let the demo seeder write a
+        # "demo (sample data)" engagement row + demo scope into whatever
+        # engagement was active, which then leaked "demo" into the dashboard
+        # label and report filename. Strip those leftovers from every real
+        # engagement DB (never the dedicated demo DB, never real findings).
+        try:
+            from heaven.config import get_config
+            from heaven.engagement import DEMO_DB_NAME, EngagementStore
+            eng_dir = get_config().data_dir / "engagements"
+            if eng_dir.exists():
+                for db in eng_dir.glob("*.db"):
+                    if db.stem == DEMO_DB_NAME:
+                        continue
+                    try:
+                        EngagementStore(db).purge_demo_artifacts()
+                    except Exception:  # noqa: BLE001 — skip locked/unreadable DBs
+                        continue
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Demo-artifact self-heal skipped: %s", e)
         yield
         # Shutdown — close any open WebSockets
         for ws in list(ws_connections) + list(log_ws_connections):
@@ -1534,8 +1531,13 @@ def create_app() -> FastAPI:
         `heaven demo` via heaven/demo.py.
         """
         from heaven.demo import seed_demo
-        store = _engagement_store_factory()
+        from heaven.engagement import DEMO_DB_NAME
+        # Sample data goes into its OWN engagement DB and we switch to it — never
+        # into a real engagement (which used to leave a stray "demo (sample data)"
+        # row behind that then leaked into the dashboard label + report filename).
+        store = _engagement_store_factory(DEMO_DB_NAME)
         result = seed_demo(store)
+        _set_active_engagement(DEMO_DB_NAME)
         logger.info("Demo data seeded by %s: %s findings", user.username,
                     result.get("findings"))
         return {"ok": True, **result}
@@ -1564,7 +1566,10 @@ def create_app() -> FastAPI:
 
         async def _run() -> None:
             from heaven.demo import insert_findings
-            store = _engagement_store_factory()
+            from heaven.engagement import DEMO_DB_NAME
+            # Dedicated demo engagement — see seed_demo_data above.
+            store = _engagement_store_factory(DEMO_DB_NAME)
+            _set_active_engagement(DEMO_DB_NAME)
             try:
                 store.record_scan_start(scan_id, name="Demo scan (sample)", mode="full")
                 phases = [
@@ -2577,6 +2582,24 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         store.create_engagement(name=engagement_name)
         store.record_scan_start(scan_id, name=req.name or engagement_name,
                                 mode=req.mode or req.scan_type or "web")
+        # Record what we're actually assessing as engagement scope, so the
+        # dashboard/report reflect the real targets instead of "0 targets".
+        for _tgt in list(req.urls or []) + list(req.targets or []):
+            _t = str(_tgt).strip()
+            if not _t:
+                continue
+            if _t.startswith(("http://", "https://")):
+                _kind = "url"
+            elif "/" in _t and _t.replace(".", "").replace("/", "").isdigit():
+                _kind = "cidr"
+            elif _t and all(ch.isdigit() or ch == "." for ch in _t):
+                _kind = "ip"
+            else:
+                _kind = "host"
+            try:
+                store.add_scope(_t, kind=_kind, notes="auto-added from scan")
+            except Exception:  # noqa: BLE001 — scope is best-effort, never block a scan
+                pass
     except Exception as e:
         logger.warning(f"Could not open engagement store '{engagement_name}': {e}")
 

@@ -30,6 +30,45 @@ from heaven.utils.logger import get_logger
 logger = get_logger("engagement")
 
 
+# Dedicated engagement slug for sample/demo data. The demo seeder writes here and
+# switches the active pointer to it, so sample findings never contaminate a real
+# engagement's DB (which previously left a stray "demo (sample data)" row behind).
+DEMO_DB_NAME = "demo"
+
+
+# ── Active-engagement pointer (single source of truth) ──────────────────
+# One small pointer file records which engagement the app is currently viewing.
+# The CLI, the web API and the demo seeder all read/write it through these
+# helpers so they can never disagree about which store holds the live data.
+def active_engagement_file() -> Path:
+    from heaven.config import get_config
+    return get_config().data_dir / ".active_engagement"
+
+
+def get_active_engagement() -> Optional[str]:
+    """The most-recently-selected engagement name, or None if never set."""
+    try:
+        p = active_engagement_file()
+        if p.exists():
+            name = p.read_text(encoding="utf-8").strip()
+            return name or None
+    except Exception:  # noqa: BLE001 — a missing/corrupt pointer just means "default"
+        pass
+    return None
+
+
+def set_active_engagement(name: Optional[str]) -> None:
+    """Persist the active engagement so dashboard, findings and reports agree."""
+    if not name:
+        return
+    try:
+        p = active_engagement_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(name).strip(), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Could not persist active engagement '%s': %s", name, e)
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS engagement (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -425,8 +464,27 @@ class EngagementStore:
                           created_at=now, updated_at=now)
 
     def get_engagement(self) -> Optional[Engagement]:
+        """Return this store's engagement, deterministically.
+
+        A single DB file can end up holding more than one ``engagement`` row —
+        e.g. the demo seeder once wrote ``demo (sample data)`` into a real
+        engagement's DB. A bare ``LIMIT 1`` with no ordering then returned an
+        arbitrary row (often the stale demo one), so the dashboard label and the
+        downloaded report filename showed "demo" for a genuine scan.
+
+        Resolve it against the DB's own filename, which *is* the canonical
+        engagement name (``engagements/<name>.db``): prefer the row whose name
+        matches that stem, then the most-recently-updated row, then any row.
+        """
+        stem = self.db_path.stem
         with self._conn() as c:
-            row = c.execute("SELECT * FROM engagement LIMIT 1").fetchone()
+            row = c.execute(
+                "SELECT * FROM engagement WHERE name = ? LIMIT 1", (stem,)
+            ).fetchone()
+            if row is None:
+                row = c.execute(
+                    "SELECT * FROM engagement ORDER BY updated_at DESC, id DESC LIMIT 1"
+                ).fetchone()
             return Engagement(**dict(row)) if row else None
 
     # ── Scope ──────────────────────────────────────────────────────────
@@ -459,6 +517,36 @@ class EngagementStore:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (target, kind, 1 if in_scope else 0, criticality, notes, now),
                 )
+
+    def purge_demo_artifacts(self) -> int:
+        """Strip leftover sample-data rows from a *real* engagement DB.
+
+        The demo seeder used to write into whatever engagement was active,
+        leaving behind a ``demo (sample data)`` engagement row and scope targets
+        in the reserved demo ranges. Even after the operator deleted the demo
+        findings, those rows persisted and leaked "demo" into the dashboard
+        label / report filename. This removes exactly those artifacts (and
+        nothing else — real findings and scope are never touched). Returns the
+        number of rows removed. Safe/no-op on a clean or demo DB.
+        """
+        demo_engagement_name = "demo (sample data)"
+        demo_scope = (
+            "https://demo.heaven.local", "demo.heaven.local",
+            "10.10.10.10/32", "10.10.10.0/24",
+        )
+        removed = 0
+        with self._conn() as c:
+            removed += c.execute(
+                "DELETE FROM engagement WHERE name = ?", (demo_engagement_name,)
+            ).rowcount
+            for t in demo_scope:
+                removed += c.execute(
+                    "DELETE FROM scope WHERE target = ?", (t,)
+                ).rowcount
+        if removed:
+            logger.info("Purged %d leftover demo artifact(s) from %s",
+                        removed, self.db_path.name)
+        return removed
 
     def remove_scope(self, target: str) -> bool:
         with self._conn() as c:

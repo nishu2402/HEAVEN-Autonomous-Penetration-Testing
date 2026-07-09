@@ -106,7 +106,8 @@ export default function FindingDetail() {
             <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "—"}</td></tr>
             <tr><td>CWE</td><td>{f.cwe || ev.cwe || "—"}</td></tr>
             <tr><td>OWASP</td><td>{f.owasp || ev.owasp || "—"}</td></tr>
-            <tr><td>MITRE Technique</td><td>{f.mitre_technique || ev.mitre || "—"}</td></tr>
+            <tr><td>MITRE ATT&CK</td><td>{f.mitre_technique || ev.mitre || "—"}</td></tr>
+            <tr><td>CVSS vector</td><td className="mono" style={{ fontSize: 12 }}>{f.cvss_vector || ev.cvss_vector || "—"}</td></tr>
             <tr><td>Seen</td><td className="dim">
               {f.seen_count ?? 1}×{f.last_seen_at ? ` (last: ${f.last_seen_at.slice(0, 10)})` : ""}
             </td></tr>

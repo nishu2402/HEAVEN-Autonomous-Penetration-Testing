@@ -581,7 +581,8 @@ class PDFReportGenerator:
             ("CVSS (predicted)", cvss),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
-            ("CWE", f.get("cwe") or "—"), ("OWASP", owasp), ("CVE", f.get("cve_id") or "—"),
+            ("CWE", f.get("cwe") or "—"), ("OWASP", owasp),
+            ("CVE", f.get("cve_id") or f.get("cve") or "—"),
             ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
             ("CVSS vector", f.get("cvss_vector")
              or _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), "—")),

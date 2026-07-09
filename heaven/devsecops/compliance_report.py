@@ -429,7 +429,7 @@ class ComplianceReportGenerator:
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
             ("CWE", f.get("cwe") or "—"),
             ("OWASP", owasp or "—"),
-            ("CVE", f.get("cve_id") or "—"),
+            ("CVE", f.get("cve_id") or f.get("cve") or "—"),
             ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
             ("CVSS vector", f.get("cvss_vector") or "—"),
             ("Status", (f.get("status") or "open").title()),

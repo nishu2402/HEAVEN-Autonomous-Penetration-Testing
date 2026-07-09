@@ -275,6 +275,24 @@ def _risk_value(finding: dict) -> float:
     return 0.0
 
 
+def _cve_id_of(finding: dict) -> str:
+    """CVE id for the ``cve_id`` column.
+
+    Detectors are inconsistent about the key: auth/ssl/web_fuzzer/misconfig/sast
+    set ``cve_id`` while cve_mapper/anomaly_probe/exploitdb/nuclei set ``cve``.
+    Reading only ``cve_id`` (the old behaviour) silently dropped the CVE for the
+    latter group, leaving the report/UI "CVE" column blank. Prefer a real
+    CVE-prefixed value from either key; ignore non-CVE sentinels like
+    ``HEAVEN-HEURISTIC`` but keep any explicit ``cve_id`` for back-compat.
+    """
+    for key in ("cve_id", "cve"):
+        v = finding.get(key)
+        if isinstance(v, str) and v.strip().upper().startswith("CVE-"):
+            return v.strip().upper()
+    v = finding.get("cve_id")
+    return v.strip() if isinstance(v, str) and v.strip() else ""
+
+
 def _confidence_bucket(conf: float) -> str:
     """Human-readable confidence tier for a persisted finding.
 
@@ -853,7 +871,7 @@ class EngagementStore:
                         finding.get("severity", "info"),
                         confidence,
                         confidence_bucket,
-                        finding.get("cve_id", ""),
+                        _cve_id_of(finding),
                         risk_score,
                         now, now,
                         evidence_json,

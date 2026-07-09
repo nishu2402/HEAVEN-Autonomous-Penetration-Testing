@@ -192,6 +192,31 @@ class TestScanResume:
         a_result = orch.results["task_A"]
         assert a_result.state.value == "completed"
 
+    def test_injected_exposed_db_finding_survives_aggregation(self):
+        """An exposed-DB port discovered in recon must emit its finding under a
+        plural key the aggregator harvests (it previously used singular
+        'finding' and was silently dropped from every report)."""
+        from heaven.orchestrator import ScanOrchestrator
+
+        # These are the exact keys orchestrator aggregation reads.
+        HARVESTED = ("vulnerabilities", "findings", "candidates", "validated_findings")
+
+        orch = ScanOrchestrator()
+        net_data = {"hosts": [{
+            "ip": "10.0.0.5",
+            "open_ports": [{"port": 3306, "service": "mysql"}],
+        }]}
+        orch._inject_service_tasks(net_data)
+
+        db_tasks = [t for t in orch.tasks.values() if "Exposed DB" in t.name]
+        assert db_tasks, "no exposed-DB task injected for the open MySQL port"
+
+        result = asyncio.run(db_tasks[0].coro_factory(**db_tasks[0].kwargs))
+        harvested = [f for k in HARVESTED for f in result.get(k, [])]
+        assert harvested, f"exposed-DB finding not under a harvested key: {result}"
+        assert harvested[0]["vuln_type"] == "exposed_database"
+        assert "MYSQL" in harvested[0]["title"]
+
 
 # ── FP suppression wired into validator ────────────────────────────────
 

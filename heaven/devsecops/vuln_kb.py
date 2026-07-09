@@ -218,6 +218,21 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://wiki.mozilla.org/Security/Server_Side_TLS"],
     },
+    "certificate_issue": {
+        "title": "TLS Certificate Issue",
+        "cwe": "CWE-295",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1557 — Adversary-in-the-Middle",
+        "typical_cvss": 5.9,
+        "description": "The server's X.509 certificate is expired, near expiry, self-signed, or signed with a weak algorithm (e.g. SHA-1), so clients cannot reliably establish trust.",
+        "impact": "Enables man-in-the-middle interception, trains users to click through TLS warnings, and can break clients that enforce validation.",
+        "remediation": (
+            "1. Issue a certificate from a trusted CA (e.g. Let's Encrypt) with SHA-256+.\n"
+            "2. Automate renewal so it never expires; monitor expiry.\n"
+            "3. Deploy the full chain and enable OCSP stapling."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
     "missing_security_headers": {
         "title": "Missing Security Headers",
         "cwe": "CWE-693",
@@ -287,6 +302,58 @@ _KB: dict[str, dict[str, Any]] = {
         "impact": "Immediate unauthorized access, often with administrative rights.",
         "remediation": "Force a credential change on first use; enforce a strong password policy + MFA.",
         "references": ["https://attack.mitre.org/techniques/T1078/001/"],
+    },
+    "exposed_database": {
+        "title": "Exposed Database Service",
+        "cwe": "CWE-668",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1210 — Exploitation of Remote Services",
+        "typical_cvss": 8.6,
+        "description": (
+            "A database service (e.g. MySQL, PostgreSQL, MSSQL, MongoDB, Redis) is "
+            "reachable over the network on its well-known port. Data stores should "
+            "never be exposed beyond the application tier that needs them."
+        ),
+        "impact": (
+            "Direct access to stored data, credential theft, tampering, and "
+            "ransomware when the instance is unauthenticated or weakly authenticated."
+        ),
+        "remediation": (
+            "1. Bind the service to localhost or a private interface, never 0.0.0.0.\n"
+            "2. Restrict access with a host firewall / security group to only the app tier.\n"
+            "3. Require strong authentication and TLS; disable anonymous access.\n"
+            "4. Place the datastore in a private subnet with no public route."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/668.html",
+            "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/",
+        ],
+    },
+    "nuclei": {
+        "title": "Nuclei Template Match",
+        "owasp": "A06:2021 Vulnerable and Outdated Components",
+        "mitre": "T1595 — Active Scanning",
+        "typical_cvss": 5.0,
+        "description": (
+            "A Nuclei community/template signature matched on the target. The "
+            "specific weakness class, CWE, CVE and CVSS are taken from the "
+            "matching template's own classification when present."
+        ),
+        "impact": (
+            "Varies by template — ranges from information disclosure to remote "
+            "code execution. Review the matched template and evidence for the "
+            "concrete risk."
+        ),
+        "remediation": (
+            "1. Open the referenced template to confirm the exact issue and affected component.\n"
+            "2. Patch or upgrade the affected component to a fixed version.\n"
+            "3. Remove or restrict access to any exposed resource the template flagged.\n"
+            "4. Re-run the scan to confirm the signature no longer matches."
+        ),
+        "references": [
+            "https://github.com/projectdiscovery/nuclei-templates",
+            "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/",
+        ],
     },
     "command_injection": {
         "title": "OS Command Injection",
@@ -1141,6 +1208,26 @@ _ALIASES: dict[str, str] = {
     "tls": "weak_tls",
     "ssl": "weak_tls",
     "weak_ssl": "weak_tls",
+    # SSL/TLS scanner findings — protocol/cipher weaknesses collapse to weak_tls,
+    # certificate problems to certificate_issue, so the SSL scan's whole output
+    # carries CWE/OWASP/CVSS taxonomy instead of going blank in the report.
+    "weak_cipher": "weak_tls",
+    "beast": "weak_tls",
+    "poodle": "weak_tls",
+    "freak": "weak_tls",
+    "logjam": "weak_tls",
+    "drown": "weak_tls",
+    "heartbleed": "weak_tls",
+    "tls10_only": "weak_tls",
+    "tls11_deprecated": "weak_tls",
+    "sslv3_enabled": "weak_tls",
+    "hsts_short_maxage": "hsts_missing",
+    "cert_expired": "certificate_issue",
+    "cert_expiring_soon": "certificate_issue",
+    "self_signed_cert": "certificate_issue",
+    "sha1_signature": "certificate_issue",
+    "ssl_expired": "certificate_issue",
+    "ssl_self_signed": "certificate_issue",
     "unvalidated_redirect": "open_redirect",
     # HTTP security-header posture (detector spellings → canonical KB key)
     "missing_csp": "csp_missing",
@@ -1194,6 +1281,9 @@ _ALIASES: dict[str, str] = {
     "exposed_sensitive_file": "sensitive_file_exposure",
     "dir_listing": "directory_listing",
     "auto_index": "directory_listing",
+    "exposed_db": "exposed_database",
+    "database_exposed": "exposed_database",
+    "exposed_service": "exposed_database",
     "auto_binding": "mass_assignment",
     "toctou": "race_condition",
     "known_vulnerable_version": "vulnerable_component",
@@ -1238,6 +1328,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "idor": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
     "auth_bypass": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "default_credentials": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "exposed_database": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
     "file_inclusion": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
     "path_traversal": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "xxe": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:L",
@@ -1253,6 +1344,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "docker_socket_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "exposed_rdp": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "weak_tls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "certificate_issue": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "no_forward_secrecy": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "missing_security_headers": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "csp_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",

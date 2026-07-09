@@ -93,3 +93,39 @@ def test_real_finding_carries_nonempty_vuln_type():
         '{"host":"h","template-id":"cve-x","info":{"severity":"high","name":"T"}}'
     ))
     assert out[0]["vuln_type"] == "nuclei"
+
+
+def test_classification_is_lifted_onto_finding():
+    # A template's own classification (cwe/cvss/cve) must land on the finding so
+    # the report taxonomy reflects real metadata instead of going blank.
+    out = _parse_nuclei_output(_b(
+        '{"host":"h","template-id":"CVE-2021-44228","matched-at":"h/api",'
+        '"info":{"severity":"critical","name":"Log4Shell",'
+        '"classification":{"cve-id":["cve-2021-44228"],"cwe-id":["cwe-502"],'
+        '"cvss-metrics":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",'
+        '"cvss-score":10.0}}}'
+    ))
+    assert len(out) == 1
+    f = out[0]
+    assert f["cwe"] == "CWE-502"                 # normalised from lowercase
+    assert f["cve"] == "CVE-2021-44228"
+    assert f["cvss_vector"].startswith("CVSS:3.1")
+    assert f["predicted_cvss_score"] == 10.0
+    assert f["evidence"]["cve"] == "CVE-2021-44228"
+
+
+def test_missing_classification_leaves_taxonomy_fields_absent():
+    # No classification → no fabricated CWE/CVSS on the finding (the KB fallback
+    # supplies OWASP + remediation at enrich time instead).
+    out = _parse_nuclei_output(_b(
+        '{"host":"h","template-id":"git-config",'
+        '"info":{"severity":"medium","name":"Git Config Exposure"}}'
+    ))
+    assert len(out) == 1
+    f = out[0]
+    assert "cwe" not in f and "cvss_vector" not in f and "cve" not in f
+    from heaven.devsecops import vuln_kb as kb
+    enriched = kb.enrich_finding(dict(f))
+    ev = enriched.get("evidence", {})
+    assert enriched.get("owasp") or ev.get("owasp")       # OWASP floor present
+    assert ev.get("remediation")                          # actionable guidance present

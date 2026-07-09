@@ -30,7 +30,7 @@ README = ROOT / "README.md"
 _PATTERNS = (
     r"(?<=%20)(\d+)(%20Tests)",     # capsule-render banner (URL-encoded space)
     r"(\d+)(\+Tests)",              # readme-typing-svg
-    r"(\d+)( passing, 0 skipped)",  # Project Summary table
+    r"(\d+)( tests \(pytest matrix)",  # Project Summary table
     r"(\d+)( pytest tests)",        # Project Structure
     r"(\d+)( tests · )",            # footer
 )

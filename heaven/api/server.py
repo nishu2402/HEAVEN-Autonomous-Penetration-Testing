@@ -266,8 +266,10 @@ def require_permission(permission: str):
 
 
 # The active-engagement pointer helpers live in heaven.engagement so the CLI,
-# the web API and the demo seeder all read/write one file the same way.
-from heaven.engagement import (  # noqa: E402
+# the web API and the demo seeder all read/write one file the same way. Re-exported
+# under the historical `_`-prefixed names the rest of this module (and tests) use.
+from heaven.engagement import (  # noqa: E402, F401
+    active_engagement_file as _active_engagement_file,  # re-exported for tests
     get_active_engagement as _get_active_engagement,
     set_active_engagement as _set_active_engagement,
 )

@@ -3,23 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Scans as ScansApi, Replay, Demo, Engagement } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import HelpTip from "../components/HelpTip.jsx";
-
-const SEV_COLOR = {
-  critical: "var(--crit)", high: "#ff8a3d", medium: "#ffd24d",
-  low: "var(--cyan)", info: "var(--text-2)",
-};
-
-// Live target validation — classify each entry so the operator gets instant
-// feedback instead of a server-side rejection after clicking Launch.
-const _IP = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
-const _URL = /^https?:\/\/[^\s/$.?#][^\s]*$/i;
-const _HOST = /^([a-z0-9-]+\.)+[a-z]{2,}$/i;
-function classifyTarget(t) {
-  if (_URL.test(t)) return "url";
-  if (_IP.test(t)) return "ip/cidr";
-  if (_HOST.test(t)) return "host";
-  return null;
-}
+import TargetsInput, { classifyTarget } from "../components/TargetsInput.jsx";
+import { sevColor } from "../theme";
 
 const MODES = ["web", "network", "full", "ad", "cloud"];
 const STEALTH = [
@@ -180,111 +165,76 @@ export default function Scans() {
       {/* Scan launcher */}
       <div className="card">
         <div className="card-title">Launch Scan</div>
-        <form onSubmit={launchScan}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 14 }}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label className="form-label" style={{ marginBottom: 4, display: "block" }}>
-                Targets <span className="dim">(URLs or IPs, one per line or comma-separated)</span>
-              </label>
-              <textarea
-                value={targets}
-                onChange={e => setTargets(e.target.value)}
-                placeholder={"https://app.example.com\n10.0.0.1\n192.168.1.0/24"}
-                rows={4}
-                style={{
-                  width: "100%", background: "var(--border)",
-                  border: "1px solid var(--border)", color: "var(--text-0)",
-                  fontFamily: "monospace", fontSize: 12, padding: "8px 10px",
-                  outline: "none", resize: "vertical", boxSizing: "border-box",
-                }}
-              />
-              {targets.trim() && (
-                <div style={{ fontSize: 11, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  {parsed.valid.length > 0 && (
-                    <span style={{ color: "var(--brand)" }}>
-                      ✓ {parsed.valid.length} valid target{parsed.valid.length !== 1 ? "s" : ""}
-                    </span>
-                  )}
-                  {parsed.invalid.length > 0 && (
-                    <span style={{ color: "var(--med)" }}>
-                      ⚠ {parsed.invalid.length} unrecognized: {parsed.invalid.slice(0, 3).join(", ")}
-                      {parsed.invalid.length > 3 ? "…" : ""}
-                    </span>
-                  )}
-                  {parsed.valid.length > 0 && (
-                    <span className="dim">
-                      → added to scope{engName ? ` in “${engName}”` : ""} on launch
-                    </span>
-                  )}
-                </div>
-              )}
-              <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
-                Scope: {scopeCount} target{scopeCount !== 1 ? "s" : ""} currently in
-                {engName ? ` “${engName}”` : " this engagement"}.
+        <form onSubmit={launchScan} className="scan-form">
+          <div className="form-group form-full">
+            <label className="form-label" htmlFor="scan-targets">
+              Targets <span className="dim">— type a URL, IP or CIDR and press Enter · or paste a list</span>
+            </label>
+            <TargetsInput
+              id="scan-targets"
+              value={targets}
+              onChange={setTargets}
+              placeholder="e.g. https://app.example.com  ·  10.0.0.1  ·  192.168.1.0/24"
+            />
+            {targets.trim() && (
+              <div className="field-hints">
+                {parsed.valid.length > 0 && (
+                  <span className="field-hint-ok">
+                    ✓ {parsed.valid.length} valid target{parsed.valid.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {parsed.invalid.length > 0 && (
+                  <span className="field-hint-warn">
+                    ⚠ {parsed.invalid.length} unrecognized: {parsed.invalid.slice(0, 3).join(", ")}
+                    {parsed.invalid.length > 3 ? "…" : ""}
+                  </span>
+                )}
+                {parsed.valid.length > 0 && (
+                  <span className="dim">
+                    → added to scope{engName ? ` in “${engName}”` : ""} on launch
+                  </span>
+                )}
               </div>
-            </div>
-
-            <div>
-              <label className="form-label" style={{ marginBottom: 4, display: "block" }}>Scan Mode</label>
-              <select
-                value={mode}
-                onChange={e => setMode(e.target.value)}
-                style={{
-                  width: "100%", background: "var(--bg-1)", color: "var(--text-0)",
-                  border: "1px solid var(--border)", padding: "8px 10px",
-                  fontFamily: "monospace", fontSize: 12, outline: "none",
-                }}
-              >
-                {MODES.map(m => <option key={m} value={m}>{m.toUpperCase()}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <label className="form-label" style={{ marginBottom: 4, display: "block" }}>
-                Stealth Level
-                <HelpTip text="How aggressive/evasive the scan is. 1 = paranoid (slow, low noise, honeypot-aware) → 4 = aggressive (fast, loud). Lower is stealthier but slower." />
-              </label>
-              <select
-                value={stealth}
-                onChange={e => setStealth(e.target.value)}
-                style={{
-                  width: "100%", background: "var(--bg-1)", color: "var(--text-0)",
-                  border: "1px solid var(--border)", padding: "8px 10px",
-                  fontFamily: "monospace", fontSize: 12, outline: "none",
-                }}
-              >
-                {STEALTH.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label className="form-label" style={{ marginBottom: 4, display: "block" }}>
-                Engagement name <span className="dim">(optional)</span>
-              </label>
-              <input
-                type="text"
-                value={engagement}
-                onChange={e => setEngagement(e.target.value)}
-                placeholder="e.g. acme-webapp-pentest"
-                style={{
-                  width: "100%", background: "var(--border)",
-                  border: "1px solid var(--border)", color: "var(--text-0)",
-                  fontFamily: "monospace", fontSize: 12, padding: "8px 10px",
-                  outline: "none", boxSizing: "border-box",
-                }}
-              />
-            </div>
+            )}
+            <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+              Scope: {scopeCount} target{scopeCount !== 1 ? "s" : ""} currently in
+              {engName ? ` “${engName}”` : " this engagement"}.
+            </span>
           </div>
 
-          <label style={{
-            display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
-            marginBottom: 16, fontSize: 12, color: authorized ? "var(--text-0)" : "var(--med)",
-          }}>
+          <label className="form-group">
+            <span className="form-label">Scan Mode</span>
+            <select className="form-select" value={mode} onChange={e => setMode(e.target.value)}>
+              {MODES.map(m => <option key={m} value={m}>{m.toUpperCase()}</option>)}
+            </select>
+          </label>
+
+          <label className="form-group">
+            <span className="form-label">
+              Stealth Level
+              <HelpTip text="How aggressive/evasive the scan is. 1 = paranoid (slow, low noise, honeypot-aware) → 4 = aggressive (fast, loud). Lower is stealthier but slower." />
+            </span>
+            <select className="form-select" value={stealth} onChange={e => setStealth(e.target.value)}>
+              {STEALTH.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </label>
+
+          <label className="form-group form-full">
+            <span className="form-label">Engagement name <span className="dim">(optional)</span></span>
+            <input
+              className="form-input"
+              type="text"
+              value={engagement}
+              onChange={e => setEngagement(e.target.value)}
+              placeholder="e.g. acme-webapp-pentest"
+            />
+          </label>
+
+          <label className={"consent-row form-full" + (authorized ? " is-ack" : "")}>
             <input
               type="checkbox"
               checked={authorized}
               onChange={e => setAuthorized(e.target.checked)}
-              style={{ marginTop: 2, accentColor: "var(--text-0)" }}
             />
             <span>
               I confirm I have <strong>written authorization</strong> from the target system owner.
@@ -294,40 +244,27 @@ export default function Scans() {
           </label>
 
           {launchError && (
-            <div style={{
-              marginBottom: 12, padding: "8px 12px",
-              background: "var(--border)", border: "1px solid var(--crit)",
-              color: "var(--crit)", fontSize: 11, fontFamily: "monospace",
-            }}>✗ {launchError}</div>
+            <div className="form-full form-banner form-banner-error">✗ {launchError}</div>
           )}
           {launchSuccess && (
-            <div style={{
-              marginBottom: 12, padding: "8px 12px",
-              background: "var(--border)", border: "1px solid var(--text-2)",
-              color: "var(--text-0)", fontSize: 11, fontFamily: "monospace",
-            }}>✓ {launchSuccess}</div>
+            <div className="form-full form-banner form-banner-ok">✓ {launchSuccess}</div>
           )}
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div className="form-full" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button
               type="submit"
               disabled={launching || !authorized || parsed.valid.length === 0}
-              className="btn"
-              style={{
-                opacity: (!authorized || launching || parsed.valid.length === 0) ? 0.5 : 1,
-                borderColor: "var(--text-0)", color: "var(--text-0)",
-              }}
+              className="btn btn-primary"
             >
-              {launching ? "⏳ Launching..." : "⚡ Launch Scan"}
+              {launching ? "⏳ Launching…" : "⚡ Launch Scan"}
             </button>
             <button type="button" onClick={runDemoScan} disabled={demoRunning} className="btn">
               {demoRunning ? "Starting…" : "▶ Run demo scan"}
             </button>
-          </div>
-          <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>
-            New here? <b>Run demo scan</b> simulates the full loop (recon →
-            findings → report) against sample data — no target, no authorization
-            needed.
+            <span className="dim" style={{ fontSize: 11 }}>
+              New here? <b>Run demo scan</b> simulates the full loop against sample
+              data — no target, no authorization needed.
+            </span>
           </div>
         </form>
       </div>

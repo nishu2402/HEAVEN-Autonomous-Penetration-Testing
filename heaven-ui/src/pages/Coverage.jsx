@@ -2,13 +2,11 @@
 // Mirrors `heaven coverage` from the CLI.
 
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Coverage, Engagement, Priors } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
-
-const GRADE_COLOR = {
-  A: "var(--text-0)", B: "var(--cyan)", C: "var(--med)", D: "var(--high)", F: "var(--crit)",
-};
+import { GRADE_COLOR } from "../theme";
 
 export default function CoveragePage() {
   const [engagement, setEngagement] = useState("");
@@ -54,25 +52,25 @@ export default function CoveragePage() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>📊 Coverage Self-Grading</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Rule-based OWASP coverage + scope hit-rate + auth/auto-prove/post-ex
           flags, with optional LLM-driven gap analysis.
         </p>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
-          <input type="text" value={engagement}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+          <input className="form-input" type="text" value={engagement}
                  onChange={(e) => setEngagement(e.target.value)}
                  placeholder="engagement name (default: active)"
-                 style={{ flex: 1, fontSize: 12 }} />
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                 style={{ flex: 1, minWidth: 200 }} />
+          <label className="consent-row" style={{ margin: 0 }}>
             <input type="checkbox" checked={useLLM}
                    onChange={(e) => setUseLLM(e.target.checked)} />
-            <span style={{ fontSize: 12 }}>Use LLM gap analysis</span>
+            <span>Use LLM gap analysis</span>
           </label>
-          <button className="btn" disabled={loading} onClick={load}>
+          <button className="btn btn-primary" disabled={loading} onClick={load}>
             {loading ? "Grading…" : "Grade"}
           </button>
-          <button className="btn-small" onClick={trainPriors}
+          <button className="btn" onClick={trainPriors}
                   title="Aggregate engagement findings into empirical Bayesian priors">
             Train priors
           </button>
@@ -101,19 +99,19 @@ export default function CoveragePage() {
               </div>
               <div style={{
                 fontSize: 64, fontWeight: 800, lineHeight: 1,
-                color: GRADE_COLOR[report.grade] || "#888",
+                color: GRADE_COLOR[report.grade] || "var(--info)",
               }}>{report.grade}</div>
             </div>
             <div style={{ marginTop: 10 }}>
               <div className="dim" style={{ fontSize: 11 }}>Scope coverage</div>
-              <div style={{ background: "var(--border)", height: 12, borderRadius: 2 }}>
+              <div style={{ background: "var(--border)", height: 12, borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
                 <div style={{
                   width: `${report.scope_coverage_pct}%`, height: "100%",
-                  background: "var(--text-0)",
+                  background: "var(--brand)",
                 }} />
               </div>
               <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>OWASP Top 10 coverage</div>
-              <div style={{ background: "var(--border-accent)", height: 12, borderRadius: 2 }}>
+              <div style={{ background: "var(--border)", height: 12, borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
                 <div style={{
                   width: `${report.owasp_coverage_pct}%`, height: "100%",
                   background: "var(--cyan)",
@@ -124,14 +122,14 @@ export default function CoveragePage() {
 
           <div className="card" style={{ marginTop: 12 }}>
             <div className="card-title">OWASP Top 10 — per-category coverage</div>
-            <table style={{ width: "100%", fontSize: 12 }}>
+            <table className="data-table">
               <tbody>
                 {(report.owasp_top10 || []).map((c) => (
                   <tr key={c.code}>
                     <td style={{ width: 80 }}><code>{c.code}</code></td>
                     <td>{c.name}</td>
-                    <td align="right" style={{ width: 60 }}>{c.findings}</td>
-                    <td style={{ width: 30, color: c.covered ? "var(--text-0)" : "var(--crit)" }}>
+                    <td className="num" style={{ width: 60 }}>{c.findings}</td>
+                    <td style={{ width: 30, color: c.covered ? "var(--brand)" : "var(--crit)" }}>
                       {c.covered ? "✓" : "✗"}
                     </td>
                   </tr>
@@ -163,11 +161,14 @@ export default function CoveragePage() {
           {report.llm_gap_summary && (
             <div className="card" style={{ marginTop: 12 }}>
               <div className="card-title">LLM gap analysis</div>
-              <pre style={{
-                whiteSpace: "pre-wrap", fontSize: 12, fontFamily: "monospace",
-                background: "rgba(0,0,0,0.4)", padding: 10, border: "1px solid var(--border)",
-              }}>{report.llm_gap_summary}</pre>
+              <pre className="cli-block">{report.llm_gap_summary}</pre>
             </div>
+          )}
+
+          {(report.total_findings ?? 0) > 0 && (
+            <Link to="/findings" className="btn-small" style={{ marginTop: 4 }}>
+              Open findings in triage →
+            </Link>
           )}
         </>
       )}

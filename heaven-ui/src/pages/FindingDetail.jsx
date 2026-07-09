@@ -4,8 +4,8 @@ import { Engagement, ExploitProof, AI, ExploitDB } from "../api";
 
 const STATUSES = ["open", "verified", "false_positive", "accepted_risk", "fixed"];
 const STATUS_COLORS = {
-  open: "var(--med)", verified: "var(--text-0)",
-  false_positive: "#aaa", accepted_risk: "var(--cyan)", fixed: "var(--text-1)"
+  open: "var(--med)", verified: "var(--brand)",
+  false_positive: "var(--text-2)", accepted_risk: "var(--cyan)", fixed: "var(--text-1)"
 };
 
 export default function FindingDetail() {
@@ -155,16 +155,11 @@ export default function FindingDetail() {
             Operator notes (saved with status change)
           </label>
           <textarea
+            className="form-input"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="e.g. confirmed via Burp Repeater — response includes admin hashes"
             rows={3}
-            style={{
-              width: "100%", background: "var(--border)",
-              border: "1px solid var(--border)", color: "var(--text-0)",
-              fontFamily: "inherit", fontSize: 12, padding: "8px 10px", outline: "none",
-              resize: "vertical",
-            }}
           />
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -382,10 +377,7 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
             </strong>
           </div>
           {result.payload.exploit_proof && result.payload.exploit_proof.length > 0 && (
-            <pre style={{
-              marginTop: 8, padding: 10, background: "rgba(0,0,0,0.4)",
-              border: "1px solid var(--border)", fontSize: 11,
-            }}>
+            <pre className="cli-block" style={{ marginTop: 8, fontSize: 11 }}>
               {JSON.stringify(result.payload.exploit_proof, null, 2)}
             </pre>
           )}

@@ -27,6 +27,7 @@
   /* ── Brand & accents ── */
   --brand:    #34E5A3;   /* emerald — HEAVEN signature / live / success */
   --brand-dk: #12B981;
+  --ok:       var(--brand);   /* semantic "healthy/configured" — alias of brand */
   --cyan:     #22D3EE;
   --accent:   #6D7CFF;   /* violet-blue — primary actions */
   --accent-2: #A78BFA;   /* violet */
@@ -495,6 +496,174 @@ a:hover { color: var(--accent-2); }
 .form-checkbox input { accent-color: var(--accent); width: 15px; height: 15px; }
 
 .scan-form { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+
+/* ── Base form controls ───────────────────────────────────────────────
+   Give every bare <input>/<textarea>/<select> the same professional field
+   styling the .form-input / .filters helpers use — so a control looks right
+   even if a page forgot to add a class (was: default white browser boxes on
+   the dark UI). Wrapped in :where() → zero specificity, so .form-input,
+   .cmd-palette-input, .login-input and any inline styles always win. */
+:where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="submit"]):not([type="button"]):not([type="reset"]),
+  textarea,
+  select
+) {
+  width: 100%;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+:where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="submit"]):not([type="button"]):not([type="reset"]),
+  textarea,
+  select
+):focus {
+  border-color: var(--border-accent);
+  box-shadow: var(--ring);
+}
+:where(input, textarea)::placeholder { color: var(--text-3); }
+:where(textarea) { resize: vertical; line-height: 1.6; }
+:where(select) { cursor: pointer; }
+:where(select) option { background: var(--bg-2); color: var(--text-0); }
+:where(input[type="checkbox"], input[type="radio"]) {
+  width: auto; accent-color: var(--accent); cursor: pointer;
+}
+/* Monospace variant for target lists, hashes, JSON bodies, key material */
+.mono-input { font-family: var(--font-mono) !important; font-size: 12.5px; }
+
+/* ── Consent / authorization row (shared by every launcher) ── */
+.consent-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 12px; line-height: 1.6; cursor: pointer;
+  color: var(--text-1); margin: 12px 0;
+}
+.consent-row input { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.consent-row.is-ack { color: var(--text-0); }
+.consent-row strong { color: var(--text-0); }
+
+/* ── Inline form validation feedback (target parser, etc.) ── */
+.field-hints { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; margin-top: 6px; }
+.field-hint-ok   { color: var(--brand); }
+.field-hint-warn { color: var(--med); }
+
+/* ── Targets tag/chip input (TargetsInput.jsx) ───────────────────────
+   A field that holds targets as removable, colour-coded pills instead of raw
+   textarea lines. The container styles like a form control; the inner input is
+   transparent and grows to fill the row. */
+.tags-input {
+  display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
+  width: 100%; min-height: 46px;
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 8px 10px; cursor: text;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.tags-input:focus-within { border-color: var(--border-accent); box-shadow: var(--ring); }
+.tag {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%;
+  padding: 3px 5px 3px 9px; border-radius: 999px;
+  background: rgba(109,124,255,0.12); border: 1px solid rgba(109,124,255,0.30);
+  color: var(--text-0); font-family: var(--font-mono); font-size: 12px;
+}
+.tag-kind {
+  font-family: var(--font-ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-2);
+}
+.tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag.is-invalid { background: rgba(255,197,61,0.10); border-color: rgba(255,197,61,0.38); }
+.tag.is-invalid .tag-kind { color: var(--med); }
+.tag-remove {
+  display: inline-grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0;
+  border: none; background: transparent; color: var(--text-2); cursor: pointer;
+  border-radius: 50%; font-size: 14px; line-height: 1; padding: 0;
+}
+.tag-remove:hover { background: rgba(255,255,255,0.12); color: var(--text-0); }
+.tags-input-field {
+  flex: 1 1 140px; width: auto; min-width: 140px;
+  border: none; background: transparent; box-shadow: none;
+  padding: 4px 2px; color: var(--text-0);
+  font-family: var(--font-mono); font-size: 12.5px;
+}
+.tags-input-field:focus { box-shadow: none; border: none; }
+.tags-input-field::placeholder { color: var(--text-3); }
+
+/* ── Inline form result banner (launch success / error) ── */
+.form-banner {
+  padding: 9px 13px; border-radius: var(--radius-md);
+  font-size: 12px; display: flex; align-items: center; gap: 8px;
+}
+.form-banner-error { color: var(--crit); background: rgba(255,77,106,0.10); border: 1px solid rgba(255,77,106,0.32); }
+.form-banner-ok    { color: var(--brand); background: rgba(52,229,163,0.10); border: 1px solid rgba(52,229,163,0.32); }
+
+/* ── Mini stat tiles (shared: Diff, Knowledge, SAST, Coverage, …) ── */
+.mini-stat-grid { display: grid; gap: var(--space-sm); }
+.mini-stat {
+  padding: 13px 15px; background: var(--bg-1);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.mini-stat.is-alert { border-color: rgba(255,77,106,0.35); background: rgba(255,77,106,0.06); }
+.mini-stat-label { font-size: 11px; color: var(--text-2); letter-spacing: 0.02em; }
+.mini-stat-value { font-size: 26px; font-weight: 700; line-height: 1.1; font-family: var(--font-mono); margin-top: 5px; }
+.mini-stat-sub { font-size: 10.5px; color: var(--text-2); margin-top: 4px; }
+
+/* ── Status tile (Watch channels, Tickets backends, health rows) ── */
+.status-tile {
+  padding: 14px 15px; background: var(--bg-1);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.status-tile.is-active   { border-color: rgba(52,229,163,0.35); }
+.status-tile.is-inactive { border-color: rgba(255,197,61,0.30); }
+.status-tile-title { font-weight: 600; color: var(--text-0); margin-bottom: 4px; }
+
+/* ── Compact data table (result / detail tables across launcher pages) ── */
+.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.data-table th {
+  text-align: left; color: var(--text-2); font-weight: 600;
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.data-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-0); vertical-align: top; }
+.data-table td.num, .data-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr.is-clickable { cursor: pointer; }
+.data-table tbody tr.is-clickable:hover td { background: rgba(255,255,255,0.03); }
+
+/* ── Fieldset (Lateral credential groups) ── */
+.form-fieldset {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 14px 16px; margin: 0;
+}
+.form-fieldset > legend {
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-2); font-weight: 600; padding: 0 6px;
+}
+.form-fieldset.is-danger { border-color: rgba(255,77,106,0.30); }
+.form-fieldset.is-danger > legend { color: var(--crit); }
+
+/* ── Intro lead paragraph (under a page/card heading) ── */
+.page-lead {
+  color: var(--text-1); font-size: 12.5px; line-height: 1.7;
+  margin-bottom: 14px; max-width: 780px;
+}
+.page-lead code { color: var(--text-0); }
+
+/* ── In-card CLI snippet block (token-based, wraps) ── */
+.cli-block {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 14px 16px;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.7;
+  color: var(--text-1); white-space: pre-wrap; overflow-x: auto;
+}
+/* Segmented button group (module pickers, tabs) */
+.btn-small.active {
+  border-color: var(--border-accent); color: var(--text-0);
+  background: rgba(109,124,255,0.14);
+}
 
 /* ── Code blocks ── */
 .code, pre.code {

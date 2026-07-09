@@ -28,7 +28,7 @@ export default function WatchPage() {
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--cyan)", marginTop: 0 }}>🔁 Watch Mode</h2>
-        <p className="dim" style={{ fontSize: 12 }}>
+        <p className="page-lead">
           Continuous monitoring with auto-diff. Runs scans on an interval,
           diffs each against the previous, and alerts ONLY when something
           changes (new / regressed finding) — no Slack spam from boring
@@ -36,12 +36,7 @@ export default function WatchPage() {
         </p>
 
         <div className="card-title" style={{ marginTop: 16 }}>Start a watch loop (CLI)</div>
-        <pre style={{
-          fontSize: 12, fontFamily: "monospace", padding: 12,
-          background: "rgba(0,0,0,0.4)",
-          border: "1px solid var(--border-accent)",
-          whiteSpace: "pre-wrap",
-        }}>{`# Watch a SaaS app every 30 min, auto-create Jira tickets on new criticals:
+        <pre className="cli-block">{`# Watch a SaaS app every 30 min, auto-create Jira tickets on new criticals:
 heaven watch -u https://app.example.com \\
     --engagement prod-monitor \\
     --interval 30m \\
@@ -96,13 +91,13 @@ heaven watch -u https://x --engagement prod \\
             body="The watch loop is a long-running CLI process. Start one with the command above and its iterations will appear here as they run."
           />
         ) : (
-          <table style={{ width: "100%", fontSize: 12 }}>
-            <thead><tr style={{ color: "var(--cyan)" }}>
-              <th align="left">Iteration</th>
-              <th align="left">Scan ID</th>
-              <th align="left">Status</th>
-              <th align="right">Findings</th>
-              <th align="left">Started</th>
+          <table className="data-table">
+            <thead><tr>
+              <th>Iteration</th>
+              <th>Scan ID</th>
+              <th>Status</th>
+              <th className="num">Findings</th>
+              <th>Started</th>
             </tr></thead>
             <tbody>
               {watchScans.map((s) => {
@@ -113,7 +108,7 @@ heaven watch -u https://x --engagement prod \\
                     <td><code>{iter}</code></td>
                     <td><code>{(id || "").slice(0, 8)}</code></td>
                     <td>{s.status || "?"}</td>
-                    <td align="right">{s.findings_count ?? 0}</td>
+                    <td className="num">{s.findings_count ?? 0}</td>
                     <td className="dim" style={{ fontSize: 11 }}>
                       {(s.started_at || "").slice(0, 16).replace("T", " ")}
                     </td>
@@ -130,12 +125,9 @@ heaven watch -u https://x --engagement prod \\
 
 function Channel({ name, active, note }) {
   return (
-    <div style={{
-      padding: 12, background: "rgba(0,0,0,0.3)",
-      border: `1px solid ${active ? "var(--text-0)" : "var(--med)"}33`,
-    }}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{name}</div>
-      <div style={{ color: active ? "var(--text-0)" : "var(--med)", fontSize: 12 }}>
+    <div className={"status-tile " + (active ? "is-active" : "is-inactive")}>
+      <div className="status-tile-title">{name}</div>
+      <div style={{ color: active ? "var(--brand)" : "var(--med)", fontSize: 12 }}>
         {active ? "✓ active" : "✗ not configured"}
       </div>
       <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>{note}</div>

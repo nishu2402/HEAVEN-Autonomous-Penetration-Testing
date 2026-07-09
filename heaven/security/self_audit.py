@@ -158,9 +158,12 @@ class SelfAuditor:
             elif not current and env_var == "HEAVEN_ADMIN_PASSWORD":
                 self._findings.append(AuditFinding(
                     category="insecure_defaults", severity="medium",
-                    title="No admin password configured",
-                    description="HEAVEN_ADMIN_PASSWORD is not set — a random one is generated at startup",
-                    remediation="Set HEAVEN_ADMIN_PASSWORD for persistent admin access",
+                    title="No persistent admin password configured",
+                    description="HEAVEN_ADMIN_PASSWORD is not set — a random admin "
+                                "password is generated at startup and a change is forced "
+                                "on first login (secure, but not stable across restarts)",
+                    remediation="Set HEAVEN_ADMIN_PASSWORD to a strong, unique value "
+                                "(or run `heaven init`) so admin access is stable and auditable",
                 ))
 
     def _check_debug_mode(self) -> None:

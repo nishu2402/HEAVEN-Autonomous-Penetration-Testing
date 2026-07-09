@@ -96,7 +96,6 @@ class SelfAuditor:
         for f in self._findings:
             severity_counts[f.severity] = severity_counts.get(f.severity, 0) + 1
 
-        sum(v for k, v in severity_counts.items() if k != "info")
         score = max(0, 100 - (severity_counts["critical"] * 25 + severity_counts["high"] * 10 +
                                severity_counts["medium"] * 5 + severity_counts["low"] * 1))
 
@@ -117,9 +116,15 @@ class SelfAuditor:
         """Scan source code for hardcoded secrets."""
         logger.info("Checking for hardcoded secrets...")
         py_files = list(self._root.rglob("*.py"))
+        # Only audit HEAVEN's own source — never third-party/vendored code, which
+        # would be slow and can trip the secret patterns on fixtures we don't own.
+        skip_parts = {
+            ".venv", "venv", "env", "site-packages", "node_modules",
+            ".git", "__pycache__", "build", "dist",
+        }
 
         for filepath in py_files:
-            if ".venv" in str(filepath) or "__pycache__" in str(filepath):
+            if skip_parts.intersection(filepath.parts):
                 continue
             try:
                 content = filepath.read_text(errors="ignore")
@@ -156,14 +161,20 @@ class SelfAuditor:
                     remediation=f"Set {env_var} to a strong, unique value via environment variable",
                 ))
             elif not current and env_var == "HEAVEN_ADMIN_PASSWORD":
+                # Informational, not a weakness: with no static password set,
+                # HEAVEN generates a RANDOM admin password at startup and forces a
+                # change on first login — the hardened default. Setting a static
+                # value only buys restart-stability/auditability, so this must not
+                # dock the security score (info severity is excluded from scoring).
                 self._findings.append(AuditFinding(
-                    category="insecure_defaults", severity="medium",
-                    title="No persistent admin password configured",
+                    category="insecure_defaults", severity="info",
+                    title="Admin password auto-generated (no static value set)",
                     description="HEAVEN_ADMIN_PASSWORD is not set — a random admin "
                                 "password is generated at startup and a change is forced "
                                 "on first login (secure, but not stable across restarts)",
-                    remediation="Set HEAVEN_ADMIN_PASSWORD to a strong, unique value "
-                                "(or run `heaven init`) so admin access is stable and auditable",
+                    remediation="Optional: set HEAVEN_ADMIN_PASSWORD to a strong, unique "
+                                "value (or run `heaven init`) so admin access is stable "
+                                "and auditable across restarts",
                 ))
 
     def _check_debug_mode(self) -> None:

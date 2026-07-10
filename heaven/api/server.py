@@ -1794,12 +1794,14 @@ def create_app() -> FastAPI:
         kind: str, request: Request,
         user: User = Depends(require_permission("vuln.validate")),
     ):
-        """Trigger an AI layer manually. kind ∈ {recon-parse, plan, fp-review}.
+        """Trigger an AI layer manually. kind ∈ {recon-parse, plan, fp-review,
+        hypothesize}.
 
         Body JSON varies by kind:
           recon-parse: {"recon": {host data}}
           plan:        {"findings": [...], "assets": [...], "objective_hint": ""}
           fp-review:   {"finding": {...}}
+          hypothesize: {"profile": {...}, "endpoints": [...], "max_hypotheses": 8}
 
         Returns the structured AI output (or {"skipped": "..."} when LLM unavailable).
         """
@@ -1836,6 +1838,19 @@ def create_app() -> FastAPI:
                 if verdict is None:
                     return {"skipped": "finding outside review band"}
                 return verdict.model_dump() if hasattr(verdict, "model_dump") else verdict.__dict__
+            if kind == "hypothesize":
+                # Propose-only: the LLM ranks vuln classes worth probing. Active
+                # verification runs in the authorised scan path, never here.
+                from heaven.ai import VulnHypothesisAgent
+                hyp_agent = VulnHypothesisAgent()
+                if not hyp_agent.available:
+                    return {"skipped": "LLM gateway unavailable"}
+                hyp_out = await hyp_agent.propose(
+                    profile=body.get("profile", {}),
+                    endpoints=body.get("endpoints", []),
+                    max_hypotheses=int(body.get("max_hypotheses") or 8),
+                )
+                return hyp_out.model_dump() if hasattr(hyp_out, "model_dump") else hyp_out.__dict__
         except Exception as e:
             raise HTTPException(500, f"AI {kind} failed: {e}")
 
@@ -1848,15 +1863,20 @@ def create_app() -> FastAPI:
         module: str, request: Request,
         user: User = Depends(require_permission("config.modify")),
     ):
-        """Run a post-exploitation module. module ∈ {linpeas, bloodhound, cred-reuse}.
+        """Run a post-exploitation module.
+
+        module ∈ {enum, loot, full, linpeas, bloodhound, cred-reuse}.
 
         Body JSON depends on module:
+          enum/loot/full: {"host": "...", "username": "...", "password": "...",
+                           "private_key": "...", "port": 22}
           linpeas:    {"host": "...", "username": "...", "password": "..."}
           bloodhound: {"domain": "...", "dc_host": "...", "username": "...", "password": "..."}
           cred-reuse: {"credentials": [["u","p"], ...], "targets": [["h", port, "ssh"], ...]}
 
         These all require explicit authorization — admin permission is the gate.
         Output is returned synchronously for now (long-running modules log progress).
+        Secrets harvested by loot/full are redacted in the response.
         """
         try:
             body = await request.json()
@@ -1864,6 +1884,37 @@ def create_app() -> FastAPI:
             body = {}
 
         try:
+            if module == "enum":
+                from heaven.postex import LinuxEnumEngine
+                enum_res = await LinuxEnumEngine(authorized=True).enumerate(
+                    host=body["host"], username=body["username"],
+                    password=body.get("password"),
+                    private_key=body.get("private_key"),
+                    port=int(body.get("port", 22)),
+                )
+                return enum_res.to_dict()
+            if module == "loot":
+                from heaven.postex import LootHarvester
+                loot_res = await LootHarvester(authorized=True).harvest(
+                    host=body["host"], username=body["username"],
+                    password=body.get("password"),
+                    private_key=body.get("private_key"),
+                    port=int(body.get("port", 22)),
+                )
+                return loot_res.to_dict()  # already redacted
+            if module == "full":
+                from heaven.postex import PostExSession
+                session = PostExSession(
+                    body["host"], body["username"],
+                    password=body.get("password"),
+                    private_key=body.get("private_key"),
+                    port=int(body.get("port", 22)), authorized=True,
+                )
+                rep = await session.run_full_postex(
+                    enable_loot=bool(body.get("enable_loot", True)),
+                    ai_analysis=bool(body.get("ai_analysis", True)),
+                )
+                return rep.to_dict()  # reusable_credentials excluded by design
             if module == "linpeas":
                 from heaven.postex import LinpeasRunner
                 runner = LinpeasRunner(authorized=True)
@@ -2338,6 +2389,55 @@ def create_app() -> FastAPI:
             out["persisted_count"] = persisted
             return out
         return result.to_dict()
+
+    @app.post("/api/sca")
+    async def sca_scan(
+        request: Request,
+        user: User = Depends(require_permission("vuln.validate")),
+    ):
+        """Software Composition Analysis: audit a codebase's dependency
+        manifests against OSV.dev. Persists findings if `engagement` is given.
+
+        Body JSON: {"path": "/abs/path", "engagement": "name", "max_files": 200}
+        """
+        try:
+            from heaven.devsecops.vuln_kb import enrich_finding
+            from heaven.vulnscan.osv_client import OSVClient
+            from heaven.vulnscan.sca_scanner import scan_path
+        except Exception as e:  # pragma: no cover
+            raise HTTPException(500, f"sca_scanner unavailable: {e}")
+        if not OSVClient().available:
+            raise HTTPException(412, "httpx not installed on the server "
+                                     "(needed for OSV lookups)")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        path = body.get("path")
+        if not path:
+            raise HTTPException(422, "body.path is required")
+
+        result = await scan_path(path, max_files=int(body.get("max_files") or 200))
+        result["findings"] = [enrich_finding(f) for f in result.get("findings", [])]
+
+        engagement = body.get("engagement")
+        if engagement and not result.get("error"):
+            import uuid as _uuid
+            from pathlib import Path as _P
+            store = _engagement_store_factory(engagement)
+            scan_id = f"sca-{_uuid.uuid4().hex[:12]}"
+            store.record_scan_start(
+                scan_id, name=f"SCA: {_P(path).name}", mode="sca",
+                config={"path": path, "manifests": result.get("manifests", [])},
+            )
+            for f in result["findings"]:
+                store.upsert_finding(scan_id, f)
+            store.record_scan_complete(
+                scan_id, {"findings_count": len(result["findings"])})
+            result["engagement_scan_id"] = scan_id
+            result["persisted_count"] = len(result["findings"])
+        return result
 
     @app.get("/api/sast/rules")
     async def sast_rules_list(

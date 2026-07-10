@@ -34,6 +34,7 @@ const LateralPage    = lazy(() => import("./pages/Lateral.jsx"));
 const DiffPage       = lazy(() => import("./pages/Diff.jsx"));
 const TicketsPage    = lazy(() => import("./pages/Tickets.jsx"));
 const SastPage       = lazy(() => import("./pages/Sast.jsx"));
+const ScaPage        = lazy(() => import("./pages/Sca.jsx"));
 const WatchPage      = lazy(() => import("./pages/Watch.jsx"));
 const Reports        = lazy(() => import("./pages/Reports.jsx"));
 const SettingsPage   = lazy(() => import("./pages/Settings.jsx"));
@@ -137,6 +138,7 @@ function Shell() {
               <Route path="/health" element={<HealthPage />} />
               <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/sast" element={<SastPage />} />
+              <Route path="/sca" element={<ScaPage />} />
               <Route path="/watch" element={<WatchPage />} />
               <Route path="*" element={<NotFound />} />
               </Routes>

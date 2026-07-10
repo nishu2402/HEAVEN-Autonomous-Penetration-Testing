@@ -928,6 +928,106 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         timeout=600,
     )
 
+    # ═══ Phase: SCA — exposed dependency manifests → OSV.dev ═══
+    async def _sca_probe(**kw):
+        """Audit any dependency manifest the app exposes (requirements.txt,
+        package-lock.json, composer.lock, go.sum, …) against OSV.dev. This
+        catches known-vulnerable *dependencies* — the class NVD's CPE search
+        and HEAVEN's inline CVE table cannot cover."""
+        try:
+            import aiohttp
+
+            from heaven.vulnscan.sca_scanner import (
+                SUPPORTED_MANIFEST_NAMES, scan_manifest_text,
+            )
+        except ImportError:
+            return {}
+        from urllib.parse import urlparse
+
+        origins: set[str] = set()
+        for url in targets.get("urls", []):
+            p = urlparse(url)
+            if p.scheme and p.netloc:
+                origins.add(f"{p.scheme}://{p.netloc}")
+        if not origins:
+            return {}
+
+        findings: list[dict] = []
+        async with aiohttp.ClientSession(
+                        timeout=aiohttp.ClientTimeout(total=15, connect=8)) as session:
+            for origin in origins:
+                for name in SUPPORTED_MANIFEST_NAMES:
+                    url = f"{origin}/{name}"
+                    try:
+                        async with session.get(url, allow_redirects=False) as resp:
+                            if resp.status != 200:
+                                continue
+                            text = await resp.text()
+                    except Exception:  # noqa: BLE001 - unreachable path, try next
+                        continue
+                    if text.strip():
+                        findings.extend(
+                            await scan_manifest_text(name, text, target=url))
+        return {"findings": findings, "total": len(findings)}
+
+    orch.add_task(
+        "Dependency Audit (SCA/OSV)", _sca_probe,
+        phase=ScanPhase.VULN_SCAN, depends_on=[deep_id],
+        timeout=300,
+    )
+
+    # ═══ Phase: AI HYPOTHESIS → VERIFY (LLM proposes, real detectors confirm) ═══
+    # The "thinking → finding" link: the LLM reads the parsed tech stack +
+    # endpoints and proposes which vuln classes are worth probing; HEAVEN then
+    # verifies each with a genuine detector and reports only confirmed findings.
+    # No-op without an LLM key (deterministic scanners already cover the surface).
+    async def _ai_hypothesis(**kw):
+        try:
+            from heaven.ai.vuln_hypothesis import (
+                VulnHypothesisAgent, verify_hypotheses,
+            )
+        except ImportError:
+            return {"skipped": True, "reason": "heaven.ai not importable"}
+        agent = VulnHypothesisAgent()
+        if not agent.available:
+            return {"skipped": True, "reason": "LLM gateway unavailable"}
+
+        # Gather the AssetProfiles produced by AI_PARSE + discovered endpoints.
+        profile: dict = {}
+        endpoints: list[dict] = []
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for p in data.get("asset_profiles", []) or []:
+                if isinstance(p, dict):
+                    profile.setdefault("tech_stack", [])
+                    profile["tech_stack"] += p.get("tech_stack", []) or []
+                    if p.get("waf_detected"):
+                        profile["waf_detected"] = p["waf_detected"]
+            for ep in data.get("endpoints", []) or []:
+                if isinstance(ep, dict) and ep.get("url"):
+                    endpoints.append(ep)
+        for u in targets.get("urls", []):
+            endpoints.append({"url": u})
+        if not endpoints:
+            return {"skipped": True, "reason": "no endpoints to reason about"}
+
+        out = await agent.propose(profile, endpoints, max_hypotheses=8)
+        hyps = getattr(out, "hypotheses", []) or []
+        if not hyps:
+            return {"findings": [], "hypotheses": 0}
+        # The scan already passed the authorization gate, so active verify is OK.
+        res = await verify_hypotheses(hyps, authorized=True, oast=None)
+        res["hypotheses"] = len(hyps)
+        return res
+
+    orch.add_task(
+        "AI Hypothesis → Verify", _ai_hypothesis,
+        phase=ScanPhase.VULN_SCAN, depends_on=[ai_parse_id, deep_id],
+        timeout=600,
+    )
+
     # ═══ Phase: NUCLEI SCAN ═══
     async def _nuclei_scan(**kw):
         try:
@@ -1514,13 +1614,17 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             except Exception as e:
                 summary["cred_reuse"] = {"error": str(e)}
 
-        # 2. Linpeas on every host where we now have valid SSH creds
+        # 2. Full post-exploitation playbook on every host where we now have
+        #    valid SSH creds: self-contained privesc enumeration + loot harvest +
+        #    (LLM) prioritisation. Harvested credentials are fed back into a
+        #    second cred-reuse round — the lateral-movement loop.
+        summary["postex_hosts"] = []
+        summary["findings"] = []
+        looted_creds: list[tuple[str, str]] = []
         if summary.get("cred_reuse") and summary["cred_reuse"].get("hits"):
             try:
-                from heaven.postex import LinpeasRunner
-                runner = LinpeasRunner(authorized=True)
+                from heaven.postex import PostExSession
                 for hit in summary["cred_reuse"]["hits"][:5]:  # cap fan-out
-                    # cred_validator stores (user, pass) — we need to find which
                     creds_for_hit = next(
                         ((u, p) for (u, p) in discovered_creds if u == hit["username"]),
                         None,
@@ -1528,21 +1632,56 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     if not creds_for_hit:
                         continue
                     try:
-                        r = await runner.run(
-                            host=hit["host"], username=creds_for_hit[0],
+                        session = PostExSession(
+                            hit["host"], creds_for_hit[0],
                             password=creds_for_hit[1], port=hit["port"],
+                            authorized=True,
                         )
-                        summary["linpeas"].append({
-                            "host": hit["host"], "success": r.success,
-                            "privesc_vectors": r.privesc_vectors[:5],
-                            "kernel_version": r.kernel_version,
+                        rep = await session.run_full_postex(
+                            enable_loot=True,
+                            ai_analysis=bool(targets.get("autonomous")),
+                        )
+                        summary["postex_hosts"].append({
+                            "host": rep.host, "success": rep.success,
+                            "error": rep.error, "facts": rep.facts,
+                            "finding_count": len(rep.findings),
+                            "harvested_credentials": rep.harvested_credentials,
+                            "kill_chain": rep.kill_chain,
+                            "ai_analysis": rep.ai_analysis,
                         })
+                        # Harvest → findings land in the engagement DB via the
+                        # normal `findings` key the orchestrator collects.
+                        summary["findings"].extend(rep.findings)
+                        # Reusable SSH creds feed the next lateral hop. These come
+                        # from the in-memory `reusable_credentials` field, which is
+                        # never serialised — plaintext stays out of the DB/report.
+                        for pair in rep.reusable_credentials:
+                            if pair not in looted_creds and pair not in discovered_creds:
+                                looted_creds.append(pair)
                     except Exception as e:
-                        summary["linpeas"].append({
+                        summary["postex_hosts"].append({
                             "host": hit["host"], "success": False, "error": str(e),
                         })
             except Exception as e:
-                summary["linpeas_error"] = str(e)
+                summary["postex_error"] = str(e)
+
+        # 3. Second cred-reuse round using anything harvested (bounded, no recursion)
+        if looted_creds and discovered_hosts:
+            try:
+                from heaven.postex import CredentialValidator
+                v2 = CredentialValidator(authorized=True)
+                tgt2 = [(h, 22, "ssh") for h in discovered_hosts]
+                reuse2 = await v2.validate(looted_creds, tgt2)
+                summary["cred_reuse_round2"] = {
+                    "attempted": reuse2.attempted,
+                    "hit_count": len(reuse2.hits),
+                    "hits": [
+                        {"host": h.host, "port": h.port, "username": h.username}
+                        for h in reuse2.hits[:10]
+                    ],
+                }
+            except Exception as e:
+                summary["cred_reuse_round2"] = {"error": str(e)}
 
         return summary
 

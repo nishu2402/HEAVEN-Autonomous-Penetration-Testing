@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20624%20Tests%20%C2%B7%20137%20Modules%20%C2%B7%2042%20CLI%20Commands%20%C2%B7%2055%20API%20Routes&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20683%20Tests%20%C2%B7%20137%20Modules%20%C2%B7%2042%20CLI%20Commands%20%C2%B7%2055%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;624+Tests+%C2%B7+137+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;683+Tests+%C2%B7+137+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
 </p>
 
 <p align="center">
@@ -115,14 +115,14 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 624 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 683 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 137 |
 | ⌨️ **CLI Commands** | 42 |
 | 🌐 **API Routes** | 55 RBAC-protected routes |
 | 🖥️ **UI Pages** | 21 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
-| 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · FP review · knowledge graph |
+| 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
 | 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · **deterministic fallback (no API key needed)** |
 | 📊 **CVSS Predictor** | ExtraTreesRegressor · R²=0.9925 · 13 features · trained on NVD |
 | 🗺️ **Threat Intel** | MITRE ATT&CK mapping · Lockheed Kill Chain · TAXII feed |
@@ -151,11 +151,11 @@ It runs three ways from the **same engagement dataset**:
 | 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS (reflected-origin + credentials) · CRLF · open redirect (canary-confirmed) · IDOR · mass assignment · dir/file fuzzing · JWT attacks (alg:none · weak-secret crack) · insecure session cookies · race conditions · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
 | 🧬 **API Security** | OWASP API Top 10 — BOLA/IDOR · broken auth · mass assignment · excessive data exposure (REST + GraphQL) |
 | 💥 **Verified Exploitation** | Active proof, not guesses — sqlmap SQLi dump · RCE canary file drop/read · **in-house OAST collaborator** proving SSRF **and** XXE out-of-band (no Burp Collaborator / interactsh dependency) |
-| 🔓 **Post-Exploitation** | linPEAS privesc enum · BloodHound AD collection · SSH/SMB/PsExec lateral movement · credential reuse / pass-the-hash |
+| 🔓 **Post-Exploitation** | **self-contained privesc engine** (GTFOBins-scored SUID/sudo/caps · docker/lxd escape · writable `/etc/passwd` · cron/PATH hijack — no linPEAS download) · **loot harvester** (SSH keys · AWS/GCP/Azure creds · kubeconfig · `.env`/`.netrc`/`.pgpass`/history — secrets redacted, plaintext never persisted) · **credential-reuse loop** feeding SSH/SMB/PsExec lateral movement + pass-the-hash · **ATT&CK-tagged kill-chain** · optional LLM path prioritisation · BloodHound AD collection — `heaven postex {enum,loot,full}` |
 | 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini) · **deterministic fallback needs no API key** |
 | 📊 **Risk Scoring** | CVSS-v3 ML predictor (R²=0.9925, 13-feature ExtraTrees) · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
-| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
+| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA — dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
 | 📄 **Reporting** | 8 formats from CLI and web UI — PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL |
 | 🔇 **FP Suppression** | Two-stage confirmation pass · sub-0.40-confidence results discarded · optional LLM second opinion |
 
@@ -400,6 +400,8 @@ deterministic heuristic (or pass `--no-llm`).
 | `watch` | Continuous monitoring — diffs each run, alerts only on change |
 | `diff` | Compare two scans (new / resolved / regressed / unchanged) |
 | `sast` | Semgrep static analysis + curated OWASP rule pack |
+| `sca` | Software Composition Analysis — dependency manifests vs. OSV.dev advisories |
+| `postex enum/loot/full` | Post-exploitation — privesc enumeration · loot harvest · full playbook (kill-chain + AI) |
 | `lateral` · `knowledge` | Lateral movement · cross-engagement knowledge graph |
 | `exploitdb` · `mitre-report` | Exploit-DB lookup · ATT&CK Navigator layer |
 | `tickets` | Push findings to Jira / Linear |
@@ -463,6 +465,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 | **Watch** | Continuous monitoring · differential alert feed |
 | **Scan Diff** | New / resolved / regressed / unchanged findings |
 | **SAST** | Semgrep results + OWASP rule pack |
+| **SCA · Deps** | Dependency audit vs. OSV.dev — vulnerable packages + fix versions |
 | **Autonomous** | LLM observe→plan→act loop with bounded budget |
 | **AI Plans** | Saved attack plans from autonomous sessions |
 | **Coverage** | OWASP coverage grade per engagement |
@@ -528,6 +531,7 @@ curl http://localhost:8443/api/engagement/findings \
 | `POST /api/autonomous/run` | `scan.create` | Iterative LLM pen-test loop |
 | `GET /api/scans/{id}/diff?baseline=…` | `scan.view` | Differential scan |
 | `POST /api/sast/scan` | `scan.create` | Semgrep SAST |
+| `POST /api/sca` | `vuln.validate` | Dependency audit vs. OSV.dev |
 | `POST /api/lateral/run` · `/api/postex/{module}/run` | admin | Lateral / post-ex modules |
 | `GET /api/report/export?format=…` | `report.view` | **Download report** (8 formats) |
 | `POST /api/auth/change-password` | session | Change password |
@@ -648,7 +652,7 @@ The 48 MB model isn't bundled in the wheel or git — fetch it once (SHA-256 ver
 heaven/                   ← Python package (137 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
-├── postex/               linPEAS · BloodHound · lateral movement · credential reuse
+├── postex/               privesc enum engine (GTFOBins) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
 ├── ai/                   LLM gateway · recon agent · attack-chain planner · FP review · knowledge graph
 ├── ml/                   CVSS model · feature engine · Bayesian priors · training pipeline
 ├── mitre/                ATT&CK mapping · kill chain · TAXII threat-intel
@@ -659,7 +663,7 @@ heaven/                   ← Python package (137 modules)
 └── cli/                  Click CLI — one module per command group (42 commands)
 
 heaven-ui/                React + Vite web console (21 pages)
-tests/                    624 pytest tests + native & DVWA benchmark suites
+tests/                    683 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh
@@ -745,7 +749,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>624 tests · 137 modules · 42 CLI commands · 55 API routes · 21 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>683 tests · 137 modules · 42 CLI commands · 55 API routes · 21 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

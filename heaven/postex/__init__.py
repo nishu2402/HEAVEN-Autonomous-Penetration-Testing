@@ -24,6 +24,15 @@ from heaven.postex.lateral import (
     SSHKeyReuseScanner, SMBLateralExecutor,
     LateralSummary, LateralHop, run_lateral,
 )
+from heaven.postex.enum_engine import (
+    LinuxEnumEngine, EnumResult, HostFacts, parse_enumeration,
+)
+from heaven.postex.loot import (
+    LootHarvester, LootResult, LootItem, parse_loot,
+)
+from heaven.postex.session import (
+    PostExSession, PostExReport, build_kill_chain,
+)
 
 __all__ = [
     "LinpeasRunner", "LinpeasResult",
@@ -31,4 +40,8 @@ __all__ = [
     "CredentialValidator", "CredentialHit",
     "SSHKeyReuseScanner", "SMBLateralExecutor",
     "LateralSummary", "LateralHop", "run_lateral",
+    # advanced post-exploitation
+    "LinuxEnumEngine", "EnumResult", "HostFacts", "parse_enumeration",
+    "LootHarvester", "LootResult", "LootItem", "parse_loot",
+    "PostExSession", "PostExReport", "build_kill_chain",
 ]

@@ -322,6 +322,69 @@ async def _check_open_redirect(session: "aiohttp.ClientSession", url: str) -> li
 
 
 # ── orchestration ─────────────────────────────────────────────────────────────
+# ── GraphQL introspection ─────────────────────────────────────────────────────
+# Common mount points for a GraphQL endpoint. We only report when the endpoint
+# actually answers an introspection query, so probing extra paths is safe.
+_GRAPHQL_PATHS = (
+    "/graphql", "/graphql/", "/api/graphql", "/v1/graphql", "/v2/graphql",
+    "/query", "/gql", "/api/gql", "/graphiql", "/graphql/console",
+    "/index.php?graphql",
+)
+# Minimal, universally-valid introspection query. A server with introspection
+# disabled answers with an error and no ``__schema`` — so a populated
+# ``data.__schema`` is definitive proof, not a heuristic.
+_GRAPHQL_INTROSPECTION = {"query": "{__schema{queryType{name} types{name}}}"}
+
+
+async def _check_graphql(session: "aiohttp.ClientSession", origin: str) -> list[dict]:
+    """Detect a GraphQL endpoint that answers introspection queries."""
+    for path in _GRAPHQL_PATHS:
+        url = origin.rstrip("/") + path
+        try:
+            async with session.post(
+                url, json=_GRAPHQL_INTROSPECTION,
+                headers={"Content-Type": "application/json"},
+                allow_redirects=False,
+            ) as resp:
+                if resp.status not in (200, 400):  # 400 => endpoint exists, query rejected
+                    continue
+                ctype = resp.headers.get("Content-Type", "")
+                if "json" not in ctype.lower():
+                    continue
+                try:
+                    data = json.loads(await resp.text())
+                except (ValueError, json.JSONDecodeError):
+                    continue
+        except Exception as e:  # noqa: BLE001 - network hiccup, try next path
+            logger.debug("graphql probe error on %s: %s", url, e)
+            continue
+
+        schema = (data.get("data") or {}).get("__schema") if isinstance(data, dict) else None
+        if isinstance(schema, dict) and schema.get("queryType"):
+            type_count = len(schema.get("types") or [])
+            return [_finding(
+                target=url,
+                vuln_type="graphql_introspection",
+                severity="medium",
+                title="GraphQL introspection enabled",
+                description=(
+                    "The GraphQL endpoint answered a full introspection query, "
+                    "exposing its entire schema (types, fields, mutations). This "
+                    "hands an attacker the complete API surface for targeting."
+                ),
+                confidence=0.95,   # the server returned a real, populated schema
+                evidence={
+                    "endpoint": url,
+                    "query_type": schema.get("queryType", {}).get("name", ""),
+                    "type_count": type_count,
+                    "signals": ["introspection_schema_returned"],
+                    "proof": (f"POST {path} returned a populated __schema with "
+                              f"{type_count} types"),
+                },
+            )]
+    return []
+
+
 async def scan_url_misconfig(session: "aiohttp.ClientSession", url: str) -> list[dict]:
     import asyncio
     results = await asyncio.gather(
@@ -377,6 +440,20 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
                 findings.extend(await scan_url_misconfig(session, u))
 
         await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
+
+        # GraphQL introspection is a host-level check — probe each unique origin
+        # once (not per URL) so a big crawl doesn't hammer /graphql repeatedly.
+        origins: set[str] = set()
+        for u in unique:
+            p = urlparse(u)
+            if p.scheme and p.netloc:
+                origins.add(f"{p.scheme}://{p.netloc}")
+
+        async def _gql(origin: str) -> None:
+            async with sem:
+                findings.extend(await _check_graphql(session, origin))
+
+        await asyncio.gather(*[_gql(o) for o in origins], return_exceptions=True)
 
     findings = _dedup(findings)
     logger.info("Misconfig scan → %d finding(s) across %d URL(s)", len(findings), len(unique))

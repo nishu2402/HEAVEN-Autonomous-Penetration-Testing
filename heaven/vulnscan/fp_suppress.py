@@ -385,6 +385,87 @@ async def suppress_finding(session, finding: dict) -> SuppressionVerdict:
         )
 
 
+# ── Calibration floors ────────────────────────────────────────────────────────
+# The bucket definitions at the top of this file are a *promise*: "strong" means
+# two independent signals confirmed it. These helpers make apply_verdict honour
+# that promise, so a single oracle is never reported as rock-solid and a finding
+# with no supporting artifact at all is never reported as high-confidence.
+
+_STRONG_MIN = 0.95
+# A definitive, effectively-uncoincidable proof may stand alone as "strong".
+_DEFINITIVE_MARKERS = ("oob_callback", "cloud_metadata", "metadata_in_response")
+# Confirmation words that indicate *some* substantiation exists (used only for
+# the proof-artifact floor, not for counting independent signals — reproducing
+# the same oracle is not a second signal).
+_CONFIRM_MARKERS = (
+    "reproducible", "error_only_on_payload", "unescaped",
+    "above_baseline_noise", "union", "advisory_version_match",
+    "introspection_schema", "co_confirmed",
+)
+
+
+def _independent_signal_count(finding: dict, verdict: SuppressionVerdict) -> int:
+    """Number of *distinct* independent oracles a detector recorded.
+
+    Only ``evidence.signals`` counts — that is where a detector lists the
+    genuinely independent confirmations it obtained. Reproducing one oracle
+    (``*_reproduced``) or a suppressor re-validating it does not add a signal,
+    so those are normalised away before counting.
+    """
+    ev = finding.get("evidence") or {}
+    families: set[str] = set()
+    for s in (ev.get("signals") or []):
+        fam = (str(s).lower()
+               .replace("_confirmed", "").replace("_reproduced", "")
+               .replace("_reproducible", ""))
+        if fam:
+            families.add(fam)
+    return len(families)
+
+
+def _is_definitive(finding: dict, verdict: SuppressionVerdict) -> bool:
+    """A single OOB/cloud-metadata proof is effectively uncoincidable."""
+    ev = finding.get("evidence") or {}
+    if ev.get("oob_callback_received") or ev.get("cloud_metadata_in_response"):
+        return True
+    joined = " ".join(verdict.reasons).lower()
+    return any(m in joined for m in _DEFINITIVE_MARKERS)
+
+
+def _has_proof_artifact(finding: dict, verdict: SuppressionVerdict) -> bool:
+    """True when a finding carries *some* concrete substantiation."""
+    if finding.get("evidence"):
+        return True
+    if any(finding.get(k) for k in
+           ("payload", "canary", "cve_id", "cve", "param", "endpoint",
+            "request", "response", "proof")):
+        return True
+    joined = " ".join(verdict.reasons).lower()
+    return any(m in joined for m in _DEFINITIVE_MARKERS + _CONFIRM_MARKERS)
+
+
+def _calibrate(finding: dict, verdict: SuppressionVerdict) -> tuple[float, str, list[str]]:
+    """Apply the confidence floors; return (confidence, bucket, extra_reasons)."""
+    conf = verdict.final_confidence
+    extra: list[str] = []
+    if not verdict.keep:
+        return conf, verdict.bucket, extra
+
+    # 1. "strong" requires 2 independent signals OR a definitive OOB/metadata proof.
+    if conf >= _STRONG_MIN:
+        if not _is_definitive(finding, verdict) and \
+                _independent_signal_count(finding, verdict) < 2:
+            conf = 0.94
+            extra.append("capped_at_high_single_signal")
+
+    # 2. No proof artifact at all → never report above "medium" (needs review).
+    if conf >= 0.60 and not _has_proof_artifact(finding, verdict):
+        conf = 0.59
+        extra.append("no_proof_artifact_capped_to_review")
+
+    return conf, _bucket_for(conf), extra
+
+
 def apply_verdict(finding: dict, verdict: SuppressionVerdict,
                   *, engagement_store=None) -> dict:
     """Mutate a finding dict with the suppressor's verdict.
@@ -394,9 +475,11 @@ def apply_verdict(finding: dict, verdict: SuppressionVerdict,
     risk_score. The original raw score is preserved in
     finding["risk_score_raw"] for audit.
     """
-    finding["confidence"] = round(verdict.final_confidence, 3)
-    finding["confidence_bucket"] = verdict.bucket
-    finding["fp_check_reasons"] = verdict.reasons
+    conf, bucket, extra = _calibrate(finding, verdict)
+    finding["confidence"] = round(conf, 3)
+    finding["confidence_bucket"] = bucket
+    finding["signal_count"] = _independent_signal_count(finding, verdict)
+    finding["fp_check_reasons"] = verdict.reasons + extra
     finding["fp_check_evidence"] = verdict.evidence
     finding["suppressed"] = not verdict.keep
     if not verdict.keep:

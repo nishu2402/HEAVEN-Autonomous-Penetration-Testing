@@ -73,6 +73,12 @@ SQLI_ERROR_PROBES: list[tuple[str, str]] = [
 # Boolean-based SQLi: (true_payload, false_payload, probe_name)
 # True condition → same response as baseline; False condition → different response.
 # See the comment-style note above: terminators are "-- " or "#", never bare "--".
+# When True (default), a boolean-blind SQLi oracle must reproduce on a second
+# independent round before it is reported. This is the primary defence against
+# the boolean-SQLi false positives that reflective / non-deterministic pages
+# produce. Operators who want maximum recall on a stable target can flip it off.
+REQUIRE_BOOLEAN_REPRODUCTION: bool = True
+
 SQLI_BOOL_PROBES: list[tuple[str, str, str]] = [
     ("1 AND 1=1-- ", "1 AND 1=2-- ", "and_bool_int"),
     ("1' AND '1'='1'-- ", "1' AND '1'='2'-- ", "and_bool_str"),
@@ -532,29 +538,51 @@ class InjectionScanner:
 
             # Reflection-resistant oracle check (see _boolean_sqli_confirmed):
             # a page that merely echoes the payload is NOT a boolean-blind SQLi.
-            if _boolean_sqli_confirmed(baseline_body, body_true, body_false,
-                                       true_pl, false_pl):
-                self._add_finding(
-                    target=url_true,
-                    vuln_type="sqli",
-                    title=f"SQL Injection (boolean-based blind) — param '{param}'",
-                    severity="critical",
-                    confidence=0.80,
-                    evidence={
-                        "param": param,
-                        "probe": probe_name,
-                        "technique": "boolean_blind",
-                        "true_payload": true_pl,
-                        "false_payload": false_pl,
-                        "baseline_len": len(baseline_body),
-                        "true_len": len(body_true),
-                        "false_len": len(body_false),
-                        "url": url,
-                    },
-                    remediation="Use parameterised queries / prepared statements.",
-                    cwe="CWE-89",
-                )
-                return
+            if not _boolean_sqli_confirmed(baseline_body, body_true, body_false,
+                                           true_pl, false_pl):
+                continue
+
+            # Co-confirmation: a real boolean-blind oracle is deterministic, so it
+            # must reproduce on a second independent round. A dynamic page that
+            # differed once by chance will not — this is the fix for the
+            # boolean-SQLi false positives seen live against reflective DVWA
+            # endpoints (xss_r / fi / brute).
+            reproduced = True
+            if REQUIRE_BOOLEAN_REPRODUCTION:
+                async with self._sem:
+                    _, body_true2 = await _get(session, url_true, self._headers)
+                async with self._sem:
+                    _, body_false2 = await _get(session, url_false, self._headers)
+                reproduced = bool(body_true2 and body_false2 and _boolean_sqli_confirmed(
+                    baseline_body, body_true2, body_false2, true_pl, false_pl))
+            if not reproduced:
+                continue  # did not reproduce → treat as noise, try next probe
+
+            self._add_finding(
+                target=url_true,
+                vuln_type="sqli",
+                title=f"SQL Injection (boolean-based blind) — param '{param}'",
+                severity="critical",
+                confidence=0.80,
+                evidence={
+                    "param": param,
+                    "probe": probe_name,
+                    "technique": "boolean_blind",
+                    "true_payload": true_pl,
+                    "false_payload": false_pl,
+                    "baseline_len": len(baseline_body),
+                    "true_len": len(body_true),
+                    "false_len": len(body_false),
+                    "reproduced": True,
+                    "signals": ["boolean_oracle_confirmed", "boolean_oracle_reproduced"],
+                    "proof": (f"boolean oracle held on two independent rounds "
+                              f"(param '{param}', probe {probe_name})"),
+                    "url": url,
+                },
+                remediation="Use parameterised queries / prepared statements.",
+                cwe="CWE-89",
+            )
+            return
 
     async def _test_sqli_union_param(self, session, url: str, param: str,
                                      baseline_body: str) -> None:

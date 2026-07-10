@@ -383,6 +383,13 @@ export const AI = {
 };
 
 export const Postex = {
+  // Advanced, self-contained post-exploitation (SSH-based, secrets redacted).
+  enum: (body) =>
+    api(`/postex/enum/run`, { method: "POST", body: JSON.stringify(body) }),
+  loot: (body) =>
+    api(`/postex/loot/run`, { method: "POST", body: JSON.stringify(body) }),
+  full: (body) =>
+    api(`/postex/full/run`, { method: "POST", body: JSON.stringify(body) }),
   linpeas: (body) =>
     api(`/postex/linpeas/run`, { method: "POST", body: JSON.stringify(body) }),
   bloodhound: (body) =>
@@ -489,6 +496,14 @@ export const SAST = {
     api(`/sast/scan`, { method: "POST", body: JSON.stringify(body) }),
   // GET /api/sast/rules
   rules: () => api(`/sast/rules`),
+};
+
+// ── Software Composition Analysis (OSV.dev) ──
+
+export const SCA = {
+  // POST /api/sca — audit dependency manifests against OSV.dev
+  scan: (body) =>
+    api(`/sca`, { method: "POST", body: JSON.stringify(body) }),
 };
 
 // WebSocket helper — token via query string (browsers can't set headers on WS open)

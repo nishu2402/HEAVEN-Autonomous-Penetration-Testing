@@ -68,8 +68,9 @@ SETTINGS: tuple[SettingSpec, ...] = (
     ),
     SettingSpec(
         "HEAVEN_LLM_MODEL", "LLM model override", "AI / LLM",
-        "Optional. Pin a specific model id; blank uses the provider default.",
-        secret=False, placeholder="gemini-1.5-pro",
+        "Optional. Pin a specific model id; blank uses the provider default "
+        "(gemini-2.5-flash / claude-sonnet-5 / gpt-4o).",
+        secret=False, placeholder="gemini-2.5-flash",
     ),
 
     # ── Recon enrichment ──

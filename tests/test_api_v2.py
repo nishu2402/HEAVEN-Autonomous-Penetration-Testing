@@ -70,6 +70,15 @@ def test_ai_recon_parse_skips_when_no_gateway(api_client):
     # No API key set => gateway unavailable => endpoint returns {"skipped": ...}
     r = api_client.post("/api/ai/recon-parse/run", json={"recon": {"host": "x"}})
     assert r.status_code == 200, r.text
+
+
+def test_ai_hypothesize_skips_when_no_gateway(api_client):
+    # The vuln-hypothesis agent is propose-only over the API and must degrade to
+    # {"skipped": ...} without an LLM key (never fabricate hypotheses).
+    r = api_client.post("/api/ai/hypothesize/run",
+                        json={"profile": {"tech_stack": ["php"]}, "endpoints": []})
+    assert r.status_code == 200, r.text
+    assert "skipped" in r.json()
     body = r.json()
     # Either skipped (no LLM key) or a real profile
     assert "skipped" in body or "host" in body
@@ -85,6 +94,31 @@ def test_postex_unknown_module_returns_400(api_client):
 def test_postex_linpeas_missing_field_returns_400(api_client):
     r = api_client.post("/api/postex/linpeas/run", json={})  # missing host/username
     assert r.status_code in (400, 500)
+
+
+def test_postex_enum_missing_field_returns_400(api_client):
+    r = api_client.post("/api/postex/enum/run", json={})  # missing host/username
+    assert r.status_code == 400
+
+
+def test_postex_enum_unreachable_host_returns_structured_failure(api_client):
+    # A valid-shaped request to an unreachable host degrades gracefully to a
+    # structured result rather than a 5xx (or 400 if asyncssh is absent).
+    r = api_client.post("/api/postex/enum/run", json={
+        "host": "127.0.0.1", "username": "nobody", "password": "x", "port": 1,
+    })
+    assert r.status_code in (200, 400, 500)
+    if r.status_code == 200:
+        body = r.json()
+        assert body["success"] is False
+        assert "host" in body and "vector_count" in body
+
+
+def test_postex_loot_full_routes_share_endpoint(api_client):
+    # enum/loot/full all route through /api/postex/{module}/run.
+    for module in ("loot", "full"):
+        r = api_client.post(f"/api/postex/{module}/run", json={})
+        assert r.status_code == 400  # missing required host/username
 
 
 # ── Gap 8: Replay missing scan ──────────────────────────────────────────
@@ -222,3 +256,39 @@ def test_admin_username_configurable(monkeypatch):
     assert res["user"]["role"] == "admin"
     assert res["must_change_password"] is False
     assert am.authenticate("admin", "admin") is None
+
+
+# ── SCA (Software Composition Analysis / OSV.dev) endpoint ─────────────────
+
+def test_sca_requires_path(api_client):
+    r = api_client.post("/api/sca", json={})
+    assert r.status_code == 422
+
+
+def test_sca_endpoint_returns_shape(api_client, monkeypatch, tmp_path):
+    """The /api/sca route audits a path and returns normalised findings.
+    scan_path is stubbed so the test never touches the network."""
+    import heaven.vulnscan.sca_scanner as sca
+
+    async def fake_scan_path(root, max_files=200, client=None):
+        return {
+            "packages": 1,
+            "manifests": ["requirements.txt"],
+            "findings": [{
+                "vuln_type": "vulnerable_dependency", "severity": "high",
+                "title": "Vulnerable dependency: flask 0.12.2", "cvss": 7.5,
+                "cve_id": "CVE-2018-1000656",
+                "evidence": {"package": "flask", "installed_version": "0.12.2",
+                             "osv_id": "GHSA-1", "signals": ["osv_advisory_version_match"]},
+            }],
+        }
+
+    monkeypatch.setattr(sca, "scan_path", fake_scan_path)
+    (tmp_path / "requirements.txt").write_text("flask==0.12.2\n")
+    r = api_client.post("/api/sca", json={"path": str(tmp_path)})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["packages"] == 1
+    assert body["findings"][0]["vuln_type"] == "vulnerable_dependency"
+    # enrichment ran → OWASP A06 filled in from the KB
+    assert body["findings"][0].get("owasp", "").startswith("A06")

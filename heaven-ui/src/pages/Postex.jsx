@@ -6,14 +6,17 @@ import { Postex, getUser } from "../api";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 
 const MODULES = [
+  { key: "full", label: "★ Full playbook (enum + loot + AI kill-chain)" },
+  { key: "enum", label: "Privesc enum (self-contained)" },
+  { key: "loot", label: "Loot harvest (creds, redacted)" },
   { key: "linpeas", label: "Linpeas (SSH → privesc enum)" },
   { key: "bloodhound", label: "BloodHound (AD enumeration)" },
   { key: "cred-reuse", label: "Credential reuse spray" },
 ];
 
 export default function PostexPage() {
-  const [module, setModule] = useState("linpeas");
-  const [bodyText, setBodyText] = useState(EXAMPLES.linpeas);
+  const [module, setModule] = useState("full");
+  const [bodyText, setBodyText] = useState(EXAMPLES.full);
   const [authorized, setAuthorized] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -44,7 +47,10 @@ export default function PostexPage() {
     setLoading(true);
     try {
       let r;
-      if (module === "linpeas") r = await Postex.linpeas(body);
+      if (module === "full") r = await Postex.full(body);
+      else if (module === "enum") r = await Postex.enum(body);
+      else if (module === "loot") r = await Postex.loot(body);
+      else if (module === "linpeas") r = await Postex.linpeas(body);
       else if (module === "bloodhound") r = await Postex.bloodhound(body);
       else r = await Postex.credReuse(body);
       setResult(r);
@@ -110,19 +116,147 @@ export default function PostexPage() {
         <div style={{ marginTop: 12 }}><SkeletonCard lines={4} /></div>
       )}
 
-      {result && (
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="card-title">Result</div>
-          <pre className="cli-block" style={{ wordBreak: "break-word", fontSize: 11 }}>
-            {JSON.stringify(result, null, 2)}
-          </pre>
-        </div>
-      )}
+      {result && <ResultView result={result} />}
     </div>
   );
 }
 
+// Structured view for the advanced modules; falls back to raw JSON otherwise.
+function ResultView({ result }) {
+  const killChain = result.kill_chain || [];
+  const ai = result.ai_analysis;
+  const findings = result.findings || [];
+  const facts = result.facts;
+  const loot = result.loot;
+
+  return (
+    <>
+      {facts && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-title">Host</div>
+          <div style={{ fontSize: 13 }}>
+            <strong>{facts.hostname || "?"}</strong>
+            {" "}<span className="dim">{facts.os} · kernel {facts.kernel}</span>
+            <div className="dim" style={{ marginTop: 4 }}>
+              user {facts.username} (uid={String(facts.uid)}, root={String(facts.is_root)})
+              {facts.groups?.length ? ` · groups: ${facts.groups.join(", ")}` : ""}
+            </div>
+            {facts.listening_ports?.length ? (
+              <div className="dim">listening: {facts.listening_ports.join(", ")}</div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {killChain.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-title">ATT&CK kill-chain</div>
+          {killChain.map((step, i) => (
+            <div key={i} style={{ marginBottom: 6 }}>
+              <span className="badge" style={{ background: "var(--accent-dim)" }}>
+                {step.tactic}
+              </span>
+              {" "}
+              <span className="dim" style={{ fontSize: 12 }}>
+                {(step.techniques || []).map((t) => `${t.id} ${t.name}`).join(", ")}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {ai && ai.available && (
+        <div className="card" style={{ marginTop: 12, borderLeft: "3px solid var(--accent)" }}>
+          <div className="card-title">
+            AI prioritisation <span className="dim">({ai.provider}/{ai.model})</span>
+          </div>
+          {ai.top_vector && (
+            <div><strong>Top path:</strong> {ai.top_vector}</div>
+          )}
+          {ai.rationale && <p style={{ fontSize: 13 }}>{ai.rationale}</p>}
+          {ai.recommended_next_steps?.length > 0 && (
+            <ul style={{ fontSize: 13, marginBottom: 6 }}>
+              {ai.recommended_next_steps.map((s, i) => <li key={i}>{s}</li>)}
+            </ul>
+          )}
+          {ai.pivot_targets?.length > 0 && (
+            <div className="dim" style={{ fontSize: 12 }}>
+              Pivot targets: {ai.pivot_targets.join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+
+      {findings.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-title">Findings ({findings.length})</div>
+          {findings.map((f, i) => (
+            <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+              <span className={"sev-pill sev-" + (f.severity || "info")}>
+                {f.severity}
+              </span>{" "}
+              <strong style={{ fontSize: 13 }}>{f.title}</strong>
+              {f.evidence?.abuse && (
+                <div className="dim" style={{ fontSize: 12 }}>{f.evidence.abuse}</div>
+              )}
+              {f.mitre?.techniques?.length > 0 && (
+                <div className="dim" style={{ fontSize: 11 }}>
+                  {f.mitre.techniques.map((t) => t.id).join(", ")}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loot && loot.item_count > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="card-title">
+            Loot ({loot.item_count} items · {loot.credential_count} creds)
+            <span className="dim" style={{ fontSize: 11 }}> — secrets redacted</span>
+          </div>
+          {(loot.items || []).map((it, i) => (
+            <div key={i} style={{ fontSize: 12, padding: "3px 0" }}>
+              <span className={"sev-pill sev-" + (it.severity || "info")}>{it.severity}</span>{" "}
+              <strong>{it.category}</strong> <span className="dim">{it.secret_preview}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <details>
+          <summary className="card-title" style={{ cursor: "pointer" }}>Raw JSON</summary>
+          <pre className="cli-block" style={{ wordBreak: "break-word", fontSize: 11 }}>
+            {JSON.stringify(result, null, 2)}
+          </pre>
+        </details>
+      </div>
+    </>
+  );
+}
+
 const EXAMPLES = {
+  full: JSON.stringify({
+    host: "10.0.0.5",
+    username: "deploy",
+    password: "deploy-pass",
+    port: 22,
+    enable_loot: true,
+    ai_analysis: true,
+  }, null, 2),
+  enum: JSON.stringify({
+    host: "10.0.0.5",
+    username: "deploy",
+    password: "deploy-pass",
+    port: 22,
+  }, null, 2),
+  loot: JSON.stringify({
+    host: "10.0.0.5",
+    username: "deploy",
+    password: "deploy-pass",
+    port: 22,
+  }, null, 2),
   linpeas: JSON.stringify({
     host: "10.0.0.5",
     username: "root",

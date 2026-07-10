@@ -38,10 +38,13 @@ logger = get_logger("ai.gateway")
 # PROVIDER DEFAULTS — keep current with Claude 4.x / GPT-4.x / Gemini 1.5+
 # ═══════════════════════════════════════════
 
+# Current-generation defaults. Pin a different one any time with HEAVEN_LLM_MODEL
+# (env or Web-UI Settings). Gemini 1.5 was retired by Google in 2025, so the
+# default must be a 2.x model or live calls 404 even with a valid key.
 PROVIDER_DEFAULT_MODELS = {
-    "anthropic": "claude-sonnet-4-6",   # balanced default; Opus 4.7 / Haiku 4.5 also valid
+    "anthropic": "claude-sonnet-5",     # balanced default; Opus 4.8 / Haiku 4.5 also valid
     "openai": "gpt-4o",
-    "gemini": "gemini-1.5-pro",
+    "gemini": "gemini-2.5-flash",       # current, fast, cheap; gemini-2.5-pro for deeper reasoning
 }
 
 PROVIDER_KEY_ENVS = {

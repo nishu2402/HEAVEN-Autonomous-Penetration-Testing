@@ -22,6 +22,9 @@ from heaven.ai.attack_chain_planner import (
 from heaven.ai.fp_review import (
     FPReviewer, FPReviewVerdict, review_borderline_findings,
 )
+from heaven.ai.vuln_hypothesis import (
+    HypothesisOutput, VulnHypothesis, VulnHypothesisAgent, verify_hypotheses,
+)
 
 __all__ = [
     "LLMGateway", "LLMRequest", "LLMResponse", "LLMProviderError", "get_gateway",
@@ -29,4 +32,5 @@ __all__ = [
     "AttackChainPlanner", "AttackPlan", "AttackStep", "PlannerOutput",
     "plan_to_killchain_findings",
     "FPReviewer", "FPReviewVerdict", "review_borderline_findings",
+    "VulnHypothesisAgent", "VulnHypothesis", "HypothesisOutput", "verify_hypotheses",
 ]

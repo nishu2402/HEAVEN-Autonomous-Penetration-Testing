@@ -1288,6 +1288,7 @@ _ALIASES: dict[str, str] = {
     "toctou": "race_condition",
     "known_vulnerable_version": "vulnerable_component",
     "outdated_component": "vulnerable_component",
+    "vulnerable_dependency": "vulnerable_component",
     "graphql_batching": "graphql_dos",
     "graphql_complexity": "graphql_dos",
     "graphql_alias_overloading": "graphql_dos",

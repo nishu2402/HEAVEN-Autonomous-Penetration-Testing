@@ -114,7 +114,7 @@ For a multi-user or internet-exposed deployment, also:
 
 When a vulnerability is fixed:
 
-1. A patch release is published to PyPI and GitHub Releases
+1. A patch release is published as a GitHub Release
 2. A GitHub Security Advisory is published with credit to the reporter
    (unless they prefer anonymity)
 3. CHANGELOG.md is updated under a `### Security` heading

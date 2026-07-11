@@ -121,6 +121,58 @@ _KB: dict[str, dict[str, Any]] = {
             "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html",
         ],
     },
+    "ssrf_cloud_metadata": {
+        "title": "SSRF to Cloud Instance Metadata (credential theft)",
+        "cwe": "CWE-918",
+        "owasp": "A10:2021 Server-Side Request Forgery",
+        "mitre": "T1552.005 — Unsecured Credentials: Cloud Instance Metadata API",
+        "typical_cvss": 9.1,
+        "description": (
+            "A server-side request forgery reaches the link-local cloud metadata "
+            "service (169.254.169.254 / metadata.google.internal), which returns "
+            "temporary IAM/role credentials for the instance. This upgrades an "
+            "SSRF into full cloud-account compromise."
+        ),
+        "impact": "Theft of temporary cloud credentials → lateral movement and "
+                  "data access across the cloud account.",
+        "remediation": (
+            "1. Enforce IMDSv2 (session-token required) on AWS and set the hop "
+            "limit to 1.\n"
+            "2. Block 169.254.169.254 and metadata.google.internal at the app's "
+            "egress proxy / network policy.\n"
+            "3. Fix the underlying SSRF: allowlist outbound hosts, deny RFC1918 + "
+            "link-local, disable unused URL schemes.\n"
+            "4. Scope instance roles to least privilege so a leak is contained."
+        ),
+        "references": [
+            "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html",
+        ],
+    },
+    "exposed_storage_bucket": {
+        "title": "Publicly Exposed Cloud Storage Bucket",
+        "cwe": "CWE-284",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1530 — Data from Cloud Storage Object",
+        "typical_cvss": 7.5,
+        "description": (
+            "An S3 / Google Cloud Storage / Azure Blob bucket belonging to the "
+            "target is world-readable and its object listing is publicly "
+            "enumerable, exposing whatever it holds (backups, source, secrets)."
+        ),
+        "impact": "Disclosure of any data stored in the bucket; often includes "
+                  "backups, credentials, or customer records.",
+        "remediation": (
+            "1. Enable 'Block Public Access' (S3) / uniform bucket-level access "
+            "(GCS) / disable anonymous blob access (Azure).\n"
+            "2. Remove AllUsers/AuthenticatedUsers ACL grants and public bucket "
+            "policies.\n"
+            "3. Audit object ACLs — a private bucket can still hold public objects.\n"
+            "4. Enable access logging and alert on anonymous reads."
+        ),
+        "references": [
+            "https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html",
+        ],
+    },
     "xss_stored": {
         "title": "Stored Cross-Site Scripting",
         "cwe": "CWE-79",
@@ -1229,6 +1281,16 @@ _ALIASES: dict[str, str] = {
     "ssl_expired": "certificate_issue",
     "ssl_self_signed": "certificate_issue",
     "unvalidated_redirect": "open_redirect",
+    # Live-CVE-feed / version-CVE findings → the outdated-component KB entry.
+    # (known_vulnerable_version / outdated_component already aliased below.)
+    "vulnerable_service": "vulnerable_component",
+    # Cloud-misconfiguration finding spellings → canonical KB keys.
+    "cloud_metadata_ssrf": "ssrf_cloud_metadata",
+    "imds_ssrf": "ssrf_cloud_metadata",
+    "public_bucket": "exposed_storage_bucket",
+    "open_s3_bucket": "exposed_storage_bucket",
+    "public_s3": "exposed_storage_bucket",
+    "cloud_asset_discovery": "exposed_storage_bucket",
     # HTTP security-header posture (detector spellings → canonical KB key)
     "missing_csp": "csp_missing",
     "no_csp": "csp_missing",
@@ -1324,6 +1386,8 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "command_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "ssti": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "ssrf": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "ssrf_cloud_metadata": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "exposed_storage_bucket": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "xss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
     "xss_stored": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:H/I:L/A:N",
     "idor": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",

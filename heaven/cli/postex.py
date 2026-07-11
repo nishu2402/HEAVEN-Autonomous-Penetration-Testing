@@ -80,26 +80,41 @@ def postex() -> None:
 @click.option("--key", type=click.Path(exists=True, dir_okay=False), default=None,
               help="SSH private key file.")
 @click.option("--port", default=22, type=int, help="SSH port (default 22).")
+@click.option("--os", "os_kind", type=click.Choice(["linux", "windows"]),
+              default="linux", show_default=True,
+              help="Target OS: 'linux' (SUID/sudo/caps) or 'windows' "
+                   "(services/privileges/AlwaysInstallElevated).")
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
 @click.option("--i-have-authorization", is_flag=True, required=True,
               help="Required — confirm written authorization for this host.")
 def enum_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
-             engagement: Optional[str], output: Optional[str],
+             os_kind: str, engagement: Optional[str], output: Optional[str],
              i_have_authorization: bool) -> None:
     """Enumerate privilege-escalation vectors on HOST (self-contained, no downloads)."""
     args = _auth_args(host, user, password, key, port, i_have_authorization)
-    from heaven.postex import LinuxEnumEngine
-    _print(f"[cyan]Enumerating privesc surface on[/cyan] {user}@{host}:{port}")
-    result = asyncio.run(LinuxEnumEngine(authorized=True).enumerate(**args))
+    if os_kind == "windows":
+        from heaven.postex import WindowsEnumEngine
+        engine: object = WindowsEnumEngine(authorized=True)
+    else:
+        from heaven.postex import LinuxEnumEngine
+        engine = LinuxEnumEngine(authorized=True)
+    _print(f"[cyan]Enumerating {os_kind} privesc surface on[/cyan] {user}@{host}:{port}")
+    result = asyncio.run(engine.enumerate(**args))  # type: ignore[attr-defined]
     if not result.success:
         _print(f"[red]Enumeration failed:[/red] {result.error}")
         sys.exit(1)
 
     f = result.facts
-    _print(f"\n[bold]Host:[/bold] {f.hostname}  [dim]{f.os} · kernel {f.kernel}[/dim]")
-    _print(f"[bold]User:[/bold] {f.username} (uid={f.uid}, root={f.is_root})  "
-           f"groups: {', '.join(f.groups) or '—'}")
+    if os_kind == "windows":
+        _print(f"\n[bold]Host:[/bold] {f.hostname}  [dim]{f.os} · {f.build}[/dim]")
+        _print(f"[bold]User:[/bold] {f.username} (admin={f.is_admin}, "
+               f"integrity={f.integrity or '—'})  "
+               f"privileges: {', '.join(f.privileges) or '—'}")
+    else:
+        _print(f"\n[bold]Host:[/bold] {f.hostname}  [dim]{f.os} · kernel {f.kernel}[/dim]")
+        _print(f"[bold]User:[/bold] {f.username} (uid={f.uid}, root={f.is_root})  "
+               f"groups: {', '.join(f.groups) or '—'}")
     if f.listening_ports:
         _print(f"[bold]Listening:[/bold] {', '.join(map(str, f.listening_ports))}")
     _print(f"\n[bold]Privilege-escalation vectors ({len(result.vectors)}):[/bold]")
@@ -166,6 +181,9 @@ def loot_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
 @click.option("--key", type=click.Path(exists=True, dir_okay=False), default=None,
               help="SSH private key file.")
 @click.option("--port", default=22, type=int, help="SSH port (default 22).")
+@click.option("--os", "os_kind", type=click.Choice(["auto", "linux", "windows"]),
+              default="auto", show_default=True,
+              help="Target OS ('auto' probes it over SSH first).")
 @click.option("--no-loot", is_flag=True, help="Skip credential harvesting.")
 @click.option("--no-ai", is_flag=True, help="Skip the LLM prioritisation step.")
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
@@ -173,14 +191,15 @@ def loot_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
 @click.option("--i-have-authorization", is_flag=True, required=True,
               help="Required — confirm written authorization for this host.")
 def full_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
-             no_loot: bool, no_ai: bool, engagement: Optional[str],
+             os_kind: str, no_loot: bool, no_ai: bool, engagement: Optional[str],
              output: Optional[str], i_have_authorization: bool) -> None:
     """Run the full post-exploitation playbook on HOST (enum + loot + AI + kill-chain)."""
     args = _auth_args(host, user, password, key, port, i_have_authorization)
     from heaven.postex import PostExSession
     session = PostExSession(
         args["host"], args["username"], password=args["password"],
-        private_key=args["private_key"], port=args["port"], authorized=True)
+        private_key=args["private_key"], port=args["port"], authorized=True,
+        target_os=os_kind)
     _print(f"[cyan]Full post-exploitation playbook on[/cyan] {user}@{host}:{port}")
     report = asyncio.run(session.run_full_postex(
         enable_loot=not no_loot, ai_analysis=not no_ai))

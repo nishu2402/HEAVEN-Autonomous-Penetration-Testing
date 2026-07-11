@@ -14,6 +14,23 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("recon.cloud")
 
+# Ports that should never be open to the whole internet on a security group.
+_SENSITIVE_PORTS = {
+    22: "SSH", 23: "Telnet", 135: "MSRPC", 445: "SMB", 1433: "MSSQL",
+    1521: "Oracle", 3306: "MySQL", 3389: "RDP", 5432: "PostgreSQL",
+    5601: "Kibana", 6379: "Redis", 9200: "Elasticsearch", 11211: "Memcached",
+    27017: "MongoDB",
+}
+
+
+def _sg_port_range(perm: dict) -> tuple[int, int]:
+    """Return (from_port, to_port) for a security-group permission (-1 = all)."""
+    frm = perm.get("FromPort")
+    to = perm.get("ToPort")
+    if frm is None or to is None:  # all ports (e.g. protocol -1)
+        return (0, 65535)
+    return (int(frm), int(to))
+
 
 @dataclass
 class CloudAsset:
@@ -69,7 +86,69 @@ async def enumerate_aws() -> list[CloudAsset]:
                             a.issues.append(f"Public ACL: {grant.get('Permission')}")
                 except Exception:
                     pass
+                # Default encryption at rest.
+                try:
+                    await loop.run_in_executor(
+                        None, lambda: s3.get_bucket_encryption(Bucket=name))
+                except Exception:
+                    a.issues.append("No default server-side encryption")
+                # Public bucket policy.
+                try:
+                    st = await loop.run_in_executor(
+                        None, lambda: s3.get_bucket_policy_status(Bucket=name))
+                    if st.get("PolicyStatus", {}).get("IsPublic"):
+                        a.public = True
+                        a.issues.append("Bucket policy is public")
+                except Exception:
+                    pass
                 assets.append(a)
+
+        # Security groups: ingress open to the whole internet on sensitive ports.
+        async def _enum_security_groups():
+            ec2 = boto3.client("ec2")
+            sgs = await loop.run_in_executor(None, lambda: ec2.describe_security_groups())
+            for sg in sgs.get("SecurityGroups", []):
+                a = CloudAsset(
+                    provider="aws", asset_type="security_group",
+                    arn_or_id=sg["GroupId"], name=sg.get("GroupName", ""),
+                    metadata={"vpc": sg.get("VpcId")})
+                for perm in sg.get("IpPermissions", []):
+                    world = any(r.get("CidrIp") == "0.0.0.0/0"
+                                for r in perm.get("IpRanges", []))
+                    world = world or any(
+                        r.get("CidrIpv6") == "::/0"
+                        for r in perm.get("Ipv6Ranges", []))
+                    if not world:
+                        continue
+                    lo, hi = _sg_port_range(perm)
+                    for port, svc in _SENSITIVE_PORTS.items():
+                        if lo <= port <= hi:
+                            a.public = True
+                            a.issues.append(
+                                f"{svc} (port {port}) open to 0.0.0.0/0")
+                if a.issues:
+                    assets.append(a)
+
+        # RDS instances reachable from the public internet.
+        async def _enum_rds():
+            rds = boto3.client("rds")
+            dbs = await loop.run_in_executor(
+                None, lambda: rds.describe_db_instances())
+            for db in dbs.get("DBInstances", []):
+                public = bool(db.get("PubliclyAccessible"))
+                a = CloudAsset(
+                    provider="aws", asset_type="rds",
+                    arn_or_id=db.get("DBInstanceArn", db.get("DBInstanceIdentifier", "")),
+                    name=db.get("DBInstanceIdentifier", ""),
+                    public=public,
+                    metadata={"engine": db.get("Engine"),
+                              "encrypted": db.get("StorageEncrypted")})
+                if public:
+                    a.issues.append("RDS instance is publicly accessible")
+                if not db.get("StorageEncrypted", False):
+                    a.issues.append("RDS storage is not encrypted at rest")
+                if a.issues:
+                    assets.append(a)
 
         # IAM analysis
         async def _enum_iam():
@@ -90,7 +169,9 @@ async def enumerate_aws() -> list[CloudAsset]:
                     pass
                 assets.append(a)
 
-        await asyncio.gather(_enum_ec2(), _enum_s3(), _enum_iam(), return_exceptions=True)
+        await asyncio.gather(
+            _enum_ec2(), _enum_s3(), _enum_iam(),
+            _enum_security_groups(), _enum_rds(), return_exceptions=True)
 
     except ImportError:
         logger.warning("boto3 not available — skipping AWS enumeration")

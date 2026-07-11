@@ -334,12 +334,26 @@ def _is_junk_finding(f: dict) -> bool:
         return True
 
 
+def _is_fp_reviewed(f: dict) -> bool:
+    """True when a finding carries an FP-suppression verdict — it went through the
+    validator / FP-review layer, so its confidence is the *adjudicated* value and
+    should win over a raw candidate's un-reviewed (usually higher) number."""
+    return bool(f.get("fp_check_reasons")) or "confidence_bucket" in f \
+        or "signal_count" in f
+
+
 def _richer_finding(a: dict, b: dict) -> dict:
     """
     When two findings dedup to the same identity, keep the one carrying more
-    signal: higher confidence wins; ties break toward the larger evidence
-    blob (a validated/scored finding is richer than a raw candidate).
+    signal: an FP-reviewed verdict is authoritative and wins outright; otherwise
+    higher confidence wins; ties break toward the larger evidence blob (a
+    validated/scored finding is richer than a raw candidate).
     """
+    a_rev, b_rev = _is_fp_reviewed(a), _is_fp_reviewed(b)
+    if a_rev != b_rev:
+        # The adjudicated copy wins even if the raw candidate's number is higher,
+        # so a suppressor's confidence *downgrade* is not silently reverted.
+        return a if a_rev else b
     ca = float(a.get("confidence", 0.0) or 0.0)
     cb = float(b.get("confidence", 0.0) or 0.0)
     if cb > ca:
@@ -362,6 +376,7 @@ def dedup_findings(findings: list) -> list:
     """
     best: dict[str, dict] = {}
     order: list[str] = []
+    suppressed_keys: set[str] = set()
     for f in findings:
         if not isinstance(f, dict):
             continue
@@ -369,6 +384,14 @@ def dedup_findings(findings: list) -> list:
             continue
         target, vuln_type, param, endpoint = _finding_identity(f)
         key = _finding_hash(target, vuln_type, param, endpoint)
+        # A finding the FP layer adjudicated as a false positive taints its whole
+        # identity: drop every copy — including any raw candidate for the same
+        # vuln that slipped through unmarked — so a rejected finding never reaches
+        # the report, engagement store or UI. This is what makes the suppression
+        # layer's verdicts actually take effect on the user-facing output.
+        if f.get("suppressed") is True or f.get("result") == "false_positive":
+            suppressed_keys.add(key)
+            continue
         if key not in best:
             best[key] = dict(f)
             order.append(key)
@@ -376,7 +399,7 @@ def dedup_findings(findings: list) -> list:
             best[key] = _richer_finding(best[key], dict(f))
         if is_host_level(vuln_type):
             best[key]["target"] = _host_key(target)
-    return [best[k] for k in order]
+    return [best[k] for k in order if k not in suppressed_keys]
 
 
 @dataclass

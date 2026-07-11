@@ -467,6 +467,7 @@ async def validate_findings(scan_id: str = "", findings: Optional[list[dict[Any,
     logger.info(f"Starting advanced PoC validation for {len(findings)} findings...")
 
     validated = []
+    suppressed: list[dict] = []
     stats = {"confirmed": 0, "likely": 0, "inconclusive": 0, "false_positive": 0}
 
     # Execute real validation engines using aiohttp
@@ -567,8 +568,14 @@ async def validate_findings(scan_id: str = "", findings: Optional[list[dict[Any,
                 "evidence": res.evidence,
                 "patch": res.patch,
             }
-            # Drop suppressed findings from the report (they're below 0.40 confidence)
+            # Suppressed findings (below the 0.40 keep threshold) are kept OUT of
+            # `validated_findings` so the report path never shows them, but they
+            # are returned separately so the aggregation chokepoint
+            # (dedup_findings) can drop the raw candidate that shares their
+            # identity — otherwise a rejected finding leaks back in via its
+            # un-suppressed candidate copy.
             if val_res["suppressed"]:
+                suppressed.append(val_res)
                 continue
             if res_status in ["confirmed", "likely"]:
                 validated.append(val_res)
@@ -580,5 +587,9 @@ async def validate_findings(scan_id: str = "", findings: Optional[list[dict[Any,
         "inconclusive": stats["inconclusive"],
         "false_positive": stats["false_positive"],
         "validated_findings": validated,
+        # Adjudicated false positives (suppressed=True). Consumed only by the
+        # summary aggregation so dedup_findings can purge their raw candidates;
+        # deliberately NOT part of validated_findings (the report path).
+        "suppressed_findings": suppressed,
         "validators_available": list(ALL_VALIDATORS.keys()),
     }

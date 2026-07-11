@@ -476,13 +476,21 @@ async def _audit_password_policy(session: "aiohttp.ClientSession",
                 has_minlength = bool(re.search(r'minlength|min.length|minimum.length', body, re.IGNORECASE))
                 has_pattern   = bool(re.search(r'pattern=|passwordrule|strength', body, re.IGNORECASE))
                 if not has_minlength and not has_pattern:
+                    # Client-side attributes being absent does NOT prove the server
+                    # accepts weak passwords — robust apps enforce policy purely
+                    # server-side. Confirming would require actually registering a
+                    # weak-password account (intrusive + creates state), so this
+                    # stays an unconfirmed *informational* observation rather than a
+                    # medium-severity "weak policy" vuln, which would be a false
+                    # positive against any server-side-only enforcement.
                     findings.append(_make_finding(
-                        test_url, "weak_password_policy", "medium",
-                        "No Client-Side Password Policy Enforcement",
-                        "Registration form has no visible minimum length or complexity requirements. "
-                        "Server may accept very short passwords.",
-                        confidence=0.65,
-                        evidence={"path": path},
+                        test_url, "weak_password_policy", "info",
+                        "No Client-Side Password Policy Hints",
+                        "Registration form exposes no minlength/pattern attributes. "
+                        "This is a client-side observation only — server-side "
+                        "enforcement was not tested and may still be present.",
+                        confidence=0.4,
+                        evidence={"path": path, "unconfirmed": True},
                     ))
                 break
         except Exception:
@@ -531,25 +539,12 @@ async def _audit_oauth(session: "aiohttp.ClientSession", url: str) -> list[dict]
         except Exception:
             continue
 
-        # Check for PKCE enforcement (missing = auth code interception)
-        if "openid" in path or "authorize" in path:
-            try:
-                test_no_pkce = (f"{auth_url}?response_type=code&client_id=test"
-                                f"&redirect_uri={urllib.parse.quote(base_url + '/callback')}"
-                                f"&scope=openid")
-                async with session.get(test_no_pkce, allow_redirects=False,
-                                       timeout=aiohttp.ClientTimeout(total=8)) as r:
-                    if r.status in (200, 301, 302):
-                        findings.append(_make_finding(
-                            auth_url, "oauth_pkce_not_enforced", "medium",
-                            "OAuth 2.0 PKCE Not Enforced",
-                            "Authorization endpoint accepts requests without code_challenge. "
-                            "Public clients are vulnerable to authorization code interception.",
-                            confidence=0.65,
-                            evidence={"path": path},
-                        ))
-            except Exception:
-                pass
+        # NOTE: a "PKCE not enforced" probe was deliberately removed. With a
+        # fabricated ``client_id=test`` no real authorization server ever proceeds
+        # with the flow, so any 200/301/302 (an SPA's index page, a redirect to
+        # /login) tripped it — a pure false-positive generator with no reachable
+        # true-positive path. PKCE enforcement can only be judged against a
+        # registered client, which is out of scope for an unauthenticated probe.
 
     return findings
 

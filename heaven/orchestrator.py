@@ -592,6 +592,10 @@ class ScanOrchestrator:
             all_vulns.extend(data.get("findings", []))
             all_vulns.extend(data.get("candidates", []))
             all_vulns.extend(data.get("validated_findings", []))
+            # Adjudicated false positives — carried in only so dedup_findings can
+            # purge the raw candidate sharing their identity (they are dropped,
+            # never shown). See safe_validator's suppressed_findings.
+            all_vulns.extend(data.get("suppressed_findings", []))
             all_assets.extend(data.get("hosts", []))
             all_assets.extend(data.get("endpoints", []))
 

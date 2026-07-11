@@ -12,7 +12,7 @@ exactly what's configured vs. missing — and then open an issue.
 
 ```bash
 heaven demo      # loads a realistic sample engagement — nothing is scanned
-heaven serve     # open http://localhost:8443, the dashboard is now full
+heaven serve     # opens http://localhost:8443 in your browser, dashboard is now full
 ```
 
 Or, in the web UI, click **Load sample data** on the dashboard.

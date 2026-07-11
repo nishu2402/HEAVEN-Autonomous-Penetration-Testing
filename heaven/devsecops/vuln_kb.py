@@ -1254,6 +1254,7 @@ _ALIASES: dict[str, str] = {
     "cookie_no_httponly": "insecure_cookie",
     "cookie_insecure": "insecure_cookie",
     "bola": "idor",
+    "enumerable_reference": "idor",  # informational IDOR-adjacent (unproven authz)
     "rce": "rce",
     "remote_code_execution": "rce",
     "code_injection": "rce",

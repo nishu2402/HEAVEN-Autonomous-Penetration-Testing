@@ -38,6 +38,35 @@ from heaven.utils.logger import get_logger
 logger = get_logger("vulnscan.anomaly_probe")
 
 
+def _strip_reflection(body: str, *snippets: str) -> str:
+    """Remove reflections of the injected input from a response body so an app
+    that merely *echoes* our payload can't masquerade as having *evaluated* it.
+
+    HTML entities are decoded first, because apps typically escape reflected
+    input (``htmlspecialchars`` turns ``"`` into ``&quot;``) — that escaping is
+    exactly what let an indicator substring survive verbatim inside an otherwise
+    "not reflected" payload and produce SSTI / prototype-pollution false
+    positives against a correctly-escaping (non-vulnerable) target.
+    """
+    import html
+    b = html.unescape(body or "")
+    for s in snippets:
+        if s and s in b:
+            b = b.replace(s, "")
+    return b
+
+
+# SSTI math probes multiply DISTINCTIVE factors so the product cannot occur
+# coincidentally in normal page content. A bare "49"/"42" (7*7, 6*7) shows up
+# constantly in random tokens, timestamps, hashes and ids — matching it produced
+# false "template evaluated" positives against non-vulnerable pages.
+_SSTI_F1, _SSTI_F2 = 31337, 31341
+_SSTI_EXPR1 = f"{_SSTI_F1}*{_SSTI_F1}"
+_SSTI_EXPR2 = f"{_SSTI_F1}*{_SSTI_F2}"
+_SSTI_R1 = str(_SSTI_F1 * _SSTI_F1)   # 982006569 — 9 digits, effectively unique
+_SSTI_R2 = str(_SSTI_F1 * _SSTI_F2)   # 982131917
+
+
 @dataclass
 class AnomalyCandidate:
     """A behavioural-anomaly candidate that needs analyst triage. NOT a confirmed 0-day."""
@@ -423,28 +452,30 @@ class WebAnomalyProbe:
                 baseline = await r.text()
 
             # ── Two-round math confirmation for Jinja2/Nunjucks/Twig ──────────
-            # Only attempt if neither target number appears in the baseline
-            if "49" not in baseline and "42" not in baseline:
+            # Only attempt if neither distinctive product appears in the baseline
+            p1 = "{{" + _SSTI_EXPR1 + "}}"      # {{31337*31337}}
+            p2 = "{{" + _SSTI_EXPR2 + "}}"
+            if _SSTI_R1 not in baseline and _SSTI_R2 not in baseline:
                 try:
-                    async with session.request(method, url, params={param: "{{7*7}}"},
+                    async with session.request(method, url, params={param: p1},
                                                 timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                         body1 = await r.text()
-                    if "49" in body1 and "{{7*7}}" not in body1:
-                        async with session.request(method, url, params={param: "{{6*7}}"},
+                    if _SSTI_R1 in _strip_reflection(body1, p1):
+                        async with session.request(method, url, params={param: p2},
                                                     timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                             body2 = await r.text()
-                        if "42" in body2 and "42" not in baseline and "{{6*7}}" not in body2:
+                        if _SSTI_R2 in _strip_reflection(body2, p2) and _SSTI_R2 not in baseline:
                             return AnomalyCandidate(
                                 target=url, category="ssti",
                                 confidence=0.96, severity="critical",
                                 description=(
                                     f"SSTI confirmed on param '{param}' — Jinja2/Nunjucks/Twig. "
-                                    "Two-round math: {{7*7}}=49 AND {{6*7}}=42 both evaluated server-side. "
-                                    "RCE is achievable via this template engine."
+                                    f"Two-round math: {p1}={_SSTI_R1} AND {p2}={_SSTI_R2} both "
+                                    "evaluated server-side. RCE is achievable via this template engine."
                                 ),
                                 evidence={"param": param,
-                                          "round1": "{{7*7}} → 49",
-                                          "round2": "{{6*7}} → 42",
+                                          "round1": f"{p1} → {_SSTI_R1}",
+                                          "round2": f"{p2} → {_SSTI_R2}",
                                           "engine": "Jinja2/Nunjucks/Twig"},
                                 remediation=(
                                     "Never pass user input to template engine render functions. "
@@ -464,10 +495,12 @@ class WebAnomalyProbe:
                 ('<%= `id` %>', "uid=", "ERB (Ruby) RCE"),
                 ('${"freemarker.template.utility.Execute"?new()("id")}', "uid=", "Freemarker RCE"),
                 ("{$smarty.version}", "Smarty-", "Smarty PHP"),
-                ("*{7*7}", "49", "Spring Thymeleaf SpEL"),
-                ("<%=7*7%>", "49", "ERB/Ruby"),
-                ("#set($x=7*7)${x}", "49", "Velocity"),
-                ("${7*7}", "49", "Freemarker/Groovy/Mako"),
+                # Distinctive product (see _SSTI_R1) instead of a bare "49", which
+                # collides with digits in random tokens/timestamps → false SSTI.
+                ("*{" + _SSTI_EXPR1 + "}", _SSTI_R1, "Spring Thymeleaf SpEL"),
+                ("<%=" + _SSTI_EXPR1 + "%>", _SSTI_R1, "ERB/Ruby"),
+                ("#set($x=" + _SSTI_EXPR1 + ")${x}", _SSTI_R1, "Velocity"),
+                ("${" + _SSTI_EXPR1 + "}", _SSTI_R1, "Freemarker/Groovy/Mako"),
             ]
             for payload, expected, engine in unique_probes:
                 if not expected or expected in baseline:
@@ -476,7 +509,15 @@ class WebAnomalyProbe:
                     async with session.request(method, url, params={param: payload},
                                                 timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                         body = await r.text()
-                        if expected in body and payload not in body and expected not in baseline:
+                        # Strip the reflected payload first: several fingerprints
+                        # (SpEL/Velocity) carry the indicator *inside* the payload
+                        # (e.g. "java.lang.Runtime"), so an app that merely echoes
+                        # the input — even HTML-escaped — would otherwise look like
+                        # a template evaluation. The indicator only counts as real
+                        # engine OUTPUT if it survives once the echoed payload is
+                        # removed.
+                        stripped = _strip_reflection(body, payload)
+                        if expected in stripped and expected not in baseline:
                             return AnomalyCandidate(
                                 target=url, category="ssti",
                                 confidence=0.90, severity="critical",
@@ -699,7 +740,15 @@ class WebAnomalyProbe:
                     async with session.request(method, url, params=payload_dict,
                                                 timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                         body = await r.text()
-                        if ("heaven_proto_probe" in body
+                        # Strip reflections of the injected keys/values: an app that
+                        # simply echoes our ``…=heaven_proto_probe`` input is NOT
+                        # polluted. The marker only counts if it survives as genuine
+                        # output (a property the app actually set) once the echoed
+                        # payload text is removed.
+                        refl = list(payload_dict.keys()) + list(payload_dict.values()) \
+                            + [f"{k}={v}" for k, v in payload_dict.items()]
+                        stripped = _strip_reflection(body, *refl)
+                        if ("heaven_proto_probe" in stripped
                                 and "heaven_proto_probe" not in proto_baseline
                                 and r.status == 200):
                             return AnomalyCandidate(
@@ -732,7 +781,10 @@ class WebAnomalyProbe:
                         timeout=aiohttp.ClientTimeout(total=self.timeout),
                     ) as r:
                         body = await r.text()
-                        if ("heaven_proto_probe" in body
+                        # Same reflection guard as the URL variant: an app echoing
+                        # our JSON body back isn't polluted.
+                        stripped = _strip_reflection(body, json.dumps(payload))
+                        if ("heaven_proto_probe" in stripped
                                 and "heaven_proto_probe" not in proto_baseline):
                             return AnomalyCandidate(
                                 target=url, category="prototype_pollution",

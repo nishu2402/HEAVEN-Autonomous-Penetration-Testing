@@ -16,12 +16,12 @@ Examples:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 import click
 
 from heaven.cli._helpers import (
+    _engagement_db_path,
     _print,
     clear_current_engagement,
     get_current_engagement,
@@ -30,11 +30,15 @@ from heaven.cli._helpers import (
 
 
 def _list_engagements() -> list[str]:
-    """Names of engagements discoverable under ./engagements/*.db."""
-    eng_dir = Path("engagements")
-    if not eng_dir.is_dir():
-        return []
-    return sorted(p.stem for p in eng_dir.glob("*.db"))
+    """Engagement names discoverable across the canonical (<data_dir>/engagements)
+    and legacy (./engagements) dirs, so `heaven demo` / web-created engagements
+    show up alongside CLI-created ones."""
+    from heaven.cli._helpers import _engagement_dirs
+    names: set[str] = set()
+    for d in _engagement_dirs():
+        if d.is_dir():
+            names.update(p.stem for p in d.glob("*.db"))
+    return sorted(names)
 
 
 @click.command(name="use")
@@ -82,7 +86,7 @@ def use(engagement: Optional[str], do_clear: bool) -> None:
            f"[bold cyan]{engagement}[/bold cyan].")
 
     if engagement not in available:
-        db_path = Path("engagements") / f"{engagement}.db"
+        db_path = _engagement_db_path(engagement)
         _print(f"[yellow]![/yellow] No DB at [dim]{db_path}[/dim] yet — "
                f"create it with:")
         _print(f"  [cyan]heaven engage init {engagement} "

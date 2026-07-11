@@ -171,6 +171,13 @@ def set_current_engagement(name: str) -> Path:
     """Persist the current engagement for this working directory."""
     _CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
     _CONTEXT_FILE.write_text(name.strip() + "\n", encoding="utf-8")
+    # Keep the web UI's active-engagement pointer in sync so the dashboard,
+    # findings and reports all agree on the selection (single source of truth).
+    try:
+        from heaven.engagement import set_active_engagement
+        set_active_engagement(name.strip())
+    except Exception:  # noqa: BLE001 — pointer sync is best-effort
+        pass
     return _CONTEXT_FILE
 
 
@@ -188,29 +195,86 @@ def clear_current_engagement() -> bool:
 def resolve_engagement_name(explicit: Optional[str] = None) -> Optional[str]:
     """Effective engagement *name* using the standard precedence.
 
-    explicit flag > HEAVEN_ENGAGEMENT env > `heaven use` context > None.
+    explicit flag > HEAVEN_ENGAGEMENT env > `heaven use` context > web/demo
+    active-engagement pointer > None.
+
+    The web-pointer fallback keeps name-based readers (``heaven doctor`` /
+    ``status``) consistent with the DB-path resolver (:func:`_engagement_db_path`):
+    after ``heaven demo`` — which sets only the web pointer — ``heaven findings``
+    and ``heaven doctor`` must agree on which engagement is active.
     """
     if explicit:
         return explicit
     env = os.environ.get("HEAVEN_ENGAGEMENT")
     if env:
         return env
-    return get_current_engagement()
+    ctx = get_current_engagement()
+    if ctx:
+        return ctx
+    try:
+        from heaven.engagement import get_active_engagement
+        active = get_active_engagement()
+        if active:
+            return active
+    except Exception:  # noqa: BLE001 — no pointer just means "nothing active"
+        pass
+    return None
+
+
+def _engagement_dirs() -> list[Path]:
+    """Directories that may hold engagement DBs, canonical first.
+
+    The web UI + ``heaven demo`` write to ``<data_dir>/engagements/`` (sandboxed,
+    config-driven); older CLI-created engagements live in bare ``./engagements/``.
+    The CLI resolves across both so ``heaven demo`` / the web app / ``heaven
+    findings`` all agree on the same data instead of silently reading different
+    stores.
+    """
+    dirs: list[Path] = []
+    try:
+        from heaven.config import get_config
+        dirs.append(get_config().data_dir / "engagements")
+    except Exception:  # noqa: BLE001 — config import/parse issues fall back below
+        dirs.append(Path("data") / "engagements")
+    dirs.append(Path("engagements"))
+    return dirs
+
+
+def _resolve_engagement_name(name: str) -> Path:
+    """Map a bare engagement name to its DB, preferring an existing file across
+    the canonical + legacy dirs; a not-yet-created engagement lands in the
+    canonical (``<data_dir>/engagements/``) dir so it is web-visible too."""
+    dirs = _engagement_dirs()
+    for d in dirs:
+        p = d / f"{name}.db"
+        if p.exists():
+            return p
+    return dirs[0] / f"{name}.db"
 
 
 def _engagement_db_path(name: Optional[str] = None) -> Path:
     """Resolve the engagement SQLite path.
 
-    Precedence: explicit name > HEAVEN_ENGAGEMENT env > `heaven use` context
-    > ./engagement.db default. A bare name maps to ./engagements/<name>.db
-    (matching what `heaven engage init` creates).
+    Precedence: explicit name > HEAVEN_ENGAGEMENT env > `heaven use` context >
+    web/demo active-engagement pointer > ./engagement.db default. A bare name
+    maps to <data_dir>/engagements/<name>.db (falling back to a legacy
+    ./engagements/<name>.db when that is where it already lives).
     """
     if name:
-        return Path("engagements") / f"{name}.db"
+        return _resolve_engagement_name(name)
     env_path = os.environ.get("HEAVEN_ENGAGEMENT")
     if env_path:
         return Path(env_path)
     ctx = get_current_engagement()
     if ctx:
-        return Path("engagements") / f"{ctx}.db"
+        return _resolve_engagement_name(ctx)
+    # Fall back to the pointer the web UI + `heaven demo` set, so a demo or scan
+    # started outside the CLI is still visible to `heaven findings`/`report`/etc.
+    try:
+        from heaven.engagement import get_active_engagement
+        active = get_active_engagement()
+        if active:
+            return _resolve_engagement_name(active)
+    except Exception:  # noqa: BLE001 — no pointer just means "use the default"
+        pass
     return Path("engagement.db")

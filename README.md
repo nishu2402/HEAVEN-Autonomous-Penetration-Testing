@@ -53,7 +53,6 @@
 |---|---|
 | 🔗 **LinkedIn** | [linkedin.com/in/nisarg-chasmawala](https://www.linkedin.com/in/nisarg-chasmawala) |
 | 🐙 **GitHub** | [github.com/nishu2402](https://github.com/nishu2402) |
-| 📦 **PyPI** | [pypi.org/project/heaven-pentest](https://pypi.org/project/heaven-pentest/) |
 | 🎯 **Role** | Offensive Security Engineer · Penetration Tester |
 
 </div>

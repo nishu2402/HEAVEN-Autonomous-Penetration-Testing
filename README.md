@@ -230,13 +230,6 @@ pip install -e ".[llm]"           # all three LLM SDKs (or [gemini]/[anthropic]/
 pip install -e ".[all]"           # every feature extra at once
 ```
 
-Or try it **without cloning**:
-
-```bash
-pipx install heaven-pentest                                # isolated global CLI
-docker run -p 8443:8443 ghcr.io/nishu2402/heaven:latest    # full stack in a container
-```
-
 ### See it in 60 seconds
 
 <p align="center">

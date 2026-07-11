@@ -73,7 +73,8 @@ heaven show <finding-id>              # full evidence + curl repro
 heaven serve
 ```
 
-Open <http://localhost:8443> and log in with:
+This **opens <http://localhost:8443> in your browser automatically** once the
+server is ready (use `heaven serve --no-open` to suppress that). Log in with:
 
 - Username: `admin`
 - Password: `admin` on a fresh install — the UI then forces a password change

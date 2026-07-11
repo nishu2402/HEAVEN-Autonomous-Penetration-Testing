@@ -452,7 +452,13 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     supported, weak = _get_ciphers(host, port)
     result.supported_ciphers = supported
     result.weak_ciphers = weak
-    result.forward_secrecy = any(k in c for c in supported for k in _FORWARD_SECRECY_KEXES)
+    # TLS 1.3 mandates ephemeral (EC)DHE for *every* cipher suite, so a 1.3-capable
+    # server always has forward secrecy. But 1.3 suite names
+    # (TLS_AES_256_GCM_SHA384, …) contain none of the KEX tokens below, and
+    # set_ciphers() cannot even enumerate 1.3 suites — so a modern 1.3-only server
+    # would otherwise be mis-flagged "no forward secrecy". Treat 1.3 as definitive.
+    result.forward_secrecy = result.tls13 or any(
+        k in c for c in supported for k in _FORWARD_SECRECY_KEXES)
 
     # ── 6. Derived vulnerabilities ────────────────────────────────────────────
     result.poodle = result.ssl3          # POODLE = SSLv3 (now actively probed)
@@ -511,12 +517,20 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             f"Weak Cipher Suites Accepted ({len(result.weak_ciphers)} found)",
             f"Accepted: {', '.join(result.weak_ciphers[:5])}. "
             "These enable downgrade and decryption attacks."))
-    if not result.forward_secrecy:
+    # Only assert the *absence* of forward secrecy when we actually enumerated at
+    # least one TLS ≤1.2 cipher. An empty list means enumeration failed (transient
+    # handshake drops), so "no FS" then would be a false positive, not a finding.
+    if not result.forward_secrecy and result.supported_ciphers:
         F.append(_make_finding(host, port, "no_forward_secrecy", "medium",
             "No Forward Secrecy",
             "Server does not support ECDHE/DHE key exchange. Past sessions can be "
             "decrypted if the server private key is compromised."))
-    if not result.hsts:
+    # Only claim "no HSTS" when TLS actually works — otherwise the HSTS HEAD
+    # simply couldn't reach an HTTPS listener (e.g. a plain-HTTP port), and
+    # reporting a missing security header we never got to observe is a false
+    # positive.
+    tls_ok = result.tls13 or result.tls12 or result.tls11 or result.tls10
+    if not result.hsts and tls_ok:
         F.append(_make_finding(host, port, "no_hsts", "medium",
             "HSTS Not Configured",
             "Missing Strict-Transport-Security header. Browsers will accept HTTP downgrade.",

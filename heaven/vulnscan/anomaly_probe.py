@@ -894,47 +894,84 @@ class WebAnomalyProbe:
 
     async def _test_header_injection(self, session: Any,
                                       url: str) -> list[AnomalyCandidate]:
-        """Test for HTTP header-based vulnerabilities."""
-        candidates = []
-        header_payloads = MutationEngine.header_injection_payloads()
+        """Test for HTTP header-based vulnerabilities with precision-first oracles.
 
+        Both checks were rewritten to defeat the "any difference" false positives
+        the previous byte-diff / status-diff logic produced:
+
+        * **Host / X-Forwarded-Host injection** — a *unique canary host* is only
+          flagged when it is actually **reflected** into the response body or a
+          redirect ``Location`` (the real cache-poisoning / reset-link-poisoning
+          vector). A merely-different body is ignored: dynamic pages differ on
+          every request (CSRF tokens, timestamps), so ``body != baseline`` was
+          pure noise.
+        * **IP-restriction bypass** — only flagged when the baseline was an actual
+          *deny* (401/403/407) and a spoofed client-IP header flipped it to an
+          *allow* (200). A random status change (a redirect, a 429 rate-limit)
+          is not a bypass.
+        """
+        candidates: list[AnomalyCandidate] = []
+        canary = f"heaven-hhi-{uuid.uuid4().hex[:10]}.invalid"
         try:
-            # Baseline without injection headers
+            # Baseline (no injected headers)
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
-                baseline_body = await resp.text()
                 baseline_status = resp.status
+                await resp.text()
 
-            for headers in header_payloads[:5]:
-                async with session.get(url, headers=headers,
-                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
-                    body = await resp.text()
-                    status = resp.status
+            # ── Host-header injection: the canary host must be REFLECTED ──
+            for hdr in ("Host", "X-Forwarded-Host"):
+                try:
+                    async with session.get(
+                        url, headers={hdr: canary}, allow_redirects=False,
+                        timeout=aiohttp.ClientTimeout(total=self.timeout),
+                    ) as resp:
+                        body = await resp.text()
+                        location = resp.headers.get("Location", "")
+                except Exception:
+                    continue
+                in_location = canary in location
+                if in_location or canary in body:
+                    candidates.append(AnomalyCandidate(
+                        target=url, category="host_header_injection",
+                        confidence=0.85, severity="medium",
+                        description=(f"Host-header injection — injected host '{canary}' "
+                                     f"was reflected via the {hdr} header"),
+                        evidence={"header": hdr, "canary": canary,
+                                  "reflected_in": "location" if in_location else "body",
+                                  "signals": ["injected_host_reflected"]},
+                        remediation="Validate the Host header against an allow-list; never "
+                                    "build absolute URLs from client-supplied host headers.",
+                        cwe_id="CWE-644", technique="host_header_injection",
+                    ))
+                    break
 
-                    # Different content with Host header change → host header injection
-                    key = list(headers.keys())[0]
-                    if key == "Host" and body != baseline_body and status == 200:
-                        candidates.append(AnomalyCandidate(
-                            target=url, category="host_header_injection",
-                            confidence=0.7, severity="medium",
-                            description=f"Host header injection — different response with Host: {headers['Host']}",
-                            evidence={"header": key, "value": headers[key],
-                                      "body_differs": True},
-                            remediation="Validate Host header. Use server-configured hostname.",
-                            cwe_id="CWE-644", technique="header_injection",
-                        ))
-                        break
-
-                    # IP bypass: different status with X-Forwarded-For
-                    if key.startswith("X-") and status != baseline_status:
+            # ── IP-restriction bypass: deny (401/403/407) → allow (200) only ──
+            if baseline_status in (401, 403, 407):
+                for hdr in ("X-Forwarded-For", "X-Real-IP", "X-Originating-IP",
+                            "X-Custom-IP-Authorization"):
+                    try:
+                        async with session.get(
+                            url, headers={hdr: "127.0.0.1"}, allow_redirects=False,
+                            timeout=aiohttp.ClientTimeout(total=self.timeout),
+                        ) as resp:
+                            status = resp.status
+                            await resp.text()
+                    except Exception:
+                        continue
+                    if status == 200:
                         candidates.append(AnomalyCandidate(
                             target=url, category="ip_restriction_bypass",
-                            confidence=0.6, severity="high",
-                            description=f"IP restriction bypass via {key}: {headers[key]}",
-                            evidence={"header": key, "value": headers[key],
-                                      "baseline_status": baseline_status, "bypass_status": status},
-                            remediation="Do not trust client-supplied IP headers for access control.",
+                            confidence=0.8, severity="high",
+                            description=(f"IP restriction bypass — {hdr}: 127.0.0.1 turned a "
+                                         f"{baseline_status} deny into a 200 allow"),
+                            evidence={"header": hdr, "value": "127.0.0.1",
+                                      "baseline_status": baseline_status, "bypass_status": status,
+                                      "signals": ["deny_to_allow_confirmed"]},
+                            remediation="Do not trust client-supplied IP headers for access "
+                                        "control; enforce authorization server-side.",
                             cwe_id="CWE-290", technique="header_bypass",
                         ))
+                        break
         except Exception:
             pass
 

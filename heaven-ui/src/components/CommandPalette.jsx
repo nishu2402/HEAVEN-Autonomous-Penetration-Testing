@@ -25,6 +25,7 @@ const CATALOGUE = [
   { group: "Navigate", icon: "🔁", label: "Watch",        hint: "g w",        nav: "/watch" },
   { group: "Navigate", icon: "↹",  label: "Scan Diff",    hint: "g D",        nav: "/diff" },
   { group: "Navigate", icon: "🔬", label: "SAST",         hint: "g S",        nav: "/sast" },
+  { group: "Navigate", icon: "🧾", label: "CVE Lookup",   hint: "",           nav: "/cve" },
   { group: "Navigate", icon: "∞",  label: "Autonomous",   hint: "g a",        nav: "/autonomous" },
   { group: "Navigate", icon: "✦",  label: "AI Plans",     hint: "g p",        nav: "/ai-plans" },
   { group: "Navigate", icon: "◐",  label: "Coverage",     hint: "g c",        nav: "/coverage" },

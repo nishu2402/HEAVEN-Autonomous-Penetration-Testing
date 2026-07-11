@@ -27,6 +27,9 @@ from heaven.postex.lateral import (
 from heaven.postex.enum_engine import (
     LinuxEnumEngine, EnumResult, HostFacts, parse_enumeration,
 )
+from heaven.postex.win_enum_engine import (
+    WindowsEnumEngine, WinEnumResult, WinHostFacts, parse_windows_enumeration,
+)
 from heaven.postex.loot import (
     LootHarvester, LootResult, LootItem, parse_loot,
 )
@@ -42,6 +45,8 @@ __all__ = [
     "LateralSummary", "LateralHop", "run_lateral",
     # advanced post-exploitation
     "LinuxEnumEngine", "EnumResult", "HostFacts", "parse_enumeration",
+    "WindowsEnumEngine", "WinEnumResult", "WinHostFacts",
+    "parse_windows_enumeration",
     "LootHarvester", "LootResult", "LootItem", "parse_loot",
     "PostExSession", "PostExReport", "build_kill_chain",
 ]

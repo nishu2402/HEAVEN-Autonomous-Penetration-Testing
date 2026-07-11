@@ -28,9 +28,17 @@ from heaven.ai.llm_gateway import LLMGateway, LLMRequest, get_gateway
 from heaven.mitre.attack_mapper import TACTIC_NAMES, Tactic
 from heaven.postex.enum_engine import EnumResult, LinuxEnumEngine
 from heaven.postex.loot import LootHarvester, LootResult
+from heaven.postex.win_enum_engine import WinEnumResult, WindowsEnumEngine
 from heaven.utils.logger import get_logger
 
 logger = get_logger("postex.session")
+
+
+def _result_text(data: Any) -> str:
+    """Coerce SSH command stdout (str or bytes) to text."""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return data or ""
 
 try:
     from pydantic import BaseModel, Field
@@ -140,6 +148,7 @@ class PostExSession:
         self, host: str, username: str, *, password: Optional[str] = None,
         private_key: Optional[str] = None, port: int = 22,
         authorized: bool = False, gateway: Optional[LLMGateway] = None,
+        target_os: str = "auto",
     ):
         self.host = host
         self.username = username
@@ -148,6 +157,8 @@ class PostExSession:
         self.port = port
         self.authorized = authorized
         self.gateway = gateway or get_gateway()
+        # "auto" | "linux" | "windows" — chooses the enumeration engine.
+        self.target_os = (target_os or "auto").lower()
 
     async def run_full_postex(
         self, *, enable_loot: bool = True, ai_analysis: bool = True,
@@ -156,27 +167,41 @@ class PostExSession:
             return PostExReport(self.host, self.username, success=False,
                                 error="aborted: session not authorized")
 
-        # 1. Enumerate privilege-escalation surface.
-        enum = await LinuxEnumEngine(authorized=True).enumerate(
-            self.host, self.username, password=self.password,
-            private_key=self.private_key, port=self.port)
+        # 1. Pick the OS-appropriate enumeration engine.
+        os_kind = self.target_os
+        if os_kind == "auto":
+            os_kind = await self._detect_os()
+
+        enum: EnumResult | WinEnumResult
+        if os_kind == "windows":
+            enum = await WindowsEnumEngine(authorized=True).enumerate(
+                self.host, self.username, password=self.password,
+                private_key=self.private_key, port=self.port)
+        else:
+            enum = await LinuxEnumEngine(authorized=True).enumerate(
+                self.host, self.username, password=self.password,
+                private_key=self.private_key, port=self.port)
         if not enum.success:
             return PostExReport(self.host, self.username, success=False,
                                 error=enum.error)
 
         findings = enum.to_findings()
 
-        # 2. Harvest reusable secrets.
+        # 2. Harvest reusable secrets. The loot battery is POSIX (cat/find/grep),
+        #    so it only runs against Linux/Unix hosts; Windows credential
+        #    locations are surfaced as enum findings instead.
         loot: Optional[LootResult] = None
-        if enable_loot:
+        if enable_loot and os_kind != "windows":
             loot = await LootHarvester(authorized=True).harvest(
                 self.host, self.username, password=self.password,
                 private_key=self.private_key, port=self.port)
             findings.extend(loot.to_findings())
 
+        facts_dict = enum.facts.to_dict()
+        facts_dict["platform"] = os_kind
         report = PostExReport(
             host=self.host, user=self.username, success=True,
-            facts=enum.facts.to_dict(),
+            facts=facts_dict,
             findings=findings,
             loot=loot.to_dict() if loot else {},
             harvested_credentials=(
@@ -203,17 +228,49 @@ class PostExSession:
     def available_ai(self) -> bool:
         return bool(self.gateway and self.gateway.available and HAS_PYDANTIC)
 
+    async def _detect_os(self) -> str:
+        """One lightweight SSH probe → 'windows' or 'linux'.
+
+        ``uname -s`` prints the kernel name on Linux/Unix and fails (empty
+        stdout) on a Windows ``cmd.exe`` shell, so its output disambiguates the
+        two without a second heuristic. Any error defaults to 'linux'.
+        """
+        try:
+            import asyncssh  # type: ignore[import-not-found]
+        except ImportError:
+            return "linux"
+        client_keys = [self.private_key] if self.private_key else None
+        try:
+            async with asyncssh.connect(  # type: ignore[attr-defined]
+                self.host, port=self.port, username=self.username,
+                password=self.password, client_keys=client_keys,
+                known_hosts=None,
+            ) as conn:
+                r = await conn.run("uname -s", check=False, timeout=15)
+                out = (_result_text(r.stdout)).lower()
+                if any(k in out for k in ("linux", "darwin", "bsd", "sunos", "aix")):
+                    return "linux"
+                return "windows"
+        except Exception as e:
+            logger.debug("OS detection failed (%s) — defaulting to linux", e)
+            return "linux"
+
     async def _ai_prioritize(
-        self, enum: EnumResult, kill_chain: list[dict[str, Any]],
+        self, enum: EnumResult | WinEnumResult, kill_chain: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Ask the LLM to rank/explain the *already-found* vectors. Advice only."""
         vector_lines = "\n".join(
             f"- [{v['severity']}] {v['title']} — {v.get('abuse', '')}"
             for v in enum.vectors)
         facts = enum.facts
+        # HostFacts (Linux) and WinHostFacts differ in a couple of fields.
+        version = getattr(facts, "kernel", "") or getattr(facts, "build", "")
+        uid = getattr(facts, "uid", None)
+        account = (f"uid={uid}" if uid is not None
+                   else ("admin" if getattr(facts, "is_admin", False) else "standard user"))
         prompt = (
-            f"Host: {facts.hostname} ({facts.os}, kernel {facts.kernel}), "
-            f"current user '{facts.username}' (uid={facts.uid}, "
+            f"Host: {facts.hostname} ({facts.os}, version {version}), "
+            f"current user '{facts.username}' ({account}, "
             f"groups: {', '.join(facts.groups)}).\n"
             f"Listening ports: {facts.listening_ports}. "
             f"Interfaces: {facts.interfaces}.\n\n"

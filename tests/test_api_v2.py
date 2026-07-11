@@ -121,6 +121,58 @@ def test_postex_loot_full_routes_share_endpoint(api_client):
         assert r.status_code == 400  # missing required host/username
 
 
+def test_postex_win_enum_missing_field_returns_400(api_client):
+    r = api_client.post("/api/postex/win-enum/run", json={})  # missing host/username
+    assert r.status_code == 400
+
+
+def test_postex_win_enum_unreachable_host_returns_structured_failure(api_client):
+    r = api_client.post("/api/postex/win-enum/run", json={
+        "host": "127.0.0.1", "username": "nobody", "password": "x", "port": 1,
+    })
+    assert r.status_code in (200, 400, 500)
+    if r.status_code == 200:
+        body = r.json()
+        assert body["success"] is False
+        assert body.get("platform") == "windows"
+
+
+# ── Cloud misconfiguration: public-bucket exposure ──────────────────────
+
+def test_cloud_storage_missing_target_returns_422(api_client):
+    r = api_client.post("/api/cloud/storage", json={})
+    assert r.status_code == 422
+
+
+def test_cloud_storage_returns_structured_result(api_client):
+    # A target that yields no valid bucket candidates → the endpoint returns a
+    # structured, network-free result (no external probes from the test suite).
+    r = api_client.post("/api/cloud/storage", json={"target": "...", "limit": 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert "buckets" in body and "candidates_tried" in body
+    assert "findings" in body
+    assert body["candidates_tried"] == 0
+
+
+# ── Dynamic live CVE lookup ("vuln not in my local DB") ─────────────────
+
+def test_cve_lookup_requires_product_or_cpe(api_client):
+    r = api_client.post("/api/cve/lookup", json={})
+    assert r.status_code == 422
+
+
+def test_cve_lookup_returns_structured_result(api_client):
+    # No httpx/network guarantee in CI: the route must still answer with a
+    # well-formed, JSON-safe envelope (cached-or-empty), never 500.
+    r = api_client.post("/api/cve/lookup", json={"product": "openssh", "version": "9.5"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["product"] == "openssh"
+    assert "available" in body and "total" in body and "cves" in body
+    assert isinstance(body["cves"], list)
+
+
 # ── Gap 8: Replay missing scan ──────────────────────────────────────────
 
 def test_replay_unknown_scan_returns_404(api_client):

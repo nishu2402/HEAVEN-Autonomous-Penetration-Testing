@@ -59,9 +59,17 @@ T_FILE_PERMS = "T1222.002"     # File and Directory Permissions Modification (Li
 T_PATH_HIJACK = "T1574.007"    # Path Interception by PATH Environment Variable
 T_CAPABILITIES = "T1548"       # Abuse Elevation Control Mechanism (file capabilities)
 
+# Privilege escalation — Windows
+T_UAC_BYPASS = "T1548.002"     # Abuse Elevation Control Mechanism: Bypass UAC
+T_WINDOWS_SERVICE = "T1543.003"  # Create or Modify System Process: Windows Service
+T_UNQUOTED_PATH = "T1574.009"  # Path Interception by Unquoted Path
+T_SERVICE_PERMS = "T1574.010"  # Services File Permissions Weakness
+T_TOKEN_IMPERSONATION = "T1134.001"  # Access Token Manipulation: Token Impersonation/Theft
+
 # Credential access
 T_VALID_ACCOUNTS = "T1078"     # Valid Accounts
 T_CREDS_IN_FILES = "T1552.001"  # Unsecured Credentials: Credentials In Files
+T_CREDS_IN_REGISTRY = "T1552.002"  # Unsecured Credentials: Credentials in Registry
 T_BASH_HISTORY = "T1552.003"   # Bash History
 T_PRIVATE_KEYS = "T1552.004"   # Private Keys
 T_CLOUD_METADATA = "T1552.005"  # Cloud Instance Metadata API
@@ -110,6 +118,17 @@ POSTEX_TECHNIQUES: dict[str, PostExTechnique] = {t.id: t for t in (
        "Writable directory earlier in a privileged PATH allows binary planting."),
     _T(T_CAPABILITIES, "Abuse Elevation Control Mechanism", Tactic.PRIV_ESCALATION,
        "File capability (e.g. cap_setuid+ep) grants elevated privileges."),
+    _T(T_UAC_BYPASS, "Abuse Elevation Control Mechanism: Bypass UAC", Tactic.PRIV_ESCALATION,
+       "AlwaysInstallElevated or a disabled UAC allows SYSTEM-level install/exec."),
+    _T(T_WINDOWS_SERVICE, "Create or Modify System Process: Windows Service", Tactic.PRIV_ESCALATION,
+       "A modifiable service (binary/config) runs as SYSTEM on restart."),
+    _T(T_UNQUOTED_PATH, "Path Interception by Unquoted Path", Tactic.PRIV_ESCALATION,
+       "Unquoted service path with a space lets an earlier binary run as the service."),
+    _T(T_SERVICE_PERMS, "Services File Permissions Weakness", Tactic.PRIV_ESCALATION,
+       "The service executable sits in a user-writable directory → SYSTEM code exec."),
+    _T(T_TOKEN_IMPERSONATION, "Access Token Manipulation: Token Impersonation/Theft",
+       Tactic.PRIV_ESCALATION,
+       "SeImpersonate/SeAssignPrimaryToken enables a 'Potato' token-theft escalation."),
 
     _T(T_VALID_ACCOUNTS, "Valid Accounts", Tactic.CREDENTIAL_ACCESS,
        "Recovered credentials authenticate as a legitimate account."),
@@ -123,6 +142,8 @@ POSTEX_TECHNIQUES: dict[str, PostExTechnique] = {t.id: t for t in (
        "Cloud metadata endpoint reachable; may yield instance-role credentials."),
     _T(T_PASSWORD_STORES, "Credentials from Password Stores", Tactic.CREDENTIAL_ACCESS,
        "Credential store / keyring readable by the current user."),
+    _T(T_CREDS_IN_REGISTRY, "Unsecured Credentials: Credentials in Registry", Tactic.CREDENTIAL_ACCESS,
+       "Plaintext credential stored in the Windows registry (e.g. Winlogon autologon)."),
     _T(T_KUBECONFIG, "Unsecured Credentials: Container API", Tactic.CREDENTIAL_ACCESS,
        "kubeconfig or service-account token grants cluster access."),
 
@@ -202,7 +223,9 @@ __all__ = [
     "PostExTechnique", "POSTEX_TECHNIQUES", "technique", "describe", "tag",
     # symbolic ids
     "T_SUID", "T_SUDO", "T_KERNEL_EXPLOIT", "T_ESCAPE_TO_HOST", "T_CRON",
-    "T_FILE_PERMS", "T_PATH_HIJACK", "T_CAPABILITIES", "T_VALID_ACCOUNTS",
+    "T_FILE_PERMS", "T_PATH_HIJACK", "T_CAPABILITIES",
+    "T_UAC_BYPASS", "T_WINDOWS_SERVICE", "T_UNQUOTED_PATH", "T_SERVICE_PERMS",
+    "T_TOKEN_IMPERSONATION", "T_CREDS_IN_REGISTRY", "T_VALID_ACCOUNTS",
     "T_CREDS_IN_FILES", "T_BASH_HISTORY", "T_PRIVATE_KEYS", "T_CLOUD_METADATA",
     "T_PASSWORD_STORES", "T_KUBECONFIG", "T_SYSTEM_INFO", "T_FILE_DISCOVERY",
     "T_ACCOUNT_DISCOVERY", "T_NET_CONFIG", "T_NET_CONNECTIONS",

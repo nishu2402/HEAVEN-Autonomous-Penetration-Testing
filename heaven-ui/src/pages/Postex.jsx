@@ -7,7 +7,8 @@ import { SkeletonCard } from "../components/Skeleton.jsx";
 
 const MODULES = [
   { key: "full", label: "★ Full playbook (enum + loot + AI kill-chain)" },
-  { key: "enum", label: "Privesc enum (self-contained)" },
+  { key: "enum", label: "Privesc enum — Linux (self-contained)" },
+  { key: "win-enum", label: "Privesc enum — Windows (services/privs/AIE)" },
   { key: "loot", label: "Loot harvest (creds, redacted)" },
   { key: "linpeas", label: "Linpeas (SSH → privesc enum)" },
   { key: "bloodhound", label: "BloodHound (AD enumeration)" },
@@ -49,6 +50,7 @@ export default function PostexPage() {
       let r;
       if (module === "full") r = await Postex.full(body);
       else if (module === "enum") r = await Postex.enum(body);
+      else if (module === "win-enum") r = await Postex.winEnum(body);
       else if (module === "loot") r = await Postex.loot(body);
       else if (module === "linpeas") r = await Postex.linpeas(body);
       else if (module === "bloodhound") r = await Postex.bloodhound(body);
@@ -249,6 +251,12 @@ const EXAMPLES = {
     host: "10.0.0.5",
     username: "deploy",
     password: "deploy-pass",
+    port: 22,
+  }, null, 2),
+  "win-enum": JSON.stringify({
+    host: "10.0.0.7",
+    username: "svc_app",
+    password: "Winter2026!",
     port: 22,
   }, null, 2),
   loot: JSON.stringify({

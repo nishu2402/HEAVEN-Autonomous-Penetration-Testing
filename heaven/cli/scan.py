@@ -85,6 +85,10 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
 @click.option("--watch-tail", is_flag=True,
               help="Headless mode: disable the Rich live HUD and stream a flat log line per "
                    "phase / finding to stdout. Better for CI, ssh sessions, and `tee` piping.")
+@click.option("--cloud-buckets", is_flag=True,
+              help="Also hunt for publicly exposed S3/GCS/Azure buckets guessed from the "
+                   "target domain. Off by default — it fires external requests to the cloud "
+                   "providers, so it stays an explicit opt-in.")
 def scan(
     target: tuple[str, ...], url: tuple[str, ...],
     repo: tuple[str, ...], cloud: tuple[str, ...],
@@ -96,7 +100,7 @@ def scan(
     i_have_authorization: bool, skip_dep_check: bool,
     seed: Optional[int], cookie_file: Optional[str], auth: str,
     auto_prove: bool, autonomous: bool,
-    watch_tail: bool = False,
+    watch_tail: bool = False, cloud_buckets: bool = False,
 ) -> None:
     """Launch a vulnerability scan against specified targets."""
     print_banner()
@@ -143,6 +147,7 @@ def scan(
         "enable_iot": iot, "enable_api_scan": api_scan,
         "enable_container": container, "enable_mitre": mitre_map,
         "auto_prove": auto_prove, "autonomous": autonomous,
+        "cloud_buckets": cloud_buckets,
     }
 
     # Engagement scope check — second authorization gate

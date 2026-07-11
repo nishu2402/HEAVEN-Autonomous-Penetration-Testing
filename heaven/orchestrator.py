@@ -691,6 +691,33 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         providers=targets.get("cloud_providers", []),
     )
 
+    # Opt-in only (fires external requests to AWS/GCS/Azure) — off unless the
+    # operator passes --cloud-buckets. Guesses bucket names from the target
+    # hostnames and proves public exposure from each provider's own response.
+    async def _cloud_bucket_scan(**kw):
+        if not targets.get("cloud_buckets"):
+            return {"skipped": True, "reason": "not requested (--cloud-buckets)"}
+        from urllib.parse import urlparse
+
+        from heaven.vulnscan.cloud_scanner import CloudStorageScanner
+        seeds: list[str] = list(targets.get("ips", []))
+        for u in targets.get("urls", []):
+            host = urlparse(u).netloc or u
+            if host:
+                seeds.append(host)
+        seeds = [s for s in dict.fromkeys(seeds) if s]
+        scanner = CloudStorageScanner()
+        findings: list[dict] = []
+        for seed in seeds[:10]:
+            res = await scanner.scan(seed)
+            findings.extend(res.to_findings())
+        return {"findings": findings, "total": len(findings), "targets": seeds[:10]}
+
+    orch.add_task(
+        "Public Cloud Bucket Exposure", _cloud_bucket_scan,
+        phase=ScanPhase.VULN_SCAN, concurrency_group="cloud",
+    )
+
     git_id = orch.add_task(
         "Git Secret Scanning", scan_repositories,
         phase=ScanPhase.RECON,
@@ -1353,6 +1380,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _cve_map(**kw):
         try:
             from heaven.vulnscan.cve_mapper import map_vulnerabilities
+            from heaven.vulnscan.live_cve_feed import LiveCVEFeed
             host_results: list[dict] = []
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
@@ -1361,7 +1389,10 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 host_results.extend(data.get("hosts", []))
             if not host_results:
                 return {"skipped": True, "reason": "no host results for CVE mapping"}
-            vulns = await map_vulnerabilities(host_results)
+            # Dynamic fallback: for any service NOT in the inline CVE DB, look it
+            # up live (NVD + CIRCL). Degrades gracefully with no network/httpx.
+            live_feed = LiveCVEFeed()
+            vulns = await map_vulnerabilities(host_results, live_feed=live_feed)
             return {"vulnerabilities": vulns, "total": len(vulns)}
         except ImportError:
             return {}

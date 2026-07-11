@@ -737,9 +737,22 @@ def detect_zero_day_indicators(service: str, version: str, banner: str) -> list[
 
 # ── Main mapping entry point ──
 
-async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None) -> list[dict]:
-    """Map discovered services to vulnerabilities via inline DB + optional NVD lookup."""
+async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
+                              live_feed: Any = None,
+                              max_live_lookups: int = 12) -> list[dict]:
+    """Map discovered services to vulnerabilities.
+
+    Layers, most-authoritative first:
+      1. **Inline CVE DB** — curated, offline, version-range matched.
+      2. **NVD** (if ``nvd_client``) — live CPE lookup.
+      3. **Live CVE feed** (if ``live_feed``) — the *dynamic* fallback for the
+         "not in my DB" case: when the inline DB has **no** entry for a detected
+         product, HEAVEN queries live authoritative feeds (NVD + CIRCL) so a
+         brand-new / niche / just-published CVE is still caught. Bounded by
+         ``max_live_lookups`` per scan to keep it cheap.
+    """
     all_vulns: list[dict] = []
+    live_used = 0
 
     for host in host_results:
         for port_info in host.get("open_ports", []):
@@ -753,6 +766,41 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None) 
             version_str  = (fp[1] if fp else "") or version
 
             inline_cves = lookup_inline_cves(product_key, version_str)
+
+            # 3a. Dynamic fallback — only when the inline DB knows nothing about
+            #     this product (that is exactly the "not in my DB" situation).
+            if (live_feed is not None and not INLINE_CVE_DB.get(product_key)
+                    and live_used < max_live_lookups
+                    and (service or banner)):
+                live_used += 1
+                try:
+                    live_hits = await live_feed.discover_for_service(
+                        service, banner, version_str)
+                    host_name = host.get("host", "unknown")
+                    for lc in live_hits:
+                        all_vulns.append({
+                            "host": host_name,
+                            "port": port_info.get("port", 0),
+                            # vuln_type drives report taxonomy — "vulnerable_service"
+                            # aliases to the "vulnerable_component" KB entry so a
+                            # dynamically-discovered CVE never lands uncategorised.
+                            "vuln_type": "vulnerable_service",
+                            "cve": lc.cve_id, "title": lc.title,
+                            "severity": lc.severity, "cvss": lc.cvss,
+                            "cvss_vector": lc.cvss_vector,
+                            "cwe": lc.cwe, "product": product_key,
+                            "version": version_str,
+                            "in_kev": lc.in_kev,
+                            "version_confirmed": lc.version_confirmed,
+                            "epss": lc.epss,
+                            "exploit_available": lc.exploit_available,
+                            "exploit_url": lc.exploit_url,
+                            "source": f"live:{lc.source}",
+                            "confidence": 0.85 if lc.version_confirmed else 0.5,
+                        })
+                except Exception as e:
+                    logger.debug("live CVE feed error for %s: %s", product_key, e)
+
             for cve_rec in inline_cves:
                 all_vulns.append({
                     "host":             host.get("host", "unknown"),

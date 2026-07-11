@@ -18,6 +18,7 @@ const GROUPS = [
       { to: "/diff",        label: "Scan Diff",    icon: "↹" },
       { to: "/sast",        label: "SAST",         icon: "🔬" },
       { to: "/sca",         label: "SCA · Deps",   icon: "📦" },
+      { to: "/cve",         label: "CVE Lookup",   icon: "🧾" },
     ],
   },
   {

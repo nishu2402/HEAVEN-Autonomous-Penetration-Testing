@@ -386,6 +386,8 @@ export const Postex = {
   // Advanced, self-contained post-exploitation (SSH-based, secrets redacted).
   enum: (body) =>
     api(`/postex/enum/run`, { method: "POST", body: JSON.stringify(body) }),
+  winEnum: (body) =>
+    api(`/postex/win-enum/run`, { method: "POST", body: JSON.stringify(body) }),
   loot: (body) =>
     api(`/postex/loot/run`, { method: "POST", body: JSON.stringify(body) }),
   full: (body) =>
@@ -396,6 +398,18 @@ export const Postex = {
     api(`/postex/bloodhound/run`, { method: "POST", body: JSON.stringify(body) }),
   credReuse: (body) =>
     api(`/postex/cred-reuse/run`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+export const Cloud = {
+  // Credential-free cloud misconfiguration checks.
+  storage: (body) =>
+    api(`/cloud/storage`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+export const Cve = {
+  // Dynamic live CVE lookup (NVD + CIRCL) for products not in the local DB.
+  lookup: (body) =>
+    api(`/cve/lookup`, { method: "POST", body: JSON.stringify(body) }),
 };
 
 export const Priors = {

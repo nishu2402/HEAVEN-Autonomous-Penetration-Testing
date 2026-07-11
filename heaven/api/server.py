@@ -1865,11 +1865,12 @@ def create_app() -> FastAPI:
     ):
         """Run a post-exploitation module.
 
-        module ∈ {enum, loot, full, linpeas, bloodhound, cred-reuse}.
+        module ∈ {enum, win-enum, loot, full, linpeas, bloodhound, cred-reuse}.
 
         Body JSON depends on module:
-          enum/loot/full: {"host": "...", "username": "...", "password": "...",
-                           "private_key": "...", "port": 22}
+          enum/win-enum/loot/full: {"host": "...", "username": "...",
+                           "password": "...", "private_key": "...", "port": 22}
+          full also accepts {"os": "auto|linux|windows"}.
           linpeas:    {"host": "...", "username": "...", "password": "..."}
           bloodhound: {"domain": "...", "dc_host": "...", "username": "...", "password": "..."}
           cred-reuse: {"credentials": [["u","p"], ...], "targets": [["h", port, "ssh"], ...]}
@@ -1893,6 +1894,15 @@ def create_app() -> FastAPI:
                     port=int(body.get("port", 22)),
                 )
                 return enum_res.to_dict()
+            if module == "win-enum":
+                from heaven.postex import WindowsEnumEngine
+                win_res = await WindowsEnumEngine(authorized=True).enumerate(
+                    host=body["host"], username=body["username"],
+                    password=body.get("password"),
+                    private_key=body.get("private_key"),
+                    port=int(body.get("port", 22)),
+                )
+                return win_res.to_dict()
             if module == "loot":
                 from heaven.postex import LootHarvester
                 loot_res = await LootHarvester(authorized=True).harvest(
@@ -1909,6 +1919,7 @@ def create_app() -> FastAPI:
                     password=body.get("password"),
                     private_key=body.get("private_key"),
                     port=int(body.get("port", 22)), authorized=True,
+                    target_os=str(body.get("os", "auto")),
                 )
                 rep = await session.run_full_postex(
                     enable_loot=bool(body.get("enable_loot", True)),
@@ -2438,6 +2449,91 @@ def create_app() -> FastAPI:
             result["engagement_scan_id"] = scan_id
             result["persisted_count"] = len(result["findings"])
         return result
+
+    @app.post("/api/cloud/storage")
+    async def cloud_storage_scan(
+        request: Request,
+        user: User = Depends(require_permission("vuln.validate")),
+    ):
+        """Unauthenticated public-bucket exposure scan (S3/GCS/Azure).
+
+        Body JSON: {"target": "example.com", "names": ["codename"],
+                    "providers": ["s3","gcs","azure"], "limit": 60,
+                    "engagement": "name"}
+        No cloud credentials are used — bucket names are guessed from the target
+        and each provider's response is parsed to prove listability.
+        """
+        try:
+            from heaven.vulnscan.cloud_scanner import CloudStorageScanner
+        except Exception as e:  # pragma: no cover
+            raise HTTPException(500, f"cloud_scanner unavailable: {e}")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        target = body.get("target")
+        if not target:
+            raise HTTPException(422, "body.target is required")
+
+        scanner = CloudStorageScanner(providers=body.get("providers") or None)
+        result = await scanner.scan(
+            str(target), extra_names=body.get("names") or [],
+            limit=int(body.get("limit") or 60))
+        out = result.to_dict()
+        findings = result.to_findings()
+        out["findings"] = findings
+
+        engagement = body.get("engagement")
+        if engagement and result.success and findings:
+            import uuid as _uuid
+            store = _engagement_store_factory(engagement)
+            scan_id = f"cloud-{_uuid.uuid4().hex[:12]}"
+            store.record_scan_start(
+                scan_id, name=f"cloud/storage: {target}", mode="cloud",
+                config={"target": target})
+            for f in findings:
+                store.upsert_finding(scan_id, f)
+            store.record_scan_complete(scan_id, {"findings_count": len(findings)})
+            out["engagement_scan_id"] = scan_id
+            out["persisted_count"] = len(findings)
+        return out
+
+    @app.post("/api/cve/lookup")
+    async def cve_lookup(
+        request: Request,
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """Dynamic live CVE lookup for a product/version NOT in the local DB.
+
+        Body JSON: {"product": "openssh", "version": "9.6", "vendor": "",
+                    "cpe": "", "limit": 25}
+        Queries NVD + CIRCL live, merges/de-dupes, marks version-confirmed hits.
+        """
+        try:
+            from heaven.vulnscan.live_cve_feed import LiveCVEFeed
+        except Exception as e:  # pragma: no cover
+            raise HTTPException(500, f"live_cve_feed unavailable: {e}")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        product = body.get("product", "")
+        cpe = body.get("cpe", "")
+        if not product and not cpe:
+            raise HTTPException(422, "body.product (or body.cpe) is required")
+
+        feed = LiveCVEFeed()
+        records = await feed.discover(
+            str(product), str(body.get("version", "")),
+            vendor=str(body.get("vendor", "")), cpe=str(cpe),
+            max_results=int(body.get("limit") or 25))
+        return {
+            "product": product, "version": body.get("version", ""),
+            "available": feed.available, "total": len(records),
+            "cves": [r.to_dict() for r in records],
+        }
 
     @app.get("/api/sast/rules")
     async def sast_rules_list(

@@ -35,6 +35,7 @@ const DiffPage       = lazy(() => import("./pages/Diff.jsx"));
 const TicketsPage    = lazy(() => import("./pages/Tickets.jsx"));
 const SastPage       = lazy(() => import("./pages/Sast.jsx"));
 const ScaPage        = lazy(() => import("./pages/Sca.jsx"));
+const CvePage        = lazy(() => import("./pages/Cve.jsx"));
 const WatchPage      = lazy(() => import("./pages/Watch.jsx"));
 const Reports        = lazy(() => import("./pages/Reports.jsx"));
 const SettingsPage   = lazy(() => import("./pages/Settings.jsx"));
@@ -139,6 +140,7 @@ function Shell() {
               <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/sast" element={<SastPage />} />
               <Route path="/sca" element={<ScaPage />} />
+              <Route path="/cve" element={<CvePage />} />
               <Route path="/watch" element={<WatchPage />} />
               <Route path="*" element={<NotFound />} />
               </Routes>

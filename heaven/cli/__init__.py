@@ -153,7 +153,8 @@ if HAS_CLICK:
 
     # Wire up every subcommand module
     from heaven.cli import (
-        audit, autonomous, completion, config_cmd, coverage, db, demo as demo_module,
+        audit, autonomous, cloud, completion, config_cmd, coverage, cve as cve_module,
+        db, demo as demo_module,
         diff, engage, exploitdb, findings, info, init as init_module, knowledge,
         lateral, methodology, mitre, postex as postex_module,
         quickstart as quickstart_module, replay,
@@ -163,7 +164,9 @@ if HAS_CLICK:
     )
     audit.register(cli)
     autonomous.register(cli)
+    cloud.register(cli)
     completion.register(cli)
+    cve_module.register(cli)
     config_cmd.register(cli)
     coverage.register(cli)
     demo_module.register(cli)

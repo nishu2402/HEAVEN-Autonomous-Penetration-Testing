@@ -95,6 +95,79 @@ def _body_differs(a: str, b: str, min_size: int = 50) -> bool:
     return _body_hash(a) != _body_hash(b) and len(a) > min_size
 
 
+# ── Evidence gating (precision-first IDOR classification) ─────────────────────
+# A *different* 200 body when an ID is changed is NORMAL for any enumerable
+# resource (/product/1 vs /product/2) and is NOT, by itself, IDOR. Escalating it
+# to a high-severity finding was a heavy false-positive source. Real IDOR needs an
+# authorization signal: either a cross-user/anon session reads the object (handled
+# by _test_horizontal_privesc / _test_unauth_access) or the alternate object
+# actually leaks another record's sensitive data. Absent both, it is only an
+# informational "enumerable reference" worth manual review.
+
+_SENSITIVE_MARKERS: list[re.Pattern] = [
+    re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I),               # email
+    re.compile(r'"(ssn|social_security|passport|national_id|tax_id)"\s*:', re.I),
+    re.compile(r'"(phone|mobile|telephone)"\s*:\s*"?\+?\d', re.I),
+    re.compile(r'"(api[_-]?key|secret|access[_-]?token|refresh[_-]?token|'
+               r'password|passwd|pwd)"\s*:', re.I),
+    re.compile(r'"(credit_?card|card_?number|cvv|cvc|iban|account_?number|routing)"\s*:', re.I),
+    re.compile(r'"(first_?name|last_?name|full_?name|address|dob|date_of_birth|'
+               r'salary|balance)"\s*:', re.I),
+]
+
+
+def _sensitive_markers(body: str) -> list[str]:
+    """Return snippets of any sensitive-data markers found in a response body —
+    the signal that an altered-ID response actually exposed a record's private
+    data rather than merely returning a different (possibly public) object."""
+    found: list[str] = []
+    for rx in _SENSITIVE_MARKERS:
+        m = rx.search(body or "")
+        if m:
+            found.append(m.group(0)[:48])
+        if len(found) >= 5:
+            break
+    return found
+
+
+def _idor_verdict(orig_status: int, orig_body: str,
+                  test_status: int, test_body: str):
+    """Classify an ID-swap result. Returns (vuln_type, severity, confidence, extra)
+    or None when there is no signal at all.
+
+    * different 200 body + sensitive data leaked → real IDOR (data exposure), medium
+    * different 200 body, nothing sensitive       → informational enumerable ref
+    """
+    if not (test_status == 200 and orig_status == 200
+            and _body_differs(orig_body, test_body)):
+        return None
+    markers = _sensitive_markers(test_body)
+    if markers:
+        return ("idor", "medium", 0.6,
+                {"signals": ["sensitive_data_exposed"], "sensitive_markers": markers})
+    return ("enumerable_reference", "info", 0.4,
+            {"signals": ["object_enumerable"],
+             "note": ("A different object was returned for the altered ID, but no "
+                      "sensitive data was observed and object-level authorization "
+                      "was not proven. Verify access control manually.")})
+
+
+def _field_value_bound(body: str, field: str, value: str) -> bool:
+    """True when an injected mass-assignment field appears *bound to its value* in
+    the response (JSON key/value or form echo) — not merely the field name showing
+    up as incidental page text (e.g. the word "admin" in a nav menu), which was a
+    false-positive source."""
+    if not body:
+        return False
+    f, v = re.escape(field), re.escape(value)
+    patterns = [
+        rf'"{f}"\s*:\s*"?{v}"?',   # "admin":"1"  /  "admin":1
+        rf'"{f}"\s*:\s*true',       # "admin":true
+        rf'\b{f}\s*=\s*{v}\b',      # admin=1
+    ]
+    return any(re.search(p, body, re.I) for p in patterns)
+
+
 async def _get(session, url: str, headers: dict, timeout: float = 10.0) -> tuple[int, str]:
     try:
         async with session.get(
@@ -154,6 +227,11 @@ class IDORScanner:
             "User-Agent": "HEAVEN-Scanner/1.0",
             **(alt_auth_headers or {}),
         } if alt_auth_headers else None
+        # Whether a *real* auth token backs base_headers. The unauth-access check
+        # is only meaningful when we actually have auth to strip — otherwise
+        # "authed" and "unauthed" requests are identical and it fires on every
+        # id'd URL (a critical-severity false positive in the default scan).
+        self._has_auth = bool(auth_headers)
         self._findings: list[dict] = []
         self._seen: set[str] = set()
 
@@ -185,15 +263,18 @@ class IDORScanner:
                     orig_status, orig_body = await _get(session, url, self._base_headers)
                     test_status, test_body = await _get(session, test_url, self._base_headers)
 
-                # IDOR: test URL returns 200 with different content
-                if (test_status == 200 and orig_status == 200
-                        and _body_differs(orig_body, test_body)):
+                verdict = _idor_verdict(orig_status, orig_body, test_status, test_body)
+                if verdict:
+                    vt, sev, conf, extra = verdict
+                    title = (f"IDOR — path ID enumeration (/{seg}/ → /{candidate}/)"
+                             if vt == "idor" else
+                             f"Enumerable object reference — path /{seg}/ → /{candidate}/")
                     self._add(
                         target=test_url,
-                        vuln_type="idor",
-                        title=f"IDOR — path ID enumeration (/{seg}/ → /{candidate}/)",
-                        severity="high",
-                        confidence=0.80,
+                        vuln_type=vt,
+                        title=title,
+                        severity=sev,
+                        confidence=conf,
                         evidence={
                             "probe_type": "path_id",
                             "param": f"path_segment[{i}]",
@@ -202,6 +283,7 @@ class IDORScanner:
                             "original_id": seg,
                             "tested_id": str(candidate),
                             "status": test_status,
+                            **extra,
                         },
                         remediation=(
                             "Implement object-level authorization checks. "
@@ -210,7 +292,7 @@ class IDORScanner:
                         ),
                         cwe="CWE-639",
                     )
-                    return  # one confirmed hit per segment is enough
+                    return  # one hit per segment is enough
 
     # ── Query parameter ID enumeration ────────────────────────────
 
@@ -233,13 +315,18 @@ class IDORScanner:
                         orig_status, orig_body = await _get(session, url, self._base_headers)
                         test_status, test_body = await _get(session, test_url, self._base_headers)
 
-                    if test_status == 200 and orig_status == 200 and _body_differs(orig_body, test_body):
+                    verdict = _idor_verdict(orig_status, orig_body, test_status, test_body)
+                    if verdict:
+                        vt, sev, conf, extra = verdict
+                        title = (f"IDOR — parameter enumeration (?{param}={candidate})"
+                                 if vt == "idor" else
+                                 f"Enumerable object reference — ?{param}={candidate}")
                         self._add(
                             target=test_url,
-                            vuln_type="idor",
-                            title=f"IDOR — parameter enumeration (?{param}={candidate})",
-                            severity="high",
-                            confidence=0.82,
+                            vuln_type=vt,
+                            title=title,
+                            severity=sev,
+                            confidence=conf,
                             evidence={
                                 "probe_type": "param_id",
                                 "param": param,
@@ -248,6 +335,7 @@ class IDORScanner:
                                 "original_value": val,
                                 "tested_value": str(candidate),
                                 "status": test_status,
+                                **extra,
                             },
                             remediation=(
                                 "Validate that the requesting user is authorized to access "
@@ -268,18 +356,23 @@ class IDORScanner:
                         orig_status, orig_body = await _get(session, url, self._base_headers)
                         test_status, test_body = await _get(session, test_url, self._base_headers)
 
-                    if test_status == 200 and orig_status == 200 and _body_differs(orig_body, test_body):
+                    verdict = _idor_verdict(orig_status, orig_body, test_status, test_body)
+                    if verdict:
+                        vt, sev, conf, extra = verdict
+                        title = (f"IDOR — UUID enumeration (?{param})" if vt == "idor"
+                                 else f"Enumerable object reference — UUID ?{param}")
                         self._add(
                             target=test_url,
-                            vuln_type="idor",
-                            title=f"IDOR — UUID enumeration (?{param})",
-                            severity="high",
-                            confidence=0.78,
+                            vuln_type=vt,
+                            title=title,
+                            severity=sev,
+                            confidence=conf,
                             evidence={
                                 "probe_type": "uuid_enum",
                                 "param": param,
                                 "tested_uuid": uuid_candidate,
                                 "original_url": url,
+                                **extra,
                             },
                             remediation=(
                                 "Verify user authorization before returning resources by UUID. "
@@ -359,8 +452,11 @@ class IDORScanner:
                 async with self._sem:
                     status, body = await _post(session, action, probe_data, self._base_headers)
 
-                # If the field name is reflected back → likely mass assignment
-                if extra_field in body and status in (200, 201):
+                # A real mass-assignment tell is the injected field being *bound to
+                # its value* in the response (e.g. `"admin":"1"`), not the field
+                # name merely appearing as page text (the word "admin" is in most
+                # HTML) — that substring match was a false-positive source.
+                if _field_value_bound(body, extra_field, "1") and status in (200, 201):
                     self._add(
                         target=action,
                         vuln_type="mass_assignment",
@@ -385,7 +481,16 @@ class IDORScanner:
     # ── Unauthenticated access check ──────────────────────────────
 
     async def _test_unauth_access(self, session, url: str) -> None:
-        """Request a URL without any auth headers — if it returns 200, that's a finding."""
+        """Request a URL without auth — if a *protected* object still returns, flag it.
+
+        Only meaningful when we actually hold an auth token to strip: without one,
+        the "authed" and "unauthed" requests are identical, so every id'd 200 URL
+        would look like unauth access (a critical-severity false positive). And an
+        identical body that carries no sensitive data is just a public page, not a
+        broken-access-control finding.
+        """
+        if not self._has_auth:
+            return
         parsed = urlparse(url)
         has_id = any(_RE_INT_SEGMENT.match(s) or _RE_UUID.match(s)
                      for s in parsed.path.split("/"))
@@ -398,7 +503,8 @@ class IDORScanner:
             unauth_status, unauth_body = await _get(session, url, no_auth)
 
         if (auth_status == 200 and unauth_status == 200
-                and not _body_differs(auth_body, unauth_body)):
+                and not _body_differs(auth_body, unauth_body)
+                and _sensitive_markers(unauth_body)):
             self._add(
                 target=url,
                 vuln_type="idor",
@@ -484,9 +590,32 @@ async def scan_for_idor(
     }
     concurrency = level_map.get(stealth_level, concurrency)
 
+    # Pick up the active auth session (`heaven scan --auth` / --cookie-file) when
+    # the caller didn't pass explicit headers, so the unauth-access and
+    # horizontal-privesc checks have a real token to work with.
+    if auth_headers is None:
+        auth_headers = _active_auth_headers()
+
     scanner = IDORScanner(
         concurrency=concurrency,
         auth_headers=auth_headers,
         alt_auth_headers=alt_auth_headers,
     )
     return await scanner.scan(targets, forms_by_url=forms_by_url)
+
+
+def _active_auth_headers() -> Optional[dict]:
+    """Convert the process-wide active AuthSession into a header dict (custom
+    headers plus its cookies folded into a ``Cookie`` header). Returns None when
+    no session is configured."""
+    try:
+        from heaven.recon.auth_session import get_active_session
+    except ImportError:
+        return None
+    sess = get_active_session()
+    if not sess:
+        return None
+    hdrs = dict(sess.headers or {})
+    if sess.cookies:
+        hdrs["Cookie"] = "; ".join(f"{k}={v}" for k, v in sess.cookies.items())
+    return hdrs or None

@@ -287,8 +287,11 @@ class _HResp:
     async def __aexit__(self, *a):
         return False
 
-    async def text(self):
+    async def text(self, *args, **kwargs):
         return self._body
+
+    async def read(self, *args, **kwargs):
+        return self._body.encode("utf-8", "replace")
 
 
 class _HSession:
@@ -301,6 +304,22 @@ class _HSession:
 
     def request(self, method, url, **kwargs):
         return self._handler(url, kwargs.get("headers") or {})
+
+
+class _ParamSession:
+    """Fake session whose handler sees the injected params/body — for probes that
+    inject via ``params=`` / ``data=`` (SSTI, prototype pollution)."""
+    def __init__(self, render):
+        self._render = render  # render(inputs: dict) -> (status, body)
+
+    def request(self, method, url, params=None, **kwargs):
+        return _HResp(*self._render(params or {}))
+
+    def get(self, url, params=None, **kwargs):
+        return _HResp(*self._render(params or {}))
+
+    def post(self, url, data=None, **kwargs):
+        return _HResp(*self._render({"__body__": data}))
 
 
 @pytest.mark.asyncio
@@ -379,3 +398,170 @@ async def test_weak_password_policy_is_informational_only():
     assert wp, "expected the informational observation to still be recorded"
     assert wp[0]["severity"] == "info"
     assert wp[0]["confidence"] <= 0.5
+
+
+# ── IDOR evidence gating ─────────────────────────────────────────────────────
+
+def test_idor_verdict_requires_evidence():
+    from heaven.vulnscan.idor_scanner import _idor_verdict
+    # identical body → no signal at all
+    assert _idor_verdict(200, "A" * 80, 200, "A" * 80) is None
+    # non-200 → nothing
+    assert _idor_verdict(200, "A" * 80, 403, "B" * 80) is None
+    # different body, nothing sensitive → informational enumerable reference
+    v = _idor_verdict(200, "A" * 80, 200, "B" * 80)
+    assert v and v[0] == "enumerable_reference" and v[1] == "info"
+    # different body that leaks another record's data → real IDOR (medium)
+    leak = '{"email":"victim@example.com","balance":9999}' + "z" * 80
+    v = _idor_verdict(200, "A" * 80, 200, leak)
+    assert v and v[0] == "idor" and v[1] == "medium"
+
+
+def test_mass_assignment_field_value_binding():
+    from heaven.vulnscan.idor_scanner import _field_value_bound
+    assert _field_value_bound('{"admin":"1","x":2}', "admin", "1")
+    assert _field_value_bound('{"is_admin": true}', "is_admin", "1")
+    assert _field_value_bound("role=1&x=2", "role", "1")
+    # 'admin' merely present as page text is NOT a binding → no false positive
+    assert not _field_value_bound("<a href=/admin>Admin panel</a>", "admin", "1")
+
+
+@pytest.mark.asyncio
+async def test_idor_param_enum_not_high_on_plain_diff():
+    from urllib.parse import parse_qs, urlparse
+    from heaven.vulnscan.idor_scanner import IDORScanner
+    scanner = IDORScanner()
+
+    def handler(url, headers):
+        idv = parse_qs(urlparse(url).query).get("id", ["0"])[0]
+        return _HResp(200, f"<html>product {idv} " + "z" * 200 + "</html>")
+
+    await scanner._test_param_ids(_HSession(handler), "http://t/item?id=5")
+    # A different-but-non-sensitive object is at most an informational note.
+    assert all(f["vuln_type"] != "idor" for f in scanner._findings)
+    if scanner._findings:
+        assert scanner._findings[0]["severity"] == "info"
+
+
+@pytest.mark.asyncio
+async def test_idor_param_enum_flagged_on_data_leak():
+    from urllib.parse import parse_qs, urlparse
+    from heaven.vulnscan.idor_scanner import IDORScanner
+    scanner = IDORScanner()
+
+    def handler(url, headers):
+        idv = parse_qs(urlparse(url).query).get("id", ["0"])[0]
+        if idv == "5":
+            return _HResp(200, "<html>your account " + "z" * 200 + "</html>")
+        return _HResp(200, '{"email":"victim@example.com","first_name":"Al"}' + "z" * 200)
+
+    await scanner._test_param_ids(_HSession(handler), "http://t/acct?id=5")
+    idor = [f for f in scanner._findings if f["vuln_type"] == "idor"]
+    assert idor and idor[0]["severity"] == "medium"
+
+
+@pytest.mark.asyncio
+async def test_idor_unauth_access_gated_on_real_auth():
+    from heaven.vulnscan.idor_scanner import IDORScanner
+
+    def handler(url, headers):
+        return _HResp(200, '{"email":"a@b.com","balance":10}' + "z" * 200)
+
+    # No auth token to strip → the unauth check must NOT fire (was a critical FP
+    # firing on every id'd URL in the default scan).
+    noauth = IDORScanner()
+    await noauth._test_unauth_access(_HSession(handler), "http://t/user/5")
+    assert noauth._findings == []
+
+    # With a real token, an identical *protected* body served without it is real.
+    authed = IDORScanner(auth_headers={"Authorization": "Bearer x"})
+    await authed._test_unauth_access(_HSession(handler), "http://t/user/5")
+    assert any(f["vuln_type"] == "idor" for f in authed._findings)
+
+
+# ── dir_fuzzer soft-404 (catch-all) suppression ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_dir_fuzzer_softffour_band_suppresses_catchall():
+    from urllib.parse import urlparse
+    from heaven.vulnscan.dir_fuzzer import DirectoryFuzzer
+    fuzzer = DirectoryFuzzer()
+
+    # Soft-404: 200 for everything, body reflects the requested path (length-var).
+    def handler(url, headers):
+        path = urlparse(url).path
+        return _HResp(200, f"<html>The page {path} was not found. " + "x" * 300 + "</html>")
+
+    session = _HSession(handler)
+    wildcard = await fuzzer._detect_wildcard(session, "http://t")
+    assert wildcard is not None and wildcard[0] == 200
+    # A normal probe against the catch-all is filtered, not reported as a hit.
+    assert await fuzzer._probe(session, "http://t/admin", wildcard) is None
+
+
+@pytest.mark.asyncio
+async def test_dir_fuzzer_real_hit_survives_soft404_band():
+    from urllib.parse import urlparse
+    from heaven.vulnscan.dir_fuzzer import DirectoryFuzzer
+    fuzzer = DirectoryFuzzer()
+
+    def handler(url, headers):
+        path = urlparse(url).path
+        if path == "/admin":
+            return _HResp(200, "<html>Admin Console" + "R" * 5000 + "</html>")
+        return _HResp(200, f"<html>not found {path} " + "x" * 300 + "</html>")
+
+    session = _HSession(handler)
+    wildcard = await fuzzer._detect_wildcard(session, "http://t")
+    r = await fuzzer._probe(session, "http://t/admin", wildcard)
+    assert r is not None and r["target"].endswith("/admin")
+
+
+# ── anomaly SSTI / prototype-pollution reflection FPs ────────────────────────
+
+@pytest.mark.asyncio
+async def test_ssti_no_fp_on_escaped_reflection():
+    import html
+    from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
+
+    # A correctly-escaping app that merely reflects input. It must NOT be flagged
+    # SSTI even though the reflected payload contains "java.lang.Runtime" / the
+    # math expression, and the page carries a token with stray "49"/"42" digits.
+    def render(inputs):
+        v = "".join(str(x) for x in inputs.values())
+        return 200, f"<html>Hi {html.escape(v)} token=aa49bb42ccdd</html>"
+
+    cand = await WebAnomalyProbe()._test_ssti(_ParamSession(render), "http://t/x", "id", "GET")
+    assert cand is None
+
+
+@pytest.mark.asyncio
+async def test_ssti_detected_when_template_evaluates():
+    import re
+    from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
+
+    # A genuinely vulnerable app that evaluates the arithmetic (real SSTI).
+    def render(inputs):
+        v = "".join(str(x) for x in inputs.values())
+        m = re.search(r"(\d{3,6})\s*\*\s*(\d{3,6})", v)
+        if m:
+            v = str(int(m.group(1)) * int(m.group(2)))
+        return 200, f"<html>result {v}</html>"
+
+    cand = await WebAnomalyProbe()._test_ssti(_ParamSession(render), "http://t/x", "id", "GET")
+    assert cand is not None and cand.category == "ssti"
+
+
+@pytest.mark.asyncio
+async def test_prototype_pollution_no_fp_on_reflection():
+    import html
+    from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
+
+    # App echoes the injected key=value back — reflection, not pollution.
+    def render(inputs):
+        v = " ".join(f"{k}={x}" for k, x in inputs.items())
+        return 200, f"<html>{html.escape(v)}</html>"
+
+    cand = await WebAnomalyProbe()._test_prototype_pollution(
+        _ParamSession(render), "http://t/x", "id", "GET")
+    assert cand is None

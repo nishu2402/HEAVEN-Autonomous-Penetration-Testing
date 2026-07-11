@@ -1928,18 +1928,28 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _generate_report(**kw):
         try:
             from heaven.devsecops.aggregator import generate_report
-            # Collect EVERYTHING for the report
-            scan_data = {"scan_id": orch.scan_id, "vulnerabilities": [], "assets": [], "secrets_list": []}
+            from heaven.engagement import dedup_findings
+            # Collect EVERYTHING for the report, using the SAME finding streams and
+            # dedup as the run() summary so the exported report and the UI /
+            # engagement store agree on exactly one finding set (raw candidate ->
+            # validated -> scored collapses to one entry; suppressed/junk dropped).
+            raw_vulns: list = []
+            scan_data: dict = {"scan_id": orch.scan_id, "vulnerabilities": [],
+                               "assets": [], "secrets_list": []}
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
                     continue
                 data = res.data if isinstance(res.data, dict) else {}
-                scan_data["vulnerabilities"].extend(data.get("vulnerabilities", []))
-                scan_data["vulnerabilities"].extend(data.get("validated_findings", []))
+                raw_vulns.extend(data.get("vulnerabilities", []))
+                raw_vulns.extend(data.get("findings", []))
+                raw_vulns.extend(data.get("candidates", []))
+                raw_vulns.extend(data.get("validated_findings", []))
+                raw_vulns.extend(data.get("suppressed_findings", []))
                 scan_data["assets"].extend(data.get("hosts", []))
                 scan_data["assets"].extend(data.get("endpoints", []))
                 scan_data["secrets_list"].extend(data.get("secrets", []))
                 scan_data["secrets_list"].extend(data.get("js_secrets", []))
+            scan_data["vulnerabilities"] = dedup_findings(raw_vulns)
             return await generate_report(scan_id=orch.scan_id, scan_data=scan_data)
         except ImportError:
             return {}

@@ -240,6 +240,12 @@ HIT_CODES = {200, 201, 204, 301, 302, 307, 308, 401, 403, 405, 500}
 MISS_CODES = {404, 410}
 
 WILDCARD_SAMPLE = "h3av3n_wildcard_probe_9z8x7"
+# A second, deliberately LONGER non-existent path. Probing two random paths of
+# different lengths reveals soft-404 pages that reflect the requested path
+# ("The page /<path> was not found"), whose size scales with path length — a
+# single fixed-length probe misses those and lets the catch-all leak as "hits".
+WILDCARD_SAMPLE_LONG = ("h3av3n_wildcard_probe_9z8x7_"
+                        "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8_notexist")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -278,21 +284,42 @@ class DirectoryFuzzer:
 
     # ── Wildcard detection ────────────────────────────────────────
 
-    async def _detect_wildcard(self, session, base_url: str) -> Optional[tuple[int, int]]:
-        """Return (status, body_hash) of a guaranteed-404 probe, or None."""
-        probe = urljoin(base_url.rstrip("/") + "/", WILDCARD_SAMPLE)
-        try:
-            async with session.get(
-                probe,
-                headers={"User-Agent": self._ua},
-                timeout=aiohttp.ClientTimeout(total=8),
-                allow_redirects=True,
-                ssl=False,
-            ) as resp:
-                body = await resp.text(errors="replace")
-                return resp.status, len(body)
-        except Exception:
+    async def _detect_wildcard(self, session, base_url: str) -> Optional[tuple[int, int, int]]:
+        """Detect a soft-404 / catch-all responder.
+
+        Probes TWO non-existent paths of different lengths. If both return the
+        same hit-status, the server has a catch-all: we return
+        ``(status, lo_size, hi_size)`` describing a size band (widened to cover
+        path-length-dependent "<path> not found" pages) so ``_probe`` can drop any
+        response landing in it. Returns ``None`` when the server 404s honestly (or
+        the two probes disagree, meaning there is no stable catch-all to filter).
+        """
+        async def _one(sample: str) -> Optional[tuple[int, int]]:
+            probe = urljoin(base_url.rstrip("/") + "/", sample)
+            try:
+                async with session.get(
+                    probe,
+                    headers={"User-Agent": self._ua},
+                    timeout=aiohttp.ClientTimeout(total=8),
+                    allow_redirects=True,
+                    ssl=False,
+                ) as resp:
+                    body = await resp.text(errors="replace")
+                    return resp.status, len(body)
+            except Exception:
+                return None
+
+        r1 = await _one(WILDCARD_SAMPLE)
+        r2 = await _one(WILDCARD_SAMPLE_LONG)
+        if r1 is None or r2 is None:
             return None
+        (s1, z1), (s2, z2) = r1, r2
+        # Different statuses, or an honest 404 → no catch-all worth filtering.
+        if s1 != s2 or s1 in MISS_CODES:
+            return None
+        lo, hi = min(z1, z2), max(z1, z2)
+        span = hi - lo  # how much the soft-404 grows with path length
+        return (s1, lo - span - 64, hi + span + 64)
 
     # ── Single path probe ─────────────────────────────────────────
 
@@ -320,10 +347,12 @@ class DirectoryFuzzer:
         if status not in HIT_CODES:
             return None
 
-        # Wildcard filter: same status AND very similar size → skip
+        # Soft-404 filter: a catch-all responder returns this same status for any
+        # path, so a hit whose size lands inside the observed catch-all band is
+        # noise, not a discovered resource.
         if wildcard and wildcard[0] == status:
-            wc_size = wildcard[1]
-            if wc_size > 0 and abs(size - wc_size) / max(wc_size, 1) < 0.05:
+            _, lo, hi = wildcard
+            if lo <= size <= hi:
                 return None
 
         # Severity heuristics

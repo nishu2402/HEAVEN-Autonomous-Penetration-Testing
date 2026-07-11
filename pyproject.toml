@@ -15,33 +15,10 @@ authors = [
 maintainers = [
     {name = "Nisarg Chasmawala", email = "nisargkc@gmail.com"}
 ]
-keywords = [
-    "security", "pentesting", "vulnerability-scanner", "devsecops",
-    "owasp", "mitre-attack", "sast", "dast", "ai-security",
-    "autonomous-pentesting", "fastapi", "click",
-]
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Environment :: Console",
-    "Environment :: Web Environment",
-    "Framework :: AsyncIO",
-    "Framework :: FastAPI",
-    "Intended Audience :: Developers",
-    "Intended Audience :: Information Technology",
-    "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: MacOS",
-    "Operating System :: POSIX :: Linux",
-    "Operating System :: Microsoft :: Windows",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Security",
-    "Topic :: Software Development :: Quality Assurance",
-    "Topic :: System :: Monitoring",
-    "Topic :: System :: Networking :: Monitoring",
-    "Typing :: Typed",
-]
+# NOTE: PyPI trove `classifiers` and search `keywords` are intentionally omitted.
+# HEAVEN is distributed via GitHub Releases + install-from-source, never uploaded
+# to PyPI, so that discovery metadata would serve no purpose here. See
+# release.yml (no publish-pypi job) and SECURITY.md.
 
 dependencies = [
     # Core async

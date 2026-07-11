@@ -20,6 +20,35 @@ from heaven.utils.logger import get_logger
 logger = get_logger("orchestrator")
 
 
+def _registered_domain(host: str) -> Optional[str]:
+    """Best-effort registered domain (eTLD+1) for a *hostname*, or ``None``.
+
+    DNS/email-posture checks (SPF, DMARC, DKIM, DNSSEC) are domain-level DNS
+    record lookups and only make sense against a real domain name. Returns
+    ``None`` for IP literals (v4/v6), ``localhost``, and bare single-label hosts
+    so the orchestrator skips those targets instead of (a) firing guaranteed
+    false-positive "record missing" findings and (b) mangling an IP like
+    ``127.0.0.1`` into ``0.1`` via a naive ``split('.')[-2:]``.
+    """
+    import ipaddress
+
+    host = (host or "").strip().rstrip(".").lower()
+    if not host or host == "localhost":
+        return None
+    # Strip a port if one slipped through (e.g. "example.com:8443").
+    if host.count(":") == 1 and "]" not in host:
+        host = host.split(":", 1)[0]
+    try:
+        ipaddress.ip_address(host)
+        return None  # IPv4/IPv6 literal — no domain to check
+    except ValueError:
+        pass
+    parts = host.split(".")
+    if len(parts) < 2:
+        return None  # single-label host (intranet name) — not a public domain
+    return ".".join(parts[-2:])
+
+
 class TaskState(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -1347,13 +1376,9 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             from urllib.parse import urlparse
             domains: list[str] = list(targets.get("domains", []))
             for url in targets.get("urls", []):
-                host = urlparse(url).hostname or ""
-                if host and host not in domains:
-                    parts = host.split(".")
-                    if len(parts) >= 2:
-                        domain = ".".join(parts[-2:])
-                        if domain not in domains:
-                            domains.append(domain)
+                domain = _registered_domain(urlparse(url).hostname or "")
+                if domain and domain not in domains:
+                    domains.append(domain)
             # Also gather domains from subdomain enumeration results
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
@@ -1361,12 +1386,9 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 data = res.data if isinstance(res.data, dict) else {}
                 for sub in data.get("subdomains", []):
                     sub_str = sub if isinstance(sub, str) else sub.get("value", "")
-                    if sub_str:
-                        parts = sub_str.split(".")
-                        if len(parts) >= 2:
-                            d = ".".join(parts[-2:])
-                            if d not in domains:
-                                domains.append(d)
+                    d = _registered_domain(sub_str)
+                    if d and d not in domains:
+                        domains.append(d)
             if not domains:
                 return {"skipped": True, "reason": "no domains for DNS recon"}
             # dns_recon_targets returns {"findings": [...], "vulnerabilities": [...], "total": int}
@@ -1823,11 +1845,11 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             from urllib.parse import urlparse
             domains = set()
             for url in targets.get("urls", []):
-                parsed = urlparse(url)
-                if parsed.hostname:
-                    parts = parsed.hostname.split(".")
-                    if len(parts) >= 2:
-                        domains.add(".".join(parts[-2:]))
+                domain = _registered_domain(urlparse(url).hostname or "")
+                if domain:
+                    domains.add(domain)
+            if not domains:
+                return {"skipped": True, "reason": "no email domains (IP/localhost targets)"}
             return await scan_email_domains(domains=list(domains))
         except ImportError:
             return {}

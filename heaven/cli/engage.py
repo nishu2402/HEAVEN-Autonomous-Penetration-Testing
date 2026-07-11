@@ -23,7 +23,7 @@ def engage() -> None:
 @click.option("--client", default="", help="Client name")
 @click.option("--sow", default="", help="Statement of work / contract reference")
 def engage_init(name: str, client: str, sow: str) -> None:
-    """Initialize a new engagement (creates ./engagements/<name>.db)."""
+    """Initialize a new engagement (creates <data_dir>/engagements/<name>.db)."""
     from heaven.engagement import EngagementStore
     path = _engagement_db_path(name)
     store = EngagementStore(path)

@@ -39,12 +39,15 @@ logger = get_logger("ai.gateway")
 # ═══════════════════════════════════════════
 
 # Current-generation defaults. Pin a different one any time with HEAVEN_LLM_MODEL
-# (env or Web-UI Settings). Gemini 1.5 was retired by Google in 2025, so the
-# default must be a 2.x model or live calls 404 even with a valid key.
+# (env or Web-UI Settings). Google retires pinned Gemini versions on a rolling
+# basis (1.5 gone in 2025; 2.5-flash later gated to "no longer available to new
+# users" → live calls 404 even with a valid key), so the Gemini default is the
+# rolling **gemini-flash-latest** alias, which always resolves to the current
+# fast Flash model and never 404s as versions churn.
 PROVIDER_DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-5",     # balanced default; Opus 4.8 / Haiku 4.5 also valid
     "openai": "gpt-4o",
-    "gemini": "gemini-2.5-flash",       # current, fast, cheap; gemini-2.5-pro for deeper reasoning
+    "gemini": "gemini-flash-latest",    # rolling alias → current Flash; gemini-pro-latest for deeper reasoning
 }
 
 PROVIDER_KEY_ENVS = {

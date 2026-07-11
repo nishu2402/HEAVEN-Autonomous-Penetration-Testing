@@ -9,7 +9,8 @@ What it refreshes:
   - ExploitDB CSV mirror         (~5 MB, ~30s — cached in data/cache/)
 
 Honest scope:
-  - Does NOT update HEAVEN's own code (use `pip install -U heaven-pentest`)
+  - Does NOT update HEAVEN's own code (pull the latest source / reinstall with
+    `git pull && pip install -e .`, or grab the newest GitHub Release)
   - Does NOT update the trained NVD CVSS model (use `heaven train-model`)
   - Each step degrades gracefully if the corresponding tool isn't installed
 """

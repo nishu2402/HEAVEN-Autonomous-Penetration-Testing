@@ -87,6 +87,15 @@ _SECRET_KEY_RE = re.compile(r"(pass|passwd|password|secret|token|api[_-]?key|_ke
 
 @dataclass
 class LootItem:
+    """One harvested loot record.
+
+    Plaintext credentials are stored **outside** the dataclass field list — see
+    :attr:`credentials`. This is deliberate: it means ``dataclasses.asdict()``,
+    ``dataclasses.fields()``, and the default ``__repr__`` cannot reach them,
+    so reflection-based serializers cannot accidentally leak plaintext.
+    Sanctioned serializers are :meth:`to_dict` (redacted).
+    """
+
     category: str
     path: str = ""
     severity: str = "high"
@@ -94,8 +103,34 @@ class LootItem:
     description: str = ""
     technique: str = ""
     secret_preview: str = ""
-    # Real (user, secret, service_hint) — in-memory only, NEVER serialized.
-    credentials: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Real (user, secret, service_hint) tuples. Held OUTSIDE the dataclass
+        # field list so `dataclasses.asdict()` / `dataclasses.fields()` /
+        # default `repr()` can never surface plaintext.
+        self._credentials: list[tuple[str, str, str]] = []
+
+    @property
+    def credentials(self) -> list[tuple[str, str, str]]:
+        """Mutable in-memory credential list. Callers may ``.append(...)``.
+
+        This attribute is intentionally not a dataclass field; see class doc.
+        """
+        return self._credentials
+
+    def wipe_secrets(self) -> None:
+        """Zero the in-memory plaintext credentials. Best-effort cleanup after
+        the credential-reuse loop has consumed them."""
+        self._credentials = []
+
+    def __repr__(self) -> str:
+        # Redacted — never surfaces plaintext even in log lines / debuggers.
+        return (
+            f"LootItem(category={self.category!r}, path={self.path!r}, "
+            f"severity={self.severity!r}, "
+            f"secret_preview={self.secret_preview!r}, "
+            f"credentials=<{len(self._credentials)} redacted>)"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         # Redacted view for DB / reports / API.
@@ -104,8 +139,8 @@ class LootItem:
             "severity": self.severity, "confidence": self.confidence,
             "description": self.description, "technique": self.technique,
             "secret_preview": self.secret_preview,
-            "credential_count": len(self.credentials),
-            "credential_users": [c[0] for c in self.credentials if c[0]][:10],
+            "credential_count": len(self._credentials),
+            "credential_users": [c[0] for c in self._credentials if c[0]][:10],
         }
 
 
@@ -159,6 +194,19 @@ class LootResult:
                 mitre.tag(f, item.technique)
             findings.append(f)
         return findings
+
+    def wipe_secrets(self) -> None:
+        """Zero every item's in-memory plaintext credential list."""
+        for item in self.items:
+            item.wipe_secrets()
+
+    def __repr__(self) -> str:
+        # Explicit redaction, in case an operator prints the object.
+        return (
+            f"LootResult(host={self.host!r}, user={self.user!r}, "
+            f"success={self.success!r}, items={len(self.items)} "
+            f"(credentials redacted), error={self.error!r})"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

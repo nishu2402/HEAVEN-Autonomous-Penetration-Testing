@@ -70,6 +70,15 @@ class PostExAnalysis(BaseModel):  # type: ignore[misc]
 
 @dataclass
 class PostExReport:
+    """Post-exploitation report.
+
+    ``reusable_credentials`` (in-memory plaintext) is stored **outside** the
+    dataclass field list — set via the property/setter after construction.
+    This means ``dataclasses.asdict()``, ``dataclasses.fields()`` and the
+    default ``__repr__`` cannot see it, so reflection-based serializers can
+    never accidentally leak plaintext. Sanctioned serializers: :meth:`to_dict`.
+    """
+
     host: str
     user: str
     success: bool
@@ -80,10 +89,39 @@ class PostExReport:
     kill_chain: list[dict[str, Any]] = field(default_factory=list)
     ai_analysis: Optional[dict[str, Any]] = None
     error: str = ""
-    # In-memory only — reusable (user, password) pairs for the lateral loop.
-    # Deliberately EXCLUDED from to_dict()/serialization so plaintext secrets
-    # never reach the engagement DB, reports, or the API.
-    reusable_credentials: list[tuple[str, str]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # In-memory (user, password) pairs for the lateral loop. Held OUTSIDE
+        # the dataclass field list so `dataclasses.asdict()` / `fields()` /
+        # default `repr()` cannot leak plaintext.
+        self._reusable_credentials: list[tuple[str, str]] = []
+
+    @property
+    def reusable_credentials(self) -> list[tuple[str, str]]:
+        """Snapshot copy of the in-memory reusable-credential list.
+
+        Not a dataclass field; see class docstring. Callers get a defensive
+        copy so downstream mutation cannot poison the report.
+        """
+        return list(self._reusable_credentials)
+
+    @reusable_credentials.setter
+    def reusable_credentials(self, value: list[tuple[str, str]]) -> None:
+        self._reusable_credentials = [tuple(v) for v in value]  # type: ignore[misc]
+
+    def wipe_secrets(self) -> None:
+        """Zero the in-memory reusable-credential list. Call once the lateral
+        loop has consumed them so nothing lingers in memory longer than needed.
+        """
+        self._reusable_credentials = []
+
+    def __repr__(self) -> str:
+        return (
+            f"PostExReport(host={self.host!r}, user={self.user!r}, "
+            f"success={self.success!r}, findings={len(self.findings)}, "
+            f"reusable_credentials=<{len(self._reusable_credentials)} redacted>, "
+            f"kill_chain={len(self.kill_chain)} tactics)"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -144,10 +182,13 @@ class PostExSession:
             harvested_credentials=(
                 len(loot.harvested_credentials()) if loot else 0),
             kill_chain=build_kill_chain(findings),
-            # SSH-reusable creds only (in-memory; never serialised).
-            reusable_credentials=(
-                loot.harvested_credentials(service_hint="ssh") if loot else []),
         )
+        # SSH-reusable creds only. Set via the property setter — the plaintext
+        # lives outside the dataclass field list so it cannot be reached by
+        # dataclasses.asdict() / fields() / default repr().
+        if loot:
+            report.reusable_credentials = loot.harvested_credentials(
+                service_hint="ssh")
 
         # 3. AI prioritisation (optional, advice-only).
         if ai_analysis and self.available_ai and enum.vectors:

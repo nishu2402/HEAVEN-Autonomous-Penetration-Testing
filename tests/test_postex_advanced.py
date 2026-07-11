@@ -190,11 +190,98 @@ def test_session_requires_authorization():
 
 
 def test_report_never_serializes_reusable_credentials():
-    rep = PostExReport("h", "u", True,
-                       reusable_credentials=[("root", "TopSecretPlaintext")])
+    rep = PostExReport("h", "u", True)
+    rep.reusable_credentials = [("root", "TopSecretPlaintext")]
     d = json.dumps(rep.to_dict())
     assert "TopSecretPlaintext" not in d
     assert "reusable_credentials" not in d
+
+
+def test_reusable_credentials_survive_leak_vectors():
+    """The sanctioned serializers redact; the reflection-based ones must too.
+
+    Because ``reusable_credentials`` is deliberately NOT a dataclass field,
+    every reflection-based serializer (``dataclasses.asdict``, ``fields``,
+    default ``repr``) must be blind to the plaintext. The property is the only
+    legitimate access path.
+    """
+    import dataclasses
+    rep = PostExReport("h", "u", True)
+    rep.reusable_credentials = [("root", "PlaintextSecret42")]
+
+    # 1. dataclasses.asdict — the classic serialization footgun.
+    d = dataclasses.asdict(rep)
+    assert "reusable_credentials" not in d
+    assert "_reusable_credentials" not in d
+    assert "PlaintextSecret42" not in json.dumps(d)
+
+    # 2. dataclasses.fields — reflection over declared fields.
+    field_names = {f.name for f in dataclasses.fields(rep)}
+    assert "reusable_credentials" not in field_names
+
+    # 3. Default repr() / str() — auto-generated dataclass repr should not
+    #    include the plaintext-carrying attribute at all; our override redacts.
+    assert "PlaintextSecret42" not in repr(rep)
+    assert "PlaintextSecret42" not in str(rep)
+    assert "redacted" in repr(rep)
+
+    # 4. Property still returns the value (defensive copy — caller mutation
+    #    can't poison the in-memory record).
+    creds = rep.reusable_credentials
+    creds.append(("evil", "MutateAttempt"))
+    assert rep.reusable_credentials == [("root", "PlaintextSecret42")]
+
+    # 5. wipe_secrets() clears the in-memory copy.
+    rep.wipe_secrets()
+    assert rep.reusable_credentials == []
+
+
+def test_loot_item_survives_leak_vectors():
+    """Same guarantee at the LootItem layer."""
+    import dataclasses
+    from heaven.postex.loot import LootItem
+
+    item = LootItem(category="pgpass", path="~/.pgpass",
+                    secret_preview="user:Pg…24@db")
+    item.credentials.append(("user", "PgPlaintextSecretXYZ", "postgres"))
+
+    # dataclasses.asdict never surfaces the plaintext
+    d = dataclasses.asdict(item)
+    assert "PgPlaintextSecretXYZ" not in json.dumps(d)
+    assert "credentials" not in d
+
+    # dataclasses.fields does not declare `credentials`
+    field_names = {f.name for f in dataclasses.fields(item)}
+    assert "credentials" not in field_names
+
+    # repr / str redact
+    assert "PgPlaintextSecretXYZ" not in repr(item)
+    assert "PgPlaintextSecretXYZ" not in str(item)
+    assert "redacted" in repr(item)
+
+    # to_dict remains redacted (unchanged contract)
+    dd = item.to_dict()
+    assert "PgPlaintextSecretXYZ" not in json.dumps(dd)
+    assert dd["credential_count"] == 1
+    assert dd["credential_users"] == ["user"]
+
+    # wipe_secrets clears the in-memory copy
+    item.wipe_secrets()
+    assert item.credentials == []
+    assert item.to_dict()["credential_count"] == 0
+
+
+def test_loot_result_wipes_all_items():
+    from heaven.postex.loot import LootItem, LootResult
+
+    item = LootItem(category="aws_credentials")
+    item.credentials.append(("AKIA…", "SecretShouldVanish", "aws"))
+    r = LootResult(host="h", user="u", success=True, items=[item])
+    assert len(r.harvested_credentials()) == 1
+    r.wipe_secrets()
+    assert r.harvested_credentials() == []
+    # And repr does not leak either
+    assert "SecretShouldVanish" not in repr(r)
 
 
 def test_session_ai_gated_without_key(monkeypatch):

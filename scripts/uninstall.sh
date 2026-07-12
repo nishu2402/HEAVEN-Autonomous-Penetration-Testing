@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  HEAVEN — Autonomous Penetration Testing Framework
-#  Uninstaller v2.0
+#  Uninstaller v1.0.0
 #
 #  Removes: venv, CLI symlinks, shell RC PATH entries, egg-info, __pycache__
 #  Keeps:   source code, scan data (unless empty), engagement DBs, config

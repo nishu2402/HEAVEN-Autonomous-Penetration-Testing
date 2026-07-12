@@ -116,6 +116,11 @@ def test_quickstart_creates_env_and_seeds(tmp_path, monkeypatch):
         "SELECT COUNT(*) FROM findings"
     ).fetchone()[0]
     assert n == 12
+    # …and quickstart pointed every default reader (web dashboard, `heaven
+    # findings`, `heaven doctor`) at that seeded data. Without this the "populated
+    # dashboard" quickstart promises opens EMPTY. Regression guard.
+    from heaven.engagement import DEMO_DB_NAME, get_active_engagement
+    assert get_active_engagement() == DEMO_DB_NAME
 
 
 def test_api_seed_demo(client):

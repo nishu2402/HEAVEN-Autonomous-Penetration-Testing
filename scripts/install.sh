@@ -100,7 +100,10 @@ if [ "${HEAVEN_CORE_ONLY:-0}" = "1" ]; then
     info "HEAVEN_CORE_ONLY=1 — skipping optional feature packs"
 else
     info "Installing optional feature packs (failures here are non-fatal)..."
-    for extra in recon reports mitre scheduling lateral deploy; do
+    # NOTE: MITRE ATT&CK mapping ships a bundled dataset + talks plain HTTP, so it
+    # has no pip extra — don't add `mitre` here or every install prints a phantom
+    # "skipped" warning for a pack that doesn't exist (see pyproject.toml).
+    for extra in recon reports scheduling lateral deploy; do
         if "$VENV_PIP" install -e "$INSTALL_DIR[$extra]" -q 2>/dev/null; then
             ok "  + $extra"
         else

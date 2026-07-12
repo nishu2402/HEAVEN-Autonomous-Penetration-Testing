@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20790%20Tests%20%C2%B7%20137%20Modules%20%C2%B7%2047%20CLI%20Commands%20%C2%B7%2059%20API%20Routes&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20792%20Tests%20%C2%B7%20137%20Modules%20%C2%B7%2047%20CLI%20Commands%20%C2%B7%2059%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;790+Tests+%C2%B7+137+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;792+Tests+%C2%B7+137+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
 </p>
 
 <p align="center">
@@ -114,7 +114,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 790 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 792 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 137 |
 | ⌨️ **CLI Commands** | 47 |
@@ -215,10 +215,11 @@ cd HEAVEN-Autonomous-Penetration-Testing
 chmod +x scripts/install.sh && ./scripts/install.sh   # venv + deps + builds the web UI
 ```
 
-`scripts/install.sh` installs everything from `requirements.txt`. If you instead install
-the package with `pip`, the base install is intentionally lean and each feature
-group is an **optional extra** (the feature degrades gracefully when its extra
-isn't installed):
+`scripts/install.sh` sets up a virtualenv and installs the core package plus the
+common feature extras (recon · reports · scheduling · lateral · deploy); the
+heavy cloud-provider and LLM SDKs stay opt-in. If you instead install the package
+with `pip`, the base install is intentionally lean and each feature group is an
+**optional extra** (the feature degrades gracefully when its extra isn't installed):
 
 ```bash
 pip install -e .                  # core: CLI, API, web UI, scanning, SQLite, auth
@@ -662,7 +663,7 @@ heaven/                   ← Python package (137 modules)
 └── cli/                  Click CLI — one module per command group (47 commands)
 
 heaven-ui/                React + Vite web console (22 pages)
-tests/                    790 pytest tests + native & DVWA benchmark suites
+tests/                    792 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh
@@ -748,7 +749,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>790 tests · 137 modules · 47 CLI commands · 59 API routes · 22 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>792 tests · 137 modules · 47 CLI commands · 59 API routes · 22 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

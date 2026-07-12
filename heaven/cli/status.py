@@ -157,7 +157,7 @@ def _engagement_status(name: str) -> dict:
         from heaven.engagement import EngagementStore
         db_path = _engagement_db_path(name)
         if not db_path.exists():
-            return {"name": name, "exists": False, "db_path": str(db_path)}
+            return {"name": name, "selector": name, "exists": False, "db_path": str(db_path)}
         store = EngagementStore(db_path)
         eng = store.get_engagement()
         stats = store.stats()
@@ -165,6 +165,10 @@ def _engagement_status(name: str) -> dict:
         last_scan = scans[0] if scans else None
         return {
             "name": eng.name if eng else name,
+            # `selector` is the DB stem to pass to --engagement; `name` may be a
+            # friendly display name ("demo (sample data)") that isn't a valid
+            # store selector, so suggested commands must use `selector`.
+            "selector": name,
             "client": eng.client if eng else "",
             "exists": True,
             "db_path": str(db_path),
@@ -189,7 +193,9 @@ def _next_steps(report: dict) -> list[str]:
     report so a brand-new operator is never left wondering 'now what?'."""
     eng = report.get("engagement", {})
     admin_set = bool(os.environ.get("HEAVEN_ADMIN_PASSWORD"))
-    name = eng.get("name") or "<name>"
+    # Use the store selector (DB stem) for copy-paste commands, not the friendly
+    # display name which can contain spaces/parens and isn't a valid --engagement.
+    name = eng.get("selector") or eng.get("name") or "<name>"
     steps: list[str] = []
     if not admin_set:
         steps.append("[cyan]heaven init[/cyan]  — set the Web-UI admin password + optional API keys")

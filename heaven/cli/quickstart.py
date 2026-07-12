@@ -52,7 +52,13 @@ def quickstart_cmd(ctx: click.Context, do_serve: bool, no_demo: bool) -> None:
     seeded = 0
     if not no_demo:
         from heaven.demo import resolve_demo_store, seed_demo
+        from heaven.engagement import DEMO_DB_NAME, set_active_engagement
         seeded = seed_demo(resolve_demo_store())["findings"]
+        # Point every default reader (web dashboard, `heaven findings`,
+        # `heaven doctor`) at the sample data we just loaded — without this the
+        # seeded `demo` DB is orphaned and the "populated dashboard" this command
+        # promises opens empty. Mirrors what `heaven demo` does.
+        set_active_engagement(DEMO_DB_NAME)
 
     if json_output():
         emit_json({

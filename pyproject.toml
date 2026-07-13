@@ -83,6 +83,12 @@ dev = [
     # benchmark tests skip at collection — which both hides them from CI and made
     # the collected test count environment-dependent (CI counted 11 fewer).
     "flask>=3.0.0",
+    # google-genai backs the Gemini gateway regression tests
+    # (tests/test_llm_gateway_gemini.py), which import real `google.genai.types`
+    # (GenerateContentConfig/ThinkingConfig) to assert the dispatch path. Without
+    # it those tests error at collection (ModuleNotFoundError: google) and the
+    # collected count drifts between CI and local — same rationale as flask above.
+    "google-genai>=1.0.0",
 ]
 cloud-gcp = ["google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0"]
 cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]

@@ -5,6 +5,7 @@
 
 import React, { useState } from "react";
 import { Cve } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import { sevColor } from "../theme";
 
@@ -14,32 +15,26 @@ export default function CvePage() {
   const [vendor, setVendor] = useState("");
   const [cpe, setCpe] = useState("");
   const [limit, setLimit] = useState(25);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  // Tracked globally so a live NVD/CIRCL lookup survives page navigation.
+  const { loading, result, error, start } = useJob("cve");
+  const [formError, setFormError] = useState(null);
 
-  async function run() {
-    setError(null);
-    setResult(null);
+  function run() {
+    setFormError(null);
     if (!product.trim() && !cpe.trim()) {
-      setError("Enter a product name (or an exact CPE).");
+      setFormError("Enter a product name (or an exact CPE).");
       return;
     }
-    setLoading(true);
-    try {
-      const r = await Cve.lookup({
+    start(
+      { label: "CVE lookup", kind: "cve", path: "/cve" },
+      () => Cve.lookup({
         product: product.trim(),
         version: version.trim() || undefined,
         vendor: vendor.trim() || undefined,
         cpe: cpe.trim() || undefined,
         limit: Number(limit) || 25,
-      });
-      setResult(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+      }),
+    );
   }
 
   function onKey(e) {
@@ -101,7 +96,9 @@ export default function CvePage() {
           {loading ? "Querying NVD + CIRCL…" : "Look up CVEs"}
         </button>
 
-        {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
+        {(formError || error) && (
+          <div className="error" style={{ marginTop: 10 }}>{formError || error}</div>
+        )}
       </div>
 
       {loading && (

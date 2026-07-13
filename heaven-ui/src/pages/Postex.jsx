@@ -3,6 +3,7 @@
 
 import React, { useState } from "react";
 import { Postex, getUser } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 
 const MODULES = [
@@ -19,48 +20,50 @@ export default function PostexPage() {
   const [module, setModule] = useState("full");
   const [bodyText, setBodyText] = useState(EXAMPLES.full);
   const [authorized, setAuthorized] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  // The post-ex run is a long, blocking request. Tracking it in the global jobs
+  // store (instead of local state) means it keeps running — and keeps its result
+  // — when you navigate to another page and come back. `formError` stays local
+  // because it's pre-flight validation, not part of the running job.
+  const { loading, result, error, start, clear } = useJob("postex");
+  const [formError, setFormError] = useState(null);
   const user = getUser();
   const isAdmin = (user?.role === "admin");
 
   function selectModule(m) {
     setModule(m);
     setBodyText(EXAMPLES[m]);
-    setResult(null);
+    setFormError(null);
+    clear();
   }
 
-  async function run() {
-    setError(null);
-    setResult(null);
+  function runModule(mod, body) {
+    if (mod === "full") return Postex.full(body);
+    if (mod === "enum") return Postex.enum(body);
+    if (mod === "win-enum") return Postex.winEnum(body);
+    if (mod === "loot") return Postex.loot(body);
+    if (mod === "linpeas") return Postex.linpeas(body);
+    if (mod === "bloodhound") return Postex.bloodhound(body);
+    return Postex.credReuse(body);
+  }
+
+  function run() {
+    setFormError(null);
     if (!authorized) {
-      setError("Authorization checkbox is required.");
+      setFormError("Authorization checkbox is required.");
       return;
     }
     let body;
     try {
       body = JSON.parse(bodyText || "{}");
     } catch (e) {
-      setError(`Body JSON is invalid: ${e.message}`);
+      setFormError(`Body JSON is invalid: ${e.message}`);
       return;
     }
-    setLoading(true);
-    try {
-      let r;
-      if (module === "full") r = await Postex.full(body);
-      else if (module === "enum") r = await Postex.enum(body);
-      else if (module === "win-enum") r = await Postex.winEnum(body);
-      else if (module === "loot") r = await Postex.loot(body);
-      else if (module === "linpeas") r = await Postex.linpeas(body);
-      else if (module === "bloodhound") r = await Postex.bloodhound(body);
-      else r = await Postex.credReuse(body);
-      setResult(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    const mod = module;
+    start(
+      { label: `Post-Ex · ${mod}`, kind: "postex", path: "/postex" },
+      () => runModule(mod, body),
+    );
   }
 
   if (!isAdmin) {
@@ -111,7 +114,14 @@ export default function PostexPage() {
           {loading ? "Running…" : `Run ${module}`}
         </button>
 
-        {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
+        {(formError || error) && (
+          <div className="error" style={{ marginTop: 12 }}>{formError || error}</div>
+        )}
+        {loading && (
+          <div className="dim" style={{ marginTop: 10, fontSize: 12 }}>
+            This runs on the server — you can switch pages and come back; it keeps running.
+          </div>
+        )}
       </div>
 
       {loading && (

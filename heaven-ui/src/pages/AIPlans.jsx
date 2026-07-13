@@ -7,14 +7,15 @@
 
 import React, { useState } from "react";
 import { AI, SIEM, Engagement } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 
 export default function AIPlans() {
   const [findingsJson, setFindingsJson] = useState("");
   const [objective, setObjective]       = useState("");
-  const [loading, setLoading]           = useState(false);
-  const [output, setOutput]             = useState(null);
-  const [error, setError]               = useState(null);
+  // Tracked globally so an LLM planning run survives page navigation.
+  const { loading, result: output, error: jobError, start } = useJob("aiplans");
+  const [error, setError]               = useState(null);   // load / validation
   const [siemStatus, setSiemStatus]     = useState(null);
 
   React.useEffect(() => {
@@ -36,19 +37,17 @@ export default function AIPlans() {
     }
   }
 
-  async function plan() {
+  function plan() {
     setError(null);
-    setOutput(null);
-    setLoading(true);
+    let parsed;
     try {
-      const parsed = JSON.parse(findingsJson || "[]");
-      const out = await AI.plan(parsed, [], objective);
-      setOutput(out);
+      parsed = JSON.parse(findingsJson || "[]");
     } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+      setError(`Findings JSON is invalid: ${e.message}`);
+      return;
     }
+    start({ label: "AI attack planner", kind: "aiplans", path: "/ai-plans" },
+          () => AI.plan(parsed, [], objective));
   }
 
   return (
@@ -99,9 +98,9 @@ export default function AIPlans() {
           {loading ? "Planning…" : "Plan attack chains"}
         </button>
 
-        {error && (
+        {(error || jobError) && (
           <div className="error" style={{ marginTop: 12 }}>
-            {error}
+            {error || jobError}
           </div>
         )}
       </div>

@@ -265,8 +265,14 @@ def scan(
     orch = build_full_scan(targets, config, checkpoint_store=engagement_store)
 
     if engagement_store:
+        # Name the scan after its targets (e.g. "app.example.com +2") so it reads
+        # the same in the CLI, the web Scans list and downloaded reports.
+        from heaven.engagement import scan_display_name
+        _scan_name = scan_display_name(
+            list(targets.get("urls") or []) + list(targets.get("ips") or []), mode,
+        )
         engagement_store.record_scan_start(
-            orch.scan_id, name=f"{mode} scan", mode=mode,
+            orch.scan_id, name=_scan_name, mode=mode,
             config={"targets": targets, "seed": seed},
         )
 

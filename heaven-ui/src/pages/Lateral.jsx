@@ -3,6 +3,7 @@
 
 import React, { useState } from "react";
 import { Lateral, getUser } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 
 export default function LateralPage() {
@@ -14,17 +15,17 @@ export default function LateralPage() {
   const [smbNthash, setSmbNthash] = useState("");
   const [targetsText, setTargetsText] = useState("10.0.0.5:22\n10.0.0.5:445");
   const [authorized, setAuthorized] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  // Global job store: a credential spray keeps running (and keeps its result)
+  // across page navigation. `formError` is local pre-flight validation only.
+  const { loading, result, error, start } = useJob("lateral");
+  const [formError, setFormError] = useState(null);
   const user = getUser();
   const isAdmin = (user?.role === "admin");
 
-  async function run() {
-    setError(null);
-    setResult(null);
-    if (!authorized) { setError("Authorization checkbox is required."); return; }
-    if (smbPass && smbNthash) { setError("smb-pass and smb-nthash are mutually exclusive"); return; }
+  function run() {
+    setFormError(null);
+    if (!authorized) { setFormError("Authorization checkbox is required."); return; }
+    if (smbPass && smbNthash) { setFormError("smb-pass and smb-nthash are mutually exclusive"); return; }
 
     const targets = targetsText.split(/\n+/).map(t => t.trim()).filter(Boolean).map(t => {
       const [host, port] = t.split(":");
@@ -40,15 +41,7 @@ export default function LateralPage() {
       smb_domain: smbDomain,
       targets,
     };
-    setLoading(true);
-    try {
-      const r = await Lateral.run(body);
-      setResult(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    start({ label: "Lateral movement", kind: "lateral", path: "/lateral" }, () => Lateral.run(body));
   }
 
   if (!isAdmin) {
@@ -123,7 +116,14 @@ export default function LateralPage() {
           {loading ? "Spraying…" : "Run lateral movement"}
         </button>
 
-        {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
+        {(formError || error) && (
+          <div className="error" style={{ marginTop: 12 }}>{formError || error}</div>
+        )}
+        {loading && (
+          <div className="dim" style={{ marginTop: 10, fontSize: 12 }}>
+            Running on the server — you can leave this page and come back; it won't stop.
+          </div>
+        )}
       </div>
 
       {loading && (

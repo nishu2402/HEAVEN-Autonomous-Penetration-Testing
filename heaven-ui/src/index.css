@@ -785,6 +785,128 @@ a:hover { color: var(--accent-2); }
 .progress-indeterminate .progress-fill { width: 40% !important; animation: progress-slide 1.4s ease-in-out infinite; }
 @keyframes progress-slide { 0% { left: -40%; } 100% { left: 140%; } }
 
+/* ── Scan activity list (redesigned scan history) ── */
+.scan-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.scan-list-head-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.scan-summary { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text-1); }
+.scan-summary-run  { color: var(--brand); font-weight: 600; }
+.scan-summary-fail { color: var(--crit); font-weight: 600; }
+
+.scan-list { display: flex; flex-direction: column; gap: 10px; }
+
+.scan-row {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-1); overflow: hidden;
+  transition: border-color 0.16s, box-shadow 0.16s;
+}
+.scan-row:hover { border-color: var(--border-strong); }
+.scan-row.is-open { border-color: var(--border-accent); box-shadow: var(--shadow-sm); }
+.scan-row.is-running { border-color: rgba(52,229,163,0.35); }
+
+.scan-row-head {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  cursor: pointer; user-select: none;
+}
+.scan-row-head:focus-visible { outline: none; box-shadow: inset var(--ring); }
+.scan-chevron { color: var(--text-2); font-size: 11px; width: 12px; flex-shrink: 0; transition: color 0.16s; }
+.scan-row:hover .scan-chevron { color: var(--text-0); }
+
+.scan-badge {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  text-transform: capitalize; letter-spacing: 0.02em;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--text-1);
+}
+.scan-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.scan-badge-running   { color: var(--brand); border-color: rgba(52,229,163,0.40); background: rgba(52,229,163,0.10); }
+.scan-badge-running .scan-badge-dot { animation: blink 1s step-end infinite; }
+.scan-badge-completed { color: var(--brand); border-color: rgba(52,229,163,0.30); background: rgba(52,229,163,0.07); }
+.scan-badge-failed    { color: var(--crit);  border-color: rgba(255,77,106,0.40); background: rgba(255,77,106,0.10); }
+.scan-badge-paused    { color: var(--med);   border-color: rgba(255,197,61,0.40); background: rgba(255,197,61,0.10); }
+.scan-badge-unknown   { color: var(--text-2); }
+
+.scan-mode-tag {
+  flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; color: var(--accent-2); background: rgba(167,139,250,0.10);
+  border: 1px solid rgba(167,139,250,0.25); border-radius: var(--radius-sm); padding: 3px 7px;
+}
+
+.scan-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.scan-row-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.scan-name {
+  font-size: 13px; font-weight: 600; color: var(--text-0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.scan-id-chip { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-0); font-weight: 500; }
+.scan-row-sub { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-2); flex-wrap: wrap; }
+.scan-id-mini { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-2); }
+
+.scan-progress-wrap { display: flex; align-items: center; gap: 8px; width: 150px; flex-shrink: 0; }
+.scan-progress-wrap .progress-bar { flex: 1; }
+.scan-progress-pct {
+  font-family: var(--font-mono); font-size: 11px; color: var(--brand); font-weight: 600;
+  min-width: 34px; text-align: right;
+}
+
+.scan-findings-chip {
+  flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 5px;
+  min-width: 78px; justify-content: flex-end;
+}
+.scan-findings-num { font-family: var(--font-mono); font-size: 16px; font-weight: 700; color: var(--text-2); }
+.scan-findings-chip.has-findings .scan-findings-num { color: var(--med); }
+.scan-findings-lbl {
+  font-family: var(--font-ui); font-size: 10px; font-weight: 500; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+
+.scan-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.scan-remove:hover {
+  border-color: rgba(255,77,106,0.5) !important; color: var(--crit) !important;
+  background: rgba(255,77,106,0.10) !important;
+}
+
+.scan-body { border-top: 1px solid var(--border); background: var(--bg-0); }
+
+/* expanded findings detail */
+.scan-detail { padding: 14px 16px; }
+.scan-detail-msg { padding: 14px 16px; font-size: 12.5px; color: var(--text-1); }
+.scan-detail-err { color: var(--crit); }
+.scan-detail-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.scan-sev-strip { display: flex; gap: 7px; flex-wrap: wrap; }
+.scan-sev-pill {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  padding: 3px 9px; border-radius: 999px; border: 1px solid; background: rgba(255,255,255,0.03);
+  text-transform: capitalize;
+}
+.scan-sev-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+.scan-finding-rows { display: flex; flex-direction: column; gap: 6px; }
+.scan-finding-row {
+  display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 9px 12px; cursor: pointer; color: var(--text-0); font-family: var(--font-ui);
+  transition: border-color 0.14s, background 0.14s, transform 0.14s;
+}
+.scan-finding-row:hover { border-color: var(--border-accent); background: var(--bg-3); transform: translateX(2px); }
+.scan-finding-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.scan-finding-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-finding-target { font-size: 11px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.scan-finding-score { font-size: 12px; color: var(--text-1); font-weight: 600; flex-shrink: 0; min-width: 30px; text-align: right; }
+.scan-finding-arrow { color: var(--text-3); font-size: 13px; flex-shrink: 0; transition: color 0.14s, transform 0.14s; }
+.scan-finding-row:hover .scan-finding-arrow { color: var(--brand); transform: translateX(2px); }
+
+@media (max-width: 720px) {
+  .scan-row-head { flex-wrap: wrap; }
+  .scan-progress-wrap { width: 100%; order: 6; }
+  .scan-actions { margin-left: auto; }
+}
+
 /* ── 3D topology container ── */
 .topology-container { position: relative; width: 100%; height: 100%; }
 .topology-legend { position: absolute; bottom: 14px; left: 14px; display: flex; gap: 14px; font-size: 10.5px; color: var(--text-2); }
@@ -1022,6 +1144,17 @@ kbd {
   0%   { box-shadow: 0 0 0 0 rgba(52,229,163,0.55); }
   70%  { box-shadow: 0 0 0 7px rgba(52,229,163,0); }
   100% { box-shadow: 0 0 0 0 rgba(52,229,163,0); }
+}
+/* Global long-running-op badge (post-ex, lateral, …) — violet to set it apart
+   from the emerald "scanning" badge. */
+.job-running-badge { border-color: var(--accent); background: rgba(109,124,255,0.12); color: var(--accent-2); max-width: 260px; }
+.job-running-badge:hover { background: rgba(109,124,255,0.20); }
+.job-running-badge .scan-running-dot { background: var(--accent-2); animation: jobPulse 1.4s infinite; }
+.job-running-badge > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes jobPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(109,124,255,0.55); }
+  70%  { box-shadow: 0 0 0 7px rgba(109,124,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(109,124,255,0); }
 }
 
 /* Accessibility: visible keyboard focus ring (mouse clicks stay clean) */

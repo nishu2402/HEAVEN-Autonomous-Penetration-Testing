@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Diff, Scans } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { EmptyState, SkeletonCard } from "../components/Skeleton.jsx";
 import { sevColor } from "../theme";
 
@@ -11,18 +12,17 @@ export default function DiffPage() {
   const [scans, setScans] = useState([]);
   const [baseline, setBaseline] = useState("");
   const [current, setCurrent] = useState("");
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Tracked globally so the diff result survives page navigation.
+  const { loading, result: report, error: jobError, start } = useJob("diff");
+  const [error, setError] = useState(null);   // scan-list load + pre-flight validation
   const navigate = useNavigate();
 
   useEffect(() => {
     Scans.list(50).then((d) => setScans(d.scans || [])).catch((e) => setError(e.message));
   }, []);
 
-  async function run() {
+  function run() {
     setError(null);
-    setReport(null);
     if (!baseline || !current) {
       setError("Pick both a baseline and a current scan.");
       return;
@@ -31,15 +31,7 @@ export default function DiffPage() {
       setError("Baseline and current must be different scans.");
       return;
     }
-    setLoading(true);
-    try {
-      const r = await Diff.compute(current, baseline);
-      setReport(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    start({ label: "Scan diff", kind: "diff", path: "/diff" }, () => Diff.compute(current, baseline));
   }
 
   return (
@@ -81,7 +73,7 @@ export default function DiffPage() {
           </button>
         </div>
 
-        {error && <div className="error">{error}</div>}
+        {(error || jobError) && <div className="error">{error || jobError}</div>}
       </div>
 
       {scans.length < 2 && !report && !loading && (

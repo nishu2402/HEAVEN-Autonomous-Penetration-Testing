@@ -1382,24 +1382,36 @@ def create_app() -> FastAPI:
 
     @app.post("/api/settings/test-llm")
     async def test_llm(user: User = Depends(require_permission("config.modify"))):
-        """Report whether the current LLM configuration is usable.
+        """Live-test the current LLM configuration end to end.
 
-        Cheap check only — confirms a provider is selected, a key is present and
-        the SDK is importable. Does not make a billed API call.
+        Confirms a provider/key/SDK are present *and* makes one tiny real
+        completion, because "key present + SDK importable" is not the same as
+        "the model actually answers" — a wrong key, a retired model, or a
+        provider-side block all pass the cheap check but return nothing. This is
+        the difference between the Settings page saying "ready" and the AI
+        features actually working.
         """
         try:
-            from heaven.ai.llm_gateway import LLMGateway
+            from heaven.ai.llm_gateway import LLMGateway, LLMRequest, reset_gateway
+            reset_gateway()  # pick up any just-saved key
             gw = LLMGateway()
-            return {
-                "provider": gw.provider or None,
-                "model": gw.model or None,
-                "available": bool(gw.available),
-                "reason": (
-                    "ready" if gw.available else
-                    "no provider/key configured" if not (gw.provider and gw.api_key) else
-                    "provider SDK not installed (pip install the provider extra)"
-                ),
-            }
+            if not gw.available:
+                return {
+                    "provider": gw.provider or None, "model": gw.model or None,
+                    "available": False,
+                    "reason": (
+                        "no provider/key configured" if not (gw.provider and gw.api_key)
+                        else "provider SDK not installed (pip install the provider extra)"
+                    ),
+                }
+            resp = await gw.acomplete(LLMRequest(
+                prompt="Reply with exactly the word: OK", max_tokens=16, temperature=0,
+            ))
+            if resp.ok():
+                return {"provider": gw.provider, "model": gw.model, "available": True,
+                        "reason": f"ready — live reply in {resp.latency_ms:.0f}ms"}
+            return {"provider": gw.provider, "model": gw.model, "available": False,
+                    "reason": f"configured but the live call failed: {resp.error or 'empty response'}"}
         except Exception as e:  # noqa: BLE001
             return {"provider": None, "model": None, "available": False,
                     "reason": f"error: {e}"}
@@ -1757,11 +1769,18 @@ def create_app() -> FastAPI:
             "patch": ev.get("remediation") or "",
         }
         engine = AIRemediationEngine()
-        text = engine.generate_patch(finding_dict)
+        # generate_patch_with_source() makes a BLOCKING LLM call. Running it
+        # directly in this async endpoint would freeze the entire uvicorn event
+        # loop for the whole call (so a slow AI provider makes every page hang,
+        # not just this request). Offload to a worker thread — the AI agent
+        # endpoints already do this via acomplete().
+        text, used_ai = await asyncio.to_thread(
+            engine.generate_patch_with_source, finding_dict,
+        )
         return {
             "finding_id": finding_id,
             "remediation": text,
-            "ai_generated": bool(engine.available),
+            "ai_generated": used_ai,
         }
 
     # ── SBOM (CycloneDX) export ──
@@ -2778,8 +2797,17 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         store = _engagement_store_factory(engagement_name)
         # Auto-create engagement record so the header/dashboard shows it
         store.create_engagement(name=engagement_name)
-        store.record_scan_start(scan_id, name=req.name or engagement_name,
-                                mode=req.mode or req.scan_type or "web")
+        # Name the scan after what it assesses (e.g. "app.example.com +2") so it's
+        # identifiable in the Scans list, dashboard and downloaded report — instead
+        # of the generic default "HEAVEN Scan". An explicit non-default req.name wins.
+        from heaven.engagement import scan_display_name
+        _scan_mode = req.mode or req.scan_type or "web"
+        _scan_name = (
+            req.name if (req.name and req.name != "HEAVEN Scan")
+            else scan_display_name(list(req.urls or []) + list(req.targets or []), _scan_mode)
+        )
+        active_scans[scan_id]["name"] = _scan_name  # so the running (in-memory) scan shows it too
+        store.record_scan_start(scan_id, name=_scan_name, mode=_scan_mode)
         # Record what we're actually assessing as engagement scope, so the
         # dashboard/report reflect the real targets instead of "0 targets".
         for _tgt in list(req.urls or []) + list(req.targets or []):

@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Engagement, SIEM, Scans, getUser, logout } from "../api";
+import { useJobs } from "../context/Jobs.jsx";
 
 export default function Header({ onMenu }) {
+  const { jobs } = useJobs();
+  // Long-running operations (post-ex, lateral, SAST, …) tracked globally so they
+  // stay visible from any page — clicking returns you to where the job runs.
+  const runningJobs = Object.values(jobs).filter((j) => j.status === "running");
   const [eng, setEng] = useState(null);
   const [siem, setSiem] = useState(null);
   const [running, setRunning] = useState(0);
@@ -91,6 +96,19 @@ export default function Header({ onMenu }) {
           >
             <span className="scan-running-dot" />
             {running} scanning
+          </button>
+        )}
+        {runningJobs.length > 0 && (
+          <button
+            type="button"
+            className="scan-running-badge job-running-badge"
+            onClick={() => navigate(runningJobs[0].path || "/")}
+            title={runningJobs.map((j) => j.label || j.key).join(", ") + " — running (safe to navigate away)"}
+          >
+            <span className="scan-running-dot" />
+            {runningJobs.length === 1
+              ? (runningJobs[0].label || "1 task running")
+              : `${runningJobs.length} tasks running`}
           </button>
         )}
         {siem && (

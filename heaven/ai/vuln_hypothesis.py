@@ -133,10 +133,19 @@ class VulnHypothesisAgent:
         waf = profile.get("waf_detected") or "none detected"
         ep_lines = []
         for ep in endpoints[:40]:
-            url = ep.get("url", "")
-            params = ep.get("params") or ep.get("parameters") or []
-            if isinstance(params, dict):
-                params = list(params.keys())
+            # Endpoints may arrive as plain URL strings (web UI / CLI) or as
+            # dicts with url + params (recon output). Handle both.
+            if isinstance(ep, str):
+                url, params = ep, []
+            elif isinstance(ep, dict):
+                url = ep.get("url") or ep.get("path") or ep.get("target") or ""
+                params = ep.get("params") or ep.get("parameters") or []
+                if isinstance(params, dict):
+                    params = list(params.keys())
+            else:
+                url, params = str(ep), []
+            if not url:
+                continue
             ep_lines.append(f"- {url}  params={list(params)[:8]}")
         eps = "\n".join(ep_lines) or "- (no parameterised endpoints discovered)"
         return (

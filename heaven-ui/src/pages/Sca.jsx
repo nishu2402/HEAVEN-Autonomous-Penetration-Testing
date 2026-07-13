@@ -4,15 +4,16 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SCA, Engagement } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import { sevColor } from "../theme";
 
 export default function ScaPage() {
   const [path, setPath] = useState("");
   const [engagement, setEngagement] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  // Tracked globally so the audit survives page navigation.
+  const { loading, result, error, start } = useJob("sca");
+  const [formError, setFormError] = useState(null);
 
   useEffect(() => {
     Engagement.summary()
@@ -20,27 +21,19 @@ export default function ScaPage() {
       .catch(() => {});
   }, []);
 
-  async function run() {
-    setError(null);
-    setResult(null);
+  function run() {
+    setFormError(null);
     if (!path.trim()) {
-      setError("Source path is required.");
+      setFormError("Source path is required.");
       return;
     }
-    setLoading(true);
-    try {
-      const r = await SCA.scan({
-        path: path.trim(),
-        engagement: engagement || undefined,
-      });
-      if (r.error) setError(r.error);
-      setResult(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    start(
+      { label: "SCA audit", kind: "sca", path: "/sca" },
+      () => SCA.scan({ path: path.trim(), engagement: engagement || undefined }),
+    );
   }
+  // The scan can return a soft error inside a 200 response (e.g. no manifests).
+  const softError = result?.error || null;
 
   const findings = result?.findings || [];
   const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
@@ -76,7 +69,9 @@ export default function ScaPage() {
           {loading ? "Auditing…" : "Run SCA"}
         </button>
 
-        {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
+        {(formError || error || softError) && (
+          <div className="error" style={{ marginTop: 10 }}>{formError || error || softError}</div>
+        )}
       </div>
 
       {loading && (

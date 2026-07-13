@@ -233,4 +233,25 @@ def apply_settings(updates: dict[str, str]) -> dict:
             os.environ.pop(key, None)
         changed.append(key)
 
+    # Refresh the process-wide cached singletons so a key entered in the browser
+    # (or via `heaven config set`) takes effect IMMEDIATELY, without a restart —
+    # this is the promise made in this module's docstring. Two things cache
+    # env-derived values at process start and would otherwise stay stale in a
+    # long-running `heaven serve`:
+    #   1. the LLM gateway  (AI provider + key)      → reset_gateway()
+    #   2. the HeavenConfig singleton (NVD key, …)   → reload_config()
+    # Everything else (Shodan, webhooks, SIEM, ticketing) reads os.environ fresh
+    # at each use, so updating os.environ above already covers them.
+    if changed:
+        try:
+            from heaven.ai.llm_gateway import reset_gateway
+            reset_gateway()
+        except Exception:  # noqa: BLE001 — settings must persist even if AI import fails
+            pass
+        try:
+            from heaven.config import reload_config
+            reload_config()
+        except Exception:  # noqa: BLE001 — settings must persist even if config reload fails
+            pass
+
     return {"changed": changed, "status": catalog_status()}

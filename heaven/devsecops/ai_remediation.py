@@ -58,9 +58,19 @@ class AIRemediationEngine:
         from HEAVEN's vulnerability knowledge base, so remediation is excellent
         with *or* without an API key. Callers never see an exception.
         """
+        text, _used_ai = self.generate_patch_with_source(vuln)
+        return text
+
+    def generate_patch_with_source(self, vuln: dict[str, Any]) -> tuple[str, bool]:
+        """Like :meth:`generate_patch` but also reports whether the LLM actually
+        produced the text (``True``) or the knowledge-base fallback did
+        (``False``). Lets callers label output honestly instead of assuming
+        "gateway available" == "AI wrote this" — a transient API failure falls
+        back to the KB, and the UI should say so rather than claim AI output.
+        """
         fallback = vuln.get("patch") or remediation_text(vuln)
         if not self.available:
-            return fallback
+            return fallback, False
 
         title = vuln.get("title", vuln.get("type", "Unknown"))
         desc = vuln.get("description", "")
@@ -84,5 +94,5 @@ class AIRemediationEngine:
 
         if not resp.ok():
             logger.error(f"AI remediation failed: {resp.error}")
-            return fallback
-        return resp.text
+            return fallback, False
+        return resp.text, True

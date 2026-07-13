@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SAST, Engagement } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import { sevColor } from "../theme";
 
@@ -13,9 +14,10 @@ export default function SastPage() {
   const [extraConfigs, setExtraConfigs] = useState("");
   const [noBuiltin, setNoBuiltin] = useState(false);
   const [timeout, setTimeoutS] = useState(300);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  // Semgrep scans can take minutes; track in the global job store so leaving the
+  // page and coming back keeps the scan running and preserves its result.
+  const { loading, result, error, start } = useJob("sast");
+  const [formError, setFormError] = useState(null);
   const [rules, setRules] = useState(null);
 
   useEffect(() => {
@@ -25,15 +27,14 @@ export default function SastPage() {
     SAST.rules().then(setRules).catch(() => setRules(null));
   }, []);
 
-  async function run() {
-    setError(null);
-    setResult(null);
+  function run() {
+    setFormError(null);
     if (!path.trim()) {
-      setError("Source path is required.");
+      setFormError("Source path is required.");
       return;
     }
     if (rules && rules.semgrep_installed === false) {
-      setError("Semgrep is not installed on the server. Run: pip install semgrep");
+      setFormError("Semgrep is not installed on the server. Run: pip install semgrep");
       return;
     }
     const body = {
@@ -43,15 +44,7 @@ export default function SastPage() {
       no_builtin: noBuiltin,
       timeout,
     };
-    setLoading(true);
-    try {
-      const r = await SAST.scan(body);
-      setResult(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    start({ label: "SAST scan", kind: "sast", path: "/sast" }, () => SAST.scan(body));
   }
 
   return (
@@ -111,7 +104,14 @@ export default function SastPage() {
           {loading ? "Scanning…" : "Run SAST"}
         </button>
 
-        {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
+        {(formError || error) && (
+          <div className="error" style={{ marginTop: 10 }}>{formError || error}</div>
+        )}
+        {loading && (
+          <div className="dim" style={{ marginTop: 10, fontSize: 12 }}>
+            Running on the server — you can switch pages; the scan keeps going.
+          </div>
+        )}
       </div>
 
       {rules && (

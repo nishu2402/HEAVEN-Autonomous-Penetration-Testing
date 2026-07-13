@@ -9,6 +9,7 @@ import { isAuthenticated, onAuthChange, needsPasswordChange, onSessionExpired } 
 import Sidebar from "./components/Sidebar.jsx";
 import Header from "./components/Header.jsx";
 import { ToastProvider, useToast } from "./components/Toast.jsx";
+import { JobsProvider } from "./context/Jobs.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
 import Tour from "./components/Tour.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
@@ -77,18 +78,23 @@ function SessionExpiryWatcher() {
 export default function App() {
   return (
     <ToastProvider>
-      <SessionExpiryWatcher />
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/*"
-          element={
-            <ProtectedRoute>
-              <Shell />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
+      {/* JobsProvider sits above the router so long-running operations (post-ex,
+          lateral, SAST, …) keep running and keep their result when you navigate
+          between pages — the page can unmount without losing the job. */}
+      <JobsProvider>
+        <SessionExpiryWatcher />
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <Shell />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </JobsProvider>
     </ToastProvider>
   );
 }

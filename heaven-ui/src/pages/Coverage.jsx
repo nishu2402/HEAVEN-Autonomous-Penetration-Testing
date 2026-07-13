@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Coverage, Engagement, Priors } from "../api";
+import { useJob } from "../context/Jobs.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import { GRADE_COLOR } from "../theme";
@@ -11,9 +12,9 @@ import { GRADE_COLOR } from "../theme";
 export default function CoveragePage() {
   const [engagement, setEngagement] = useState("");
   const [useLLM, setUseLLM] = useState(true);
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Tracked globally: LLM gap analysis can take a while, so grading survives
+  // navigating away and back.
+  const { loading, result: report, error, start } = useJob("coverage");
   const toast = useToast();
 
   useEffect(() => {
@@ -22,17 +23,9 @@ export default function CoveragePage() {
       .catch(() => {});
   }, []);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await Coverage.get({ engagement, use_llm: useLLM });
-      setReport(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+  function load() {
+    start({ label: "Coverage grading", kind: "coverage", path: "/coverage" },
+          () => Coverage.get({ engagement, use_llm: useLLM }));
   }
 
   async function trainPriors() {

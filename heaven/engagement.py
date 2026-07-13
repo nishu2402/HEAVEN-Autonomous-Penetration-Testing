@@ -204,6 +204,31 @@ def _host_key(target: str) -> str:
     return t.split("/")[0].lower()
 
 
+def scan_display_name(targets, mode: str = "") -> str:
+    """A human, target-based name for a scan, e.g. ``app.example.com`` or
+    ``app.example.com +2`` for several targets.
+
+    Used so the scan shows up identifiably by *what it assessed* — in the Scans
+    list, the dashboard, and downloaded reports — instead of a bare id or a
+    generic "HEAVEN Scan". ``targets`` is any iterable of raw target strings
+    (URLs, IPs, hosts, CIDRs); ``mode`` is only used as a fallback label when no
+    targets are given.
+    """
+    raw = [str(t).strip() for t in (targets or []) if str(t).strip()]
+
+    def _host(t: str) -> str:
+        # For a URL, drop scheme + path so we keep just the host. For a bare
+        # host / IP / CIDR, keep it verbatim (don't strip a CIDR's "/24").
+        if "://" in t:
+            return t.split("://", 1)[-1].split("/", 1)[0] or t
+        return t
+    if not raw:
+        return f"{mode} scan".strip() if mode else "scan"
+    head = _host(raw[0])
+    extra = len(raw) - 1
+    return f"{head} +{extra}" if extra > 0 else head
+
+
 def is_host_level(vuln_type: str) -> bool:
     """True when a vuln type dedups per host rather than per URL.
 

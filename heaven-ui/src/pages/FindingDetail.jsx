@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Engagement, ExploitProof, AI, ExploitDB } from "../api";
+import Markdown from "../components/Markdown";
 
 const STATUSES = ["open", "verified", "false_positive", "accepted_risk", "fixed"];
 const STATUS_COLORS = {
@@ -295,8 +296,8 @@ function RemediationCard({ id, staticText }) {
               ? "✨ AI-tailored remediation"
               : "Knowledge-base remediation (set an LLM key for AI-tailored guidance)"}
           </div>
-          <div className="evidence-block" style={{ whiteSpace: "pre-wrap" }}>
-            {ai.remediation}
+          <div className="md-block">
+            <Markdown>{ai.remediation}</Markdown>
           </div>
         </div>
       )}

@@ -44,10 +44,22 @@ def test_methodology_lists_docs(api_client):
     r = api_client.get("/api/methodology")
     assert r.status_code == 200, r.text
     body = r.json()
+    # Backward-compatible raw docs still present …
     assert "docs" in body
     names = {d["name"] for d in body["docs"]}
-    # The three documents we shipped
     assert {"owasp_testing_guide", "nist_800_115", "ptes"}.issubset(names)
+    # … plus the new structured coverage matrices + live overlay.
+    assert "standards" in body and "engagement" in body
+    std_names = {s["name"] for s in body["standards"]}
+    assert {"owasp_testing_guide", "nist_800_115", "ptes"}.issubset(std_names)
+    owasp = next(s for s in body["standards"] if s["name"] == "owasp_testing_guide")
+    assert owasp["summary"]["total"] > 0
+    assert owasp["summary"]["covered"] <= owasp["summary"]["total"]
+    assert owasp["categories"], "expected parsed OWASP categories"
+    # Every row carries a status + engagement overlay flags.
+    row = owasp["categories"][0]["rows"][0]
+    assert row["status"] in {"automated", "partial", "manual"}
+    assert "exercised" in row and "exercised_count" in row
 
 
 # ── Gap 1: Benchmark results ────────────────────────────────────────────
@@ -57,6 +69,43 @@ def test_benchmark_results_endpoint_responds(api_client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert "available" in body
+    if body["available"]:
+        # New structured shape: says which target produced the numbers and
+        # carries parsed headline metrics, never a bare markdown dump.
+        assert body["source"] in {"native-controlled", "live-dvwa"}
+        assert body["label"] and body["target"] and body["markdown"]
+        metrics = body["metrics"]
+        assert set(metrics) == {"precision", "recall", "f1"}
+        # A washout (target down → 0/0) must never be surfaced as the benchmark.
+        assert metrics["precision"] or metrics["recall"], "washout leaked through"
+
+
+def test_benchmark_metrics_parser_and_washout():
+    """The headline parser reads both report formats and flags washouts."""
+    from heaven.api.server import _parse_benchmark_metrics
+
+    # Single-run table (native benchmark) — "required GT only" recall wins.
+    single = (
+        "| Precision (TP / TP+FP)       | 100.0% |\n"
+        "| Recall (required GT only)    | 100.0% |\n"
+        "| Recall (all GT)              | 90.0% |\n"
+        "| F1                           | 100.0% |\n"
+    )
+    m = _parse_benchmark_metrics(single)
+    assert m == {"precision": 1.0, "recall": 1.0, "f1": 1.0}
+
+    # Aggregated table with ± stddev — first percentage per row.
+    agg = "| Precision | 87.4% ± 2.1% |\n| Recall | 73.6% ± 3.8% |\n| F1 | 79.9% ± 2.6% |\n"
+    m = _parse_benchmark_metrics(agg)
+    assert m["precision"] == 0.874 and m["recall"] == 0.736 and m["f1"] == 0.799
+
+    # Washout: parses but both precision and recall are zero.
+    washout = "| Precision | 0.0% ± 0.0% |\n| Recall | 0.0% ± 0.0% |\n| F1 | 0.0% |\n"
+    m = _parse_benchmark_metrics(washout)
+    assert not m["precision"] and not m["recall"]
+
+    # Nothing to parse.
+    assert _parse_benchmark_metrics("# just a heading\n") is None
 
 
 # ── Gap 6: AI layer triggers ────────────────────────────────────────────

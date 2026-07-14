@@ -206,11 +206,11 @@ class GroundTruth:
             )
             for v in data.get("vulnerabilities") or []
         ]
-        for e in entries:
-            if e.category not in CANONICAL_CATEGORIES:
+        for entry in entries:
+            if entry.category not in CANONICAL_CATEGORIES:
                 raise ValueError(
-                    f"Ground-truth entry '{e.id}' has unknown category "
-                    f"'{e.category}'. Add it to CANONICAL_CATEGORIES in "
+                    f"Ground-truth entry '{entry.id}' has unknown category "
+                    f"'{entry.category}'. Add it to CANONICAL_CATEGORIES in "
                     f"tests/benchmarks/metrics.py or fix the YAML."
                 )
         return cls(

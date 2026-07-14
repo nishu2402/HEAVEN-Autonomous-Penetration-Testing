@@ -45,6 +45,12 @@ function splitRow(line) {
 const isTableSep = (l) => !!l && l.includes("-") && /^\s*\|?[\s:|-]+\|?\s*$/.test(l);
 const isHeading = (l) => /^#{1,6}\s+/.test(l);
 const isListItem = (l) => /^\s*[-*]\s+/.test(l);
+const isOrderedItem = (l) => /^\s*\d+[.)]\s+/.test(l);
+// A horizontal rule: three or more of the same -, * or _ alone on a line.
+const isHr = (l) => /^\s*([-*_])(?:\s*\1){2,}\s*$/.test(l);
+// Fenced code block: ``` or ~~~ (optionally indented, optional language tag).
+const fenceOpen = (l) => /^(\s*)(```|~~~)(.*)$/.exec(l);
+const isFenceClose = (l) => /^\s*(```|~~~)\s*$/.test(l);
 
 function parseBlocks(md) {
   const lines = String(md).replace(/\r\n/g, "\n").split("\n");
@@ -55,8 +61,30 @@ function parseBlocks(md) {
 
   while (i < lines.length) {
     const line = lines[i];
+
+    // Fenced code block — consume verbatim until the closing fence. Must be
+    // checked first so its contents are never parsed as Markdown. Content is
+    // de-indented by the opening fence's indent (fences are often nested under
+    // a list item) so code doesn't render with spurious leading whitespace.
+    const fo = fenceOpen(line);
+    if (fo) {
+      const indent = fo[1].length;
+      const lang = fo[3].trim();
+      const buf = [];
+      i++;
+      while (i < lines.length && !isFenceClose(lines[i])) {
+        buf.push(indent ? lines[i].replace(new RegExp(`^\\s{0,${indent}}`), "") : lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++; // consume the closing fence
+      blocks.push({ type: "code", lang, text: buf.join("\n") });
+      continue;
+    }
+
     const h = /^(#{1,6})\s+(.*)$/.exec(line);
     if (h) { blocks.push({ type: "heading", level: h[1].length, text: h[2] }); i++; continue; }
+
+    if (isHr(line)) { blocks.push({ type: "hr" }); i++; continue; }
 
     if (startsTable(i)) {
       const header = splitRow(line);
@@ -84,11 +112,21 @@ function parseBlocks(md) {
       continue;
     }
 
+    if (isOrderedItem(line)) {
+      const items = [];
+      while (i < lines.length && isOrderedItem(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+[.)]\s+/, "")); i++;
+      }
+      blocks.push({ type: "olist", items });
+      continue;
+    }
+
     if (!line.trim()) { i++; continue; }
 
     const para = [line]; i++;
     while (i < lines.length && lines[i].trim()
-           && !isHeading(lines[i]) && !isListItem(lines[i]) && !startsTable(i)) {
+           && !isHeading(lines[i]) && !isListItem(lines[i]) && !isOrderedItem(lines[i])
+           && !isHr(lines[i]) && !fenceOpen(lines[i]) && !startsTable(i)) {
       para.push(lines[i]); i++;
     }
     blocks.push({ type: "paragraph", text: para.join(" ") });
@@ -107,7 +145,10 @@ const HEADING_STYLE = {
 export default function Markdown({ children }) {
   const blocks = parseBlocks(children || "");
   return (
-    <div className="md-body" style={{ color: "var(--text-1)", fontSize: 13, lineHeight: 1.65 }}>
+    <div className="md-body" style={{
+      color: "var(--text-1)", fontSize: 13, lineHeight: 1.65,
+      fontFamily: "var(--font-ui, inherit)",
+    }}>
       {blocks.map((b, idx) => {
         if (b.type === "heading") {
           const s = HEADING_STYLE[Math.min(b.level, 3)] || HEADING_STYLE[3];
@@ -124,6 +165,42 @@ export default function Markdown({ children }) {
                 <li key={j} style={{ margin: "3px 0" }}>{renderInline(it)}</li>
               ))}
             </ul>
+          );
+        }
+        if (b.type === "olist") {
+          return (
+            <ol key={idx} style={{ margin: "0 0 12px", paddingLeft: 22 }}>
+              {b.items.map((it, j) => (
+                <li key={j} style={{ margin: "3px 0" }}>{renderInline(it)}</li>
+              ))}
+            </ol>
+          );
+        }
+        if (b.type === "hr") {
+          return (
+            <hr key={idx} style={{
+              border: 0, borderTop: "1px solid var(--border)", margin: "18px 0",
+            }} />
+          );
+        }
+        if (b.type === "code") {
+          return (
+            <pre key={idx} style={{
+              margin: "0 0 14px", padding: "12px 14px", overflowX: "auto",
+              background: "var(--bg-1, rgba(255,255,255,0.03))",
+              border: "1px solid var(--border)", borderRadius: 8,
+              fontSize: 12, lineHeight: 1.55,
+              fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+              color: "var(--text-0)",
+            }}>
+              {b.lang && (
+                <div style={{
+                  fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5,
+                  color: "var(--text-2, var(--text-1))", marginBottom: 6, userSelect: "none",
+                }}>{b.lang}</div>
+              )}
+              <code style={{ fontFamily: "inherit", whiteSpace: "pre" }}>{b.text}</code>
+            </pre>
           );
         }
         if (b.type === "table") {

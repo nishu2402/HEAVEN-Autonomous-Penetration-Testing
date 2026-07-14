@@ -7,6 +7,10 @@ DVWA benchmark uses (precision / recall / F1 vs. a labelled ground truth). It is
 fast (~1 s), deterministic, and always-on in CI, so the headline numbers are
 reproducible by anyone with `pip install -e .[dev]` and no Docker at all.
 
+The run itself lives in `tests/benchmarks/native/runner.py` (`run_native_benchmark`)
+so the CLI (`heaven benchmark`) and the web Benchmark page score the target by
+exactly the same code path this test enforces the floor on.
+
 This is a *controlled functional benchmark*: the target is a faithful
 reproduction of DVWA's injection endpoints (including MySQL comment semantics),
 so the score measures HEAVEN's end-to-end detection + attribution on a known
@@ -15,20 +19,24 @@ surface. It is NOT a claim of performance against any live third-party app.
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-
 import pytest
 
-from tests.benchmarks.metrics import Finding, GroundTruth, evaluate
 
-_GT_PATH = Path(__file__).resolve().parent / "ground_truth" / "native.yaml"
+def test_benchmark_cli_registered_and_help() -> None:
+    """`heaven benchmark` is wired into the CLI and documents itself.
 
+    The full scored run is exercised by test_native_benchmark_scores below (same
+    `run_native_benchmark` path the CLI drives), so this just locks in the command
+    registration + option parsing cheaply.
+    """
+    from click.testing import CliRunner
 
-def _reports_dir() -> Path:
-    d = Path(__file__).resolve().parent / "reports"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    from heaven.main import cli
+
+    r = CliRunner().invoke(cli, ["benchmark", "--help"])
+    assert r.exit_code == 0, r.output
+    assert "precision" in r.output.lower()
+    assert "--json" in r.output and "--no-report" in r.output
 
 
 def test_native_benchmark_scores() -> None:
@@ -37,60 +45,14 @@ def test_native_benchmark_scores() -> None:
     pytest.importorskip("aiohttp")
     pytest.importorskip("yaml")
 
-    import time
+    from tests.benchmarks.native.runner import run_native_benchmark
 
-    from heaven.recon.web_crawler import crawl_targets
-    from heaven.vulnscan.injection_scanner import (
-        build_injection_targets,
-        scan_for_injections,
-    )
-    from heaven.vulnscan.misconfig_scanner import scan_misconfig
-    from heaven.vulnscan.oast import OASTListener
-    from heaven.vulnscan.oob_scanner import scan_oob
-
-    from tests.benchmarks.native.vuln_app import serve
-
-    gt = GroundTruth.load(_GT_PATH)
-
-    async def _drive(base_url: str) -> tuple[list[dict], float]:
-        start = time.time()
-        crawl = await crawl_targets([base_url], stealth_level="aggressive")
-        endpoints = crawl.get("endpoints", [])
-
-        # Injection scanner — the classic surface (SQLi/XSS/LFI/cmdi).
-        urls, forms_by_url = build_injection_targets(endpoints, seed_urls=[base_url])
-        inj = await scan_for_injections(urls, forms_by_url=forms_by_url,
-                                        stealth_level="aggressive")
-
-        # The v1.0 misconfig + out-of-band scanners run over the SAME discovered
-        # surface — param-less routes (/api/data, /login, /xxe/) that the injection
-        # target builder drops are exactly where CORS/JWT/cookie/XXE live, so feed
-        # every crawled URL plus the seed. One shared, loopback-bound collaborator
-        # observes the SSRF/XXE callbacks; the app reaches it over 127.0.0.1.
-        discovered = list({ep.get("url", "") for ep in endpoints if ep.get("url")} | {base_url})
-        mis = await scan_misconfig(discovered)
-        with OASTListener() as oast:
-            oob = await scan_oob(discovered, oast=oast)
-
-        findings = (inj.get("findings", []) + mis.get("findings", [])
-                    + oob.get("findings", []))
-        return findings, time.time() - start
-
-    with serve() as base_url:
-        gt.base_url = base_url  # for the report header; matching is by path
-        raw_findings, duration = asyncio.run(_drive(base_url))
-
-    findings = [Finding.from_heaven(f) for f in raw_findings]
-    result = evaluate(findings, gt, duration_seconds=duration)
-
-    # Write a publication-style report (reports/ is gitignored).
-    from tests.benchmarks.reporters.markdown_report import render_markdown_report
-    report = render_markdown_report(result, gt, scanner_name="HEAVEN")
-    (_reports_dir() / "native_benchmark.md").write_text(report, encoding="utf-8")
+    run = run_native_benchmark()  # writes reports/native_benchmark.md
+    result = run.result
 
     print()
     print("=" * 64)
-    print(f"HEAVEN vs. {gt.target_app} (native, Docker-free)")
+    print(f"HEAVEN vs. {run.gt.target_app} (native, Docker-free)")
     print("=" * 64)
     print(f"Precision: {result.precision * 100:5.1f}%  "
           f"({result.matched_finding_count}/"

@@ -314,6 +314,27 @@ def _is_safe_scan_id(scan_id: Optional[str]) -> bool:
     return bool(scan_id) and bool(_SAFE_SCAN_ID_RE.match(scan_id or ""))
 
 
+def _parse_benchmark_metrics(md: str) -> Optional[dict]:
+    """Pull headline precision / recall / F1 (as 0–1 floats) out of a report.
+
+    Handles both the single-run table (``| Precision (TP / TP+FP) | 100.0% |``)
+    and the aggregated table (``| Precision | 87.4% ± 2.1% |``). For recall the
+    first matching row wins, which in the single-run format is the headline
+    "required GT only" recall. Returns None when nothing parses.
+    """
+    def _first_pct(metric_re: str) -> Optional[float]:
+        m = re.search(rf"^\|\s*{metric_re}\b[^|]*\|\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+                      md, re.MULTILINE)
+        return round(float(m.group(1)) / 100.0, 4) if m else None
+
+    precision = _first_pct("Precision")
+    recall = _first_pct("Recall")
+    f1 = _first_pct("F1")
+    if precision is None and recall is None and f1 is None:
+        return None
+    return {"precision": precision, "recall": recall, "f1": f1}
+
+
 def _engagement_store_factory(name: Optional[str] = None):
     """Resolve engagement store. Falls back to env var, active pointer, then default."""
     from heaven.config import get_config
@@ -2040,34 +2061,93 @@ def create_app() -> FastAPI:
 
     @app.get("/api/methodology")
     async def list_methodology(user: User = Depends(require_permission("scan.view"))):
-        """Return the markdown content of every methodology mapping doc."""
+        """Structured OWASP/NIST/PTES coverage matrices + a LIVE overlay.
+
+        The matrices are parsed from ``docs/methodology`` and classified per row
+        (automated / partial / manual) with summary counts computed from the
+        rows. On top of that, the active engagement's real findings are joined
+        in: a row is marked ``exercised`` when the detector it names actually
+        produced a finding in this engagement — so the page reflects what THIS
+        assessment covered, not just a static reference. ``docs`` (raw markdown)
+        is retained for backward compatibility.
+        """
+        from heaven import methodology as _methodology
+
         docs_dir = Path(__file__).parent.parent.parent / "docs" / "methodology"
-        if not docs_dir.exists():
-            return {"docs": []}
-        out = []
-        for md in sorted(docs_dir.glob("*.md")):
-            try:
-                out.append({"name": md.stem, "content": md.read_text(encoding="utf-8")})
-            except Exception:
-                pass
-        return {"docs": out}
+
+        # Raw findings of the active engagement drive the live overlay.
+        findings: list[dict[str, Any]] = []
+        engagement_name = ""
+        try:
+            store = _engagement_store_factory()
+            eng = store.get_engagement()
+            engagement_name = getattr(eng, "name", "") or ""
+            findings = [
+                {"vuln_type": f.vuln_type, "owasp": getattr(f, "owasp", "")}
+                for f in store.list_findings(limit=10000)
+            ]
+        except Exception:
+            findings = []
+
+        built = await asyncio.to_thread(_methodology.build, findings, docs_dir)
+        built["engagement"]["name"] = engagement_name
+
+        # Backward-compatible raw docs.
+        docs = []
+        if docs_dir.exists():
+            for md in sorted(docs_dir.glob("*.md")):
+                if md.stem == "README":
+                    continue
+                try:
+                    docs.append({"name": md.stem, "content": md.read_text(encoding="utf-8")})
+                except Exception:
+                    pass
+        built["docs"] = docs
+        return built
 
     # ── Gap 1: Latest benchmark results ──
 
     @app.get("/api/benchmark/results")
     async def latest_benchmark(user: User = Depends(require_permission("scan.view"))):
-        """Return the most-recent aggregated benchmark report markdown."""
+        """Return the latest benchmark report with parsed headline metrics.
+
+        Prefers a *valid* live Docker-DVWA aggregated run, then falls back to the
+        always-fresh native controlled benchmark (`heaven benchmark`). A washout —
+        a failed run where the target was down, so precision AND recall are both
+        0% — is never surfaced as "the benchmark"; we skip it and fall through.
+        """
+        from datetime import datetime, timezone
+
         reports = Path(__file__).parent.parent.parent / "tests" / "benchmarks" / "reports"
-        agg = reports / "dvwa_aggregated.md"
-        if not agg.exists():
+        # (filename, source, label, target) in preference order.
+        candidates = [
+            (reports / "dvwa_aggregated.md", "live-dvwa",
+             "Live DVWA — Docker, multi-run aggregate", "dvwa"),
+            (reports / "native_benchmark.md", "native-controlled",
+             "Native controlled target — Docker-free, always current", "heaven-native-vuln-app"),
+        ]
+        for path, source, label, target in candidates:
+            if not path.exists():
+                continue
+            md = path.read_text(encoding="utf-8")
+            metrics = _parse_benchmark_metrics(md)
+            # Skip a washout: a run that detected nothing (target unreachable).
+            if metrics and not metrics.get("precision") and not metrics.get("recall"):
+                continue
+            stat = path.stat()
             return {
-                "available": False,
-                "note": "No benchmark results yet. Run: HEAVEN_RUN_BENCHMARKS=1 pytest tests/benchmarks/",
+                "available": True,
+                "source": source,
+                "label": label,
+                "target": target,
+                "markdown": md,
+                "metrics": metrics,
+                "generated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "size_bytes": stat.st_size,
             }
         return {
-            "available": True,
-            "target": "dvwa",
-            "markdown": agg.read_text(encoding="utf-8"),
+            "available": False,
+            "note": "No benchmark results yet. Generate the built-in one with: heaven benchmark",
         }
 
     # ══════════════════════════════════════════════════════════════════

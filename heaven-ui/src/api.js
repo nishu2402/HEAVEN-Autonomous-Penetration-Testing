@@ -421,12 +421,21 @@ export const SIEM = {
 };
 
 export const Methodology = {
-  // Returns {"docs": [{"name": "owasp_testing_guide", "content": "..."}, ...]}
+  // Returns { standards: [{name, meta_title, subtitle, summary, categories:[
+  //   {code, title, rows:[{id, item, description, coverage, status, exercised,
+  //   exercised_count}]}]}], engagement: {name, findings_total, vuln_types,
+  //   owasp_categories, modules_active}, docs:[...] }.  The `standards` matrices
+  //   are computed from the mapping docs; each row's `exercised` flag reflects
+  //   whether the detector it names produced a finding in the active engagement.
   list: () => api(`/methodology`),
 };
 
 export const Benchmark = {
-  // Returns {"available": bool, "markdown": "..."} for the latest aggregated run
+  // Latest scanner benchmark. Prefers a valid live-DVWA aggregate, else the
+  // always-fresh native controlled run (`heaven benchmark`); washouts are skipped.
+  // → { available, source: "native-controlled"|"live-dvwa", label, target,
+  //     markdown, metrics: { precision, recall, f1 }, generated_at, size_bytes }
+  // or { available: false, note } when nothing has been generated yet.
   latest: () => api(`/benchmark/results`),
 };
 

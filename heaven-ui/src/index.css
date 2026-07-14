@@ -771,6 +771,15 @@ a:hover { color: var(--accent-2); }
   white-space: pre-wrap; word-break: break-all;
 }
 
+/* Panel chrome for rendered Markdown (AI remediation): same card look as
+   .evidence-block but with the UI font and normal word-wrap so the <Markdown>
+   renderer controls formatting (headings, lists, fenced code) instead of the
+   text being forced monospace + broken mid-word. */
+.md-block {
+  background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 12px 18px; overflow: auto; max-height: 560px;
+}
+
 /* ── Scan status + progress ── */
 .scan-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; }
 .scan-status::before { content: '●'; font-size: 9px; }

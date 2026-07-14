@@ -110,6 +110,11 @@ dev = [
     # it those tests error at collection (ModuleNotFoundError: google) and the
     # collected count drifts between CI and local — same rationale as flask above.
     "google-genai>=1.0.0",
+    # pypdf backs the PDF-report regression test (tests/test_integrations.py),
+    # which reads the generated PDF back to assert its sections are present.
+    # TEST-ONLY: no runtime code imports pypdf (reportlab does the writing), so it
+    # belongs here, not in requirements.txt. Floor pinned for GHSA-jm82-fx9c-mx94.
+    "pypdf>=6.13.3",
 ]
 cloud-gcp = ["google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0"]
 cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]

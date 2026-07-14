@@ -8,13 +8,20 @@ Cross-platform: Linux, macOS, Windows.
 from __future__ import annotations
 
 import asyncio
-import random
+import secrets
 from dataclasses import dataclass
 from enum import Enum
 
 from heaven.utils.logger import get_logger
 
 logger = get_logger("evasion")
+
+# All evasion randomness (timing jitter, User-Agent rotation, scan-order shuffling,
+# decoy generation) is drawn from a CSPRNG rather than the default Mersenne-Twister.
+# Predictable PRNG patterns can be fingerprinted by IDS/WAF anomaly detection, so an
+# os.urandom-backed source makes the scanner harder to profile — and it satisfies
+# HEAVEN's own SAST rule `heaven.python.weak-random-for-crypto`.
+_rng = secrets.SystemRandom()
 
 
 class StealthLevel(str, Enum):
@@ -128,8 +135,8 @@ async def evasion_delay(profile: EvasionProfile) -> None:
     """Apply randomised inter-request delay based on evasion profile."""
     if profile.max_delay_ms <= 0:
         return
-    base = random.uniform(profile.min_delay_ms, profile.max_delay_ms)
-    jitter = base * (profile.jitter_pct / 100.0) * random.uniform(-1, 1)
+    base = _rng.uniform(profile.min_delay_ms, profile.max_delay_ms)
+    jitter = base * (profile.jitter_pct / 100.0) * _rng.uniform(-1, 1)
     delay_ms = max(0, base + jitter)
     await asyncio.sleep(delay_ms / 1000.0)
 
@@ -157,7 +164,7 @@ USER_AGENTS = [
 
 def get_random_user_agent() -> str:
     """Return a random realistic User-Agent string."""
-    return random.choice(USER_AGENTS)
+    return _rng.choice(USER_AGENTS)
 
 
 def build_evasive_headers(profile: EvasionProfile, target_host: str = "") -> dict[str, str]:
@@ -165,7 +172,7 @@ def build_evasive_headers(profile: EvasionProfile, target_host: str = "") -> dic
     headers = {
         "User-Agent": get_random_user_agent() if profile.rotate_user_agents else USER_AGENTS[0],
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": random.choice(["en-US,en;q=0.9", "en-GB,en;q=0.8", "en;q=0.5"]),
+        "Accept-Language": _rng.choice(["en-US,en;q=0.9", "en-GB,en;q=0.8", "en;q=0.5"]),
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "DNT": "1",
@@ -174,16 +181,16 @@ def build_evasive_headers(profile: EvasionProfile, target_host: str = "") -> dic
     if profile.randomise_headers:
         # Add realistic browser headers in random order
         optional_headers = {
-            "Sec-Fetch-Dest": random.choice(["document", "empty", "image"]),
-            "Sec-Fetch-Mode": random.choice(["navigate", "cors", "no-cors"]),
-            "Sec-Fetch-Site": random.choice(["none", "same-origin", "cross-site"]),
-            "Sec-Ch-Ua-Platform": random.choice(['"Windows"', '"macOS"', '"Linux"']),
+            "Sec-Fetch-Dest": _rng.choice(["document", "empty", "image"]),
+            "Sec-Fetch-Mode": _rng.choice(["navigate", "cors", "no-cors"]),
+            "Sec-Fetch-Site": _rng.choice(["none", "same-origin", "cross-site"]),
+            "Sec-Ch-Ua-Platform": _rng.choice(['"Windows"', '"macOS"', '"Linux"']),
             "Upgrade-Insecure-Requests": "1",
-            "Cache-Control": random.choice(["no-cache", "max-age=0"]),
+            "Cache-Control": _rng.choice(["no-cache", "max-age=0"]),
         }
         # Include random subset
         for key, val in optional_headers.items():
-            if random.random() > 0.3:
+            if _rng.random() > 0.3:
                 headers[key] = val
 
     if target_host:
@@ -199,7 +206,7 @@ def randomise_scan_targets(ports: list[int], hosts: list[str], profile: EvasionP
     targets = [(h, p) for h in hosts for p in ports]
 
     if profile.scan_order == "random":
-        random.shuffle(targets)
+        _rng.shuffle(targets)
     elif profile.scan_order == "reverse":
         targets.reverse()
     # "sequential" = default order
@@ -327,12 +334,12 @@ class PayloadObfuscator:
 
 def randomise_source_port() -> int:
     """Generate a random high source port to avoid fingerprinting."""
-    return random.randint(49152, 65535)
+    return _rng.randint(49152, 65535)
 
 
 def randomise_ttl() -> int:
     """Generate a realistic TTL value to mask OS fingerprint."""
-    return random.choice([64, 128, 255, 60, 62, 63, 126, 127])
+    return _rng.choice([64, 128, 255, 60, 62, 63, 126, 127])
 
 
 def generate_decoy_ips(count: int = 5) -> list[str]:
@@ -341,15 +348,15 @@ def generate_decoy_ips(count: int = 5) -> list[str]:
     decoys = []
     for _ in range(count):
         # Generate IPs in common private and public ranges
-        first_octet = random.choice([10, 172, 192, 203, 198])
+        first_octet = _rng.choice([10, 172, 192, 203, 198])
         if first_octet == 10:
-            ip = f"10.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+            ip = f"10.{_rng.randint(0,255)}.{_rng.randint(0,255)}.{_rng.randint(1,254)}"
         elif first_octet == 172:
-            ip = f"172.{random.randint(16,31)}.{random.randint(0,255)}.{random.randint(1,254)}"
+            ip = f"172.{_rng.randint(16,31)}.{_rng.randint(0,255)}.{_rng.randint(1,254)}"
         elif first_octet == 192:
-            ip = f"192.168.{random.randint(0,255)}.{random.randint(1,254)}"
+            ip = f"192.168.{_rng.randint(0,255)}.{_rng.randint(1,254)}"
         else:
-            ip = f"{first_octet}.0.{random.randint(0,255)}.{random.randint(1,254)}"
+            ip = f"{first_octet}.0.{_rng.randint(0,255)}.{_rng.randint(1,254)}"
         decoys.append(ip)
     return decoys
 

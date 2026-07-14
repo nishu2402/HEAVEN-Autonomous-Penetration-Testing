@@ -156,7 +156,8 @@ if HAS_CLICK:
         audit, autonomous, benchmark as benchmark_module, cloud, completion,
         config_cmd, coverage, cve as cve_module,
         db, demo as demo_module,
-        diff, engage, exploitdb, findings, info, init as init_module, knowledge,
+        diff, engage, exploitdb, findings, info, init as init_module,
+        install_tools as install_tools_module, knowledge,
         lateral, methodology, mitre, postex as postex_module,
         quickstart as quickstart_module, replay,
         sast, sbom as sbom_module, sca as sca_module, scan, server,
@@ -179,6 +180,7 @@ if HAS_CLICK:
     findings.register(cli)
     info.register(cli)
     init_module.register(cli)
+    install_tools_module.register(cli)
     knowledge.register(cli)
     lateral.register(cli)
     methodology.register(cli)

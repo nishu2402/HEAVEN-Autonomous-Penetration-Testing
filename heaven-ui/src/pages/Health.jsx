@@ -75,6 +75,32 @@ export default function Health() {
 
       {/* External tools */}
       <Card title={`External tools  ·  ${tools.length - missing}/${tools.length} available`}>
+        {missing > 0 && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            padding: "10px 12px", marginBottom: 12, borderRadius: 8,
+            background: "var(--warn-bg, rgba(240,180,60,0.10))",
+            border: "1px solid var(--warn-border, rgba(240,180,60,0.30))",
+          }}>
+            <span style={{ fontSize: 12.5, color: "var(--text-0)" }}>
+              {missing} tool{missing > 1 ? "s" : ""} missing — install {missing > 1 ? "them all" : "it"} at once:
+            </span>
+            <code style={{ fontSize: 12.5, color: "var(--brand)" }}>{h.install_command || "heaven install-tools"}</code>
+            <button
+              className="btn"
+              style={{ padding: "3px 10px", fontSize: 11.5, marginLeft: "auto" }}
+              onClick={() => {
+                const cmd = h.install_command || "heaven install-tools";
+                navigator.clipboard?.writeText(cmd).then(
+                  () => toast.success?.("Copied — run it in your terminal"),
+                  () => toast.info?.(cmd),
+                );
+              }}
+            >
+              Copy command
+            </button>
+          </div>
+        )}
         <div style={{ display: "grid", gap: 10 }}>
           {tools.map((t) => (
             <div key={t.name} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>

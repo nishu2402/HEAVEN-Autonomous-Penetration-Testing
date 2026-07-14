@@ -40,3 +40,28 @@ def test_scan_suggestion_uses_selector_when_no_findings(monkeypatch):
     joined = "\n".join(_next_steps(report))
     assert "--engagement acme-q3" in joined
     assert "ACME Q3 (external)" not in joined
+
+
+def test_missing_tools_suggest_install_tools(monkeypatch):
+    """A missing scanner binary surfaces the one-shot `heaven install-tools` step."""
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "x" * 12)  # skip the init step
+    report = {
+        "engagement": {"name": "demo", "selector": "demo", "exists": True,
+                       "total_findings": 3},
+        "external_tools": {"nmap": True, "sqlmap": False, "ffuf": False},
+    }
+    joined = "\n".join(_next_steps(report))
+    assert "heaven install-tools" in joined
+    # Names the actual missing tools so the operator knows what will be installed.
+    assert "sqlmap" in joined and "ffuf" in joined
+
+
+def test_all_tools_present_no_install_step(monkeypatch):
+    """When every tool is present, the install-tools step is suppressed."""
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "x" * 12)
+    report = {
+        "engagement": {"name": "demo", "selector": "demo", "exists": True,
+                       "total_findings": 3},
+        "external_tools": {"nmap": True, "sqlmap": True},
+    }
+    assert "install-tools" not in "\n".join(_next_steps(report))

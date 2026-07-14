@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1.6
 
 # ── Stage 1: Build the React UI ──────────────────────────────────────
-FROM node:20-slim AS ui-builder
+# Node 22 (active LTS): Vite 8 requires Node >=20.19/>=22.12, and Node 20 is EOL.
+FROM node:22-slim AS ui-builder
 
 WORKDIR /ui
 

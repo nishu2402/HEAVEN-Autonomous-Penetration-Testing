@@ -7,7 +7,7 @@ content-type confusion, and method override attacks.
 from __future__ import annotations
 
 import asyncio
-import random
+import secrets
 import string
 import urllib.parse
 from typing import Optional
@@ -21,6 +21,10 @@ except ImportError:
 from heaven.utils.logger import get_logger
 
 logger = get_logger("web_fuzzer")
+
+# Canary markers use a CSPRNG so a target cannot pre-compute / pre-seed them and
+# mask reflection, and to satisfy HEAVEN's `weak-random-for-crypto` SAST rule.
+_rng = secrets.SystemRandom()
 
 
 def _dedup(findings: list[dict]) -> list[dict]:
@@ -71,7 +75,7 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
         allow_hdr = ""
 
     # Canary for TRACE echo verification — must appear in echoed request headers
-    _xst_canary = "HVNXST" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    _xst_canary = "HVNXST" + "".join(_rng.choices(string.ascii_uppercase + string.digits, k=8))
     sem = asyncio.Semaphore(5)
 
     async def _try_method(method: str) -> None:
@@ -297,7 +301,7 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
     attackers can poison the cache for all users.
     """
     findings: list[dict] = []
-    canary = f"HEAVEN-{random.randint(100000, 999999)}"
+    canary = f"HEAVEN-{_rng.randint(100000, 999999)}"
 
     for hdr in _CACHE_HEADERS:
         try:

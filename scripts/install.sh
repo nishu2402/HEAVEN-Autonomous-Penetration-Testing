@@ -173,23 +173,25 @@ fi
 
 ok "heaven command: $WRAPPER_PATH"
 
-# ── 6. External tools check ───────────────────────────────────────────────────
+# ── 6. External tools — install for full power ────────────────────────────────
 echo ""
-step "Step 6/9 — Checking external tools..."
+step "Step 6/9 — Installing external scanner tools..."
 echo ""
 
-check_tool() {
-    local name="$1"; local cmd="$2"; local install_hint="$3"
-    if command -v "$cmd" >/dev/null 2>&1; then
-        ok "$name → $(command -v "$cmd")"
-    else
-        warn "$name not found  ($install_hint)"
-    fi
-}
-
-check_tool "nmap"    "nmap"    "apt install nmap  |  brew install nmap"
-check_tool "nuclei"  "nuclei"  "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
-check_tool "sqlmap"  "sqlmap"  "pip install sqlmap  |  apt install sqlmap"
+# HEAVEN shells out to nmap / nuclei / sqlmap / ffuf / searchsploit / semgrep /
+# docker for full-power scanning (each has an in-house fallback, so this is
+# non-fatal). `heaven install-tools` uses this host's package manager and is
+# idempotent, so already-present tools are skipped. Set HEAVEN_SKIP_TOOLS=1 to
+# opt out (e.g. locked-down CI where you provision tools separately).
+if [ "${HEAVEN_SKIP_TOOLS:-0}" = "1" ]; then
+    info "HEAVEN_SKIP_TOOLS=1 — skipping external tool install"
+    info "Run later with:  heaven install-tools"
+elif "$VENV_PYTHON" -m heaven.main --quiet install-tools --yes; then
+    ok "External tools ready (or already present)"
+else
+    warn "Some external tools couldn't be installed automatically"
+    echo -e "  ${DIM}Re-run any time:  heaven install-tools   (or heaven doctor to see what's missing)${NC}"
+fi
 
 # ── 7. Frontend build ─────────────────────────────────────────────────────────
 echo ""

@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Cleared all 19 web-UI dependency advisories** reported by `heaven sca`
+  (OSV.dev). Removed the **unused `mermaid`** dependency — it was never imported,
+  and dropping it eliminated 13 advisories on its own (4 mermaid CVEs plus the
+  transitive `dompurify` set and a high-severity `uuid` issue) and removed 113
+  packages. Bumped `vite` 5→8, `@vitejs/plugin-react` 4→6 and `react-router-dom`
+  6→7 to clear the remainder. `heaven sca` and `npm audit` now report **zero**
+  vulnerable dependencies.
+- **Hardened evasion/fuzzer randomness to a CSPRNG** (CWE-330). All timing
+  jitter, User-Agent rotation, scan-order shuffling and canary generation in
+  `recon/evasion_engine.py` and `vulnscan/web_fuzzer.py` now draw from
+  `secrets.SystemRandom` instead of the default PRNG — unpredictable to IDS/WAF
+  fingerprinting, and clearing HEAVEN's own `weak-random-for-crypto` SAST rule.
+
+### Added
+
+- **`heaven install-tools`** — one command installs the external scanner
+  binaries HEAVEN shells out to (nmap, nuclei, sqlmap, ffuf, searchsploit,
+  semgrep, docker) using the host package manager (brew / apt / dnf / pacman) or
+  pip / go, so the scanner runs at full power. Idempotent, with `--dry-run` and
+  per-tool selection. Driven by a single shared catalog
+  (`heaven/utils/tool_installer.py`) that also powers `heaven doctor` and the web
+  System-Health panel, so the tool list and install recipes never drift. Wired
+  into `scripts/install.sh` (opt out with `HEAVEN_SKIP_TOOLS=1`).
+
+### Changed
+
+- **Full power by default.** Folded the pure-Python runtime feature-packs
+  (recon, reports, lateral movement, deploy, scheduling, AWS cloud, and the
+  default Gemini AI SDK) into the base `dependencies`, so a plain `pip install`
+  is fully powered with no extras to remember. The former `[recon]`/`[reports]`/…
+  extras remain as backward-compatible aliases.
+- **Web UI build now targets Node 22 (active LTS)** in CI and the Dockerfile.
+  Vite 8 requires Node ≥20.19 / ≥22.12, and Node 20 has reached end-of-life.
+
 ## [1.0.0] — 2026-07-08
 
 ### Added

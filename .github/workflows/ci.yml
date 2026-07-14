@@ -157,7 +157,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 22 (active LTS): Vite 8 needs >=20.19/>=22.12; Node 20 is EOL.
+          node-version: "22"
           cache: npm
           cache-dependency-path: heaven-ui/package-lock.json
       - name: Install UI deps

@@ -41,9 +41,7 @@ dependencies = [
     "numpy>=1.26.0",
     "pandas>=2.2.0",
     "joblib>=1.3.0",
-    # Web recon (crawler uses the stdlib html.parser, so no lxml). scapy (raw
-    # packets) and boto3 (AWS) are heavy + guarded, so they live in the
-    # [recon] / [cloud-aws] extras rather than the base install.
+    # Web recon (crawler uses the stdlib html.parser, so no lxml).
     "beautifulsoup4>=4.12.0",
     # Utilities
     "pydantic>=2.6.0",
@@ -60,6 +58,29 @@ dependencies = [
     "pyjwt>=2.8.0",
     "cryptography>=42.0.0",
     "aiosqlite>=0.19.0",
+    # ── Full-power runtime deps (folded in from the old feature extras) ───────
+    # HEAVEN ships "full power by default": every runtime capability is installed
+    # with a plain `pip install`, no extras to remember. The [recon]/[reports]/
+    # [lateral]/[deploy]/[scheduling]/[cloud-aws]/[gemini] extras below are kept
+    # as backward-compatible aliases (now already-satisfied subsets of the base).
+    # Only dev/test tooling and the alternate LLM providers (anthropic/openai)
+    # and heavyweight GCP/Azure SDKs remain opt-in. All of the following are
+    # pure-Python wheels, so the base install stays wheel-only (no compilers).
+    "dnspython>=2.6.0",           # DNS enumeration (recon)
+    "scapy>=2.5.0",               # raw-packet probes (recon)
+    "jinja2>=3.1.3",              # HTML report templating (reports)
+    "reportlab>=4.0.0",           # PDF reports (reports)
+    "tabulate>=0.9.0",            # table rendering (reports/CLI)
+    "impacket>=0.11.0",           # SMB/Kerberos lateral movement (lateral)
+    "asyncssh>=2.14.0",           # SSH credential testing (lateral)
+    "ldap3>=2.9.1",               # LDAP/AD enumeration (lateral)
+    "docker>=7.0.0",              # container recon (deploy)
+    "kubernetes>=29.0.0",         # k8s recon (deploy)
+    "apscheduler>=3.10.0",        # scheduled scans (scheduling)
+    "alembic>=1.13.0",            # DB migrations (scheduling)
+    "boto3>=1.34.0",              # AWS cloud recon (cloud-aws)
+    "google-genai>=1.0.0",        # default AI provider SDK (Gemini) — AI works
+                                  # as soon as a key is added; no extra install
 ]
 
 [project.urls]
@@ -93,20 +114,20 @@ dev = [
 cloud-gcp = ["google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0"]
 cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]
 
-# LLM provider SDKs for the AI layers (optional — HEAVEN runs without any).
-# Pick one:  pip install -e ".[gemini]"  /  ".[anthropic]"  /  ".[openai]"
-# Or all three:  pip install -e ".[llm]"
-gemini = ["google-genai>=1.0.0"]
+# LLM provider SDKs. The default (Gemini / google-genai) now ships in the base
+# install, so the AI layer works as soon as a key is added. anthropic / openai
+# are alternate providers — install one if you prefer Claude or GPT.
+#   pip install -e ".[anthropic]"  /  ".[openai]"  /  ".[llm]" (all three)
+gemini = ["google-genai>=1.0.0"]        # alias — already in base
 anthropic = ["anthropic>=0.39.0"]
 openai = ["openai>=1.40.0"]
 llm = ["google-genai>=1.0.0", "anthropic>=0.39.0", "openai>=1.40.0"]
 
-# Feature extras — optional capabilities. HEAVEN degrades gracefully without
-# them (the feature is skipped with a clear message), so a base `pip install`
-# works and you add only what you need. `requirements.txt` installs everything
-# for a full local dev environment.
-# Network recon: DNS enumeration + scapy raw-packet probes. nmap/nuclei/sqlmap
-# are system binaries (not pip), and Shodan recon + WHOIS use plain HTTP.
+# Feature extras — kept as BACKWARD-COMPATIBLE ALIASES. As of v1.0 every runtime
+# capability ships in the base install (full power by default), so these are now
+# already-satisfied subsets of `dependencies` above; `pip install -e ".[recon]"`
+# still resolves for anyone with it in their scripts. The only genuine opt-ins
+# left are dev tooling, the alternate LLM providers, and the heavy GCP/Azure SDKs.
 recon = ["dnspython>=2.6.0", "scapy>=2.5.0"]
 reports = ["jinja2>=3.1.3", "reportlab>=4.0.0", "tabulate>=0.9.0"]
 lateral = ["impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1"]

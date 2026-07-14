@@ -113,16 +113,11 @@ def _collect_status(engagement: Optional[str]) -> dict:
     except Exception as e:
         report["ticketing"] = {"error": str(e)}
 
-    # External tools
-    report["external_tools"] = {
-        "nmap":         shutil.which("nmap") is not None,
-        "nuclei":       shutil.which("nuclei") is not None,
-        "sqlmap":       shutil.which("sqlmap") is not None,
-        "ffuf":         shutil.which("ffuf") is not None,
-        "searchsploit": shutil.which("searchsploit") is not None,
-        "semgrep":      shutil.which("semgrep") is not None,
-        "docker":       shutil.which("docker") is not None,
-    }
+    # External tools — names from the shared catalog so `heaven doctor`,
+    # `heaven install-tools` and the web System-Health panel never drift.
+    from heaven.utils.tool_installer import tool_names
+    report["external_tools"] = {name: shutil.which(name) is not None
+                                for name in tool_names()}
 
     # Active engagement (flag > HEAVEN_ENGAGEMENT env > `heaven use` context)
     eng_name = resolve_engagement_name(engagement)
@@ -197,6 +192,12 @@ def _next_steps(report: dict) -> list[str]:
     # display name which can contain spaces/parens and isn't a valid --engagement.
     name = eng.get("selector") or eng.get("name") or "<name>"
     steps: list[str] = []
+    # Missing scanner binaries cap HEAVEN below full power — offer the one-shot
+    # installer first so the operator lands on a fully-capable setup.
+    missing = [t for t, present in (report.get("external_tools") or {}).items() if not present]
+    if missing:
+        shown = ", ".join(missing[:3]) + ("…" if len(missing) > 3 else "")
+        steps.append(f"[cyan]heaven install-tools[/cyan]  — install missing scanners ({shown})")
     if not admin_set:
         steps.append("[cyan]heaven init[/cyan]  — set the Web-UI admin password + optional API keys")
     if not eng.get("exists"):

@@ -1500,27 +1500,6 @@ def create_app() -> FastAPI:
     # System health — the web-UI equivalent of `heaven doctor`
     # ══════════════════════════════════════════════════════════════════
 
-    # Install hints surfaced next to any missing external tool, so the operator
-    # knows exactly how to enable a degraded capability.
-    _TOOL_HINTS = {
-        "nmap": "apt install nmap  ·  brew install nmap",
-        "nuclei": "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
-        "sqlmap": "apt install sqlmap  ·  pip install sqlmap",
-        "ffuf": "go install github.com/ffuf/ffuf/v2@latest",
-        "searchsploit": "apt install exploitdb",
-        "semgrep": "pip install semgrep",
-        "docker": "https://docs.docker.com/get-docker/",
-    }
-    _TOOL_PURPOSE = {
-        "nmap": "Network port/service scanning",
-        "nuclei": "Template-based vulnerability checks",
-        "sqlmap": "Automated SQL-injection exploitation proof",
-        "ffuf": "Content/directory fuzzing",
-        "searchsploit": "Local Exploit-DB PoC lookup",
-        "semgrep": "Static analysis (SAST)",
-        "docker": "Container/Kubernetes recon + DVWA benchmark",
-    }
-
     @app.get("/api/system/health")
     async def system_health(user: User = Depends(require_permission("scan.view"))):
         """Web-UI System Health — mirrors `heaven doctor`.
@@ -1533,17 +1512,25 @@ def create_app() -> FastAPI:
         from heaven.cli.status import _collect_status, _next_steps
         from heaven.cli._helpers import check_module_health
         from heaven.settings_catalog import catalog_status
+        from heaven.utils.tool_installer import TOOLS, install_hint, is_present
 
         report = _collect_status(None)
-        # Enrich external tools with purpose + install hint.
+        # Enrich external tools with purpose + platform-aware install hint, both
+        # sourced from the shared catalog so the panel matches `heaven doctor`
+        # and `heaven install-tools` exactly (no drift between hint strings).
         tools = []
-        for name, present in (report.get("external_tools") or {}).items():
+        for spec in TOOLS:
+            present = is_present(spec.name)
             tools.append({
-                "name": name, "present": bool(present),
-                "purpose": _TOOL_PURPOSE.get(name, ""),
-                "hint": "" if present else _TOOL_HINTS.get(name, ""),
+                "name": spec.name, "present": present,
+                "purpose": spec.purpose,
+                "hint": "" if present else install_hint(spec),
             })
         report["tools"] = tools
+        # The one command that installs every missing tool at once — surfaced as
+        # a copy-paste call-to-action in the System-Health panel.
+        report["install_command"] = "heaven install-tools"
+        report["tools_missing"] = sum(1 for t in tools if not t["present"])
         report["modules"] = check_module_health()
         report["settings"] = catalog_status()
         # Strip Rich markup so the UI gets plain strings.

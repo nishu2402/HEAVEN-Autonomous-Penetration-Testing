@@ -28,9 +28,12 @@ export default defineConfig({
         // Long-lived vendor chunks that change rarely → better browser caching.
         // three.js / @react-three are intentionally NOT listed: they auto-split
         // into the lazy topology chunk via the dynamic import and must stay async.
-        manualChunks: {
-          react: ["react", "react-dom", "react-router-dom"],
-          motion: ["framer-motion"],
+        // Function form (object form was dropped when Vite 8 moved to Rolldown).
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("framer-motion")) return "motion";
+          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id))
+            return "react";
         },
       },
     },

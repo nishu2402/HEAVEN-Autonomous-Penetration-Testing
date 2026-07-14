@@ -62,6 +62,23 @@ def test_methodology_lists_docs(api_client):
     assert "exercised" in row and "exercised_count" in row
 
 
+# ── System Health: external tools + one-shot install command ────────────
+
+def test_system_health_lists_tools_with_install_command(api_client):
+    r = api_client.get("/api/system/health")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # The panel's copy-paste CTA + missing counter.
+    assert body["install_command"] == "heaven install-tools"
+    assert isinstance(body["tools_missing"], int)
+    names = {t["name"] for t in body["tools"]}
+    assert {"sqlmap", "ffuf", "searchsploit", "semgrep", "nmap"}.issubset(names)
+    for t in body["tools"]:
+        assert {"name", "present", "purpose", "hint"}.issubset(t)
+        # Present tools carry no hint; missing tools always carry an actionable one.
+        assert (t["hint"] == "") == bool(t["present"])
+
+
 # ── Gap 1: Benchmark results ────────────────────────────────────────────
 
 def test_benchmark_results_endpoint_responds(api_client):

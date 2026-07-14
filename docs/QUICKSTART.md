@@ -132,7 +132,7 @@ so the README's benchmark badge has a target to link to.
 | Symptom | Fix |
 |---|---|
 | `heaven: command not found` | `pip install -e .` from the repo root, or open a new shell so `~/.local/bin` is on PATH |
-| `nmap: command not found` | `brew install nmap` (macOS) / `apt install nmap` (Linux) — HEAVEN degrades gracefully but coverage drops |
+| A scanner tool shows "missing" (`nmap`, `sqlmap`, `ffuf`, `searchsploit`, `semgrep`) | `heaven install-tools` — installs them all with your package manager (idempotent). HEAVEN still runs without them, just at reduced power |
 | Web UI shows blank page | `cd heaven-ui && npm install && npm run build` |
 | `HEAVEN_ADMIN_PASSWORD not set` warning | Run `heaven init` for an interactive setup, or `export HEAVEN_ADMIN_PASSWORD=…` |
 | Scan exits "Authorization required" | Add `--i-have-authorization` flag (mandatory and intentional) |

@@ -317,8 +317,10 @@ export const Dashboard = {
   get: () => api("/dashboard"),
 };
 
-// System health — GET /api/system/health mirrors `heaven doctor`: external
-// tools (with install hints), optional integrations, configured keys, module health.
+// System health — GET /api/system/health mirrors `heaven doctor`. Shape:
+// { version, python, tools:[{name,present,purpose,hint}], tools_missing,
+//   install_command:"heaven install-tools", settings, modules, next_steps, … }.
+// `install_command` powers the "install missing tools" CTA on the Health page.
 export const System = {
   health: () => api("/system/health"),
 };

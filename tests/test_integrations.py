@@ -61,7 +61,7 @@ def test_pdf_report_generates_valid_pdf(tmp_path):
     (regression guard for the old reportlab/weasyprint wiring mismatch)."""
     import pytest
     pytest.importorskip("reportlab")
-    from pypdf import PdfReader  # type: ignore
+    PdfReader = pytest.importorskip("pypdf").PdfReader
 
     from heaven.devsecops.pdf_report import PDFReportGenerator
     from heaven.devsecops.vuln_kb import enrich_finding

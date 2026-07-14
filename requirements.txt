@@ -104,11 +104,11 @@ tqdm>=4.66.0
 colorama>=0.4.6
 
 # ─── Transitive dependency security floors ───────────────────────────
-# These are pulled in indirectly (idna via requests/aiohttp, pypdf via a
-# report/parse dep) but shipped versions had advisories, so pin the fixed
-# floor explicitly. Flagged by `pip-audit`; re-run it after dependency bumps.
+# These are pulled in indirectly (idna via requests/aiohttp, msgpack via
+# cachecontrol) but shipped versions had advisories, so pin the fixed floor
+# explicitly. Flagged by `pip-audit`; re-run it after dependency bumps.
+# (pypdf is TEST-ONLY — it lives in the [dev] extra in pyproject.toml, not here.)
 idna>=3.15                  # PYSEC-2026-215
-pypdf>=6.13.3               # GHSA-jm82-fx9c-mx94
 msgpack>=1.2.1              # GHSA-6v7p-g79w-8964 (via cachecontrol)
 
 # ─── AI layers (LLM providers) ───────────────────────────────────────

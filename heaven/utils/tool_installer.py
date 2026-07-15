@@ -22,9 +22,11 @@ anywhere, including the API server and the plain-Click fallback.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -38,6 +40,9 @@ class ToolSpec:
     apt: Optional[str] = None       # Debian/Ubuntu package
     dnf: Optional[str] = None       # Fedora/RHEL package
     pacman: Optional[str] = None    # Arch package
+    winget: Optional[str] = None    # Windows winget package id
+    choco: Optional[str] = None     # Windows Chocolatey package
+    scoop: Optional[str] = None     # Windows Scoop package
     pip: Optional[str] = None       # PyPI package (installed into HEAVEN's interpreter)
     go: Optional[str] = None        # `go install <pkg>` path
     url: Optional[str] = None       # manual-install docs when nothing else applies
@@ -49,11 +54,12 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="nmap", purpose="Network port/service scanning",
         brew="nmap", apt="nmap", dnf="nmap", pacman="nmap",
+        winget="Insecure.Nmap", choco="nmap", scoop="nmap",
         url="https://nmap.org/download.html",
     ),
     ToolSpec(
         name="nuclei", purpose="Template-based vulnerability checks",
-        brew="nuclei", pacman="nuclei",
+        brew="nuclei", pacman="nuclei", scoop="nuclei",
         go="github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
         url="https://github.com/projectdiscovery/nuclei#install-nuclei",
     ),
@@ -64,7 +70,7 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="ffuf", purpose="Content/directory fuzzing",
-        brew="ffuf", apt="ffuf", pacman="ffuf",
+        brew="ffuf", apt="ffuf", pacman="ffuf", scoop="ffuf",
         go="github.com/ffuf/ffuf/v2@latest",
         url="https://github.com/ffuf/ffuf#installation",
     ),
@@ -81,6 +87,7 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="docker", purpose="Container/Kubernetes recon + DVWA benchmark",
         apt="docker.io", dnf="docker", pacman="docker",
+        winget="Docker.DockerDesktop", choco="docker-desktop",
         url="https://docs.docker.com/get-docker/",
     ),
 ]
@@ -112,6 +119,12 @@ def _pkg_manager() -> Optional[str]:
     """The system package manager available on this host, if any."""
     if sys.platform == "darwin":
         return "brew" if shutil.which("brew") else None
+    if sys.platform.startswith("win") or os.name == "nt":
+        # Windows: prefer winget (ships with Win10+), then Chocolatey / Scoop.
+        for mgr in ("winget", "choco", "scoop"):
+            if shutil.which(mgr):
+                return mgr
+        return None
     if sys.platform.startswith("linux"):
         # Homebrew on Linux is valid too, but prefer the native manager.
         for mgr in ("apt-get", "dnf", "pacman"):
@@ -131,7 +144,8 @@ def build_install_command(spec: ToolSpec) -> Optional[list[str]]:
     wrapped in ``sudo`` (matching scripts/install.sh); pip/go/brew need no root.
     """
     mgr = _pkg_manager()
-    # 1) native package manager
+    # 1) native package manager (all invoked non-interactively so nothing blocks
+    #    waiting for a y/N or a licence prompt mid-install)
     if mgr == "brew" and spec.brew:
         return ["brew", "install", spec.brew]
     if mgr == "apt-get" and spec.apt:
@@ -140,6 +154,14 @@ def build_install_command(spec: ToolSpec) -> Optional[list[str]]:
         return ["sudo", "dnf", "install", "-y", spec.dnf]
     if mgr == "pacman" and spec.pacman:
         return ["sudo", "pacman", "-S", "--noconfirm", spec.pacman]
+    if mgr == "winget" and spec.winget:
+        return ["winget", "install", "-e", "--id", spec.winget,
+                "--accept-package-agreements", "--accept-source-agreements",
+                "--disable-interactivity"]
+    if mgr == "choco" and spec.choco:
+        return ["choco", "install", "-y", spec.choco]
+    if mgr == "scoop" and spec.scoop:
+        return ["scoop", "install", spec.scoop]
     # 2) pip — reliable, cross-platform, lands next to the `heaven` script
     if spec.pip and (shutil.which("pip") or shutil.which("pip3") or sys.executable):
         return [sys.executable, "-m", "pip", "install", "--upgrade", spec.pip]
@@ -167,6 +189,15 @@ def install_hint(spec: ToolSpec) -> str:
     if sys.platform == "darwin":
         if spec.brew:
             parts.append(f"brew install {spec.brew}")
+        if spec.pip:
+            parts.append(f"pip install {spec.pip}")
+    elif sys.platform.startswith("win") or os.name == "nt":
+        if spec.winget:
+            parts.append(f"winget install -e --id {spec.winget}")
+        if spec.choco:
+            parts.append(f"choco install {spec.choco}")
+        if spec.scoop:
+            parts.append(f"scoop install {spec.scoop}")
         if spec.pip:
             parts.append(f"pip install {spec.pip}")
     else:
@@ -231,26 +262,102 @@ def install_tools(
     return results
 
 
-def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) -> InstallResult:
-    """Run one install command and re-verify the tool landed on PATH."""
+def _install_timeout() -> int:
+    """Per-tool install timeout in seconds. Override with
+    ``HEAVEN_TOOL_INSTALL_TIMEOUT`` (e.g. on a very slow link). A hard cap is the
+    single most important guard against a 'stuck' install — no one command can
+    block the whole run forever."""
+    raw = os.environ.get("HEAVEN_TOOL_INSTALL_TIMEOUT", "900")
     try:
-        if callable(on_output):
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                on_output(line.rstrip("\n"))
-            rc = proc.wait()
-        else:
-            rc = subprocess.call(cmd)
+        val = int(raw)
+    except ValueError:
+        return 900
+    return val if val > 0 else 900
+
+
+def _install_env() -> dict:
+    """Environment that keeps package managers non-interactive and fast, so an
+    install never blocks on a prompt or a slow self-update."""
+    env = os.environ.copy()
+    env.setdefault("DEBIAN_FRONTEND", "noninteractive")   # apt never prompts
+    env.setdefault("HOMEBREW_NO_AUTO_UPDATE", "1")         # skip the slow brew self-update
+    env.setdefault("HOMEBREW_NO_INSTALL_CLEANUP", "1")
+    env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    env.setdefault("PIP_ROOT_USER_ACTION", "ignore")
+    return env
+
+
+def _noninteractive_sudo(cmd: list[str]) -> list[str]:
+    """When there is no interactive terminal, make sudo fail fast (``-n``) rather
+    than block forever on a password prompt — the classic cause of a 'stuck'
+    install in piped (``curl | bash``) or CI runs. With a real TTY, leave sudo
+    alone so the operator can authenticate normally."""
+    if cmd[:1] == ["sudo"] and cmd[1:2] != ["-n"]:
+        try:
+            interactive = sys.stdin.isatty()
+        except (ValueError, OSError):
+            interactive = False
+        if not interactive:
+            return ["sudo", "-n", *cmd[1:]]
+    return cmd
+
+
+def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) -> InstallResult:
+    """Run one install command with a hard timeout, non-interactive package
+    managers and a fast-fail sudo — then re-verify the tool landed on PATH.
+
+    Live output (when ``on_output`` is given) is streamed line-by-line so a long
+    download still shows progress instead of looking frozen; a watchdog timer
+    kills the child if it exceeds the timeout.
+    """
+    run_cmd = _noninteractive_sudo(cmd)
+    timeout = _install_timeout()
+    timed_out = threading.Event()
+
+    try:
+        proc = subprocess.Popen(
+            run_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,   # a child must never block reading stdin
+            text=True,
+            env=_install_env(),
+        )
     except FileNotFoundError as e:
         return InstallResult(spec.name, "failed", command=cmd, detail=str(e))
     except Exception as e:  # noqa: BLE001
         return InstallResult(spec.name, "failed", command=cmd, detail=str(e))
 
+    def _kill() -> None:
+        timed_out.set()
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+    watchdog = threading.Timer(timeout, _kill)
+    watchdog.start()
+    try:
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                if callable(on_output):
+                    on_output(line.rstrip("\n"))
+        rc = proc.wait()
+    finally:
+        watchdog.cancel()
+
+    if timed_out.is_set():
+        return InstallResult(
+            spec.name, "failed", command=cmd,
+            detail=f"timed out after {timeout}s — install manually: {install_hint(spec)}")
+
     # `brew` can exit non-zero on benign keg-link conflicts while still pouring
     # the binary, so trust PATH presence over the return code as the final word.
     if is_present(spec.name):
         return InstallResult(spec.name, "installed", command=cmd)
+    if run_cmd[:2] == ["sudo", "-n"]:
+        return InstallResult(
+            spec.name, "failed", command=cmd,
+            detail=f"needs sudo (no interactive terminal) — run: {install_hint(spec)}")
     detail = f"exit {rc}" if rc else "not found on PATH after install"
     return InstallResult(spec.name, "failed", command=cmd, detail=detail)

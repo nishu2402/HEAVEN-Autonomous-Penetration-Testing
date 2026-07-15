@@ -70,6 +70,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in CI and skips cleanly without dev extras.
 - **Installer appearing to hang / getting stuck** during the external-tool step —
   see the install hardening under *Changed* above.
+- **Windows installer could abort mid-run under two edge cases** (found by
+  executing `install.ps1`/`uninstall.ps1` end-to-end, not just linting them):
+  (1) `$env:Path.Split(';')` had no null-guard, so in any context where the
+  process `Path` is unset it would throw and stop the install right after adding
+  the PATH entry — now guarded like the adjacent user-PATH handling; (2) the web
+  UI build ran under `ErrorActionPreference='Stop'`, so a broken/missing Node or
+  npm could throw and abort the whole installer (losing `.env` creation and the
+  smoke test) — the UI build is now wrapped in try/catch and is genuinely
+  non-fatal, matching the script's stated "the CLI works fine without the UI"
+  contract. Both `.ps1` scripts now pass PSScriptAnalyzer with zero findings and
+  run install→uninstall to a clean exit. A new **`windows-install-e2e` CI job
+  executes the full installer and uninstaller on real `windows-latest`** every
+  push (native venv + pip install, `cmd /c npm` UI build, `.env`, smoke test,
+  then uninstall with a data-preservation assertion) — so the Windows path is now
+  gated by actual Windows execution, not just static analysis.
 
 ## [1.0.0] — 2026-07-08
 

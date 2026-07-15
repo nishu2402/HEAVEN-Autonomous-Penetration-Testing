@@ -34,11 +34,14 @@ INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 info "Install directory: ${BOLD}$INSTALL_DIR${NC}"
 
 # ── Detect target user (handle sudo correctly) ────────────────────────────────
-TARGET_USER="${SUDO_USER:-$USER}"
+# Guard against $USER/$HOME being UNSET (set -u would otherwise abort here):
+# minimal environments — Docker `RUN`, systemd units, cron, `env -i` — often
+# don't export them. Fall back to id/getent so the installer still runs.
+TARGET_USER="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || echo heaven)}}"
 if [ -n "${SUDO_USER:-}" ] && command -v getent >/dev/null 2>&1; then
     TARGET_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || eval echo "~${SUDO_USER}")"
 else
-    TARGET_HOME="$HOME"
+    TARGET_HOME="${HOME:-$(eval echo "~${TARGET_USER}" 2>/dev/null || echo "")}"
 fi
 [ -d "$TARGET_HOME" ] || fail "Cannot determine home directory (TARGET_HOME='$TARGET_HOME')"
 

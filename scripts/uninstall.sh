@@ -33,7 +33,7 @@ echo ""
 
 # ── Resolve target user home (handle sudo correctly) ──────────────────────────
 TARGET_USER="${SUDO_USER:-${USER:-$(whoami)}}"
-TARGET_HOME="$HOME"
+TARGET_HOME="${HOME:-$(eval echo "~${TARGET_USER}" 2>/dev/null || echo "")}"
 if [ -n "${SUDO_USER:-}" ]; then
     if command -v getent >/dev/null 2>&1; then
         _gh="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)" || true

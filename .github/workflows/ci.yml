@@ -218,6 +218,50 @@ jobs:
           }
           Write-Host "PSScriptAnalyzer: no errors." -ForegroundColor Green
 
+  windows-install-e2e:
+    name: Windows install/uninstall E2E (native)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: heaven-ui/package-lock.json
+      # Actually EXECUTE install.ps1 on real Windows — the one thing a macOS/Linux
+      # dev host cannot do. -SkipTools avoids pulling heavyweight system packages
+      # (Docker Desktop, etc.) onto the runner, but everything else runs natively:
+      # the venv, the full editable pip install + feature packs, the user-PATH
+      # wiring, the `cmd /c npm` web-UI build, .env generation, and the smoke test.
+      - name: Run install.ps1 (native Windows)
+        shell: pwsh
+        run: |
+          ./scripts/install.ps1 -SkipTools
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited with $LASTEXITCODE" }
+      - name: Verify the installed CLI runs and .env was created
+        shell: pwsh
+        run: |
+          $heaven = Join-Path (Get-Location) 'venv\Scripts\heaven.exe'
+          if (-not (Test-Path $heaven)) { throw "heaven.exe missing at $heaven" }
+          & $heaven --version
+          if ($LASTEXITCODE -ne 0) { throw "heaven --version failed" }
+          if (-not (Test-Path '.env')) { throw ".env was not created by step 8" }
+          Write-Host "install.ps1 OK: CLI runs, .env present" -ForegroundColor Green
+      - name: Run uninstall.ps1 and assert it preserves user data
+        shell: pwsh
+        run: |
+          # Seed a non-empty engagements dir; the uninstaller must KEEP it.
+          New-Item -ItemType Directory -Force -Path 'engagements' | Out-Null
+          Set-Content -Path 'engagements/keep.db' -Value 'user-data'
+          ./scripts/uninstall.ps1
+          if ($LASTEXITCODE -ne 0) { throw "uninstall.ps1 exited with $LASTEXITCODE" }
+          if (Test-Path 'venv') { throw "uninstall.ps1 left the venv behind" }
+          if (-not (Test-Path 'engagements/keep.db')) { throw "uninstall.ps1 DELETED user data" }
+          Write-Host "Native Windows install -> uninstall E2E passed" -ForegroundColor Green
+
   docker-build:
     name: Docker image build
     runs-on: ubuntu-latest

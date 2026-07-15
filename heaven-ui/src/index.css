@@ -315,6 +315,52 @@ a:hover { color: var(--accent-2); }
 .eng-warn { color: var(--med); font-size: 12.5px; }
 .header-clock { color: var(--text-2); font-size: 12px; font-family: var(--font-mono); letter-spacing: 0.04em; }
 
+/* Dashboard engagement switcher — pick a row to switch, trash to delete. */
+.eng-switch-list { display: flex; flex-direction: column; gap: 4px; }
+.eng-switch-row {
+  display: flex; align-items: stretch; gap: 4px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-1); overflow: hidden;
+}
+.eng-switch-row.is-active { border-color: var(--brand); background: rgba(52,229,163,0.06); }
+.eng-switch-pick {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: none; border: none; cursor: pointer;
+  color: var(--text-0); font-family: var(--font-ui); font-size: 12.5px;
+  text-align: left; min-width: 0;
+}
+.eng-switch-pick:hover:not(:disabled) { background: rgba(255,255,255,0.03); }
+.eng-switch-pick:disabled { cursor: default; }
+.eng-switch-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--border-strong);
+}
+.is-active .eng-switch-dot { background: var(--brand); box-shadow: 0 0 8px rgba(52,229,163,0.6); }
+.eng-switch-name {
+  font-weight: 600; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.eng-switch-tag {
+  flex-shrink: 0; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.1em;
+  font-weight: 700; color: var(--text-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 6px;
+}
+.eng-switch-count { flex-shrink: 0; color: var(--text-2); font-size: 11px; font-family: var(--font-mono); }
+.eng-switch-del {
+  flex-shrink: 0; width: 34px; background: none; border: none;
+  border-left: 1px solid var(--border); cursor: pointer;
+  color: var(--text-2); font-size: 13px;
+}
+.eng-switch-del:hover:not(:disabled) { background: rgba(255,77,106,0.10); color: var(--crit); }
+.eng-switch-del:disabled { cursor: default; opacity: 0.5; }
+.eng-switch-clear {
+  margin-top: 8px; background: none; border: none; cursor: pointer;
+  color: var(--text-2); font-size: 11px; font-family: var(--font-ui);
+  text-decoration: underline; padding: 0;
+}
+.eng-switch-clear:hover:not(:disabled) { color: var(--crit); }
+.eng-switch-clear:disabled { cursor: default; opacity: 0.5; }
+
 .user-badge {
   color: var(--text-1); font-size: 11.5px; font-weight: 500;
   border: 1px solid var(--border); border-radius: 999px;
@@ -719,6 +765,31 @@ a:hover { color: var(--accent-2); }
 .stat-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); margin-bottom: 10px; font-weight: 600; }
 .stat-value { font-size: 2.6rem; font-weight: 700; line-height: 1; font-family: var(--font-mono); letter-spacing: -0.02em; }
 .stat-sub { font-size: 10.5px; color: var(--text-2); margin-top: 8px; letter-spacing: 0.04em; }
+
+/* ── Dashboard quick-launch grid ── every scan surface + analysis tool, one
+   click from the landing page. Fed by src/scanModes.js (shared with Scans). */
+.launch-panel { padding: 0 18px 16px; min-height: 0; }
+.launch-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; gap: 12px; }
+.launch-all {
+  background: none; border: none; color: var(--brand); font-size: 11px;
+  cursor: pointer; font-family: var(--font-ui); font-weight: 600; white-space: nowrap;
+}
+.launch-all:hover { text-decoration: underline; }
+.launch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.launch-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 8px; background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius-md); cursor: pointer; color: var(--text-1);
+  font-family: var(--font-ui); text-align: center;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
+}
+.launch-tile:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: var(--shadow-md); color: var(--text-0); }
+.launch-tile-icon { font-size: 18px; line-height: 1; }
+.launch-tile-name { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+.launch-tile.is-primary { border-color: var(--accent); }
+.launch-tile.is-primary .launch-tile-icon,
+.launch-tile.is-primary .launch-tile-name { color: var(--accent); }
+.launch-tile.is-tool { border-style: dashed; }
 
 /* ── Terminal pane ── */
 .terminal-pane { flex: 1; overflow: hidden; display: flex; flex-direction: column; }

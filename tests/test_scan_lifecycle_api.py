@@ -115,6 +115,292 @@ def test_scan_detail_and_delete(client):
     assert client.get("/api/scans/scanB").status_code == 200
 
 
+_FINDING = {"target": "https://a", "vuln_type": "xss", "title": "Reflected XSS",
+            "severity": "high", "confidence": 0.9, "risk_score": 7.5}
+
+
+def test_delete_engagement_repoints_to_best_survivor(client):
+    """Deleting the engagement you're viewing repoints the active pointer to the
+    survivor with the most findings — the fix for stale/empty engagements the
+    dashboard switcher listed forever with no way to remove them."""
+    from heaven.api.server import _engagement_store_factory
+    _seed("keep-me", {"s1": [_FINDING]})           # a real engagement with data
+    _engagement_store_factory("trash-me").create_engagement(name="trash-me")  # empty
+    client.post("/api/engagements/active", json={"name": "trash-me"})
+    assert client.get("/api/engagements").json()["active"] == "trash-me"
+
+    r = client.delete("/api/engagements/trash-me")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deleted"] == "trash-me"
+    assert body["active"] == "keep-me"     # repointed to the survivor with findings
+
+    js = client.get("/api/engagements").json()
+    assert js["active"] == "keep-me"
+    assert all(e["name"] != "trash-me" for e in js["engagements"])   # gone from the list
+
+
+def test_delete_last_engagement_clears_pointer(client):
+    """Deleting the only engagement clears the pointer so the resolver falls back
+    to 'default' (empty dashboard / quick-start) rather than dangling."""
+    from heaven.api import server
+    _seed("solo", {"s1": [_FINDING]})
+    client.post("/api/engagements/active", json={"name": "solo"})
+
+    r = client.delete("/api/engagements/solo")
+    assert r.status_code == 200, r.text
+    assert r.json()["active"] == "default"
+    assert not server._active_engagement_file().exists()
+
+
+def test_delete_engagement_removes_wal_sidecars(client):
+    """The DB *and* its WAL/SHM sidecars are removed, so the name can't be
+    resurrected from a leftover write-ahead log."""
+    from heaven.config import get_config
+    _seed("waltest", {"s1": [_FINDING]})
+    eng_dir = get_config().data_dir / "engagements"
+    assert (eng_dir / "waltest.db").exists()
+
+    r = client.delete("/api/engagements/waltest")
+    assert r.status_code == 200, r.text
+    assert not (eng_dir / "waltest.db").exists()
+    assert not (eng_dir / "waltest.db-wal").exists()
+    assert not (eng_dir / "waltest.db-shm").exists()
+
+
+def test_delete_engagement_rejects_traversal_and_missing(client):
+    """A traversal name is blocked (400) before any file op; a real-but-absent
+    engagement is a clean 404."""
+    assert client.delete("/api/engagements/x..y").status_code == 400
+    assert client.delete("/api/engagements/nope").status_code == 404
+
+
+def test_cli_engage_list_and_delete(tmp_path, monkeypatch):
+    """CLI parity: `heaven engage list` shows engagements and `engage delete`
+    removes the DB and drops any pointer that named it."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("HEAVEN_ENGAGEMENT", raising=False)
+    from click.testing import CliRunner
+
+    from heaven.cli._helpers import _engagement_db_path
+    from heaven.engagement import (
+        EngagementStore,
+        get_active_engagement,
+        set_active_engagement,
+    )
+    from heaven.main import cli
+
+    path = _engagement_db_path("cli-eng")
+    EngagementStore(path).create_engagement(name="cli-eng")
+    set_active_engagement("cli-eng")
+    assert path.exists()
+
+    runner = CliRunner()
+    res = runner.invoke(cli, ["engage", "list"])
+    assert res.exit_code == 0, res.output
+    assert "cli-eng" in res.output
+
+    res = runner.invoke(cli, ["engage", "delete", "cli-eng", "--yes"])
+    assert res.exit_code == 0, res.output
+    assert not path.exists()                       # DB removed
+    assert get_active_engagement() != "cli-eng"    # pointer no longer dangles
+
+
+def test_dashboard_reads_do_not_create_default_db(client):
+    """Opening the dashboard on a fresh install (nothing scanned) must NOT
+    materialise an empty data/engagements/default.db. That stray file is what
+    used to reappear in the switcher as a "default — empty" row the user could
+    never get rid of — recreated by the very act of loading a page."""
+    from heaven.config import get_config
+    default_db = get_config().data_dir / "engagements" / "default.db"
+    assert not default_db.exists()
+
+    # Every read the dashboard + header fire on load, plus the findings page.
+    assert client.get("/api/engagement").status_code == 200          # summary
+    assert client.get("/api/dashboard").status_code == 200
+    assert client.get("/api/engagement/findings").status_code == 200
+    assert client.get("/api/engagement/top-findings").status_code == 200
+    assert client.get("/api/scans").status_code == 200
+    js = client.get("/api/engagements").json()
+
+    # No file was created, and the switcher lists no phantom "default".
+    assert not default_db.exists(), "a read materialised default.db"
+    assert js["active"] == "default"
+    assert js["engagements"] == []
+    assert all(e["name"] != "default" for e in js["engagements"])
+
+
+def test_default_engagement_materialises_only_on_write(client):
+    """A genuine write into the fallback engagement still creates the store —
+    it's only *reads* that must not."""
+    from heaven.config import get_config
+    default_db = get_config().data_dir / "engagements" / "default.db"
+    assert not default_db.exists()
+    _seed("default", {"s1": [_FINDING]})
+    assert default_db.exists()
+    js = client.get("/api/engagements").json()
+    row = next(e for e in js["engagements"] if e["name"] == "default")
+    assert row["findings"] == 1
+
+
+def test_startup_prunes_empty_default_db(tmp_path, monkeypatch):
+    """Server startup removes a stray empty default.db left by older builds, but
+    preserves a 'default' engagement that actually holds data."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HEAVEN_DISABLE_AUTH", "1")
+    monkeypatch.delenv("HEAVEN_ENGAGEMENT", raising=False)
+    import heaven.security.auth as auth_mod
+    auth_mod._auth_manager = None
+    from fastapi.testclient import TestClient
+
+    from heaven.api.server import create_app
+    from heaven.config import get_config
+    from heaven.engagement import EngagementStore
+
+    default_db = get_config().data_dir / "engagements" / "default.db"
+    EngagementStore(default_db)               # materialise an EMPTY default.db
+    assert default_db.exists()
+
+    with TestClient(create_app()):            # entering runs the lifespan startup
+        pass
+    assert not default_db.exists(), "startup should prune an empty default.db"
+
+    # A default engagement WITH data must survive startup untouched.
+    store = EngagementStore(default_db)
+    store.create_engagement(name="default")
+    store.record_scan_start("s1", name="x", mode="web")
+    store.upsert_finding("s1", _FINDING)
+    with TestClient(create_app()):
+        pass
+    assert default_db.exists(), "a non-empty default must be preserved"
+    auth_mod._auth_manager = None
+
+
+def _seed_modes(engagement: str, scans: dict[str, str]):
+    """Seed one finding per scan, each recorded under a given mode.
+
+    scans maps scan_id -> mode (e.g. {"web-1": "web", "sast-1": "sast"}).
+    """
+    from heaven.api.server import _engagement_store_factory
+    store = _engagement_store_factory(engagement)
+    store.create_engagement(name=engagement)
+    for scan_id, mode in scans.items():
+        store.record_scan_start(scan_id, name=scan_id, mode=mode)
+        store.upsert_finding(scan_id, dict(_FINDING))
+    return store
+
+
+def test_scans_list_excludes_code_analysis_by_default(client):
+    """The general Scan Activity list (kind=pentest, the default) must NOT show
+    SAST/SCA runs — those have their own sections, so a code-analysis scan
+    appears exactly once instead of being merged in twice."""
+    client.post("/api/engagements/active", json={"name": "mix"})
+    _seed_modes("mix", {
+        "web-1": "web", "net-1": "network", "full-1": "full",
+        "sast-1": "sast", "sca-1": "sca",
+    })
+
+    def ids(r):
+        return {s.get("scan_id") or s.get("id") for s in r.json()["scans"]}
+
+    # Default (pentest) — web/network/full only, no sast/sca.
+    pentest = ids(client.get("/api/scans"))
+    assert {"web-1", "net-1", "full-1"} <= pentest
+    assert "sast-1" not in pentest and "sca-1" not in pentest
+
+    # Each code-analysis section returns only its own kind.
+    assert ids(client.get("/api/scans?kind=sast")) == {"sast-1"}
+    assert ids(client.get("/api/scans?kind=sca")) == {"sca-1"}
+
+    # kind=all is the escape hatch that still returns everything.
+    everything = ids(client.get("/api/scans?kind=all"))
+    assert {"web-1", "net-1", "full-1", "sast-1", "sca-1"} <= everything
+
+
+def test_sast_scan_persists_and_activates_engagement(client, monkeypatch):
+    """Running SAST with an engagement name must persist the findings AND make
+    that engagement active — the Findings page/dashboard read the *active*
+    engagement, so without activation the run lands in one store while every
+    reader looks at another ('I scanned SAST but Findings is empty')."""
+    import heaven.vulnscan.sast_runner as sr
+
+    class _Result:
+        success = True
+        duration_s = 1.2
+
+        def to_dict(self):
+            return {"success": True, "findings_count": 1, "files_scanned": 3,
+                    "duration_s": 1.2, "severity_breakdown": {"high": 1},
+                    "findings": [{"rule_id": "x.secret", "severity": "high",
+                                  "file_path": "app.py", "line": 4,
+                                  "title": "Hardcoded secret"}]}
+
+    async def _fake_run_sast(path, **kw):
+        return _Result()
+
+    def _fake_persist(store, scan_id, result):
+        store.upsert_finding(scan_id, {
+            "target": "app.py", "vuln_type": "hardcoded_secret",
+            "title": "Hardcoded secret", "severity": "high", "confidence": 0.9,
+        })
+        return 1
+
+    monkeypatch.setattr(sr, "has_semgrep", lambda: True)
+    monkeypatch.setattr(sr, "run_sast", _fake_run_sast)
+    monkeypatch.setattr(sr, "persist_findings", _fake_persist)
+
+    # Start out viewing a DIFFERENT engagement, to prove the SAST run repoints.
+    _seed("other", {"s0": [_FINDING]})
+    client.post("/api/engagements/active", json={"name": "other"})
+
+    r = client.post("/api/sast/scan", json={"path": "/src", "engagement": "code-audit"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["engagement"] == "code-audit"
+    assert body["persisted_count"] == 1
+
+    # The active engagement is now the one we scanned into...
+    assert client.get("/api/engagements").json()["active"] == "code-audit"
+    # ...and the Findings page (which reads the active engagement) shows it.
+    titles = [f["title"] for f in client.get("/api/engagement/findings").json()["findings"]]
+    assert "Hardcoded secret" in titles
+
+
+def test_dashboard_empty_engagement_does_not_leak_report_hosts(client):
+    """Switching to an engagement with no findings must show an EMPTY topology —
+    not fall back to some other engagement's latest report_*.json. Regression for
+    'hosts mapped doesn't change when I switch the viewing engagement'."""
+    import json
+
+    from heaven.api.server import _engagement_store_factory
+    from heaven.config import get_config
+
+    # A global CLI report on disk with a host — the tempting wrong fallback.
+    # (Same directory the dashboard globs report_*.json from.)
+    d = get_config().data_dir
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "report_old.json").write_text(json.dumps({
+        "scan_id": "old",
+        "vulnerabilities": [{"target": "10.9.9.9", "severity": "high", "title": "x"}],
+    }))
+
+    # Engagement A has a real host; engagement B is empty.
+    _seed("eng-a", {"s1": [{"target": "10.0.0.1", "vuln_type": "xss", "title": "A",
+                            "severity": "high", "confidence": 0.9, "risk_score": 7.0}]})
+    _engagement_store_factory("eng-b").create_engagement(name="eng-b")
+
+    client.post("/api/engagements/active", json={"name": "eng-a"})
+    a = client.get("/api/dashboard").json()
+    assert a["total_assets"] == 1
+    assert a["assets"][0]["host"] == "10.0.0.1"
+
+    client.post("/api/engagements/active", json={"name": "eng-b"})
+    b = client.get("/api/dashboard").json()
+    # Empty engagement → empty topology, NOT 10.9.9.9 (report) or 10.0.0.1 (eng-a).
+    assert b["total_assets"] == 0
+    assert b["assets"] == []
+
+
 def test_resolve_engagement_priority(tmp_path, monkeypatch):
     """Resolution order: explicit arg > env > active pointer > 'default'."""
     monkeypatch.chdir(tmp_path)

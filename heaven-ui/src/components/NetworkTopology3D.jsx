@@ -106,6 +106,10 @@ function GridPlane() {
 }
 
 function Scene({ hosts, onSelect }) {
+  // Key the layout on the actual host identities, not just the count — switching
+  // to another engagement with the same number of hosts (but different IPs) must
+  // still relayout so the topology reflects the engagement you're viewing.
+  const hostKey = hosts.map((h) => h.ip || h.host || '?').join('|')
   const positions = useMemo(() => {
     return hosts.map((_, i) => {
       const angle = (i / hosts.length) * Math.PI * 2
@@ -116,7 +120,8 @@ function Scene({ hosts, onSelect }) {
         Math.sin(angle) * r,
       ]
     })
-  }, [hosts.length])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostKey])
 
   const edges = useMemo(() => {
     const out = []

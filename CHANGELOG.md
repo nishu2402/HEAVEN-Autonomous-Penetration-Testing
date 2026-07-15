@@ -26,6 +26,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-section scan results in the web UI.** SAST and SCA runs now have their
+  own result lists on the SAST and SCA pages (a "SAST scan history" / "SCA audit
+  history" panel, same expandable-row + inline-findings view as the Scans page),
+  instead of being merged into the general Scan Activity list where the same run
+  showed up twice. Backed by a new `kind` filter on `GET /api/scans`
+  (`pentest` — the default, excludes code-analysis runs — plus `sast`, `sca`,
+  `all`). Reusable `ScanList` component (`heaven-ui/src/components/ScanList.jsx`)
+  drives all three sections.
+- **More scan modes in the launcher.** The Launch Scan mode dropdown now exposes
+  every mode with a real scanner phase: FULL, WEB, NETWORK, API, CLOUD,
+  CONTAINER, IOT, **OT**, AD and EMAIL (was only web/network/full/ad/cloud). Added
+  `OT` (operational technology) to the `ScanMode` enum; it runs the same
+  IoT/SCADA/OT scanner phase.
+- **Dashboard quick-launch panel.** The dashboard now has a "Launch a scan" grid
+  with a tile for every scan surface (Full, Web, Network, API, Cloud, Container,
+  IoT, OT, AD, Email) plus the analysis tools (SAST, SCA, CVE) — each one click
+  from the landing page. Scan-mode tiles deep-link into the launcher with the
+  mode preselected (`/scans?mode=<mode>`); FULL is highlighted and appears once.
+  Both the panel and the launcher `<select>` read from one shared source of truth
+  (`heaven-ui/src/scanModes.js`), so they can never drift apart.
+
+### Fixed
+
+- **SAST/SCA findings now show up after a scan.** Running a SAST or SCA scan with
+  an engagement name persisted the findings into that engagement's store but left
+  the app pointed at whatever engagement was active before — so the Findings page
+  and dashboard (which read the *active* engagement) showed nothing. These scans
+  now activate the engagement they persist into, exactly like a pentest scan, so
+  the run is immediately visible in triage. The header chip and dashboard refresh
+  on completion.
+- **Dashboard topology follows the selected engagement.** Switching the viewing
+  engagement now updates the "hosts mapped" topology and stats immediately (the
+  dashboard listens for the engagement-changed event, not just its poll). An
+  engagement with no findings no longer falls back to some *other* engagement's
+  latest report file — an empty engagement shows an empty topology instead of
+  leaking another engagement's hosts.
+- **Code-analysis findings no longer pollute the topology.** SAST/SCA findings
+  (whose "target" is a source file or package, not a network host) are excluded
+  from the 3D host map, so they no longer spawn phantom nodes like `src`. They
+  still count toward severity totals and appear on the Findings page.
+
 - **`heaven install-tools`** — one command installs the external scanner
   binaries HEAVEN shells out to (nmap, nuclei, sqlmap, ffuf, searchsploit,
   semgrep, docker) using the host package manager (brew / apt / dnf / pacman /
@@ -39,9 +80,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full dependencies, external tools via winget/choco/scoop/pip/go, web UI build,
   generated `.env`), so HEAVEN now installs unattended on **macOS, Linux, and
   Windows** from a single command.
+- **Delete engagements from the dashboard** — the "Viewing engagement" selector
+  is now a full manager: every engagement is a clickable row (switch by clicking)
+  with a per-row trash button that permanently removes it (its scans, findings and
+  scope). Deleting the engagement you're viewing repoints the active pointer to
+  the best surviving engagement (most findings, real engagements preferred over
+  the `demo` sample) or falls back to the empty-state quick-start; a one-click
+  **Remove N empty engagements** clears stray empties in a batch. Previously there
+  was no way to remove an engagement, so deleting *scans* left the empty
+  engagement DB behind and it lingered in the switcher forever. Backed by a new
+  `DELETE /api/engagements/{name}` endpoint and matching CLI `heaven engage list`
+  / `heaven engage delete` for CLI ↔ API ↔ UI parity; the delete removes the
+  SQLite DB *and* its WAL/SHM sidecars so the name can't be resurrected.
 
 ### Changed
 
+- **Default scan mode is now FULL** (was WEB) in both the web launcher and the
+  `heaven scan` CLI wizard, so the out-of-the-box scan runs every module.
 - **Full power by default.** Folded the pure-Python runtime feature-packs
   (recon, reports, lateral movement, deploy, scheduling, AWS cloud, and the
   default Gemini AI SDK) into the base `dependencies`, so a plain `pip install`
@@ -62,6 +117,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A phantom "default — empty" engagement appeared on its own and couldn't be
+  removed.** Merely loading the dashboard opened the fallback `default`
+  engagement for a *read*, and the store constructor eagerly created its SQLite
+  file — so `data/engagements/default.db` was materialised on every page load and
+  reappeared in the switcher no matter how many times it was deleted (and
+  deleting *scans* never removed the engagement). `EngagementStore` now has a
+  read-only mode (`create=False`) that serves a not-yet-scanned engagement from
+  an ephemeral in-memory schema instead of writing a file; every dashboard read
+  (summary, dashboard, findings, top-findings, scans, report/coverage/methodology
+  exports) uses it via a new `_read_store()` helper. The engagement switcher no
+  longer invents a phantom `default` row, and on startup an empty auto-created
+  `default.db` (no scans, findings or scope) is pruned — a real `default`
+  engagement you actually scanned into is left untouched.
+- **The dashboard looked like it "started scanning" the moment you opened it.**
+  The live terminal read a `heaven_active_scan` browser-storage key that older
+  builds set but never cleared, so a stale value made it show "CONNECTING" and
+  open a log socket on a fresh open even though nothing was running. The terminal
+  now derives its target from the actually-running scan (via the scans list) and
+  clears the stale key, so it sits **IDLE** unless a scan is genuinely in
+  progress. (Confirmed there is no auto-scan anywhere: nothing on server startup
+  or page load launches a scan.)
+- **Header engagement chip went stale after switching engagements.** The
+  top-of-page "Engagement · N findings · M targets" indicator only re-fetched on a
+  route change, so switching or deleting an engagement on the Dashboard left it
+  showing the previous engagement (or a spurious "No active engagement" warning)
+  until you navigated. It now refreshes immediately on a `heaven:engagement-changed`
+  event fired by the switch/delete actions, with an 8s poll as a fallback, so the
+  header, the selector and the dashboard stats can never disagree about which
+  engagement is active.
 - **CI unit-tests failing on `ModuleNotFoundError: No module named 'pypdf'`.**
   `pypdf` is a test-only dependency (the PDF-report regression test reads the
   generated PDF back to verify it; nothing at runtime imports it) but lived in

@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { SAST, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import ScanList from "../components/ScanList.jsx";
 import { sevColor } from "../theme";
 
 export default function SastPage() {
@@ -19,6 +20,8 @@ export default function SastPage() {
   const { loading, result, error, start } = useJob("sast");
   const [formError, setFormError] = useState(null);
   const [rules, setRules] = useState(null);
+  // Refresh the persisted SAST history right after a run finishes.
+  const [historyRefresh, setHistoryRefresh] = useState(0);
 
   useEffect(() => {
     Engagement.summary()
@@ -26,6 +29,16 @@ export default function SastPage() {
       .catch(() => {});
     SAST.rules().then(setRules).catch(() => setRules(null));
   }, []);
+
+  useEffect(() => {
+    if (result?.engagement_scan_id) {
+      setHistoryRefresh((n) => n + 1);
+      // The scan just persisted into (and activated) an engagement — tell the
+      // header chip and dashboard so they reflect the run without a reload.
+      try { window.dispatchEvent(new Event("heaven:engagement-changed")); }
+      catch { /* non-browser — no-op */ }
+    }
+  }, [result?.engagement_scan_id]);
 
   function run() {
     setFormError(null);
@@ -187,6 +200,22 @@ export default function SastPage() {
           </div>
         </>
       )}
+
+      {/* Persisted SAST runs for the active engagement — its own section, so
+          they never merge into the general Scans list. */}
+      <div style={{ marginTop: 12 }}>
+        <ScanList
+          kind="sast"
+          title="SAST scan history"
+          showReplay={false}
+          refreshKey={historyRefresh}
+          emptyState={{
+            icon: "🔬",
+            title: "No SAST runs recorded",
+            hint: "Run a SAST scan with an engagement set — persisted runs appear here.",
+          }}
+        />
+      </div>
     </div>
   );
 }

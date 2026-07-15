@@ -23,6 +23,7 @@ class ScanMode(str, Enum):
     DEVSECOPS = "devsecops"
     AD = "ad"
     IOT = "iot"
+    OT = "ot"
     API = "api"
     CONTAINER = "container"
     EMAIL = "email"

@@ -280,7 +280,9 @@ export const Engagement = {
 export const Scans = {
   create: (req) =>
     api("/scans", { method: "POST", body: JSON.stringify(req) }),
-  list: (limit = 20) => api(`/scans?limit=${limit}`),
+  // kind: "pentest" (default — active scans, no SAST/SCA), "sast", "sca", "all".
+  list: (limit = 20, kind = "pentest") =>
+    api(`/scans?limit=${limit}&kind=${encodeURIComponent(kind)}`),
   get: (id, includeFindings = false) =>
     api(`/scans/${encodeURIComponent(id)}${includeFindings ? "?include_findings=true" : ""}`),
   // Findings produced by one scan (deduped rows from the engagement store).
@@ -293,10 +295,24 @@ export const Scans = {
 
 // Engagements — list all scanned engagements and switch which one the whole
 // app (dashboard, findings, reports) is currently viewing.
+// Notify in-app listeners (the header engagement chip) that the active
+// engagement changed without a route change, so they can re-fetch immediately.
+function notifyEngagementChanged() {
+  try { window.dispatchEvent(new Event("heaven:engagement-changed")); }
+  catch { /* non-browser / SSR — no-op */ }
+}
+
 export const Engagements = {
   list: () => api("/engagements"),
   setActive: (name) =>
-    api("/engagements/active", { method: "POST", body: JSON.stringify({ name }) }),
+    api("/engagements/active", { method: "POST", body: JSON.stringify({ name }) })
+      .then((r) => { notifyEngagementChanged(); return r; }),
+  // Permanently delete an engagement (its scans, findings and scope). The server
+  // repoints the active engagement if you delete the one you're viewing and
+  // returns the new active name.
+  remove: (name) =>
+    api(`/engagements/${encodeURIComponent(name)}`, { method: "DELETE" })
+      .then((r) => { notifyEngagementChanged(); return r; }),
 };
 
 export const Vulns = {

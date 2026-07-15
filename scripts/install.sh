@@ -181,16 +181,34 @@ echo ""
 # HEAVEN shells out to nmap / nuclei / sqlmap / ffuf / searchsploit / semgrep /
 # docker for full-power scanning (each has an in-house fallback, so this is
 # non-fatal). `heaven install-tools` uses this host's package manager and is
-# idempotent, so already-present tools are skipped. Set HEAVEN_SKIP_TOOLS=1 to
-# opt out (e.g. locked-down CI where you provision tools separately).
+# idempotent, so already-present tools are skipped. Every per-tool install is
+# now bounded by a timeout (HEAVEN_TOOL_INSTALL_TIMEOUT, default 900s) and never
+# blocks on a password prompt, so this step can't hang. Set HEAVEN_SKIP_TOOLS=1
+# to opt out (e.g. locked-down CI where you provision tools separately).
 if [ "${HEAVEN_SKIP_TOOLS:-0}" = "1" ]; then
     info "HEAVEN_SKIP_TOOLS=1 — skipping external tool install"
     info "Run later with:  heaven install-tools"
-elif "$VENV_PYTHON" -m heaven.main --quiet install-tools --yes; then
-    ok "External tools ready (or already present)"
 else
-    warn "Some external tools couldn't be installed automatically"
-    echo -e "  ${DIM}Re-run any time:  heaven install-tools   (or heaven doctor to see what's missing)${NC}"
+    # Pre-authorize sudo ONCE, up front. Linux package managers (apt/dnf/pacman)
+    # need root; caching the credential here means the per-tool installs below
+    # never each stop to ask — and never stall waiting for a password mid-run.
+    # brew / pip / go and the Windows managers need no sudo, so this is skipped
+    # there. If sudo is declined/unavailable, tools needing it are simply skipped.
+    if command -v sudo >/dev/null 2>&1 && {
+           command -v apt-get >/dev/null 2>&1 \
+        || command -v dnf     >/dev/null 2>&1 \
+        || command -v pacman  >/dev/null 2>&1; }; then
+        info "Your package manager needs sudo — authorizing once now:"
+        sudo -v 2>/dev/null || warn "sudo unavailable — tools needing it will be skipped (add later: heaven install-tools)"
+    fi
+    info "Installing nmap · nuclei · sqlmap · ffuf · searchsploit · semgrep · docker"
+    info "${DIM}This downloads real binaries and can take a few minutes — progress prints below.${NC}"
+    if "$VENV_PYTHON" -m heaven.main --quiet install-tools --yes; then
+        ok "External tools ready (or already present)"
+    else
+        warn "Some external tools couldn't be installed automatically (non-fatal — each has a fallback)"
+        echo -e "  ${DIM}Re-run any time:  heaven install-tools   ·   see what's missing:  heaven doctor${NC}"
+    fi
 fi
 
 # ── 7. Frontend build ─────────────────────────────────────────────────────────

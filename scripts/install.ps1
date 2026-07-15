@@ -136,8 +136,10 @@ if ($userPath.Split(';') -notcontains $VenvScripts) {
 } else {
     Write-Ok "$VenvScripts already on user PATH"
 }
-if ($env:Path.Split(';') -notcontains $VenvScripts) {
-    $env:Path = "$env:Path;$VenvScripts"
+$procPath = $env:Path
+if ([string]::IsNullOrEmpty($procPath)) { $procPath = '' }
+if ($procPath.Split(';') -notcontains $VenvScripts) {
+    $env:Path = if ($procPath -eq '') { $VenvScripts } else { "$procPath;$VenvScripts" }
 }
 Write-Ok "heaven command: $VenvHeaven"
 
@@ -177,22 +179,30 @@ if ($SkipUI) {
     Write-Host "    cd heaven-ui; npm install --legacy-peer-deps; npm run build"
     Write-Host "    The CLI + API work fully without the UI; 'heaven serve' shows a placeholder until it's built."
 } else {
-    $nodeVer = (& node --version 2>$null)
-    Write-Info "Node $nodeVer detected"
-    $BuildLog = Join-Path $UiDir 'build.log'
-    Push-Location $UiDir
+    # The whole UI build is best-effort: a broken Node/npm must never abort the
+    # installer (which runs under ErrorActionPreference='Stop'), because the CLI
+    # and API work fine without the prebuilt UI. Catch every failure -> warn.
     try {
-        cmd /c "npm install --legacy-peer-deps > `"$BuildLog`" 2>&1"
-        if ($LASTEXITCODE -eq 0) { cmd /c "npm run build >> `"$BuildLog`" 2>&1" }
-        if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $UiDir 'dist\index.html'))) {
-            Write-Ok "Frontend built -> heaven-ui\dist\"
-            Remove-Item $BuildLog -ErrorAction SilentlyContinue
-        } else {
-            Write-Warn "Frontend build failed - see $BuildLog"
-            Write-Host "    UI unavailable but the CLI and API work fine."
+        $nodeVer = (& node --version 2>$null)
+        Write-Info "Node $nodeVer detected"
+        $BuildLog = Join-Path $UiDir 'build.log'
+        Push-Location $UiDir
+        try {
+            cmd /c "npm install --legacy-peer-deps > `"$BuildLog`" 2>&1"
+            if ($LASTEXITCODE -eq 0) { cmd /c "npm run build >> `"$BuildLog`" 2>&1" }
+            if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $UiDir 'dist\index.html'))) {
+                Write-Ok "Frontend built -> heaven-ui\dist\"
+                Remove-Item $BuildLog -ErrorAction SilentlyContinue
+            } else {
+                Write-Warn "Frontend build failed - see $BuildLog"
+                Write-Host "    UI unavailable but the CLI and API work fine."
+            }
+        } finally {
+            Pop-Location
         }
-    } finally {
-        Pop-Location
+    } catch {
+        Write-Warn "Web UI build skipped - $($_.Exception.Message)"
+        Write-Host "    UI unavailable but the CLI and API work fine (build later: cd heaven-ui; npm install --legacy-peer-deps; npm run build)."
     }
 }
 

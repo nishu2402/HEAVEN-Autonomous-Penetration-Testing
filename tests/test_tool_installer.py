@@ -9,7 +9,11 @@ already-present / unknown-tool branches. The one non-dry-run install test forces
 
 from __future__ import annotations
 
+import os
 import sys
+import time
+
+import pytest
 
 from heaven.utils import tool_installer as ti
 
@@ -144,3 +148,91 @@ def test_cli_dry_run_is_safe_and_reports_ok():
     # No result may be "installed" — dry-run only plans or reports present.
     for res in payload.get("results", []):
         assert res["status"] in ("planned", "present")
+
+
+# ── Windows package managers ──────────────────────────────────────────────────
+def test_build_command_uses_winget_on_windows(monkeypatch):
+    monkeypatch.setattr(ti, "_pkg_manager", lambda: "winget")
+    cmd = ti.build_install_command(ti.get_spec("nmap"))
+    assert cmd[:4] == ["winget", "install", "-e", "--id"]
+    assert "Insecure.Nmap" in cmd
+    # winget must run fully non-interactively or it can block on an agreement.
+    assert "--disable-interactivity" in cmd
+    assert "--accept-package-agreements" in cmd
+
+
+def test_build_command_uses_scoop_on_windows(monkeypatch):
+    monkeypatch.setattr(ti, "_pkg_manager", lambda: "scoop")
+    assert ti.build_install_command(ti.get_spec("ffuf")) == ["scoop", "install", "ffuf"]
+
+
+def test_build_command_uses_choco_on_windows(monkeypatch):
+    monkeypatch.setattr(ti, "_pkg_manager", lambda: "choco")
+    assert ti.build_install_command(ti.get_spec("docker")) == \
+        ["choco", "install", "-y", "docker-desktop"]
+
+
+def test_windows_pip_fallback_for_sqlmap(monkeypatch):
+    """sqlmap has no Windows-manager recipe → pip, which works everywhere."""
+    monkeypatch.setattr(ti, "_pkg_manager", lambda: "winget")
+    cmd = ti.build_install_command(ti.get_spec("sqlmap"))
+    assert cmd[:3] == [sys.executable, "-m", "pip"]
+    assert cmd[-1] == "sqlmap"
+
+
+def test_windows_hint_uses_winget_not_apt(monkeypatch):
+    monkeypatch.setattr(ti.sys, "platform", "win32")
+    # Keep shutil off its Windows codepath while sys.platform is forced to win32.
+    monkeypatch.setattr(ti.shutil, "which", lambda _cmd: None)
+    hint = ti.install_hint(ti.get_spec("nmap"))
+    assert "winget" in hint
+    assert "apt" not in hint
+
+
+# ── Hang guards — the "stuck install" fix ─────────────────────────────────────
+def test_noninteractive_sudo_adds_dash_n(monkeypatch):
+    """Without a TTY, sudo must fail fast (-n) instead of blocking on a password."""
+    monkeypatch.setattr(ti.sys.stdin, "isatty", lambda: False)
+    assert ti._noninteractive_sudo(["sudo", "apt-get", "install", "-y", "nmap"]) == \
+        ["sudo", "-n", "apt-get", "install", "-y", "nmap"]
+
+
+def test_interactive_sudo_is_left_alone(monkeypatch):
+    """With a real TTY, sudo keeps its normal prompt so the operator can auth."""
+    monkeypatch.setattr(ti.sys.stdin, "isatty", lambda: True)
+    cmd = ["sudo", "apt-get", "install", "-y", "nmap"]
+    assert ti._noninteractive_sudo(cmd) == cmd
+
+
+def test_non_sudo_command_is_untouched():
+    assert ti._noninteractive_sudo(["brew", "install", "nmap"]) == ["brew", "install", "nmap"]
+
+
+def test_install_timeout_env_override(monkeypatch):
+    monkeypatch.setenv("HEAVEN_TOOL_INSTALL_TIMEOUT", "42")
+    assert ti._install_timeout() == 42
+    monkeypatch.setenv("HEAVEN_TOOL_INSTALL_TIMEOUT", "not-a-number")
+    assert ti._install_timeout() == 900   # bad value → safe default
+    monkeypatch.setenv("HEAVEN_TOOL_INSTALL_TIMEOUT", "0")
+    assert ti._install_timeout() == 900   # non-positive → safe default
+
+
+def test_install_env_is_noninteractive():
+    env = ti._install_env()
+    assert env["DEBIAN_FRONTEND"] == "noninteractive"   # apt never prompts
+    assert env["HOMEBREW_NO_AUTO_UPDATE"] == "1"         # no slow brew self-update
+
+
+@pytest.mark.skipif(os.name != "posix", reason="uses the POSIX `sh`/`sleep` shell")
+def test_run_install_times_out_instead_of_hanging(monkeypatch):
+    """The core guard against a 'stuck install': a command that would block
+    forever is killed at the timeout. 1s cap + a 30s sleep → the watchdog must
+    fire, keeping the test fast and deterministic."""
+    monkeypatch.setenv("HEAVEN_TOOL_INSTALL_TIMEOUT", "1")
+    monkeypatch.setattr(ti, "is_present", lambda _n: False)
+    start = time.time()
+    result = ti._run_install(ti.get_spec("nmap"), ["sh", "-c", "sleep 30"], None)
+    elapsed = time.time() - start
+    assert result.status == "failed"
+    assert "timed out" in result.detail
+    assert elapsed < 15   # must not wait the full 30s

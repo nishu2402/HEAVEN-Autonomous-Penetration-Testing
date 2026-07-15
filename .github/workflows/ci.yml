@@ -175,6 +175,49 @@ jobs:
           path: heaven-ui/dist
           if-no-files-found: error
 
+  powershell-lint:
+    name: Windows installer lint (PSScriptAnalyzer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Parse-check the .ps1 installers
+        shell: pwsh
+        run: |
+          # A parse error means the script is broken syntax — fail hard. This is
+          # the guard that catches Windows-only bugs the macOS/Linux dev host
+          # can't execute-test.
+          $failed = $false
+          foreach ($f in 'scripts/install.ps1', 'scripts/uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) {
+              Write-Host "Parse errors in $f :" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host "  line $($_.Extent.StartLineNumber): $($_.Message)" }
+              $failed = $true
+            } else {
+              Write-Host "OK: $f parses cleanly"
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: PSScriptAnalyzer (fail on errors, warnings informational)
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          # Write-Host is intentional for a colored installer UX, so its style
+          # warning is excluded; block only on genuine Error/ParseError findings.
+          $errors = @()
+          foreach ($f in 'scripts/install.ps1', 'scripts/uninstall.ps1') {
+            $all = Invoke-ScriptAnalyzer -Path $f -ExcludeRule PSAvoidUsingWriteHost
+            $all | Format-Table -AutoSize
+            $errors += $all | Where-Object { $_.Severity -in 'Error', 'ParseError' }
+          }
+          if ($errors) {
+            Write-Host "PSScriptAnalyzer found $($errors.Count) error(s)." -ForegroundColor Red
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer: no errors." -ForegroundColor Green
+
   docker-build:
     name: Docker image build
     runs-on: ubuntu-latest

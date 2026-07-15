@@ -28,12 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`heaven install-tools`** — one command installs the external scanner
   binaries HEAVEN shells out to (nmap, nuclei, sqlmap, ffuf, searchsploit,
-  semgrep, docker) using the host package manager (brew / apt / dnf / pacman) or
-  pip / go, so the scanner runs at full power. Idempotent, with `--dry-run` and
-  per-tool selection. Driven by a single shared catalog
-  (`heaven/utils/tool_installer.py`) that also powers `heaven doctor` and the web
-  System-Health panel, so the tool list and install recipes never drift. Wired
-  into `scripts/install.sh` (opt out with `HEAVEN_SKIP_TOOLS=1`).
+  semgrep, docker) using the host package manager (brew / apt / dnf / pacman /
+  **winget / choco / scoop**) or pip / go, so the scanner runs at full power.
+  Idempotent, with `--dry-run` and per-tool selection. Driven by a single shared
+  catalog (`heaven/utils/tool_installer.py`) that also powers `heaven doctor` and
+  the web System-Health panel, so the tool list and install recipes never drift.
+  Runs automatically as part of install (opt out with `HEAVEN_SKIP_TOOLS=1`).
+- **Windows one-command install/uninstall** — `scripts/install.ps1` and
+  `scripts/uninstall.ps1` mirror the macOS/Linux shell scripts (Python venv,
+  full dependencies, external tools via winget/choco/scoop/pip/go, web UI build,
+  generated `.env`), so HEAVEN now installs unattended on **macOS, Linux, and
+  Windows** from a single command.
 
 ### Changed
 
@@ -42,8 +47,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default Gemini AI SDK) into the base `dependencies`, so a plain `pip install`
   is fully powered with no extras to remember. The former `[recon]`/`[reports]`/…
   extras remain as backward-compatible aliases.
+- **The one-command install now does everything in one pass and can't hang.**
+  External-tool installation runs as part of `install.sh` / `install.ps1` (no
+  separate step to remember). Every per-tool install is bounded by a timeout
+  (`HEAVEN_TOOL_INSTALL_TIMEOUT`, default 900s) with a watchdog that kills a
+  stalled command, runs package managers non-interactively
+  (`DEBIAN_FRONTEND=noninteractive`, `HOMEBREW_NO_AUTO_UPDATE`, winget
+  `--disable-interactivity`), and makes `sudo` fail fast when there's no
+  interactive terminal instead of blocking forever on a password prompt.
+  `install.sh` pre-authorizes `sudo` once up front so Linux tool installs never
+  stall mid-run.
 - **Web UI build now targets Node 22 (active LTS)** in CI and the Dockerfile.
   Vite 8 requires Node ≥20.19 / ≥22.12, and Node 20 has reached end-of-life.
+
+### Fixed
+
+- **CI unit-tests failing on `ModuleNotFoundError: No module named 'pypdf'`.**
+  `pypdf` is a test-only dependency (the PDF-report regression test reads the
+  generated PDF back to verify it; nothing at runtime imports it) but lived in
+  `requirements.txt`, which the CI test job doesn't install. Moved it to the
+  `[dev]` extra and guarded the test with `importorskip`, so the suite runs green
+  in CI and skips cleanly without dev extras.
+- **Installer appearing to hang / getting stuck** during the external-tool step —
+  see the install hardening under *Changed* above.
 
 ## [1.0.0] — 2026-07-08
 

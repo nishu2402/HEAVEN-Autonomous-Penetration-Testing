@@ -8,7 +8,14 @@ from typing import Optional
 
 import click
 
-from heaven.cli._helpers import _engagement_db_path, _print
+from heaven.cli._helpers import (
+    _engagement_db_path,
+    _engagement_dirs,
+    _print,
+    clear_current_engagement,
+    get_current_engagement,
+    resolve_engagement_name,
+)
 
 
 # ── engage group ─────────────────────────────────────────────────────────────
@@ -61,6 +68,89 @@ def engage_status(engagement: Optional[str]) -> None:
         _print("\n[cyan]By status:[/cyan]")
         for st, count in stats["by_status"].items():
             _print(f"  {st:18}: {count}")
+
+
+@engage.command("list")
+def engage_list() -> None:
+    """List every engagement with finding/scan counts and the active marker."""
+    from heaven.engagement import DEMO_DB_NAME, EngagementStore
+
+    active = resolve_engagement_name()
+    # Dedupe by stem across the canonical + legacy dirs (canonical wins).
+    seen: dict[str, "object"] = {}
+    for d in _engagement_dirs():
+        if not d.is_dir():
+            continue
+        for p in sorted(d.glob("*.db")):
+            seen.setdefault(p.stem, p)
+    if not seen:
+        _print("[yellow]No engagements yet.[/yellow] Create one with: "
+               "[cyan]heaven engage init <name>[/cyan]")
+        return
+    _print("[cyan]Engagements:[/cyan]")
+    for name in sorted(seen):
+        try:
+            stats = EngagementStore(seen[name]).stats()
+            findings = stats.get("total_findings", 0)
+            scans = stats.get("scans_run", 0)
+        except Exception:  # noqa: BLE001 — skip unreadable/locked DBs
+            findings = scans = 0
+        marker = "[green]●[/green]" if name == active else " "
+        tag = " [dim](sample)[/dim]" if name == DEMO_DB_NAME else ""
+        detail = (f"{findings} finding{'s' if findings != 1 else ''}, "
+                  f"{scans} scan{'s' if scans != 1 else ''}")
+        _print(f"  {marker} [bold]{name}[/bold]{tag}  [dim]— {detail}[/dim]")
+    _print("\nSwitch with [cyan]heaven use <name>[/cyan] · "
+           "delete with [cyan]heaven engage delete <name>[/cyan]")
+
+
+@engage.command("delete")
+@click.argument("name")
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
+def engage_delete(name: str, yes: bool) -> None:
+    """Permanently delete an engagement (its scans, findings and scope).
+
+    Removes the SQLite DB and its WAL sidecars. If the deleted engagement is the
+    current selection, the sticky `heaven use` context and the web UI's active
+    pointer are cleared so nothing keeps pointing at a store that no longer
+    exists.
+    """
+    from heaven.engagement import (
+        EngagementStore,
+        clear_active_engagement,
+        delete_engagement_store,
+        get_active_engagement,
+    )
+
+    path = _engagement_db_path(name)
+    if not path.exists():
+        _print(f"[red]Engagement DB not found: {path}[/red]")
+        sys.exit(2)
+
+    try:
+        stats = EngagementStore(path).stats()
+        summary = (f"{stats.get('total_findings', 0)} findings, "
+                   f"{stats.get('scans_run', 0)} scans")
+    except Exception:  # noqa: BLE001
+        summary = "unknown contents"
+    if not yes:
+        _print(f"[yellow]About to permanently delete[/yellow] "
+               f"[bold]{name}[/bold] ({summary}) at [dim]{path}[/dim].")
+        if not click.confirm("This cannot be undone. Continue?", default=False):
+            _print("[dim]Aborted.[/dim]")
+            return
+
+    if not delete_engagement_store(path):
+        _print(f"[red]Nothing was deleted for {name}.[/red]")
+        sys.exit(1)
+
+    # Drop any pointer that still names the now-deleted engagement.
+    if get_current_engagement() == name:
+        clear_current_engagement()
+    if get_active_engagement() == name:
+        clear_active_engagement()
+
+    _print(f"[green]✓[/green] Deleted engagement [bold]{name}[/bold].")
 
 
 # ── scope group ──────────────────────────────────────────────────────────────

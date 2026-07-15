@@ -27,8 +27,19 @@ export default function Header({ onMenu }) {
   }
 
   useEffect(() => {
-    Engagement.summary().then(setEng).catch(() => {});
+    const loadEng = () => Engagement.summary().then(setEng).catch(() => {});
+    loadEng();
     SIEM.status().then(setSiem).catch(() => setSiem(null));
+    // The engagement can change without a route change — switching or deleting
+    // one on the Dashboard. Re-fetch on an explicit event (immediate) and poll
+    // as a fallback so this chip never disagrees with the dashboard selector.
+    const onChange = () => loadEng();
+    window.addEventListener("heaven:engagement-changed", onChange);
+    const t = setInterval(loadEng, 8000);
+    return () => {
+      window.removeEventListener("heaven:engagement-changed", onChange);
+      clearInterval(t);
+    };
   }, [location.pathname]);
 
   useEffect(() => {

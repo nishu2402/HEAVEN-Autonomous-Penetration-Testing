@@ -3,9 +3,10 @@ import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import LiveTerminal from '../components/LiveTerminal'
 import FirstRunGuide from '../components/FirstRunGuide'
-import { Engagement, Dashboard as DashApi, Demo, Engagements } from '../api'
+import { Engagement, Dashboard as DashApi, Demo, Engagements, Scans } from '../api'
 import { useToast } from '../components/Toast.jsx'
 import HelpTip from '../components/HelpTip.jsx'
+import { SCAN_MODES, ANALYSIS_TOOLS } from '../scanModes.js'
 
 // three.js + r3f + drei are heavy (~600 KB). Load them only when the dashboard
 // mounts, not in the app's first paint — keeps login/findings/etc. lightweight.
@@ -77,40 +78,108 @@ function SeverityBars({ bySeverity, total }) {
 export default function Dashboard() {
   const [eng, setEng] = useState(null)
   const [dash, setDash] = useState(null)
-  const [activeScanId] = useState(localStorage.getItem('heaven_active_scan') || '')
+  // The live terminal streams the scan that is ACTUALLY running (if any),
+  // derived from the scans list — not a stale localStorage pointer that older
+  // builds left behind and never cleared, which made the terminal falsely show
+  // "CONNECTING" and open a log socket on every fresh open.
+  const [liveScanId, setLiveScanId] = useState('')
   const [seeding, setSeeding] = useState(false)
   const [topFindings, setTopFindings] = useState([])
   const [engList, setEngList] = useState([])
-  const [switching, setSwitching] = useState(false)
+  const [busyEng, setBusyEng] = useState('')   // engagement name being switched/deleted
   const navigate = useNavigate()
   const toast = useToast()
 
+  // Returns the engagement-list promise so callers can await the switcher
+  // refresh (switch/delete) before clearing their busy state.
   const refresh = () => {
     Engagement.summary().then(setEng).catch(() => {})
     DashApi.get().then(setDash).catch(() => {})
     Engagement.topFindings(5).then(d => setTopFindings(d.findings || [])).catch(() => {})
-    Engagements.list().then(d => setEngList(d.engagements || [])).catch(() => {})
+    // Only stream a scan that is genuinely running right now.
+    Scans.list(20).then(d => {
+      const running = (d.scans || []).find(s => s.status === 'running')
+      setLiveScanId(running ? (running.scan_id || running.id || '') : '')
+    }).catch(() => {})
+    return Engagements.list().then(d => setEngList(d.engagements || [])).catch(() => {})
   }
 
   // Switch which engagement the whole app is viewing (dashboard, findings, reports).
   const switchEngagement = async (name) => {
-    if (!name) return
-    setSwitching(true)
+    if (!name || busyEng) return
+    if (engList.find((e) => e.active)?.name === name) return   // already viewing
+    setBusyEng(name)
     try {
       await Engagements.setActive(name)
-      refresh()
+      await refresh()
       toast.success(`Now viewing “${name}”`)
     } catch (e) {
       toast.error(e.message || 'Could not switch engagement')
     } finally {
-      setSwitching(false)
+      setBusyEng('')
+    }
+  }
+
+  // Permanently delete an engagement. The server repoints the active engagement
+  // when you delete the one you're viewing, so we just refresh afterwards.
+  const deleteEngagement = async (name) => {
+    if (busyEng) return
+    const target = engList.find((e) => e.name === name)
+    const detail = target?.findings
+      ? `${target.findings} finding${target.findings !== 1 ? 's' : ''}`
+      : 'no findings'
+    if (!window.confirm(
+      `Delete engagement “${name}” (${detail})? This permanently removes its ` +
+      `scans and findings and cannot be undone.`
+    )) return
+    setBusyEng(name)
+    try {
+      await Engagements.remove(name)
+      await refresh()
+      toast.success(`Deleted “${name}”`)
+    } catch (e) {
+      toast.error(e.message || 'Could not delete engagement')
+    } finally {
+      setBusyEng('')
+    }
+  }
+
+  // One-click cleanup for the common "stray empty engagements pile up" case.
+  const clearEmpties = async () => {
+    const empties = engList.filter((e) => !e.findings && !e.scans).map((e) => e.name)
+    if (empties.length === 0 || busyEng) return
+    if (!window.confirm(
+      `Remove ${empties.length} empty engagement${empties.length !== 1 ? 's' : ''} ` +
+      `(${empties.join(', ')})? Only engagements with no scans and no findings are removed.`
+    )) return
+    setBusyEng('__empties__')
+    try {
+      for (const name of empties) {
+        try { await Engagements.remove(name) } catch { /* skip one that fails */ }
+      }
+      await refresh()
+      toast.success(`Removed ${empties.length} empty engagement${empties.length !== 1 ? 's' : ''}`)
+    } finally {
+      setBusyEng('')
     }
   }
 
   useEffect(() => {
+    // Clear a stale scan pointer from older builds so the terminal starts IDLE
+    // and only lights up for a real, currently-running scan.
+    try { localStorage.removeItem('heaven_active_scan') } catch { /* no storage */ }
     refresh()
     const t = setInterval(refresh, 8000)
-    return () => clearInterval(t)
+    // The active engagement can change from the Header chip or another tab
+    // without a route change. Re-fetch immediately so the topology, stats and
+    // "hosts mapped" reflect the newly-selected engagement at once instead of
+    // waiting for the next 8s poll.
+    const onEngChange = () => refresh()
+    window.addEventListener('heaven:engagement-changed', onEngChange)
+    return () => {
+      clearInterval(t)
+      window.removeEventListener('heaven:engagement-changed', onEngChange)
+    }
   }, [])
 
   const loadSampleData = async () => {
@@ -176,6 +245,45 @@ export default function Dashboard() {
           <StatCard label="Targets" value={stats.scope_targets ?? 0} color="#34E5A3" delay={0.14}
                     sub="In scope" />
         </div>
+
+        {/* Quick-launch: every scan surface + analysis tool, one click away.
+            Scan modes deep-link into the launcher with the mode preselected;
+            FULL is highlighted (and appears once). Fed by scanModes.js so this
+            grid and the Scans launcher can never disagree. */}
+        <div className="launch-panel">
+          <div className="launch-head">
+            <span className="stat-label" style={{ marginBottom: 0 }}>Launch a scan</span>
+            <button type="button" className="launch-all" onClick={() => navigate('/scans')}>
+              Open scan console →
+            </button>
+          </div>
+          <div className="launch-grid">
+            {SCAN_MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                className={'launch-tile' + (m.value === 'full' ? ' is-primary' : '')}
+                title={m.desc}
+                onClick={() => navigate(`/scans?mode=${m.value}`)}
+              >
+                <span className="launch-tile-icon">{m.icon}</span>
+                <span className="launch-tile-name">{m.short}</span>
+              </button>
+            ))}
+            {ANALYSIS_TOOLS.map((t) => (
+              <button
+                key={t.to}
+                type="button"
+                className="launch-tile is-tool"
+                title={t.desc}
+                onClick={() => navigate(t.to)}
+              >
+                <span className="launch-tile-icon">{t.icon}</span>
+                <span className="launch-tile-name">{t.short}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Right rail */}
@@ -183,24 +291,52 @@ export default function Dashboard() {
         <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
           {engList.length > 1 && (
             <div style={{ marginBottom: 14 }}>
-              <div className="stat-label" style={{ marginBottom: 5 }}>Viewing engagement</div>
-              <select
-                value={engList.find((e) => e.active)?.name || ''}
-                disabled={switching}
-                onChange={(e) => switchEngagement(e.target.value)}
-                style={{
-                  width: '100%', background: 'var(--bg-1)', color: 'var(--text-0)',
-                  border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
-                  padding: '8px 10px', fontSize: 12.5, fontFamily: 'var(--font-ui)',
-                  cursor: switching ? 'wait' : 'pointer', outline: 'none',
-                }}
-              >
-                {engList.map((e) => (
-                  <option key={e.name} value={e.name}>
-                    {e.display_name}{e.findings ? ` — ${e.findings} findings` : ' — empty'}
-                  </option>
-                ))}
-              </select>
+              <div className="stat-label" style={{ marginBottom: 6 }}>Viewing engagement</div>
+              <div className="eng-switch-list">
+                {engList.map((e) => {
+                  const busy = busyEng === e.name
+                  return (
+                    <div key={e.name} className={'eng-switch-row' + (e.active ? ' is-active' : '')}>
+                      <button
+                        type="button"
+                        className="eng-switch-pick"
+                        disabled={!!busyEng}
+                        onClick={() => switchEngagement(e.name)}
+                        title={e.active ? 'Currently viewing' : `Switch to “${e.name}”`}
+                      >
+                        <span className="eng-switch-dot" />
+                        <span className="eng-switch-name">{e.display_name}</span>
+                        {e.name === 'demo' && <span className="eng-switch-tag">sample</span>}
+                        <span className="eng-switch-count">
+                          {e.findings
+                            ? `${e.findings} finding${e.findings !== 1 ? 's' : ''}`
+                            : 'empty'}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="eng-switch-del"
+                        disabled={!!busyEng}
+                        onClick={() => deleteEngagement(e.name)}
+                        title={`Delete “${e.name}” permanently`}
+                        aria-label={`Delete engagement ${e.name}`}
+                      >
+                        {busy ? '…' : '🗑'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+              {engList.filter((e) => !e.findings && !e.scans).length > 1 && (
+                <button
+                  type="button"
+                  className="eng-switch-clear"
+                  disabled={!!busyEng}
+                  onClick={clearEmpties}
+                >
+                  Remove {engList.filter((e) => !e.findings && !e.scans).length} empty engagements
+                </button>
+              )}
             </div>
           )}
           {noEng ? (
@@ -296,7 +432,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        <LiveTerminal scanId={activeScanId} />
+        <LiveTerminal scanId={liveScanId} />
       </div>
     </div>
   )

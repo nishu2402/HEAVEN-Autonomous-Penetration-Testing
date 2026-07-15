@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { SCA, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import ScanList from "../components/ScanList.jsx";
 import { sevColor } from "../theme";
 
 export default function ScaPage() {
@@ -14,12 +15,24 @@ export default function ScaPage() {
   // Tracked globally so the audit survives page navigation.
   const { loading, result, error, start } = useJob("sca");
   const [formError, setFormError] = useState(null);
+  // Refresh the persisted SCA history right after an audit finishes.
+  const [historyRefresh, setHistoryRefresh] = useState(0);
 
   useEffect(() => {
     Engagement.summary()
       .then((d) => { if (d?.engagement?.name) setEngagement(d.engagement.name); })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (result?.engagement_scan_id) {
+      setHistoryRefresh((n) => n + 1);
+      // The audit just persisted into (and activated) an engagement — tell the
+      // header chip and dashboard so they reflect the run without a reload.
+      try { window.dispatchEvent(new Event("heaven:engagement-changed")); }
+      catch { /* non-browser — no-op */ }
+    }
+  }, [result?.engagement_scan_id]);
 
   function run() {
     setFormError(null);
@@ -147,6 +160,22 @@ export default function ScaPage() {
           </div>
         </>
       )}
+
+      {/* Persisted SCA audits for the active engagement — its own section, so
+          they never merge into the general Scans list. */}
+      <div style={{ marginTop: 12 }}>
+        <ScanList
+          kind="sca"
+          title="SCA audit history"
+          showReplay={false}
+          refreshKey={historyRefresh}
+          emptyState={{
+            icon: "📦",
+            title: "No SCA audits recorded",
+            hint: "Run an SCA audit with an engagement set — persisted audits appear here.",
+          }}
+        />
+      </div>
     </div>
   );
 }

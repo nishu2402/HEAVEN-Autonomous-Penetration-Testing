@@ -69,6 +69,42 @@ def set_active_engagement(name: Optional[str]) -> None:
         logger.debug("Could not persist active engagement '%s': %s", name, e)
 
 
+def clear_active_engagement() -> bool:
+    """Remove the active-engagement pointer so the resolver falls back to
+    'default'. Returns True if a pointer existed. Used after deleting the
+    engagement the app was currently viewing."""
+    try:
+        p = active_engagement_file()
+        if p.exists():
+            p.unlink()
+            return True
+    except Exception as e:  # noqa: BLE001 — a missing pointer is already the goal
+        logger.debug("Could not clear active engagement pointer: %s", e)
+    return False
+
+
+def delete_engagement_store(db_path: Path | str) -> bool:
+    """Permanently delete an engagement's SQLite DB and its sidecar files.
+
+    SQLite in WAL mode keeps ``<name>.db-wal`` and ``<name>.db-shm`` alongside the
+    main file; a stray rollback journal (``-journal``) can also exist. Removing
+    only ``<name>.db`` would let SQLite resurrect data from the leftover WAL the
+    next time the name is opened, so every sidecar is unlinked too. Returns True
+    when the main DB file was present and removed."""
+    p = Path(db_path)
+    removed_main = False
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        sidecar = p if suffix == "" else p.with_name(p.name + suffix)
+        try:
+            if sidecar.exists():
+                sidecar.unlink()
+                if suffix == "":
+                    removed_main = True
+        except OSError as e:
+            logger.warning("Could not delete %s: %s", sidecar, e)
+    return removed_main
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS engagement (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -483,13 +519,35 @@ class Finding:
 class EngagementStore:
     """SQLite-backed engagement state. One DB file per engagement."""
 
-    def __init__(self, db_path: Path | str):
+    def __init__(self, db_path: Path | str, *, create: bool = True):
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self._create = create
+        # create=True (the default) materialises the DB immediately so writers
+        # can persist. create=False opens the store read-only: if the file does
+        # not exist yet it is NOT created — reads are served from an ephemeral
+        # in-memory schema instead (see _conn). This stops a page-load that only
+        # *reads* the fallback "default" engagement from leaving an empty
+        # default.db behind, which used to haunt the dashboard switcher as a
+        # "default — empty" row the user could never get rid of.
+        if create:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_schema()
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
+        # Read-only view of a not-yet-scanned engagement: serve an ephemeral
+        # in-memory schema so reads return empty results without materialising
+        # an empty file on disk. Writers always use create=True, so this branch
+        # is never taken for a write.
+        if not self._create and not self.db_path.exists():
+            mem = sqlite3.connect(":memory:")
+            mem.row_factory = sqlite3.Row
+            mem.executescript(SCHEMA)
+            try:
+                yield mem
+            finally:
+                mem.close()
+            return
         # timeout=30 + WAL: the API flushes findings on every scan-progress
         # callback while record_scan_complete writes concurrently. Without
         # these, concurrent writers hit "database is locked" and findings

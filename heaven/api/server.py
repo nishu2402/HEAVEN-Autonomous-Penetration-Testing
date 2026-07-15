@@ -72,6 +72,24 @@ class LoginResponse(BaseModel):
     must_change_password: bool = False
 
 
+# Scan modes that get their OWN dedicated result section in the web UI (the
+# SAST and SCA pages). They are kept OUT of the general "Scan Activity" list so
+# a code-analysis run shows up exactly once — in its own section — instead of
+# being merged in with the pentest scans. `/api/scans?kind=<mode>` returns just
+# that section; the default `kind=pentest` returns everything except these.
+CODE_ANALYSIS_MODES = frozenset({"sast", "sca"})
+
+
+def _scan_mode_of(scan: dict) -> str:
+    """The scan's mode/type, however it happens to be recorded (top-level
+    ``mode`` on a persisted row, or ``mode``/``scan_type`` inside an in-memory
+    scan's config)."""
+    cfg = scan.get("config") or {}
+    return str(
+        scan.get("mode") or cfg.get("mode") or cfg.get("scan_type") or ""
+    ).lower()
+
+
 class ScanRequest(BaseModel):
     name: str = "HEAVEN Scan"
     targets: list[str] = Field(default_factory=list)
@@ -80,7 +98,7 @@ class ScanRequest(BaseModel):
     cloud_providers: list[str] = Field(default_factory=list)
     ports: str = "1-1024"
     scan_type: str = "full"
-    mode: str = "web"
+    mode: str = "full"
     stealth_level: int = 3
     engagement: Optional[str] = None
     i_have_authorization: bool = False
@@ -270,6 +288,8 @@ def require_permission(permission: str):
 # under the historical `_`-prefixed names the rest of this module (and tests) use.
 from heaven.engagement import (  # noqa: E402, F401
     active_engagement_file as _active_engagement_file,  # re-exported for tests
+    clear_active_engagement as _clear_active_engagement,
+    delete_engagement_store as _delete_engagement_store,
     get_active_engagement as _get_active_engagement,
     set_active_engagement as _set_active_engagement,
 )
@@ -335,8 +355,15 @@ def _parse_benchmark_metrics(md: str) -> Optional[dict]:
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
-def _engagement_store_factory(name: Optional[str] = None):
-    """Resolve engagement store. Falls back to env var, active pointer, then default."""
+def _engagement_store_factory(name: Optional[str] = None, *, create: bool = True):
+    """Resolve engagement store. Falls back to env var, active pointer, then default.
+
+    ``create=True`` (default) materialises the DB on open so writers can persist.
+    ``create=False`` opens it read-only and never creates a missing file — use it
+    for pure reads (dashboard, findings, reports) so merely viewing a fresh,
+    never-scanned install doesn't leave a stray ``default.db`` behind. Prefer the
+    ``_read_store`` helper below for that.
+    """
     from heaven.config import get_config
     from heaven.engagement import EngagementStore
 
@@ -356,7 +383,18 @@ def _engagement_store_factory(name: Optional[str] = None):
         p = data_dir / "engagements" / f"{path}.db"
     elif path != os.environ.get("HEAVEN_ENGAGEMENT"):
         raise HTTPException(status_code=400, detail="Invalid engagement name")
-    return EngagementStore(p)
+    return EngagementStore(p, create=create)
+
+
+def _read_store(name: Optional[str] = None):
+    """Resolve an engagement store for READ-ONLY access.
+
+    Unlike the plain factory this never materialises an empty DB file, so simply
+    loading the dashboard/findings/report for the fallback "default" engagement
+    (or any engagement that hasn't been scanned yet) doesn't leave a stray
+    ``default.db`` that then reappears in the engagement switcher forever.
+    """
+    return _engagement_store_factory(name, create=False)
 
 
 def create_app() -> FastAPI:
@@ -394,6 +432,28 @@ def create_app() -> FastAPI:
                         continue
         except Exception as e:  # noqa: BLE001
             logger.debug("Demo-artifact self-heal skipped: %s", e)
+        # One-time cleanup: older builds materialised data/engagements/default.db
+        # the moment any page loaded (the resolver's fallback name), leaving an
+        # empty "default — empty" row in the switcher a user could never remove.
+        # If it holds no scans, findings or scope it carries no data, so delete
+        # it; a real "default" engagement the user actually scanned into (any of
+        # those counts > 0) is left untouched. Reads no longer recreate it.
+        try:
+            from heaven.config import get_config
+            from heaven.engagement import (
+                EngagementStore,
+                delete_engagement_store,
+            )
+            default_db = get_config().data_dir / "engagements" / "default.db"
+            if default_db.exists():
+                dstats = EngagementStore(default_db, create=False).stats()
+                if (dstats.get("total_findings", 0) == 0
+                        and dstats.get("scans_run", 0) == 0
+                        and dstats.get("scope_targets", 0) == 0):
+                    delete_engagement_store(default_db)
+                    logger.info("Removed empty auto-created 'default' engagement")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Empty-default prune skipped: %s", e)
         yield
         # Shutdown — close any open WebSockets
         for ws in list(ws_connections) + list(log_ws_connections):
@@ -576,7 +636,7 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("scan.view")),
     ):
         # Primary: engagement store (populated by UI-launched + CLI scans)
-        eng_store = _engagement_store_factory()
+        eng_store = _read_store()
         eng_findings = []
         if eng_store:
             try:
@@ -589,8 +649,21 @@ def create_app() -> FastAPI:
         data = _get_latest_report_data(scan_id)
         report_findings = data.get("vulnerabilities", []) or data.get("findings", [])
 
-        # Merge — engagement store takes priority
-        vulns = eng_findings if eng_findings else report_findings
+        # Merge — engagement store takes priority. Critically, the report-JSON
+        # fallback only applies when NO engagement is actively selected (a
+        # fresh/CLI-only install). Once an operator is viewing a specific
+        # engagement, the dashboard must show ONLY that engagement's data — even
+        # when it's empty — otherwise switching to an engagement with no findings
+        # would fall through to some *other* engagement's latest report and the
+        # topology/stats would show the wrong hosts ("hosts mapped doesn't change
+        # when I switch engagement").
+        has_active_engagement = _get_active_engagement() is not None
+        if eng_findings:
+            vulns = eng_findings
+        elif has_active_engagement:
+            vulns = []
+        else:
+            vulns = report_findings
 
         sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
         for f in vulns:
@@ -657,10 +730,28 @@ def create_app() -> FastAPI:
         # Real host topology — aggregated from actual findings. Each node is a
         # host that a scan actually touched; severity is the worst finding on
         # it. No demo/placeholder data.
+        #
+        # Code-analysis findings (SAST/SCA) are excluded here: their "target" is
+        # a source file or package name, not a network host, so mapping them
+        # would spawn phantom nodes like "src" in the 3D topology. They still
+        # count toward severity/totals and appear on the Findings page — they
+        # just aren't network assets.
+        code_scan_ids: set[str] = set()
+        if eng_store:
+            try:
+                for s in eng_store.list_scans(limit=1000):
+                    if _scan_mode_of(s) in CODE_ANALYSIS_MODES:
+                        sid = s.get("id") or s.get("scan_id")
+                        if sid:
+                            code_scan_ids.add(sid)
+            except Exception:
+                pass
         from heaven.engagement import _host_key
         _sev_rank = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
         host_map: dict[str, dict] = {}
         for f in vulns:
+            if f.get("scan_id") in code_scan_ids:
+                continue
             tgt = f.get("target", "") or f.get("host", "")
             if not tgt:
                 continue
@@ -805,22 +896,43 @@ def create_app() -> FastAPI:
     @app.get("/api/scans")
     async def list_scans(
         limit: int = Query(20, ge=1, le=100),
+        kind: str = Query(
+            "pentest",
+            description="Which section's scans to list: 'pentest' (default — "
+            "active scans, excludes SAST/SCA which have their own sections), "
+            "'sast', 'sca', or 'all'.",
+        ),
         user: User = Depends(require_permission("scan.view")),
     ):
+        # Which scans belong to the requested section. Each code-analysis mode
+        # (sast/sca) lives in its own section, so the default pentest list must
+        # not double-show them — that was the "same scan appears twice" bug.
+        kind = (kind or "pentest").lower()
+        if kind == "all":
+            def _keep(s: dict) -> bool:
+                return True
+        elif kind in CODE_ANALYSIS_MODES:
+            def _keep(s: dict) -> bool:
+                return _scan_mode_of(s) == kind
+        else:  # "pentest" — everything that isn't a code-analysis section
+            def _keep(s: dict) -> bool:
+                return _scan_mode_of(s) not in CODE_ANALYSIS_MODES
+
         # In-memory scans (current session)
         mem = [{**v, "scan_id": k} for k, v in active_scans.items()]
-        # Persisted scans from engagement store
+        # Persisted scans from engagement store. Pull extra rows before filtering
+        # so a section still fills its page even when other kinds dominate.
         persisted = []
-        store = _engagement_store_factory()
+        store = _read_store()
         if store:
             try:
-                for s in store.list_scans(limit=limit):
+                for s in store.list_scans(limit=limit * 3):
                     sid = s.get("scan_id") or s.get("id", "")
                     if sid not in active_scans:
                         persisted.append(s)
             except Exception:
                 pass
-        combined = mem + persisted
+        combined = [s for s in (mem + persisted) if _keep(s)]
         combined.sort(key=lambda s: s.get("created") or s.get("started_at") or "", reverse=True)
         return {"scans": combined[:limit]}
 
@@ -838,7 +950,7 @@ def create_app() -> FastAPI:
         if scan_id in active_scans:
             detail = dict(active_scans[scan_id])
         else:
-            store = _engagement_store_factory()
+            store = _read_store()
             row = None
             try:
                 row = store.get_scan(scan_id)
@@ -859,7 +971,7 @@ def create_app() -> FastAPI:
             }
 
         if include_findings:
-            store = _engagement_store_factory()
+            store = _read_store()
             try:
                 rows = store.list_findings(scan_id=scan_id, limit=1000)
                 detail["findings"] = [f.__dict__ for f in rows]
@@ -1035,7 +1147,7 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("scan.view")),
     ):
         """Active engagement summary + stats."""
-        store = _engagement_store_factory()
+        store = _read_store()
         try:
             eng = store.get_engagement()
             stats = store.stats()
@@ -1075,7 +1187,7 @@ def create_app() -> FastAPI:
                 name = db.stem
                 seen.add(name)
                 try:
-                    st = EngagementStore(db)
+                    st = EngagementStore(db, create=False)
                     stats = st.stats()
                     eng = st.get_engagement()
                     out.append({
@@ -1087,9 +1199,12 @@ def create_app() -> FastAPI:
                     })
                 except Exception:  # noqa: BLE001 — skip unreadable/locked DBs
                     continue
-        # The active engagement may not have a DB yet (nothing scanned) — still
-        # surface it so the switcher shows a consistent current selection.
-        if active not in seen:
+        # A real, user-chosen engagement may not have a DB yet (switched to but
+        # not scanned) — surface it so the switcher shows a consistent selection.
+        # But NEVER invent the bare "default" fallback: it isn't a real
+        # engagement, and its phantom "default — empty" row is exactly the one a
+        # fresh, never-scanned install could never get rid of.
+        if active not in seen and active != "default":
             out.insert(0, {"name": active, "display_name": active,
                            "findings": 0, "scans": 0, "active": True})
         out.sort(key=lambda e: (not e["active"], -e["findings"], e["name"]))
@@ -1110,6 +1225,63 @@ def create_app() -> FastAPI:
         _set_active_engagement(name)
         return {"ok": True, "active": name}
 
+    @app.delete("/api/engagements/{name}")
+    async def delete_engagement_endpoint(
+        name: str,
+        user: User = Depends(require_permission("scan.cancel")),
+    ):
+        """Permanently delete an engagement store (its scans, findings and scope).
+
+        Backs the dashboard "remove engagement" action so operators can clean up
+        stray/empty engagements the switcher would otherwise list forever. If the
+        engagement being deleted is the one the app is currently viewing, the
+        active pointer is repointed to the best remaining engagement (the one with
+        the most findings, real engagements before the sample 'demo' one) or
+        cleared so the resolver falls back to 'default'.
+        """
+        from heaven.config import get_config
+        from heaven.engagement import DEMO_DB_NAME, EngagementStore
+
+        # The name becomes a DB filename — reject traversal before any file op.
+        _validate_http_engagement(name)
+        eng_dir = get_config().data_dir / "engagements"
+        db = eng_dir / f"{name}.db"
+        if not db.exists():
+            raise HTTPException(404, "Engagement not found")
+
+        was_active = _resolve_engagement_name() == name
+        _delete_engagement_store(db)
+
+        new_active: Optional[str] = None
+        if was_active:
+            # Rank the survivors: real engagements with findings first, then the
+            # sample 'demo', then anything else; empty stores never auto-activate.
+            candidates: list[tuple[int, int, str]] = []
+            for other in sorted(eng_dir.glob("*.db")):
+                other_name = other.stem
+                if other_name == name:
+                    continue
+                try:
+                    findings = EngagementStore(other).stats().get("total_findings", 0)
+                except Exception:  # noqa: BLE001 — skip unreadable/locked DBs
+                    continue
+                if findings <= 0:
+                    continue
+                is_demo = 1 if other_name == DEMO_DB_NAME else 0
+                # sort key: real-before-demo, then most findings, then name
+                candidates.append((is_demo, -findings, other_name))
+            candidates.sort()
+            if candidates:
+                new_active = candidates[0][2]
+                _set_active_engagement(new_active)
+            else:
+                _clear_active_engagement()
+                new_active = _resolve_engagement_name()
+
+        logger.info("Engagement '%s' deleted by %s (was_active=%s, new_active=%s)",
+                    name, user.username, was_active, new_active)
+        return {"ok": True, "deleted": name, "active": new_active or _resolve_engagement_name()}
+
     @app.get("/api/engagement/findings")
     async def engagement_findings(
         severity: Optional[str] = None,
@@ -1122,7 +1294,7 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("vuln.view")),
     ):
         """List findings from the active engagement (optionally one scan)."""
-        store = _engagement_store_factory()
+        store = _read_store()
         results = store.list_findings(
             severity=severity, status=status, target=target,
             vuln_type=vuln_type, min_confidence=min_confidence, limit=limit,
@@ -1180,7 +1352,7 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("vuln.view")),
     ):
         """Full evidence package for a finding (request, response, repro)."""
-        store = _engagement_store_factory()
+        store = _read_store()
         if not store:
             raise HTTPException(404, "No active engagement.")
         f = store.get_finding(finding_id)
@@ -1238,7 +1410,7 @@ def create_app() -> FastAPI:
         from fastapi.responses import FileResponse
         from heaven.devsecops.vuln_kb import enrich_finding
 
-        store = _engagement_store_factory(engagement)
+        store = _read_store(engagement)
         eng = store.get_engagement()
         eng_name = (eng.name if eng else None) or engagement or \
             os.environ.get("HEAVEN_ENGAGEMENT") or "HEAVEN Engagement"
@@ -1469,7 +1641,7 @@ def create_app() -> FastAPI:
         severity), each with a one-line remediation so an operator knows the
         highest-impact next action at a glance."""
         from heaven.devsecops.vuln_kb import lookup as kb_lookup
-        store = _engagement_store_factory()
+        store = _read_store()
         results = store.list_findings(limit=2000)
         sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
         results.sort(
@@ -2066,7 +2238,7 @@ def create_app() -> FastAPI:
         findings: list[dict[str, Any]] = []
         engagement_name = ""
         try:
-            store = _engagement_store_factory()
+            store = _read_store()
             eng = store.get_engagement()
             engagement_name = getattr(eng, "name", "") or ""
             findings = [
@@ -2340,7 +2512,7 @@ def create_app() -> FastAPI:
             from heaven.ai.coverage_grader import grade_engagement
         except Exception as e:
             raise HTTPException(500, f"coverage_grader unavailable: {e}")
-        store = _engagement_store_factory(engagement)
+        store = _read_store(engagement)
         report = await grade_engagement(store, use_llm=use_llm)
         return report.to_dict()
 
@@ -2465,10 +2637,18 @@ def create_app() -> FastAPI:
             timeout_s=int(body.get("timeout") or 300),
         )
 
-        engagement = body.get("engagement")
+        # Persist into an engagement so the findings surface in triage/dashboard.
+        # Target = the name the operator typed, else the engagement the app is
+        # currently viewing (active pointer). Crucially we then make that
+        # engagement active, exactly like the pentest scan endpoint does: the
+        # Findings page and dashboard always read the *active* engagement, so
+        # without this the run would persist into one store while every reader
+        # looked at another — the "I scanned SAST but Findings is empty" bug.
+        engagement = _validate_http_engagement(body.get("engagement")) or _get_active_engagement()
         if engagement and result.success:
             import uuid as _uuid
             from pathlib import Path as _P
+            engagement = _resolve_engagement_name(engagement)
             store = _engagement_store_factory(engagement)
             scan_id = f"sast-{_uuid.uuid4().hex[:12]}"
             store.record_scan_start(
@@ -2481,7 +2661,9 @@ def create_app() -> FastAPI:
                 "findings_count": persisted,
                 "duration_s": result.duration_s,
             })
+            _set_active_engagement(engagement)
             out = result.to_dict()
+            out["engagement"] = engagement
             out["engagement_scan_id"] = scan_id
             out["persisted_count"] = persisted
             return out
@@ -2518,10 +2700,14 @@ def create_app() -> FastAPI:
         result = await scan_path(path, max_files=int(body.get("max_files") or 200))
         result["findings"] = [enrich_finding(f) for f in result.get("findings", [])]
 
-        engagement = body.get("engagement")
+        # Same contract as SAST above: persist into the typed engagement (or the
+        # currently-viewed one) and make it active so the audit shows up in the
+        # Findings page / dashboard, which always read the active engagement.
+        engagement = _validate_http_engagement(body.get("engagement")) or _get_active_engagement()
         if engagement and not result.get("error"):
             import uuid as _uuid
             from pathlib import Path as _P
+            engagement = _resolve_engagement_name(engagement)
             store = _engagement_store_factory(engagement)
             scan_id = f"sca-{_uuid.uuid4().hex[:12]}"
             store.record_scan_start(
@@ -2532,6 +2718,8 @@ def create_app() -> FastAPI:
                 store.upsert_finding(scan_id, f)
             store.record_scan_complete(
                 scan_id, {"findings_count": len(result["findings"])})
+            _set_active_engagement(engagement)
+            result["engagement"] = engagement
             result["engagement_scan_id"] = scan_id
             result["persisted_count"] = len(result["findings"])
         return result
@@ -2570,9 +2758,10 @@ def create_app() -> FastAPI:
         findings = result.to_findings()
         out["findings"] = findings
 
-        engagement = body.get("engagement")
+        engagement = _validate_http_engagement(body.get("engagement")) or _get_active_engagement()
         if engagement and result.success and findings:
             import uuid as _uuid
+            engagement = _resolve_engagement_name(engagement)
             store = _engagement_store_factory(engagement)
             scan_id = f"cloud-{_uuid.uuid4().hex[:12]}"
             store.record_scan_start(
@@ -2581,6 +2770,8 @@ def create_app() -> FastAPI:
             for f in findings:
                 store.upsert_finding(scan_id, f)
             store.record_scan_complete(scan_id, {"findings_count": len(findings)})
+            _set_active_engagement(engagement)
+            out["engagement"] = engagement
             out["engagement_scan_id"] = scan_id
             out["persisted_count"] = len(findings)
         return out

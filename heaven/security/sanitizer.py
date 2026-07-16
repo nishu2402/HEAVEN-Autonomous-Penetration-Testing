@@ -38,7 +38,7 @@ BLOCKED_RANGES = [
 ]
 
 # Localhost patterns that could cause self-exploitation
-LOCALHOST_PATTERNS = [  # nosec B104 — detection list, not a bind address
+LOCALHOST_PATTERNS = [  # "0.0.0.0" below is a detection pattern, not a bind
     "127.0.0.1", "localhost", "0.0.0.0", "::1",
     "127.0.0.0/8", "0177.0.0.1", "0x7f000001",
     "2130706433", "127.1", "127.0.1",

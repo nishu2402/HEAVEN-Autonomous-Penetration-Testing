@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Closed an XXE in the SCA Maven parser** (CWE-611). `pom.xml` files come from
+  the *scanned* project, which may be hostile — parsing them with stdlib
+  `xml.etree.ElementTree` allowed external-entity / external-DTD attacks that
+  could read local files off the analyst's host or drive SSRF. The Maven and
+  nmap XML parsers now use `defusedxml`, and a regression test proves a
+  malicious `pom.xml` cannot exfiltrate a local file. `defusedxml` is now a
+  declared dependency.
+- **Randomised the linPEAS post-ex staging path** (CWE-377). The privilege-
+  escalation runner dropped `linpeas.sh` at a fixed `/tmp/linpeas.sh` on the
+  target, then `chmod +x` and executed it — a TOCTOU/symlink opening on a
+  multi-user target's world-writable `/tmp`. It now uses an unpredictable
+  `/tmp/.heaven-<random>.sh` per run.
+- **Clean bandit (SAST) baseline — findings _and_ log.** Reviewed and resolved
+  every `-ll` bandit finding: the two real issues above are fixed; the remaining
+  flagged lines (the scheme-validated + checksum-verified model download, the
+  readiness-probe host comparison, and the authorised OOB-callback listener bind)
+  are genuine intentional/false-positive cases. Broadly-intentional test classes
+  for a network-pentest tool (`B104` all-interfaces bind, `B108` remote-target
+  `/tmp` staging path) are documented in `[tool.bandit] skips`; `B310`/urlopen
+  stays on a scoped, prose-free `# nosec B310` so any *new* urlopen must be
+  reviewed. Result: `bandit -r heaven/ -ll -c pyproject.toml` now emits **zero
+  findings and zero parser warnings** (previously ~70 cosmetic "Test in comment"
+  / "no failed test" lines cluttered the CI SAST log).
 - **Cleared all 19 web-UI dependency advisories** reported by `heaven sca`
   (OSV.dev). Removed the **unused `mermaid`** dependency — it was never imported,
   and dropping it eliminated 13 advisories on its own (4 mermaid CVEs plus the

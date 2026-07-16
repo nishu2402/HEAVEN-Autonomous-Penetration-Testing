@@ -124,7 +124,7 @@ class BloodHoundCollector:
             try:
                 conn.unbind()
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
 
 def _entry_to_bh_doc(entry: Any, kind: str, domain: str) -> dict[str, Any]:

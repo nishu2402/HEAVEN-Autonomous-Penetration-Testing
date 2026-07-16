@@ -57,6 +57,9 @@ class EmailSecurityScanner:
         await self.check_spf(domain)
         await self.check_dkim(domain)
         await self.check_dmarc(domain)
+        await self.check_dnssec(domain)
+        await self.check_mta_sts(domain)
+        await self.check_tls_rpt(domain)
         await self.check_smtp_relay(domain)
 
         logger.info(f"Email scan complete for {domain}: {len(self._findings)} findings")
@@ -189,6 +192,7 @@ class EmailSecurityScanner:
                                     remediation="Use 2048-bit RSA keys minimum for DKIM.",
                                 ))
             except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
                 continue
 
         if not found_selectors:
@@ -274,8 +278,91 @@ class EmailSecurityScanner:
         except Exception as e:
             logger.debug(f"DMARC check failed: {e}")
 
+    async def check_dnssec(self, domain: str) -> None:
+        """Check whether the zone is DNSSEC-signed (DNSKEY present)."""
+        if not HAS_DNS:
+            return
+        try:
+            answers = dns.resolver.resolve(domain, "DNSKEY")
+            if answers:
+                self._findings.append(EmailFinding(
+                    target=domain, vuln_type="dnssec_enabled", severity="info",
+                    title=f"DNSSEC enabled: {domain}",
+                    description=f"Zone is DNSSEC-signed ({len(answers)} DNSKEY record(s)).",
+                    confidence=0.95, evidence={"dnskey_count": len(answers)},
+                ))
+                return
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            pass
+        except Exception as e:
+            logger.debug(f"DNSSEC check failed for {domain}: {e}")
+            return
+        self._findings.append(EmailFinding(
+            target=domain, vuln_type="dnssec_missing", severity="low",
+            title=f"DNSSEC not enabled: {domain}",
+            description="No DNSKEY records — the zone is not DNSSEC-signed, so DNS "
+                        "responses (incl. MX) can be spoofed via cache poisoning.",
+            confidence=0.85,
+            remediation="Sign the zone with DNSSEC and publish a DS record at the registrar.",
+        ))
+
+    async def check_mta_sts(self, domain: str) -> None:
+        """Check for an MTA-STS policy record (_mta-sts TXT, v=STSv1)."""
+        if not HAS_DNS:
+            return
+        try:
+            answers = dns.resolver.resolve(f"_mta-sts.{domain}", "TXT")
+            for rdata in answers:
+                if "v=STSv1" in str(rdata):
+                    self._findings.append(EmailFinding(
+                        target=domain, vuln_type="mta_sts_enabled", severity="info",
+                        title=f"MTA-STS configured: {domain}",
+                        description="MTA-STS policy record present — enforces TLS for "
+                                    "inbound mail.",
+                        confidence=0.9, evidence={"record": str(rdata).strip('"')},
+                    ))
+                    return
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            pass
+        except Exception as e:
+            logger.debug(f"MTA-STS check failed for {domain}: {e}")
+            return
+        self._findings.append(EmailFinding(
+            target=domain, vuln_type="mta_sts_missing", severity="low",
+            title=f"MTA-STS not configured: {domain}",
+            description="No MTA-STS policy — sending servers cannot enforce TLS and may "
+                        "be downgraded to cleartext by an on-path attacker.",
+            confidence=0.8,
+            remediation="Publish an MTA-STS policy (_mta-sts TXT + https policy file).",
+        ))
+
+    async def check_tls_rpt(self, domain: str) -> None:
+        """Check for a TLS-RPT record (_smtp._tls TXT, v=TLSRPTv1)."""
+        if not HAS_DNS:
+            return
+        try:
+            answers = dns.resolver.resolve(f"_smtp._tls.{domain}", "TXT")
+            for rdata in answers:
+                if "v=TLSRPTv1" in str(rdata):
+                    self._findings.append(EmailFinding(
+                        target=domain, vuln_type="tls_rpt_enabled", severity="info",
+                        title=f"TLS-RPT configured: {domain}",
+                        description="SMTP TLS reporting is configured.",
+                        confidence=0.9, evidence={"record": str(rdata).strip('"')},
+                    ))
+                    return
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            pass
+        except Exception as e:
+            logger.debug(f"TLS-RPT check failed for {domain}: {e}")
+
     async def check_smtp_relay(self, domain: str) -> None:
-        """Check for open SMTP relay."""
+        """Check STARTTLS support and probe for an open relay.
+
+        The open-relay probe is NON-INTRUSIVE: it issues MAIL FROM / RCPT TO for
+        two external domains and inspects the RCPT response code, then always
+        sends RSET — it never sends DATA, so no mail is ever relayed.
+        """
         mx_findings = [f for f in self._findings if f.vuln_type == "mx_enumeration"]
         if not mx_findings:
             return
@@ -283,33 +370,65 @@ class EmailSecurityScanner:
         mx_servers = mx_findings[0].evidence.get("mx_records", [])
         for mx in mx_servers[:3]:
             server = mx["server"]
+            writer = None
             try:
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(server, 25), timeout=self._timeout
                 )
                 await asyncio.wait_for(reader.readline(), timeout=5)
-                # Send EHLO
-                writer.write(b"EHLO heaven-scanner.local\r\n")
+                writer.write(b"EHLO heaven-scanner.example\r\n")
                 await writer.drain()
                 ehlo_resp = await asyncio.wait_for(reader.read(2048), timeout=5)
                 ehlo_text = ehlo_resp.decode(errors="ignore")
 
-                # Check STARTTLS
-                if "STARTTLS" not in ehlo_text:
+                if "STARTTLS" not in ehlo_text.upper():
                     self._findings.append(EmailFinding(
                         target=server, vuln_type="smtp_no_starttls",
                         severity="medium",
                         title=f"SMTP: No STARTTLS on {server}",
-                        description="Mail server does not support STARTTLS encryption.",
+                        description="Mail server does not advertise STARTTLS — inbound "
+                                    "mail can be delivered in cleartext.",
                         confidence=0.85,
                         remediation="Enable STARTTLS on the mail server.",
                     ))
 
+                # ── Non-intrusive open-relay probe (RSET before DATA) ──
+                async def _cmd(line: bytes) -> str:
+                    writer.write(line)  # type: ignore[union-attr]
+                    await writer.drain()  # type: ignore[union-attr]
+                    data = await asyncio.wait_for(reader.read(512), timeout=5)
+                    return data.decode(errors="ignore")
+
+                mail_resp = await _cmd(b"MAIL FROM:<probe@heaven-scanner.example>\r\n")
+                if mail_resp.startswith("250"):
+                    rcpt_resp = await _cmd(b"RCPT TO:<relay-test@example.net>\r\n")
+                    if rcpt_resp.startswith("250"):
+                        self._findings.append(EmailFinding(
+                            target=server, vuln_type="smtp_open_relay",
+                            severity="critical",
+                            title=f"SMTP open relay on {server}",
+                            description="Server accepted MAIL FROM and RCPT TO for two "
+                                        "external domains (no DATA was sent). An open "
+                                        "relay can be abused to send spoofed mail/spam.",
+                            confidence=0.85,
+                            evidence={"mail_from": mail_resp.strip()[:120],
+                                      "rcpt_to": rcpt_resp.strip()[:120]},
+                            remediation="Restrict relaying to authenticated senders / "
+                                        "trusted networks only.",
+                        ))
+                    await _cmd(b"RSET\r\n")  # abandon the transaction — never DATA
+
                 writer.write(b"QUIT\r\n")
                 await writer.drain()
-                writer.close()
             except (asyncio.TimeoutError, OSError):
                 pass
+            finally:
+                if writer is not None:
+                    writer.close()
+                    try:
+                        await writer.wait_closed()
+                    except Exception:  # noqa: BLE001
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     def summary(self) -> dict:
         sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}

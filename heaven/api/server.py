@@ -90,6 +90,22 @@ def _scan_mode_of(scan: dict) -> str:
     ).lower()
 
 
+# Web launcher exposes stealth as an int 1-4; the evasion engine speaks names.
+_STEALTH_INT_TO_NAME = {1: "paranoid", 2: "stealth", 3: "normal", 4: "aggressive"}
+
+
+def _resolve_stealth_name(level: object) -> str:
+    """Map a web-launcher stealth level (int 1-4, or an already-resolved name)
+    to its evasion-profile name. Unknown values fall back to ``normal`` so a
+    scan is never accidentally silent or maximally loud."""
+    if isinstance(level, str):
+        name = level.strip().lower()
+        return name if name in _STEALTH_INT_TO_NAME.values() else "normal"
+    if isinstance(level, int):
+        return _STEALTH_INT_TO_NAME.get(level, "normal")
+    return "normal"
+
+
 class ScanRequest(BaseModel):
     name: str = "HEAVEN Scan"
     targets: list[str] = Field(default_factory=list)
@@ -171,7 +187,7 @@ def _autonomous_broadcast(job_id: str, message: dict) -> None:
         try:
             q.put_nowait(message)
         except Exception:  # noqa: BLE001 — a full/closed queue must not break the run
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
 
 class ConnectionManager:
@@ -236,6 +252,9 @@ class WebSocketLogHandler(logging.Handler):
                     try:
                         log_ws_connections.remove(ws)
                     except ValueError:
+                        # Deliberately silent: this runs inside a
+                        # logging.Handler.emit(); logging here would re-enter
+                        # the logging system.
                         pass
 
 
@@ -429,6 +448,7 @@ def create_app() -> FastAPI:
                     try:
                         EngagementStore(db).purge_demo_artifacts()
                     except Exception:  # noqa: BLE001 — skip locked/unreadable DBs
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
                         continue
         except Exception as e:  # noqa: BLE001
             logger.debug("Demo-artifact self-heal skipped: %s", e)
@@ -460,7 +480,7 @@ def create_app() -> FastAPI:
             try:
                 await ws.close(code=1001, reason="Server shutting down")
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     app = FastAPI(
         title="HEAVEN Command Centre",
@@ -642,7 +662,7 @@ def create_app() -> FastAPI:
             try:
                 eng_findings = [f.__dict__ for f in eng_store.list_findings(limit=1000)]
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         # Fallback: report JSON files (written by CLI scans without engagement set)
         report_findings: list[dict] = []
@@ -704,7 +724,7 @@ def create_app() -> FastAPI:
                             "date": s.get("started_at", ""),
                         })
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         # From report JSON files
         d = _data_dir()
@@ -745,7 +765,7 @@ def create_app() -> FastAPI:
                         if sid:
                             code_scan_ids.add(sid)
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
         from heaven.engagement import _host_key
         _sev_rank = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
         host_map: dict[str, dict] = {}
@@ -931,7 +951,7 @@ def create_app() -> FastAPI:
                     if sid not in active_scans:
                         persisted.append(s)
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
         combined = [s for s in (mem + persisted) if _keep(s)]
         combined.sort(key=lambda s: s.get("created") or s.get("started_at") or "", reverse=True)
         return {"scans": combined[:limit]}
@@ -1198,6 +1218,7 @@ def create_app() -> FastAPI:
                         "active": name == active,
                     })
                 except Exception:  # noqa: BLE001 — skip unreadable/locked DBs
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
                     continue
         # A real, user-chosen engagement may not have a DB yet (switched to but
         # not scanned) — surface it so the switcher shows a consistent selection.
@@ -1264,6 +1285,7 @@ def create_app() -> FastAPI:
                 try:
                     findings = EngagementStore(other).stats().get("total_findings", 0)
                 except Exception:  # noqa: BLE001 — skip unreadable/locked DBs
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
                     continue
                 if findings <= 0:
                     continue
@@ -1830,7 +1852,9 @@ def create_app() -> FastAPI:
         _validate_http_engagement(new_engagement or None)
 
         store = _engagement_store_factory(engagement)
-        all_scans = store.list_all_scans()
+        # list_scans() (SELECT *) carries config_json + mode; list_all_scans()
+        # drops them, which would leave every replay with an empty config.
+        all_scans = store.list_scans(limit=1000)
         target_scan = next((s for s in all_scans if s["id"].startswith(scan_id)), None)
         if not target_scan:
             raise HTTPException(404, f"Scan {scan_id} not found")
@@ -1851,10 +1875,17 @@ def create_app() -> FastAPI:
                 store.create_engagement(name=new_engagement,
                                         client=f"replay of {scan_id[:8]}")
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         cfg = get_config()
-        orch = build_full_scan(targets, cfg, checkpoint_store=store)
+        from heaven.config import ScanMode as _ScanMode
+        try:
+            _replay_mode = _ScanMode(target_scan.get("mode")
+                                     or original_config.get("mode") or "full")
+        except ValueError:
+            _replay_mode = _ScanMode.FULL
+        orch = build_full_scan(targets, cfg, checkpoint_store=store,
+                               scan_mode=_replay_mode)
         store.record_scan_start(
             orch.scan_id, name=f"replay of {target_scan['id'][:8]}",
             mode=target_scan.get("mode", ""),
@@ -1869,7 +1900,7 @@ def create_app() -> FastAPI:
                     try:
                         store.upsert_finding(orch.scan_id, f)
                     except Exception:
-                        pass
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
                 store.record_scan_complete(orch.scan_id, summary)
             except Exception as e:
                 logger.error(f"replay scan {orch.scan_id} failed: {e}")
@@ -2260,7 +2291,7 @@ def create_app() -> FastAPI:
                 try:
                     docs.append({"name": md.stem, "content": md.read_text(encoding="utf-8")})
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
         built["docs"] = docs
         return built
 
@@ -2498,7 +2529,7 @@ def create_app() -> FastAPI:
             try:
                 await websocket.close()
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     # ── Coverage self-grading (heaven coverage equivalent) ──
     @app.get("/api/coverage")
@@ -3048,6 +3079,20 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
     active_scans[scan_id]["status"] = "running"
     active_scans[scan_id]["progress_pct"] = 0
 
+    # Build the target dict once, up front, so it is available both for the
+    # dispatch (build_full_scan) and for the persisted config — and survives a
+    # store-open failure below. Resolving the stealth level here (int 1-4 → name)
+    # means the operator's stealth choice is what gets persisted and replayed.
+    stealth_name = _resolve_stealth_name(req.stealth_level)
+    scan_targets: dict[str, Any] = {
+        "ips": req.targets,
+        "urls": req.urls,
+        "repositories": req.repositories,
+        "cloud_providers": req.cloud_providers,
+        "ports": req.ports,
+        "stealth_level": stealth_name,
+    }
+
     # Engagement store — always open one (defaults to "default" engagement)
     engagement_name = req.engagement or os.environ.get("HEAVEN_ENGAGEMENT") or "default"
     store = None
@@ -3065,7 +3110,15 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             else scan_display_name(list(req.urls or []) + list(req.targets or []), _scan_mode)
         )
         active_scans[scan_id]["name"] = _scan_name  # so the running (in-memory) scan shows it too
-        store.record_scan_start(scan_id, name=_scan_name, mode=_scan_mode)
+        # Persist a full, replayable config (targets incl. stealth level, mode,
+        # and the active seed if any) so `heaven replay` / the replay endpoint
+        # reproduce this scan faithfully — previously web scans stored no config
+        # at all, so they were unreplayable and their stealth choice was lost.
+        from heaven.utils.seeding import current_seed
+        store.record_scan_start(
+            scan_id, name=_scan_name, mode=_scan_mode,
+            config={"targets": scan_targets, "seed": current_seed(), "mode": _scan_mode},
+        )
         # Record what we're actually assessing as engagement scope, so the
         # dashboard/report reflect the real targets instead of "0 targets".
         for _tgt in list(req.urls or []) + list(req.targets or []):
@@ -3083,28 +3136,29 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             try:
                 store.add_scope(_t, kind=_kind, notes="auto-added from scan")
             except Exception:  # noqa: BLE001 — scope is best-effort, never block a scan
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
     except Exception as e:
         logger.warning(f"Could not open engagement store '{engagement_name}': {e}")
 
     try:
         from heaven.orchestrator import build_full_scan
-        from heaven.config import get_config
+        from heaven.config import ScanMode, get_config
         cfg = get_config()
 
+        # Honor the mode the operator picked in the web launcher so the scan
+        # actually runs that mode's modules (previously every mode ran the full
+        # pipeline). Pass it explicitly — never mutate the shared config
+        # singleton, or concurrent scans of different modes would race.
+        try:
+            _mode = ScanMode(req.mode or req.scan_type or "full")
+        except ValueError:
+            _mode = ScanMode.FULL
+
         orch = build_full_scan(
-            {
-                "ips": req.targets,
-                "urls": req.urls,
-                "repositories": req.repositories,
-                "cloud_providers": req.cloud_providers,
-                "ports": req.ports,
-                "stealth_level": {1: "paranoid", 2: "stealth", 3: "normal", 4: "aggressive"}.get(
-                    req.stealth_level or 3, "normal"
-                ),
-            },
+            scan_targets,
             cfg,
             checkpoint_store=store,
+            scan_mode=_mode,
         )
 
         # Track which findings we've already persisted to avoid duplicates
@@ -3119,7 +3173,7 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                 try:
                     await ws.send_json({"scan_id": scan_id, **(progress.to_dict() if hasattr(progress, "to_dict") else {})})
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
 
             # Flush any new findings to the engagement store in real time
             if store:
@@ -3136,12 +3190,12 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                                     try:
                                         store.upsert_finding(scan_id, f)
                                     except Exception:
-                                        pass
+                                        logger.debug("suppressed non-fatal exception", exc_info=True)
                     # Live count = real deduped rows in the store, so the scan
                     # list and the engagement view never disagree.
                     active_scans[scan_id]["findings_count"] = store.count_findings(scan_id)
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
 
         orch.on_progress(progress_update)
         result = await orch.run()
@@ -3216,7 +3270,7 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             try:
                 store.record_scan_complete(scan_id, summary={"error": str(e)}, status="failed")
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         from heaven.security.audit import get_audit_logger, AuditAction, AuditSeverity
         get_audit_logger().log(

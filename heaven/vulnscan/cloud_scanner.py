@@ -203,6 +203,16 @@ _MULTI_TLDS = {
 }
 
 
+# Registrable labels that are RFC 2606 / RFC 6761 reserved or otherwise
+# non-distinctive: guessing "<label>-images" etc. from these can only ever hit a
+# bucket owned by an unrelated party, so a match is a coincidence, not the
+# target's asset. Skipping them avoids the mis-attributed critical FP (e.g.
+# example.com → the unrelated public "example-images" bucket).
+_RESERVED_BASE_NAMES = frozenset({
+    "example", "test", "invalid", "localhost", "local",
+})
+
+
 def _sanitize_label(label: str) -> str:
     """Reduce a hostname label to a valid S3-style bucket token."""
     return re.sub(r"[^a-z0-9-]", "", label.lower().replace("_", "-")).strip("-")
@@ -236,7 +246,7 @@ def base_names_from_target(target: str) -> list[str]:
     out: list[str] = []
     for b in bases:
         s = _sanitize_label(b)
-        if s and s not in out:
+        if s and s not in out and s not in _RESERVED_BASE_NAMES:
             out.append(s)
     return out
 
@@ -247,7 +257,7 @@ def generate_bucket_candidates(target: str, extra: Optional[list[str]] = None,
     bases = base_names_from_target(target)
     for e in (extra or []):
         s = _sanitize_label(e)
-        if s and s not in bases:
+        if s and s not in bases and s not in _RESERVED_BASE_NAMES:
             bases.append(s)
     seen: list[str] = []
     for base in bases:

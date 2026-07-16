@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, cast
 from urllib.parse import urljoin, urlparse
 
-from heaven.recon.evasion_engine import EvasionEngine, EvasionProfile, StealthLevel
+from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
 
 logger = get_logger("recon.web")
@@ -240,18 +240,16 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
         logger.info("No URLs specified — skipping web crawl")
         return {"endpoints": [], "js_endpoints": [], "input_vectors": 0}
 
-    stealth_map = {
-        "aggressive": StealthLevel.AGGRESSIVE,
-        "normal": StealthLevel.NORMAL,
-        "stealth": StealthLevel.STEALTH,
-        "paranoid": StealthLevel.PARANOID,
-    }
-    profile = EvasionProfile(stealth_level=stealth_map.get(stealth_level, StealthLevel.NORMAL))
+    # Resolve the FULL profile for this level (timing + concurrency), not a bare
+    # EvasionProfile(stealth_level=…) — the bare form leaves every delay at 0 and
+    # would make stealth a no-op for the crawl.
+    profile = profile_for(stealth_level)
     engine = EvasionEngine(profile)
 
     all_endpoints: list[WebEndpoint] = []
     all_js: list[str] = []
-    sem = asyncio.Semaphore(100)
+    # Concurrency scales with the level: paranoid=10 … stealth=50 … aggressive=1000.
+    sem = asyncio.Semaphore(max(1, profile.max_concurrent))
 
     for url in urls:
         await engine.apply_evasion_delay()

@@ -177,7 +177,7 @@ def set_current_engagement(name: str) -> Path:
         from heaven.engagement import set_active_engagement
         set_active_engagement(name.strip())
     except Exception:  # noqa: BLE001 — pointer sync is best-effort
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
     return _CONTEXT_FILE
 
 
@@ -217,7 +217,7 @@ def resolve_engagement_name(explicit: Optional[str] = None) -> Optional[str]:
         if active:
             return active
     except Exception:  # noqa: BLE001 — no pointer just means "nothing active"
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
     return None
 
 
@@ -276,5 +276,5 @@ def _engagement_db_path(name: Optional[str] = None) -> Path:
         if active:
             return _resolve_engagement_name(active)
     except Exception:  # noqa: BLE001 — no pointer just means "use the default"
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
     return Path("engagement.db")

@@ -28,6 +28,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
+import logging
+logger = logging.getLogger(__name__)
+
 
 DOCS_DIR = Path(__file__).resolve().parent.parent / "docs" / "methodology"
 
@@ -291,6 +294,7 @@ def load_standards(docs_dir: Optional[Path] = None) -> list[dict[str, Any]]:
         try:
             out.append(parse_standard(md.stem, md.read_text(encoding="utf-8")))
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
     # Stable, meaningful order: OWASP, NIST, PTES, then anything else.
     order = {"owasp_testing_guide": 0, "nist_800_115": 1, "ptes": 2}

@@ -11,6 +11,9 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 async def run_sqlmap(
@@ -58,7 +61,7 @@ async def run_sqlmap(
         try:
             proc.kill()
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
         return {"error": "timeout", "url": url, "findings": []}
     except Exception as exc:
         return {"error": str(exc), "url": url, "findings": []}
@@ -109,7 +112,7 @@ def _parse_sqlmap_output(output: str, url: str, work_dir: Path) -> dict:
                         "evidence": {"log": text[:500]},
                     })
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return {
         "url": url,

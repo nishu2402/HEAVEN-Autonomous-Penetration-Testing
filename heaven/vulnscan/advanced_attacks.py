@@ -168,7 +168,7 @@ class JWTAttacker:
                         cwe="CWE-347",
                     ))
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
         # Test 2: Weak secret brute force
         cracked_secret = cls.brute_force_secret(token)
@@ -312,7 +312,7 @@ class SubdomainTakeoverDetector:
                                 cwe="CWE-284",
                             )
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         return None
 
@@ -481,16 +481,18 @@ class CredentialSprayer:
         # redirect failed logins to /home too — without this baseline that
         # would be a false "default credentials" finding.
         baseline_location = ""
+        # A login that is guaranteed to fail (baseline for auth-response diffing).
+        bad = "heaven_invalid_x9"
         try:
             async with session.post(url,
-                data={"username": "heaven_invalid_x9", "password": "heaven_invalid_x9",
-                      "user": "heaven_invalid_x9", "pass": "heaven_invalid_x9",
-                      "login": "heaven_invalid_x9", "passwd": "heaven_invalid_x9"},
+                data={"username": bad, "password": bad,
+                      "user": bad, "pass": bad,
+                      "login": bad, "passwd": bad},
                 timeout=aiohttp.ClientTimeout(total=10),
                 allow_redirects=False) as bresp:
                 baseline_location = bresp.headers.get("Location", "")
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
         for service, username, password in relevant_creds[:15]:
             try:
@@ -531,7 +533,7 @@ class CredentialSprayer:
                             break
 
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         return findings
 
@@ -574,6 +576,7 @@ class CredentialSprayer:
                     ))
                     break  # one confirmed cred is enough
             except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
                 continue
 
         return findings

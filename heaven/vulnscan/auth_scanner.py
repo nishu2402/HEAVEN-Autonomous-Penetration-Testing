@@ -183,7 +183,7 @@ async def _audit_csrf(session: "aiohttp.ClientSession", url: str,
                     if has_meta_token or has_header_token:
                         continue
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
             findings.append(_make_finding(
                 action, "csrf_missing_token", "high",
@@ -282,7 +282,7 @@ async def _brute_http_basic(session: "aiohttp.ClientSession",
                     if r.status == 200:
                         found.append((user, passwd))
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     pairs = [(u, p) for u in _COMMON_USERNAMES[:8] for p in _COMMON_PASSWORDS[:12]]
     await asyncio.gather(*[_try(u, p) for u, p in pairs])
@@ -310,7 +310,7 @@ async def _brute_http_basic(session: "aiohttp.ClientSession",
                         confidence=0.75,
                     ))
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return findings
 
@@ -351,7 +351,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
                 if m:
                     csrf_value = m.group(1)
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     sem = asyncio.Semaphore(3)
     found: list[tuple[str, str]] = []
@@ -494,6 +494,7 @@ async def _audit_password_policy(session: "aiohttp.ClientSession",
                     ))
                 break
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
     return findings
 
@@ -537,6 +538,7 @@ async def _audit_oauth(session: "aiohttp.ClientSession", url: str) -> list[dict]
                             confidence=0.65,
                         ))
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
 
         # NOTE: a "PKCE not enforced" probe was deliberately removed. With a

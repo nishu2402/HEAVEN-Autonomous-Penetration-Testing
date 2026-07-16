@@ -7,6 +7,7 @@ pod security, container escape detection, etcd exposure.
 from __future__ import annotations
 
 import os
+import socket
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -19,6 +20,30 @@ try:
     HAS_AIOHTTP = True
 except ImportError:
     HAS_AIOHTTP = False
+
+
+def _is_local_target(host: str) -> bool:
+    """True only when the scan target IS the machine HEAVEN runs on.
+
+    The local Docker-socket / privileged-container / RBAC checks inspect the
+    *scanner's own host*, so they may only be attributed to the target when the
+    target actually is this host. Scanning a remote target must never surface
+    the analyst's own `/var/run/docker.sock` as a target finding.
+    """
+    if not host:
+        return False
+    h = host.strip().lower()
+    if "://" in h:
+        from urllib.parse import urlparse
+        h = urlparse(h).hostname or h
+    if h in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"):
+        return True
+    try:
+        if h in (socket.gethostname().lower(), socket.getfqdn().lower()):
+            return True
+    except Exception:  # noqa: BLE001 — hostname lookup is best-effort
+        logger.debug("suppressed non-fatal exception", exc_info=True)
+    return False
 
 
 @dataclass
@@ -48,18 +73,27 @@ class DockerScanner:
     """Docker security scanner."""
 
     @classmethod
-    async def check_docker_socket(cls, host: str = "localhost") -> list[ContainerFinding]:
-        """Check for exposed Docker socket (local and remote)."""
+    async def check_docker_socket(cls, host: str = "localhost",
+                                  is_local: bool = False) -> list[ContainerFinding]:
+        """Check for an exposed Docker socket.
+
+        The local ``/var/run/docker.sock`` check inspects the machine HEAVEN is
+        running on, so it only applies when the target IS this host — otherwise
+        scanning any remote target from a workstation with Docker installed
+        would emit a bogus critical attributed to the remote. The remote Docker
+        API probe (2375/2376) is genuinely target-scoped and always runs.
+        """
         findings = []
-        # Local socket
-        if os.path.exists("/var/run/docker.sock"):
+        # Local socket — only meaningful (and only correctly attributed) when
+        # the target is this host.
+        if is_local and os.path.exists("/var/run/docker.sock"):
             findings.append(ContainerFinding(
-                target="localhost", vuln_type="docker_socket_exposed",
+                target=host, vuln_type="docker_socket_exposed",
                 severity="critical",
                 title="Docker Socket Exposed: /var/run/docker.sock",
                 description=(
-                    "Docker socket is accessible. Any process with access can control Docker, "
-                    "mount host filesystem, and escape the container."
+                    "Docker socket is accessible on this host. Any process with access "
+                    "can control Docker, mount the host filesystem, and escape the container."
                 ),
                 confidence=0.95,
                 remediation="Restrict Docker socket permissions. Use rootless Docker. Never mount socket in containers.",
@@ -86,7 +120,7 @@ class DockerScanner:
                                     cwe="CWE-306", mitre="T1609",
                                 ))
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
         return findings
 
     @classmethod
@@ -179,6 +213,7 @@ class KubernetesScanner:
                                 cwe="CWE-200", mitre="T1552",
                             ))
                 except Exception:
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
                     continue
 
             # Check etcd
@@ -201,7 +236,7 @@ class KubernetesScanner:
                                 cwe="CWE-306", mitre="T1552",
                             ))
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
 
             # Check kubelet API
             for kubelet_port in [10250, 10255]:
@@ -224,7 +259,7 @@ class KubernetesScanner:
                                 cwe="CWE-306", mitre="T1609",
                             ))
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
 
         return findings
 
@@ -276,18 +311,23 @@ class ContainerScanner:
     async def scan(self, host: str = "localhost", k8s_port: int = 6443) -> list[ContainerFinding]:
         logger.info(f"🐳 Container Security Scan: {host}")
         self._findings = []
+        is_local = _is_local_target(host)
 
-        docker_findings = await DockerScanner.check_docker_socket(host)
-        self._findings.extend(docker_findings)
+        # Docker socket: local-host check gated to a local target; remote API
+        # probe (2375/2376) is target-scoped and always runs.
+        self._findings.extend(
+            await DockerScanner.check_docker_socket(host, is_local=is_local))
 
-        priv_findings = await DockerScanner.check_privileged_containers()
-        self._findings.extend(priv_findings)
+        # These enumerate the LOCAL Docker/K8s daemon, so only run them when the
+        # target is this host — never attribute the scanner's own containers /
+        # RBAC to a remote target.
+        if is_local:
+            self._findings.extend(await DockerScanner.check_privileged_containers())
+            self._findings.extend(await KubernetesScanner.analyze_rbac())
 
-        k8s_findings = await KubernetesScanner.check_api_server(host, k8s_port)
-        self._findings.extend(k8s_findings)
-
-        rbac_findings = await KubernetesScanner.analyze_rbac()
-        self._findings.extend(rbac_findings)
+        # Target-scoped remote probes (K8s API / etcd / kubelet).
+        self._findings.extend(
+            await KubernetesScanner.check_api_server(host, k8s_port))
 
         logger.info(f"Container scan complete: {len(self._findings)} findings")
         return self._findings

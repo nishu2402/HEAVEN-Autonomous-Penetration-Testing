@@ -9,6 +9,152 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Every scan mode now runs a real, focused pipeline — the mode selector is no
+  longer cosmetic.** `build_full_scan` previously registered all ~35 tasks
+  regardless of the chosen mode, so WEB, NETWORK, API, CLOUD, CONTAINER, IOT, OT,
+  AD and EMAIL all executed the identical full scan (neither the CLI nor the web
+  launcher wired the mode through). Each task is now tagged with the modes it
+  belongs to; a focused mode registers only its dedicated modules plus the shared
+  enrichment tail (validation, FP-suppression, ML scoring, MITRE mapping,
+  reporting), and `FULL` still runs everything. The CLI (`heaven scan -m …`) and
+  the web API (`POST /api/scans` `mode`) both pass the mode through to a
+  per-scan-isolated builder (no shared-singleton mutation). New
+  `tests/test_scan_modes.py` locks in the per-mode task sets.
+- **OT is now a distinct mode from IOT.** OT/ICS runs ICS/SCADA protocol probes
+  (Modbus, Siemens S7comm, EtherNet/IP, DNP3, IEC 60870-5-104, OPC-UA, BACnet);
+  IOT covers consumer / building-automation devices (MQTT, SNMP, RTSP, CoAP,
+  UPnP/SSDP, vendor web panels). Previously OT re-ran the IoT scanner.
+- **CLOUD mode now does real work against any target.** Selecting CLOUD mode is
+  itself the opt-in for the public-bucket exposure probe (previously gated behind
+  the `--cloud-buckets` flag), so a CLOUD scan automatically guesses bucket names
+  from the target host and proves public exposure from each provider's own
+  response. The probe stays opt-in in every other mode.
+- **Zero Bandit findings at every severity (previously clean only at medium+).**
+  The 132 best-effort `except … : pass|continue` handlers that silently swallowed
+  probe errors now log at `debug` with `exc_info` — a scanner that hides an
+  unexpected probe error can silently miss a vulnerability, so the breadcrumb is a
+  real observability win (and it costs nothing when debug logging is off). The
+  irreducible intentional patterns carry a precise, documented per-line
+  `# nosec <id>` instead of a blanket skip (default-credential and auth-bypass
+  test payloads, MITRE ATT&CK ids / taxonomy strings, deterministic seedable repro
+  RNG and non-crypto jitter, subprocess calls to vetted CLI tools, and XML
+  output-escaping), so the checks stay live for any *new* real issue. Also
+  modernized `asyncio.get_event_loop()` → `get_running_loop()` inside coroutines,
+  replaced a mypy-narrowing `assert` with a positive `isinstance` guard, and
+  tightened the CI Bandit gate from `-ll` to `-l` so low-severity regressions
+  surface in code scanning.
+
+### Fixed
+
+- **Stealth level now genuinely changes scan behaviour at every setting — it was
+  partly cosmetic.** The web launcher / CLI expose four levels (paranoid /
+  stealth / normal / aggressive), but several scanners accepted `stealth_level`
+  and then discarded it. The web crawler and the adaptive-intel profiler built a
+  *bare* `EvasionProfile(stealth_level=…)` whose timing fields stay `0`, so the
+  inter-request delay was a **no-op for every level** and the crawler's
+  concurrency was hardcoded (100) instead of scaling with the profile; the web
+  fuzzer collapsed all four levels into a stealthy/loud binary with a fixed
+  `Semaphore(5)`; and the IDOR scanner varied concurrency but never applied a
+  delay. Root cause was a footgun — `EvasionProfile(stealth_level=X)` only sets
+  the label; the real timing/concurrency lives in `STEALTH_PROFILES` via
+  `get_profile()`. Added `evasion_engine.profile_for()` /
+  `resolve_stealth_level()` (case-insensitive, unknown→NORMAL, returns a *copy*
+  so the long-lived API server can't corrupt the shared template) and routed the
+  crawler, adaptive-intel, network scanner, web fuzzer and IDOR scanner through
+  it. All four levels now differ in concurrency **and** inter-request delay (and
+  aggressive correctly stops rotating the User-Agent). The network scanner also
+  resolves its profile up front so an optional honeypot/CTF import failure can no
+  longer silently drop it to a no-evasion profile. New
+  `tests/test_stealth_levels.py` proves each level's behaviour and locks in the
+  footgun fix.
+- **`heaven replay` now actually works, and web-launched scans are reproducible.**
+  Two real gaps: (1) the web-scan background runner recorded a scan with **no
+  config at all**, so `heaven replay` / the replay endpoint had nothing to
+  reconstruct and the operator's stealth choice was lost the moment the scan
+  finished; (2) both replay paths read the stored config off `list_all_scans()`,
+  which returns only id/name/status/timestamps — **no `config_json`, no `mode`** —
+  so every replay silently fell back to an empty config ("no replayable targets").
+  Web scans now persist a full, replayable config (targets incl. the resolved
+  stealth level, `mode`, and the active seed), both replay paths read via
+  `list_scans()` (`SELECT *`, which carries `config_json` + `mode`), and CLI
+  `replay` now passes the stored `scan_mode` so it reproduces the original
+  *focused* mode instead of a blanket FULL run (stealth rides inside `targets`).
+  Added `server._resolve_stealth_name()` (int 1-4 / name → profile name, unknown →
+  normal) and `tests/test_replay_stealth_persistence.py`.
+- **IoT/OT scans no longer fabricate findings from an open port.** The IoT
+  scanner asserted BACnet and UPnP findings from a mere open port (no protocol
+  probe), did TCP-only discovery so UDP services (SNMP/BACnet/CoAP/UPnP) were
+  never actually reached, claimed default credentials without testing them, and
+  matched vendors by naive substring (`"GE"` in "imaGE"). It now sends real,
+  **read-only** protocol handshakes over the correct transport (UDP for
+  SNMP/CoAP/BACnet-Who-Is/SSDP-M-SEARCH; TCP for the ICS protocols), reports a
+  finding only on a protocol-correct response, **actively verifies** a default
+  credential before claiming it (else a low-confidence "verify" note), and
+  matches vendor tokens on whole words only. Open ICS ports that don't confirm
+  become an honest `info` "verify" finding, never a fabricated critical.
+- **Container scan no longer reports the scanner's own host for a remote target.**
+  The local `/var/run/docker.sock`, privileged-container and RBAC checks inspect
+  the machine HEAVEN runs on, so scanning any remote target from a workstation
+  with Docker installed emitted a bogus critical "Docker Socket Exposed"
+  attributed to the remote. Those local-host checks now run only when the target
+  is this host; remote targets get only the genuinely target-scoped probes
+  (Docker API 2375/2376, K8s API, etcd, kubelet).
+- **Email posture deepened.** Added DNSSEC (DNSKEY), MTA-STS and TLS-RPT checks
+  and a **non-intrusive** open-relay probe (MAIL FROM / RCPT TO for external
+  domains, then `RSET` — never `DATA`, so no mail is relayed).
+- **IoT vendor-panel default-credential false positive.** The panel check
+  attempted HTTP Basic auth and treated any `200` as "accepts default
+  credentials" — so an **open, no-auth** panel was reported as a CRITICAL
+  default-credential finding. It now only attempts (and claims) a default login
+  when the panel actually issued a `401` Basic challenge and the credential
+  clears it (`401`→`200` without a renewed challenge); open panels and
+  form-login panels stay a fingerprint-only `info` finding. (Also replaced the
+  deprecated `aiohttp.BasicAuth` with an explicit `Authorization` header.)
+- **API-mode false positives (deep detector audit).** Three FP paths in the API
+  scanner were closed: (1) the "API key leaked" check reported *any* `token=…` /
+  `secret=…` string in a response as a **critical** leak — but a login/CSRF/session
+  token in a response is normal, not a leak; the blanket `token` pattern is
+  removed, unambiguous provider keys (AWS/OpenAI/GitHub/Slack/Google/Stripe) stay
+  critical, and a generic `api_key`/`client_secret` value is reported only when it
+  passes a placeholder/entropy guard, as `medium` + "verify". (2) "No rate
+  limiting" fired even when the probed endpoint returned all `404`s (i.e. didn't
+  exist); it now requires the endpoint to actually process the requests. (3) "Mass
+  assignment" fired when the response merely *contained the field name* (a normal
+  profile object has a `role`/`active` field); it now reads the object first and
+  requires the injected privileged **value** to round-trip *and* differ from the
+  pre-existing value.
+- **WEB-mode injection false positives.** (1) Header-injection XSS was flagged on
+  the bare reflected canary — an HTML-escaped header reflection is inert, so it now
+  requires an *executable* reflection (matching the parameter-XSS gate). (2) POST
+  time-based SQLi was asserted from a single slow response, so a naturally slow
+  POST endpoint became a **critical** finding; it now uses the same
+  baseline-plus-reproduce guard the GET path already had.
+- **HTTP request-smuggling false positive (live sandbox E2E).** The web fuzzer
+  baselined the smuggling probes with a **GET** but sent the ambiguous CL.TE /
+  TE.TE requests as **POST**, so any server that answers POST differently from
+  GET — a `404`/`405` on a GET-only route, i.e. almost every server — tripped the
+  "smuggling indicator" on every path. The baseline is now a well-formed **POST**
+  to the same URL, isolating the ambiguous framing as the only variable.
+- **HSTS "max-age too short (0s)" on plain-HTTP ports.** The `no_hsts` branch was
+  correctly gated on TLS actually working, but the `hsts_short_maxage` branch was
+  not — so scanning any non-TLS port fired "HSTS max-age Too Short (0s)" from the
+  default `max_age=0`. HSTS is a TLS-only control; the whole check now runs only
+  when a TLS version negotiated.
+- **Version-based CVE findings persisted as `vuln_type: "unknown"`.** The inline
+  CVE-DB and NVD paths in the CVE mapper built findings without a `vuln_type`, so
+  every version-matched CVE (e.g. an Apache banner → Optionsbleed) landed
+  uncategorised — no KB taxonomy, blank type in reports. They now carry
+  `vulnerable_service` (aliased to the `vulnerable_component` KB entry) like the
+  live-feed path.
+- **CLOUD bucket mis-attribution.** Bucket-name guessing derived candidates from
+  RFC 2606 / 6761 reserved or non-distinctive registrable labels (`example`,
+  `test`, `localhost`, …), so a scan of `example.com` matched the unrelated public
+  `example-images` bucket and reported it as the target's **critical** exposed
+  asset. Those reserved base names are now skipped — a coincidental generic-name
+  match is no longer claimed as the target's bucket.
+
 ### Security
 
 - **Closed an XXE in the SCA Maven parser** (CWE-611). `pom.xml` files come from

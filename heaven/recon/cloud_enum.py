@@ -85,7 +85,7 @@ async def enumerate_aws() -> list[CloudAsset]:
                             a.public = True
                             a.issues.append(f"Public ACL: {grant.get('Permission')}")
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
                 # Default encryption at rest.
                 try:
                     await loop.run_in_executor(
@@ -100,7 +100,7 @@ async def enumerate_aws() -> list[CloudAsset]:
                         a.public = True
                         a.issues.append("Bucket policy is public")
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
                 assets.append(a)
 
         # Security groups: ingress open to the whole internet on sensitive ports.
@@ -166,7 +166,7 @@ async def enumerate_aws() -> list[CloudAsset]:
                             a.issues.append(f"Has full access: {p['PolicyName']}")
                     a.metadata["policies"] = [p["PolicyName"] for p in policies.get("AttachedPolicies", [])]
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
                 assets.append(a)
 
         await asyncio.gather(

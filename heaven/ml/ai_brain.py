@@ -283,7 +283,7 @@ class BayesianPrioritiser:
                 filtered = {k: v for k, v in vals.items() if k in valid_fields}
                 self.beliefs[host] = TargetBelief(**filtered)
         except Exception:
-            pass  # Corrupt persistence file — start fresh
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     def summary(self) -> dict:
         top = self.get_next_targets(10)

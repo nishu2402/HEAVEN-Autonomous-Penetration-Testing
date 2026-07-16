@@ -24,6 +24,9 @@ from typing import Optional
 import click
 
 from heaven.cli._helpers import _print
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 def _auth_args(host: str, user: str, password: str, key: Optional[str],
@@ -59,6 +62,7 @@ def _persist_findings(engagement: Optional[str], findings: list[dict],
                 store.upsert_finding(scan_id, f)
                 stored += 1
             except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
                 continue
         store.record_scan_complete(
             scan_id, {"findings": len(findings), "source": "postex"})

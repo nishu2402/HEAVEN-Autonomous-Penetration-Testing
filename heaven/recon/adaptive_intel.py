@@ -23,7 +23,7 @@ try:
 except ImportError:
     aiohttp = None  # type: ignore[assignment]
 
-from heaven.recon.evasion_engine import EvasionEngine, EvasionProfile, StealthLevel
+from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
 
 logger = get_logger("adaptive")
@@ -203,7 +203,7 @@ class AdaptiveIntelligence:
                                                    "case_alternation", "comment_injection"],
                             )
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         if best_match and best_match.confidence >= 0.3:
             logger.info(f"🛡️ WAF detected: {best_match.name} (confidence={best_match.confidence:.0%}) — "
@@ -217,13 +217,11 @@ class AdaptiveIntelligence:
         """Build a comprehensive intelligence profile of a target."""
         profile = TargetProfile(host=url)
 
-        stealth_map = {
-            "aggressive": StealthLevel.AGGRESSIVE,
-            "normal": StealthLevel.NORMAL,
-            "stealth": StealthLevel.STEALTH,
-            "paranoid": StealthLevel.PARANOID,
-        }
-        evasion_profile = EvasionProfile(stealth_level=stealth_map.get(stealth_level, StealthLevel.NORMAL))
+        # Full profile for the level so header behaviour matches it — e.g.
+        # AGGRESSIVE deliberately does NOT rotate the User-Agent, which the bare
+        # EvasionProfile(stealth_level=…) form would get wrong (it defaults
+        # rotation on for every level).
+        evasion_profile = profile_for(stealth_level)
         engine = EvasionEngine(evasion_profile)
         evasion_hdrs = engine.get_http_headers()
 

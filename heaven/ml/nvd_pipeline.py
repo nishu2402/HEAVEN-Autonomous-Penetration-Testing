@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 class NVDPipeline:
@@ -105,6 +108,7 @@ class NVDPipeline:
                     try:
                         cid = (json.loads(line).get("cve") or {}).get("id")
                     except Exception:
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
                         continue
                     if cid:
                         known.add(cid)
@@ -210,6 +214,7 @@ class NVDPipeline:
                     }
                     rows.append(row)
                 except Exception:
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
                     continue
 
         df = pd.DataFrame(rows)
@@ -235,7 +240,7 @@ class NVDPipeline:
                 for item in data.get("data", []):
                     scores[item["cve"]] = float(item.get("epss", 0.0))
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
             await asyncio.sleep(0.5)
         return scores
 

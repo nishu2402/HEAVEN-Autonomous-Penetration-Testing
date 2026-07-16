@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+from contextlib import asynccontextmanager
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -217,8 +218,12 @@ class IDORScanner:
         concurrency: int = 20,
         auth_headers: Optional[dict] = None,
         alt_auth_headers: Optional[dict] = None,
+        request_delay: float = 0.0,
     ) -> None:
         self._sem = asyncio.Semaphore(concurrency)
+        # Stealth throttle: seconds to pause while holding a concurrency slot, so
+        # higher stealth levels genuinely space IDOR probes out on the wire.
+        self._delay = request_delay
         self._base_headers = {
             "User-Agent": "HEAVEN-Scanner/1.0",
             **(auth_headers or {}),
@@ -234,6 +239,23 @@ class IDORScanner:
         self._has_auth = bool(auth_headers)
         self._findings: list[dict] = []
         self._seen: set[str] = set()
+
+    @asynccontextmanager
+    async def _slot(self):
+        """Acquire a concurrency slot and apply the stealth inter-request delay.
+
+        Sleeping *inside* the semaphore holds the slot, which rate-limits the
+        scanner as a whole — the intended, genuine effect of a higher stealth
+        level. At the default (delay=0) it is exactly equivalent to the bare
+        semaphore, so aggressive/normal keep full speed.
+        """
+        await self._sem.acquire()
+        try:
+            if self._delay:
+                await asyncio.sleep(self._delay)
+            yield
+        finally:
+            self._sem.release()
 
     def _add(self, **kwargs) -> None:
         key = hashlib.sha256(
@@ -259,7 +281,7 @@ class IDORScanner:
                 if candidate <= 0:
                     continue
                 test_url = _replace_path_segment(url, seg, str(candidate))
-                async with self._sem:
+                async with self._slot():
                     orig_status, orig_body = await _get(session, url, self._base_headers)
                     test_status, test_body = await _get(session, test_url, self._base_headers)
 
@@ -311,7 +333,7 @@ class IDORScanner:
                     if candidate <= 0:
                         continue
                     test_url = _replace_qs_param(url, param, str(candidate))
-                    async with self._sem:
+                    async with self._slot():
                         orig_status, orig_body = await _get(session, url, self._base_headers)
                         test_status, test_body = await _get(session, test_url, self._base_headers)
 
@@ -352,7 +374,7 @@ class IDORScanner:
                     if uuid_candidate == val:
                         continue
                     test_url = _replace_qs_param(url, param, uuid_candidate)
-                    async with self._sem:
+                    async with self._slot():
                         orig_status, orig_body = await _get(session, url, self._base_headers)
                         test_status, test_body = await _get(session, test_url, self._base_headers)
 
@@ -404,7 +426,7 @@ class IDORScanner:
         if not has_id and not has_param_id:
             return
 
-        async with self._sem:
+        async with self._slot():
             status_a, body_a = await _get(session, url, self._base_headers)
             status_b, body_b = await _get(session, url, self._alt_headers)
 
@@ -449,7 +471,7 @@ class IDORScanner:
             # Inject mass assignment fields
             for extra_field in MASS_ASSIGNMENT_FIELDS:
                 probe_data = {**base_data, extra_field: "1"}
-                async with self._sem:
+                async with self._slot():
                     status, body = await _post(session, action, probe_data, self._base_headers)
 
                 # A real mass-assignment tell is the injected field being *bound to
@@ -498,7 +520,7 @@ class IDORScanner:
             return
 
         no_auth = {"User-Agent": "HEAVEN-Scanner/1.0"}
-        async with self._sem:
+        async with self._slot():
             auth_status, auth_body = await _get(session, url, self._base_headers)
             unauth_status, unauth_body = await _get(session, url, no_auth)
 
@@ -582,13 +604,15 @@ async def scan_for_idor(
     stealth_level: str = "normal",
 ) -> dict:
     """Top-level function called from the orchestrator."""
+    # (concurrency, inter-request delay seconds) per stealth level — higher
+    # stealth fans out less AND spaces probes out, matching the other scanners.
     level_map = {
-        "aggressive": 40,
-        "normal": 20,
-        "stealth": 10,
-        "paranoid": 5,
+        "aggressive": (40, 0.0),
+        "normal": (20, 0.0),
+        "stealth": (10, 0.3),
+        "paranoid": (5, 1.0),
     }
-    concurrency = level_map.get(stealth_level, concurrency)
+    concurrency, request_delay = level_map.get(stealth_level, (concurrency, 0.0))
 
     # Pick up the active auth session (`heaven scan --auth` / --cookie-file) when
     # the caller didn't pass explicit headers, so the unauth-access and
@@ -600,6 +624,7 @@ async def scan_for_idor(
         concurrency=concurrency,
         auth_headers=auth_headers,
         alt_auth_headers=alt_auth_headers,
+        request_delay=request_delay,
     )
     return await scanner.scan(targets, forms_by_url=forms_by_url)
 

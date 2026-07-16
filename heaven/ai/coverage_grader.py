@@ -285,6 +285,7 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
         try:
             data = _json.loads(cfg)
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
         if isinstance(data, dict):
             targets = data.get("targets", data)

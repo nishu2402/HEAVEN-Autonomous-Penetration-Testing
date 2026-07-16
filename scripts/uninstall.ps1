@@ -102,3 +102,8 @@ Write-Host "  To delete entirely:  Remove-Item -Recurse -Force `"$InstallDir`""
 Write-Host ""
 Write-Warn "Open a NEW terminal so the PATH change takes effect."
 Write-Host ""
+
+# Cleanup uses only cmdlets, so no native command ever sets $LASTEXITCODE; a
+# caller that checks `if ($LASTEXITCODE -ne 0)` would otherwise read the fresh
+# session's $null and treat a clean uninstall as a failure. Exit explicitly.
+exit 0

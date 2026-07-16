@@ -66,6 +66,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (whose "target" is a source file or package, not a network host) are excluded
   from the 3D host map, so they no longer spawn phantom nodes like `src`. They
   still count toward severity totals and appear on the Findings page.
+- **Tool-install watchdog now actually kills a stuck install (CI red on Linux).**
+  `_run_install` launched the package manager via a shell and, on timeout, killed
+  only the shell. On Linux (`/bin/sh` = dash) the forked child kept the stdout
+  pipe open, so the streaming read loop blocked for the *full* command duration
+  and the timeout never took effect (`test_run_install_times_out_instead_of_hanging`
+  waited the whole 30 s and failed the 3.11/3.12 unit-test jobs). The child now
+  runs in its own process group and the watchdog kills the **whole group**, so a
+  hung install is terminated at the configured timeout on every platform.
+- **`heaven engage list` type error (mypy CI).** The dedupe map was annotated
+  `dict[str, object]`, so passing a value to `EngagementStore(Path | str)` was a
+  type error. It holds `Path` values — annotated correctly now; mypy is clean.
+- **`scripts/uninstall.ps1` reported success as failure on Windows.** The
+  uninstaller runs only PowerShell cmdlets (no native command), so in a fresh
+  session `$LASTEXITCODE` stayed `$null`; a caller's `if ($LASTEXITCODE -ne 0)`
+  read `$null -ne 0` as *true* and treated a clean uninstall as a failure (the
+  native-Windows E2E job went red even though every step printed success). Both
+  `install.ps1` and `uninstall.ps1` now `exit 0` explicitly on the success path
+  (fatal errors already abort via `Die`/non-zero), so their exit codes are
+  deterministic.
 
 - **`heaven install-tools`** — one command installs the external scanner
   binaries HEAVEN shells out to (nmap, nuclei, sqlmap, ffuf, searchsploit,

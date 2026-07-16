@@ -251,3 +251,8 @@ Write-Host "  heaven engage init my-engagement"
 Write-Host "  heaven scan -u https://target --i-have-authorization"
 Write-Host "  heaven serve                         # web UI -> http://localhost:8443"
 Write-Host ""
+
+# Fatal errors already abort via Die (exit 1); reaching here means success. Exit
+# explicitly so a tolerated non-zero from an earlier non-fatal step (e.g. an
+# optional feature pack) can't leak into a caller's $LASTEXITCODE check.
+exit 0

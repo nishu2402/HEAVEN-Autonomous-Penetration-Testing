@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -314,6 +315,19 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
     timeout = _install_timeout()
     timed_out = threading.Event()
 
+    # Run the child in its own process group (POSIX) / new group (Windows) so the
+    # watchdog can kill the WHOLE tree. An install command like ``sh -c "apt …"``
+    # forks helpers; killing only the shell leaves those children alive, still
+    # holding the stdout pipe open — the read loop below would then block until
+    # they exit on their own, defeating the timeout entirely.
+    popen_kwargs: dict[str, Any] = {}
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+    elif os.name == "nt":
+        # getattr keeps this off the type-checker's radar on POSIX, where the
+        # Windows-only flag doesn't exist; the branch only runs on Windows.
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
     try:
         proc = subprocess.Popen(
             run_cmd,
@@ -322,6 +336,7 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
             stdin=subprocess.DEVNULL,   # a child must never block reading stdin
             text=True,
             env=_install_env(),
+            **popen_kwargs,
         )
     except FileNotFoundError as e:
         return InstallResult(spec.name, "failed", command=cmd, detail=str(e))
@@ -331,9 +346,16 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
     def _kill() -> None:
         timed_out.set()
         try:
-            proc.kill()
-        except Exception:  # noqa: BLE001
-            pass
+            if os.name == "posix":
+                # Kill the whole process group so forked helpers die too.
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            else:
+                proc.kill()
+        except Exception:  # noqa: BLE001 — process may already be gone
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
 
     watchdog = threading.Timer(timeout, _kill)
     watchdog.start()

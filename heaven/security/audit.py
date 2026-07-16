@@ -39,7 +39,7 @@ class AuditAction(str, Enum):
     VAULT_KEY_ROTATED = "vault.key.rotated"
     AUTH_LOGIN_SUCCESS = "auth.login.success"
     AUTH_LOGIN_FAILED = "auth.login.failed"
-    AUTH_TOKEN_ISSUED = "auth.token.issued"
+    AUTH_TOKEN_ISSUED = "auth.token.issued"  # nosec B105 -- audit event name
     AUTH_BRUTE_FORCE_DETECTED = "auth.brute_force.detected"
     API_REQUEST = "api.request"
     API_RATE_LIMITED = "api.rate_limited"

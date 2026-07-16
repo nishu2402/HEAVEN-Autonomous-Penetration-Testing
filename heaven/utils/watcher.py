@@ -52,7 +52,7 @@ class WatchConfig:
         if self.jitter_pct <= 0:
             return float(self.interval_s)
         delta = self.interval_s * self.jitter_pct
-        return max(1.0, self.interval_s + random.uniform(-delta, delta))
+        return max(1.0, self.interval_s + random.uniform(-delta, delta))  # nosec B311
 
 
 @dataclass
@@ -162,7 +162,7 @@ async def run_watch(
                     try:
                         store.upsert_finding(orch.scan_id, f)
                     except Exception:
-                        pass
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
                 store.record_scan_complete(orch.scan_id, scan_summary)
 
                 iteration.scan_id = orch.scan_id
@@ -208,7 +208,7 @@ async def run_watch(
                 try:
                     on_iteration(iteration)
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
 
             logger.info(
                 f"[watch iter {iter_n}] scan={iteration.scan_id[:8] if iteration.scan_id else '—'} "

@@ -25,6 +25,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from heaven.utils.env_file import resolve_env_path, set_env_var, unset_env_var
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass(frozen=True)
@@ -247,11 +250,11 @@ def apply_settings(updates: dict[str, str]) -> dict:
             from heaven.ai.llm_gateway import reset_gateway
             reset_gateway()
         except Exception:  # noqa: BLE001 — settings must persist even if AI import fails
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
         try:
             from heaven.config import reload_config
             reload_config()
         except Exception:  # noqa: BLE001 — settings must persist even if config reload fails
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return {"changed": changed, "status": catalog_status()}

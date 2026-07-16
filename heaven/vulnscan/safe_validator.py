@@ -413,7 +413,7 @@ async def validate_xxe(session: aiohttp.ClientSession, url: str,
                     result.patch = "Disable DTD processing. Use defusedxml library for Python XML parsing."
                     break
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     result.duration_ms = (time.time() - start) * 1000
     return result

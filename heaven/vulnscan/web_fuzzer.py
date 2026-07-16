@@ -131,7 +131,7 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
                                     evidence={"allow": allow_hdr, "dangerous": dangerous},
                                 ))
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     await asyncio.gather(*[_try_method(m) for m in _DANGEROUS_METHODS[:6]])
     return findings
@@ -185,6 +185,7 @@ async def _fuzz_host_header(session: "aiohttp.ClientSession",
                     ))
                     break
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
 
     return findings
@@ -242,7 +243,7 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
                             bypassed.append({"type": "header", "headers": hdrs,
                                              "status": r.status, "body_len": len(body)})
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     async def _try_path_bypass(suffix: str) -> None:
         async with sem:
@@ -256,7 +257,7 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
                             bypassed.append({"type": "path", "suffix": suffix,
                                              "status": r.status, "body_len": len(body)})
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     await asyncio.gather(
         *[_try_header_bypass(h) for h in _BYPASS_HEADERS],
@@ -330,6 +331,7 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
                     ))
                     break
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
 
     # Check for web cache deception (path confusion)
@@ -350,7 +352,7 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
                             evidence={"deception_url": decept_url, "cache_control": cache_ctrl},
                         ))
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return findings
 
@@ -370,8 +372,16 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
     # ambiguous request is not, by itself, evidence. (Previously these checks
     # keyed off the *response* Content-Length header, which is present on almost
     # every 200, so they fired on nearly every server.)
+    #
+    # The baseline MUST use the same method as the probes (POST) with a
+    # well-formed Content-Length body. If we baselined with GET, a server that
+    # simply answers POST differently — 404/405 on a GET-only route, which is the
+    # norm — would look like an "anomaly" for every ambiguous POST and trip every
+    # check. Same-method baselining isolates the ambiguous *framing* as the only
+    # variable.
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as base:
+        async with session.post(url, data=b"heaven=probe",
+                                timeout=aiohttp.ClientTimeout(total=10)) as base:
             baseline_status = base.status
     except Exception:
         return findings  # can't establish a baseline → can't judge an anomaly
@@ -401,7 +411,7 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
                     cve="CVE-2019-16278",
                 ))
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     # TE header obfuscation: duplicate Transfer-Encoding headers with different
     # case. Again only report a *behavioural deviation* from the baseline.
@@ -425,7 +435,7 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
                               "note": "manual verification required"},
                 ))
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return findings
 
@@ -483,7 +493,7 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
                             "reflected": "HEAVEN_PROBE" in body,
                         })
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     await asyncio.gather(*[_try_param(p) for p in _HIDDEN_PARAMS])
 
@@ -529,7 +539,7 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
                     ))
                     break
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return findings
 
@@ -566,7 +576,7 @@ async def _fuzz_content_type(session: "aiohttp.ClientSession",
                     evidence={"payload": json_payload[:100]},
                 ))
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     try:
         # Try XML Content-Type to detect XXE surface
@@ -600,7 +610,7 @@ async def _fuzz_content_type(session: "aiohttp.ClientSession",
                         evidence={"status": resp.status},
                     ))
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return findings
 
@@ -653,6 +663,7 @@ async def _fuzz_method_override(session: "aiohttp.ClientSession",
                         ))
                         break  # Only report once per override header
             except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
                 continue
 
     return findings
@@ -714,8 +725,19 @@ async def fuzz_url(url: str, aggressive: bool = False) -> dict:
     }
 
 
-async def fuzz_targets(urls: list[str], aggressive: bool = False,
-                       max_urls: int = 40) -> dict:
+# Stealth level → (per-host concurrency, inter-request delay seconds). Lower
+# levels fan out wider and never pause; higher levels serialise and space
+# requests out so the fuzzer is genuinely quieter on the wire.
+_FUZZ_STEALTH: dict[str, tuple[int, float]] = {
+    "aggressive": (10, 0.0),
+    "normal": (5, 0.0),
+    "stealth": (3, 0.3),
+    "paranoid": (1, 1.0),
+}
+
+
+async def fuzz_targets(urls: list[str], aggressive: Optional[bool] = None,
+                       max_urls: int = 40, stealth_level: str = "normal") -> dict:
     """Fuzz multiple URLs concurrently.
 
     The verb-tampering / host-header / 403-bypass / cache-poisoning / smuggling /
@@ -725,7 +747,18 @@ async def fuzz_targets(urls: list[str], aggressive: bool = False,
     phase blowing past its time budget (and emitting hundreds of duplicates).
     Collapse to unique scheme+path (query stripped) and cap the count so the
     phase stays bounded and fast.
+
+    ``stealth_level`` throttles the fuzzer genuinely: it sets the per-host
+    concurrency and an inter-request delay, and — unless the caller passes an
+    explicit ``aggressive`` — decides whether to run the noisier parameter-
+    discovery pass (off for stealth/paranoid).
     """
+    concurrency, delay = _FUZZ_STEALTH.get(stealth_level, _FUZZ_STEALTH["normal"])
+    if aggressive is None:
+        # Parameter discovery fires many extra requests; skip it when the
+        # operator asked to stay quiet.
+        aggressive = stealth_level not in ("stealth", "paranoid")
+
     seen: set[str] = set()
     unique: list[str] = []
     for u in urls:
@@ -740,13 +773,15 @@ async def fuzz_targets(urls: list[str], aggressive: bool = False,
         logger.info(f"Web fuzz: {len(urls)} URLs collapsed to {len(unique)} unique "
                     f"path(s) (cap {max_urls})")
 
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(max(1, concurrency))
     all_findings: list[dict] = []
 
     async def _one(url: str) -> None:
         async with sem:
             r = await fuzz_url(url, aggressive=aggressive)
             all_findings.extend(r.get("findings", []))
+            if delay:
+                await asyncio.sleep(delay)
 
     await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
     return {

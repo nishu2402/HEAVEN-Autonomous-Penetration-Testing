@@ -21,8 +21,17 @@ from heaven.vulnscan.cloud_scanner import (
 
 
 def test_base_names_registrable_label():
-    assert base_names_from_target("https://app.example.com:8443/x")[0] == "example"
-    assert "app" in base_names_from_target("app.example.com")
+    assert base_names_from_target("https://app.acmecorp.com:8443/x")[0] == "acmecorp"
+    assert "app" in base_names_from_target("app.acmecorp.com")
+
+
+def test_base_names_skip_reserved_labels():
+    # RFC 2606 / 6761 reserved or non-distinctive registrable labels must not
+    # produce bucket candidates — a "example-images" match is coincidental, not
+    # the target's asset (guards the mis-attributed critical FP).
+    assert base_names_from_target("example.com") == []
+    assert base_names_from_target("test.local") == []
+    assert generate_bucket_candidates("example.com") == []
 
 
 def test_base_names_multi_part_tld():
@@ -33,10 +42,10 @@ def test_base_names_multi_part_tld():
 
 
 def test_candidate_generation_valid_bucket_names():
-    cands = generate_bucket_candidates("example.com", extra=["examplecorp"], limit=100)
-    assert "example" in cands
-    assert "example-backups" in cands
-    assert "examplecorp" in cands
+    cands = generate_bucket_candidates("acmecorp.com", extra=["acmecorpdata"], limit=100)
+    assert "acmecorp" in cands
+    assert "acmecorp-backups" in cands
+    assert "acmecorpdata" in cands
     # S3 naming rules: 3-63 chars, no trailing hyphen.
     for c in cands:
         assert 3 <= len(c) <= 63

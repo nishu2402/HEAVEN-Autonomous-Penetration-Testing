@@ -155,6 +155,7 @@ async def _scan_zone_transfer(domain: str) -> list[dict]:
         try:
             ns_ip = socket.gethostbyname(ns_clean)
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
 
         records = await loop.run_in_executor(
@@ -243,6 +244,7 @@ async def _check_subdomain_takeover(subdomain: str) -> Optional[dict]:
                         with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310
                             return resp.read(8192).decode("utf-8", errors="ignore")
                     except Exception:
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
                         continue
                 return ""
 
@@ -421,7 +423,7 @@ async def _enumerate_ptr(cidr: str, max_hosts: int = 256) -> list[dict]:
                 )
                 hosts_found.append({"ip": ip_str, "hostname": hostname[0]})
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     ips = list(network.hosts())[:max_hosts]
     await asyncio.gather(*[_lookup(str(ip)) for ip in ips])
@@ -630,7 +632,7 @@ async def dns_recon(domain: str, enumerate_subdomains: bool = False,
                             evidence={"version": version},
                         ))
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
 
     all_findings = _dedup(all_findings)
     crit = sum(1 for f in all_findings if f.get("severity") == "critical")

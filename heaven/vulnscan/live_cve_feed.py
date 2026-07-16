@@ -322,7 +322,7 @@ class LiveCVEFeed:
             from heaven.vulnscan.cve_mapper import lookup_inline_cves
             merged = filter_by_version(merged, product_key, version, lookup_inline_cves)
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
         # Cap first, then enrich only what we'll actually return — no point
         # paying EPSS/Exploit-DB cost on records that get sliced off.
         merged = merged[:max_results]

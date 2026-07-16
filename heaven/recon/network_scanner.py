@@ -12,7 +12,7 @@ import asyncio
 import ipaddress
 import sys
 import time
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 -- only ET.ParseError (a type) is used; all parsing goes through defusedxml below
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -22,7 +22,7 @@ from typing import Any, Optional
 # ET is still imported for its ParseError type below.
 from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
 
-from heaven.recon.evasion_engine import EvasionEngine, EvasionProfile, StealthLevel
+from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
 
 logger = get_logger("recon.network")
@@ -384,13 +384,10 @@ async def scan_network(
         logger.info("No network targets specified — skipping network scan")
         return {"hosts": [], "total_open_ports": 0}
 
-    stealth_map = {
-        "aggressive": StealthLevel.AGGRESSIVE,
-        "normal": StealthLevel.NORMAL,
-        "stealth": StealthLevel.STEALTH,
-        "paranoid": StealthLevel.PARANOID,
-    }
-    profile = EvasionProfile(stealth_level=stealth_map.get(stealth_level, StealthLevel.NORMAL))
+    # Resolve the FULL evasion profile (timing + concurrency) for this level up
+    # front — this can't fail (same module, no I/O) so stealth always takes
+    # effect even if the optional honeypot/CTF add-ons below are unavailable.
+    profile = profile_for(stealth_level)
     engine = EvasionEngine(profile)
 
     # Pre-init so a NON-ImportError failure below (e.g. a runtime bug in the
@@ -398,12 +395,10 @@ async def scan_network(
     hp_engine = None
     ctf = None
     try:
-        from heaven.recon.evasion_engine import get_profile, HoneypotEvasionEngine
+        from heaven.recon.evasion_engine import HoneypotEvasionEngine
         from heaven.recon.ctf_extractor import CTFFlagExtractor
         from heaven.recon.honeypot_detector import analyze_host as hp_analyze
 
-        profile = get_profile(stealth_map.get(stealth_level, StealthLevel.NORMAL))
-        engine = EvasionEngine(profile)
         hp_engine = HoneypotEvasionEngine(threshold=profile.honeypot_threshold)
         ctf = CTFFlagExtractor()
     except Exception as e:

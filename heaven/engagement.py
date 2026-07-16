@@ -53,7 +53,7 @@ def get_active_engagement() -> Optional[str]:
             name = p.read_text(encoding="utf-8").strip()
             return name or None
     except Exception:  # noqa: BLE001 — a missing/corrupt pointer just means "default"
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
     return None
 
 
@@ -235,7 +235,7 @@ def _host_key(target: str) -> str:
             if host:
                 return f"{scheme}://{host}"
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
     # bare host / host:port / host/path
     return t.split("/")[0].lower()
 

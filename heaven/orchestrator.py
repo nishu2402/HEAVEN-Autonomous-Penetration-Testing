@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
-from heaven.config import HeavenConfig, get_config
+from heaven.config import HeavenConfig, ScanMode, get_config
 from heaven.ml.ai_brain import BayesianPrioritiser
 from heaven.utils.logger import get_logger
 
@@ -158,8 +158,15 @@ class ScanOrchestrator:
     """
 
     def __init__(self, config: Optional[HeavenConfig] = None,
-                 checkpoint_store=None, resume_scan_id: Optional[str] = None):
+                 checkpoint_store=None, resume_scan_id: Optional[str] = None,
+                 scan_mode: Optional[ScanMode] = None):
         self.config = config or get_config()
+        # The active scan mode decides which tasks are registered. FULL runs
+        # every module; a focused mode (WEB/NETWORK/API/…) registers only the
+        # tasks tagged for it, so each mode is a genuine, targeted scan rather
+        # than the full pipeline with a different label. An explicit arg wins
+        # over config so concurrent API scans never race on the shared singleton.
+        self.active_mode: ScanMode = scan_mode or self.config.scan_mode or ScanMode.FULL
         # Use the resumed scan_id if provided so checkpoints line up
         self.scan_id = resume_scan_id or str(uuid.uuid4())
         self.tasks: dict[str, OrchestratorTask] = {}
@@ -209,15 +216,38 @@ class ScanOrchestrator:
         depends_on: Optional[list[str]] = None,
         concurrency_group: str = "default",
         timeout: float = 300.0,
+        modes: Optional[frozenset[ScanMode]] = None,
         **kwargs,
-    ) -> str:
-        """Register a task in the execution graph. Returns task ID."""
+    ) -> Optional[str]:
+        """Register a task in the execution graph. Returns task ID, or ``None``
+        if the task is skipped because it does not belong to the active scan
+        mode.
+
+        ``modes`` is the set of scan modes this task belongs to; ``None`` means
+        "every mode". In FULL mode every task registers. In a focused mode a
+        task whose ``modes`` set excludes the active mode is skipped, so callers
+        that store the returned id may get ``None`` — that is expected and is
+        filtered out of any ``depends_on`` list automatically.
+        """
+        if (
+            modes is not None
+            and self.active_mode is not ScanMode.FULL
+            and self.active_mode not in modes
+        ):
+            logger.debug(f"Task skipped (mode {self.active_mode.value}): {name}")
+            return None
+
+        # Drop dependency ids that were skipped (None) or never registered
+        # (a prerequisite that belongs to a different mode). A dependent task
+        # then simply waits on whichever of its prerequisites are present.
+        resolved_deps = [d for d in (depends_on or []) if d and d in self.tasks]
+
         task = OrchestratorTask(
             name=name,
             phase=phase,
             coro_factory=coro_factory,
             kwargs=kwargs,
-            depends_on=depends_on or [],
+            depends_on=resolved_deps,
             concurrency_group=concurrency_group,
             timeout=timeout,
         )
@@ -666,9 +696,16 @@ class ScanOrchestrator:
 
 def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     checkpoint_store=None,
-                    resume_scan_id: Optional[str] = None) -> ScanOrchestrator:
+                    resume_scan_id: Optional[str] = None,
+                    scan_mode: Optional[ScanMode] = None) -> ScanOrchestrator:
     """
-    Build the HEAVEN full scan pipeline.
+    Build the HEAVEN scan pipeline for the requested ``scan_mode``.
+
+    In ``ScanMode.FULL`` every module runs. In a focused mode (WEB, NETWORK,
+    API, CLOUD, CONTAINER, IOT, OT, AD, EMAIL) only the tasks tagged for that
+    mode are registered, so each mode is a genuine, targeted assessment — plus
+    the shared enrichment tail (validation, FP-suppression, ML scoring, MITRE
+    mapping, reporting) which every mode runs on whatever it discovered.
 
     If ``checkpoint_store`` is provided (an EngagementStore), each task's
     terminal state is persisted, and passing ``resume_scan_id`` makes the
@@ -681,8 +718,17 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     from heaven.recon.honeypot_detector import check_honeypots
 
     orch = ScanOrchestrator(config, checkpoint_store=checkpoint_store,
-                             resume_scan_id=resume_scan_id)
+                             resume_scan_id=resume_scan_id, scan_mode=scan_mode)
     stealth = targets.get("stealth_level", "normal")
+
+    # ── Scan-mode task groups ─────────────────────────────────────────────
+    # Each add_task is tagged with the set of modes it belongs to. `None`
+    # (the add_task default) means "every mode". FULL always registers all.
+    M = ScanMode
+    NET_MODES = frozenset({M.NETWORK, M.AD, M.IOT, M.OT, M.CONTAINER})
+    WEB_MODES = frozenset({M.WEB})
+    WEBAPI_MODES = frozenset({M.WEB, M.API})
+    WEBNET_MODES = frozenset({M.WEB, M.NETWORK, M.API})
 
     # Authenticated scanning: if the operator loaded a cookie file / login session
     # (`heaven scan --cookie-file` / `--auth`), feed those cookies + headers to the
@@ -704,6 +750,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     net_id = orch.add_task(
         "Network Reconnaissance", scan_network,
         phase=ScanPhase.RECON, concurrency_group="network",
+        modes=NET_MODES,
         targets=targets.get("ips", []),
         port_range=targets.get("ports", "1-65535"),
         stealth_level=stealth,
@@ -713,6 +760,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     web_id = orch.add_task(
         "Web Application Crawling", crawl_targets,
         phase=ScanPhase.RECON, concurrency_group="web",
+        modes=WEBAPI_MODES,
         urls=targets.get("urls", []),
         stealth_level=stealth,
         auth_config=_auth_cfg,
@@ -721,6 +769,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     cloud_id = orch.add_task(
         "Cloud Asset Enumeration", enumerate_cloud,
         phase=ScanPhase.RECON, concurrency_group="cloud",
+        modes=frozenset({M.CLOUD}),
         providers=targets.get("cloud_providers", []),
     )
 
@@ -728,8 +777,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # operator passes --cloud-buckets. Guesses bucket names from the target
     # hostnames and proves public exposure from each provider's own response.
     async def _cloud_bucket_scan(**kw):
-        if not targets.get("cloud_buckets"):
-            return {"skipped": True, "reason": "not requested (--cloud-buckets)"}
+        # Selecting CLOUD mode is itself the opt-in: the operator explicitly asked
+        # for a cloud assessment, so the public-bucket exposure probe runs
+        # automatically. In any other mode it stays opt-in (--cloud-buckets)
+        # because it fires external requests to AWS / GCS / Azure.
+        if not (targets.get("cloud_buckets") or orch.active_mode is ScanMode.CLOUD):
+            return {"skipped": True, "reason": "not requested (--cloud-buckets or CLOUD mode)"}
         from urllib.parse import urlparse
 
         from heaven.vulnscan.cloud_scanner import CloudStorageScanner
@@ -749,11 +802,13 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "Public Cloud Bucket Exposure", _cloud_bucket_scan,
         phase=ScanPhase.VULN_SCAN, concurrency_group="cloud",
+        modes=frozenset({M.CLOUD}),
     )
 
     git_id = orch.add_task(
         "Git Secret Scanning", scan_repositories,
         phase=ScanPhase.RECON,
+        modes=frozenset({M.DEVSECOPS, M.CI}),
         repos=targets.get("repositories", []),
     )
 
@@ -768,6 +823,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     hp_id = orch.add_task(
         "Honeypot Detection", _honeypot_phase,
         phase=ScanPhase.RECON, depends_on=[net_id],
+        modes=frozenset({M.NETWORK}),
     )
 
     # ═══ Phase: DEEP RECON (subdomain enum, JS secrets, endpoint fuzzing) ═══
@@ -798,6 +854,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     deep_id = orch.add_task(
         "Deep Reconnaissance", _deep_recon,
         phase=ScanPhase.RECON, depends_on=[web_id],
+        modes=WEBAPI_MODES,
         timeout=600,
     )
 
@@ -825,6 +882,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "Shodan Passive Intelligence", _shodan_recon,
         phase=ScanPhase.RECON,
+        modes=WEBNET_MODES,
         timeout=120,
     )
 
@@ -851,6 +909,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     adapt_id = orch.add_task(
         "Adaptive Target Profiling", _adaptive_profile,
         phase=ScanPhase.RECON, depends_on=[web_id],
+        modes=WEBAPI_MODES,
     )
 
     # ═══ Phase: AI_PARSE (Layer B — agentic recon parser) ═══
@@ -950,6 +1009,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     zday_id = orch.add_task(
         "Anomaly Probe", _anomaly_probe,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id],
+        modes=WEBAPI_MODES,
         timeout=600,
     )
 
@@ -985,6 +1045,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     adv_id = orch.add_task(
         "Advanced Exploitation Tests", _advanced_attacks,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        modes=WEBAPI_MODES,
         timeout=600,
     )
 
@@ -1024,6 +1085,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                                 continue
                             text = await resp.text()
                     except Exception:  # noqa: BLE001 - unreachable path, try next
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
                         continue
                     if text.strip():
                         findings.extend(
@@ -1033,6 +1095,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "Dependency Audit (SCA/OSV)", _sca_probe,
         phase=ScanPhase.VULN_SCAN, depends_on=[deep_id],
+        modes=frozenset({M.WEB, M.DEVSECOPS, M.CI}),
         timeout=300,
     )
 
@@ -1085,6 +1148,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "AI Hypothesis → Verify", _ai_hypothesis,
         phase=ScanPhase.VULN_SCAN, depends_on=[ai_parse_id, deep_id],
+        modes=WEBAPI_MODES,
         timeout=600,
     )
 
@@ -1118,6 +1182,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     nuclei_id = orch.add_task(
         "Nuclei Scanner", _nuclei_scan,
         phase=ScanPhase.VULN_SCAN, depends_on=[adv_id],
+        modes=WEBNET_MODES,
         timeout=1800,
     )
 
@@ -1156,6 +1221,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     ssl_id = orch.add_task(
         "SSL/TLS Audit", _ssl_scan,
         phase=ScanPhase.VULN_SCAN, depends_on=[net_id, web_id],
+        modes=WEBNET_MODES,
         concurrency_group="network", timeout=300,
     )
 
@@ -1189,6 +1255,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     auth_id = orch.add_task(
         "Authentication Security Audit", _auth_scan,
         phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        modes=WEBAPI_MODES,
         concurrency_group="web", timeout=600,
     )
 
@@ -1208,15 +1275,18 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                         urls.append(ep_url)
             if not urls:
                 return {"skipped": True, "reason": "no URLs to fuzz"}
-            aggressive = stealth not in ("stealth", "paranoid")
+            # Pass the stealth level through — fuzz_targets derives concurrency,
+            # inter-request delay AND the parameter-discovery toggle from it, so
+            # all four levels behave distinctly (not just a stealthy/loud binary).
             # fuzz_targets returns {"findings": [...], "vulnerabilities": [...], "total": int}
-            return await fuzz_targets(urls, aggressive=aggressive)
+            return await fuzz_targets(urls, stealth_level=stealth)
         except ImportError:
             return {}
 
     fuzz_id = orch.add_task(
         "Web Application Fuzzing", _web_fuzz,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        modes=WEB_MODES,
         concurrency_group="web", timeout=600,
     )
 
@@ -1264,6 +1334,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "Misconfiguration & Out-of-Band Scan", _misconfig_oob,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        modes=WEBAPI_MODES,
         concurrency_group="web", timeout=600,
     )
 
@@ -1302,6 +1373,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     inject_id = orch.add_task(
         "Injection Discovery (XSS/SQLi)", _injection_scan,
         phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        modes=WEBAPI_MODES,
         concurrency_group="web", timeout=600,
     )
 
@@ -1338,6 +1410,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     dir_fuzz_id = orch.add_task(
         "Directory & File Fuzzing", _dir_fuzz,
         phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        modes=WEB_MODES,
         concurrency_group="web", timeout=900,
     )
 
@@ -1366,6 +1439,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     idor_id = orch.add_task(
         "IDOR & Privilege Escalation Scan", _idor_scan,
         phase=ScanPhase.VULN_SCAN, depends_on=[web_id, inject_id],
+        modes=WEBAPI_MODES,
         concurrency_group="web", timeout=600,
     )
 
@@ -1399,6 +1473,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     dns_id = orch.add_task(
         "DNS Security Reconnaissance", _dns_recon,
         phase=ScanPhase.VULN_SCAN, depends_on=[deep_id],
+        modes=frozenset({M.WEB, M.NETWORK, M.EMAIL}),
         concurrency_group="network", timeout=300,
     )
 
@@ -1559,6 +1634,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "SQLMap Exploitation", _sqlmap_scan,
         phase=ScanPhase.VALIDATION, depends_on=[val_id],
+        modes=WEBAPI_MODES,
         timeout=600,
     )
 
@@ -1792,10 +1868,11 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "Active Directory Scan", _ad_scan,
         phase=ScanPhase.AD_RECON, depends_on=[net_id],
+        modes=frozenset({M.AD}),
         timeout=600,
     )
 
-    # ═══ Phase: IOT SCAN ═══
+    # ═══ Phase: IOT SCAN (consumer / building automation) ═══
     async def _iot_scan(**kw):
         try:
             from heaven.recon.iot_scanner import scan_iot_targets
@@ -1804,8 +1881,27 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             return {}
 
     orch.add_task(
-        "IoT/SCADA/OT Scan", _iot_scan,
+        "IoT/SCADA Scan", _iot_scan,
         phase=ScanPhase.IOT_SCAN, depends_on=[net_id],
+        modes=frozenset({M.IOT}),
+        timeout=600,
+    )
+
+    # ═══ Phase: OT/ICS SCAN (operational technology — industrial protocols) ═══
+    # Distinct from the consumer/IoT sweep: focuses on ICS/SCADA protocols
+    # (Modbus, S7comm, EtherNet/IP, DNP3, IEC-104, OPC-UA, BACnet) using
+    # READ-ONLY handshakes — never writes to a PLC.
+    async def _ot_scan(**kw):
+        try:
+            from heaven.recon.iot_scanner import scan_ot_targets
+            return await scan_ot_targets(targets=targets.get("ot_targets", targets.get("ips", [])))
+        except ImportError:
+            return {}
+
+    orch.add_task(
+        "OT/ICS Scan", _ot_scan,
+        phase=ScanPhase.IOT_SCAN, depends_on=[net_id],
+        modes=frozenset({M.OT}),
         timeout=600,
     )
 
@@ -1820,6 +1916,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "API Security Scan", _api_scan,
         phase=ScanPhase.API_SCAN, depends_on=[web_id, adapt_id],
+        modes=frozenset({M.API}),
         timeout=600,
     )
 
@@ -1834,6 +1931,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "Container/K8s Scan", _container_scan,
         phase=ScanPhase.CONTAINER_SCAN, depends_on=[net_id],
+        modes=frozenset({M.CONTAINER}),
         timeout=600,
     )
 
@@ -1857,6 +1955,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch.add_task(
         "Email Security Scan", _email_scan,
         phase=ScanPhase.RECON, depends_on=[web_id],
+        modes=frozenset({M.EMAIL}),
     )
 
     # ═══ Phase: ML SCORING ═══

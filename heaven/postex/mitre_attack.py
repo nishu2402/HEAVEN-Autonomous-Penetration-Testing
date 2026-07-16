@@ -64,7 +64,7 @@ T_UAC_BYPASS = "T1548.002"     # Abuse Elevation Control Mechanism: Bypass UAC
 T_WINDOWS_SERVICE = "T1543.003"  # Create or Modify System Process: Windows Service
 T_UNQUOTED_PATH = "T1574.009"  # Path Interception by Unquoted Path
 T_SERVICE_PERMS = "T1574.010"  # Services File Permissions Weakness
-T_TOKEN_IMPERSONATION = "T1134.001"  # Access Token Manipulation: Token Impersonation/Theft
+T_TOKEN_IMPERSONATION = "T1134.001"  # nosec B105 -- ATT&CK id (Token Impersonation/Theft)
 
 # Credential access
 T_VALID_ACCOUNTS = "T1078"     # Valid Accounts
@@ -73,7 +73,7 @@ T_CREDS_IN_REGISTRY = "T1552.002"  # Unsecured Credentials: Credentials in Regis
 T_BASH_HISTORY = "T1552.003"   # Bash History
 T_PRIVATE_KEYS = "T1552.004"   # Private Keys
 T_CLOUD_METADATA = "T1552.005"  # Cloud Instance Metadata API
-T_PASSWORD_STORES = "T1555"    # Credentials from Password Stores
+T_PASSWORD_STORES = "T1555"    # Credentials from Password Stores  # nosec B105
 T_KUBECONFIG = "T1552.007"     # Container API (kubeconfig / service-account token)
 
 # Discovery
@@ -91,7 +91,7 @@ T_LOCAL_DATA = "T1005"         # Data from Local System
 # Lateral movement
 T_SSH = "T1021.004"            # Remote Services: SSH
 T_SMB = "T1021.002"            # Remote Services: SMB/Windows Admin Shares
-T_PASS_THE_HASH = "T1550.002"  # Use Alternate Authentication Material: Pass the Hash
+T_PASS_THE_HASH = "T1550.002"  # Use Alternate Authentication Material: Pass the Hash  # nosec B105
 
 # Persistence *opportunities* (HEAVEN identifies, never installs)
 T_SSH_AUTHKEYS = "T1098.004"   # Account Manipulation: SSH Authorized Keys

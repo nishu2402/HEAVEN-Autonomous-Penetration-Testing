@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from heaven.utils.logger import get_logger
@@ -114,6 +114,37 @@ STEALTH_PROFILES: dict[StealthLevel, EvasionProfile] = {
 def get_profile(level: StealthLevel = StealthLevel.NORMAL) -> EvasionProfile:
     """Get a pre-configured evasion profile."""
     return STEALTH_PROFILES[level]
+
+
+def resolve_stealth_level(level: str | StealthLevel) -> StealthLevel:
+    """Coerce a stealth-level string (case-insensitive) or enum to a StealthLevel.
+
+    The whole tool passes stealth around as a plain string ("paranoid" / "stealth"
+    / "normal" / "aggressive") — from the CLI ``--stealth`` choice and the web
+    launcher's 1-4 selector. This is the one place that turns that string into the
+    typed enum; an unknown/empty value falls back to NORMAL so a stray config can
+    never crash a scan.
+    """
+    if isinstance(level, StealthLevel):
+        return level
+    try:
+        return StealthLevel(str(level).strip().lower())
+    except ValueError:
+        return StealthLevel.NORMAL
+
+
+def profile_for(level: str | StealthLevel) -> EvasionProfile:
+    """Return the fully-configured evasion profile for a stealth level string/enum.
+
+    ALWAYS prefer this over ``EvasionProfile(stealth_level=...)`` when you have a
+    level and want it to actually take effect. The bare constructor only sets the
+    ``stealth_level`` label and leaves every timing/concurrency/fragmentation field
+    at its zero default — i.e. *no evasion at all* — which silently defeats stealth
+    mode regardless of which level was selected. Returns a fresh copy so callers
+    (notably the long-lived API server that runs many scans per process) can never
+    mutate the shared ``STEALTH_PROFILES`` template.
+    """
+    return replace(get_profile(resolve_stealth_level(level)))
 
 
 class EvasionEngine:

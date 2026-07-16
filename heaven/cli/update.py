@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,7 +58,7 @@ def _update_nuclei() -> tuple[bool, str, int]:
     if not shutil.which("nuclei"):
         return False, "nuclei binary not on PATH", 0
     try:
-        proc = subprocess.run(
+        proc = subprocess.run(  # nosec B603 B607 -- fixed argv on PATH, no shell
             ["nuclei", "-update-templates", "-silent"],
             capture_output=True, text=True, timeout=120,
         )

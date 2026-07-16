@@ -1356,8 +1356,8 @@ _ALIASES: dict[str, str] = {
     "graphql_complexity": "graphql_dos",
     "graphql_alias_overloading": "graphql_dos",
     "api_key_leakage": "secret_exposure",
-    "exposed_secret": "secret_exposure",
-    "hardcoded_secret": "secret_exposure",
+    "exposed_secret": "secret_exposure",  # nosec B105 -- taxonomy string, not a secret
+    "hardcoded_secret": "secret_exposure",  # nosec B105 -- taxonomy string, not a secret
     "credential_leak": "secret_exposure",
     # Containers / Kubernetes / infra
     "docker_api_exposed": "docker_socket_exposed",
@@ -1402,7 +1402,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "cors_misconfig": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N",
     "insecure_cookie": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "cookie_no_httponly": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N",
-    "jwt_weak_secret": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "jwt_weak_secret": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",  # nosec B105
     "jwt_none_algorithm": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "crlf_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
     "request_smuggling": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:N",
@@ -1437,7 +1437,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "vulnerable_component": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "graphql_introspection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "graphql_dos": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
-    "secret_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "secret_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",  # nosec B105
     "smtp_no_starttls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "ssh_hardening": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
     "container_escape_risk": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",

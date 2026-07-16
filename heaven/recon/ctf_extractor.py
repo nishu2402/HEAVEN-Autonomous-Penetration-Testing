@@ -187,7 +187,7 @@ class CTFFlagExtractor:
                             ))
                             logger.info(f"🚩 ENCODED FLAG DECODED: {flag_text} (base64)")
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         # Hex candidates
         hex_matches = re.findall(r"(?:0x)?([0-9a-fA-F]{32,})", text)
@@ -211,7 +211,7 @@ class CTFFlagExtractor:
                             ))
                             logger.info(f"🚩 ENCODED FLAG DECODED: {flag_text} (hex)")
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         return flags
 

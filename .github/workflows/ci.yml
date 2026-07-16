@@ -106,7 +106,7 @@ jobs:
       - name: Install bandit
         run: pip install "bandit[toml,sarif]"
       - name: Run bandit
-        run: bandit -r heaven/ -ll -f sarif -o bandit.sarif -c pyproject.toml
+        run: bandit -r heaven/ -l -f sarif -o bandit.sarif -c pyproject.toml
         continue-on-error: true
       - name: Upload SARIF to GitHub code scanning
         if: always()

@@ -805,6 +805,11 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                 all_vulns.append({
                     "host":             host.get("host", "unknown"),
                     "port":             port_info.get("port", 0),
+                    # vuln_type drives report taxonomy — without it the finding
+                    # persists as "unknown". "vulnerable_service" aliases to the
+                    # "vulnerable_component" KB entry so an inline-DB CVE is
+                    # categorised the same as a live/NVD one.
+                    "vuln_type":        "vulnerable_service",
                     "cve":              cve_rec.cve_id,
                     "title":            cve_rec.title,
                     "severity":         cve_rec.severity,
@@ -827,6 +832,9 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                             all_vulns.append({
                                 "host":             host.get("host", "unknown"),
                                 "port":             port_info.get("port", 0),
+                                # Same taxonomy as the inline/live paths so an
+                                # NVD-sourced CVE never persists as "unknown".
+                                "vuln_type":        "vulnerable_service",
                                 "cve":              cve.cve_id,
                                 "title":            cve.title,
                                 "severity":         cve.severity,

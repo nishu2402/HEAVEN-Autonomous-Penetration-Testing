@@ -208,7 +208,7 @@ class SMBLateralExecutor:
             raise PermissionError("SMBLateralExecutor requires authorized=True")
         self.timeout = timeout
 
-    def _login_one(
+    def _login_one(  # nosec B107 -- empty-string default, not a secret
         self, host: str, port: int, user: str, domain: str,
         password: str = "", nthash: str = "",
     ) -> tuple[bool, str]:
@@ -246,7 +246,7 @@ class SMBLateralExecutor:
             summary.errors.append("impacket not installed; pip install impacket")
             return summary
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         technique = "psexec_nthash" if nthash else "psexec_password"
 
         for host, port in targets:

@@ -178,10 +178,10 @@ async def _check_wildcard_dns(domain: str) -> Optional[set[str]]:
     import string
     wildcard_ips: Optional[set[str]] = None
     for _ in range(2):
-        rand_label = "".join(random.choices(string.ascii_lowercase, k=16))
+        rand_label = "".join(random.choices(string.ascii_lowercase, k=16))  # nosec B311
         probe = f"{rand_label}.{domain}"
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             addrs = await loop.getaddrinfo(probe, None)
             # sockaddr[0] is typed str | int (IPv6 scope); coerce to str so this
             # matches wildcard_ips: set[str] | None.
@@ -361,7 +361,7 @@ async def extract_js_secrets(session: aiohttp.ClientSession, url: str,
                         ))
 
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     logger.info(f"JS analysis: {len([s for s in secrets if s.asset_type == 'secret'])} secrets, "
                  f"{len([s for s in secrets if s.asset_type == 'endpoint'])} endpoints from {len(js_urls)} files")
@@ -382,7 +382,7 @@ async def _discover_js_files(session: aiohttp.ClientSession, url: str) -> list[s
                 if match.endswith(".js"):
                     js_urls.append(urljoin(url, match))
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
     return list(set(js_urls))
 
 
@@ -421,7 +421,7 @@ async def discover_vhosts(session: aiohttp.ClientSession, ip: str,
                         metadata={"status": status, "length": body_len},
                     ))
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     if discovered:
         logger.info(f"VHost discovery: {len(discovered)} virtual hosts on {ip}")
@@ -634,7 +634,7 @@ async def fuzz_endpoints(session: aiohttp.ClientSession, base_url: str,
                                        "requires_auth": status in (401, 403)},
                         )
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
             return None
 
     tasks = [check_path(p) for p in target_paths]
@@ -667,7 +667,7 @@ async def analyze_certificate(host: str, port: int = 443) -> list[DiscoveredAsse
         try:
             await writer.wait_closed()
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
         if cert:
             # Extract SANs (Subject Alternative Names)

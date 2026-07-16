@@ -24,9 +24,13 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+# A pom.xml comes from the *scanned* project, which may be hostile, so parse it
+# with defusedxml — stdlib ElementTree is vulnerable to entity-expansion and
+# external-DTD (billion-laughs / XXE-SSRF / local file read on the analyst host).
+from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
 
 from heaven.utils.logger import get_logger
 from heaven.vulnscan.osv_client import OSVClient, OSVVuln, Package
@@ -233,8 +237,8 @@ def _parse_pom_xml(text: str) -> list[tuple[str, str]]:
     """Maven pom.xml — ``groupId:artifactId`` @ version (skip property versions)."""
     out: list[tuple[str, str]] = []
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError:
+        root = _safe_xml_fromstring(text)
+    except Exception:  # noqa: BLE001 — ParseError or a defused entity/DTD rejection → skip
         return out
     ns = ""
     if root.tag.startswith("{"):

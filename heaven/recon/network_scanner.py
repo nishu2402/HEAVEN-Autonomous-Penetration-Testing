@@ -16,6 +16,12 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+# nmap output is ours (we ran the subprocess), but parse it through defusedxml
+# anyway — defence in depth costs nothing and a compromised/mitm'd nmap binary
+# or a crafted scan target can't turn XML parsing into an XXE on this host.
+# ET is still imported for its ParseError type below.
+from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
+
 from heaven.recon.evasion_engine import EvasionEngine, EvasionProfile, StealthLevel
 from heaven.utils.logger import get_logger
 
@@ -243,7 +249,7 @@ async def scan_host(
 
             if stdout:
                 try:
-                    xml_root = ET.fromstring(stdout)  # nosec B314 — nmap subprocess output
+                    xml_root = _safe_xml_fromstring(stdout)
 
                     # ── Host liveness ─────────────────────────────────────────
                     status = xml_root.find(".//status")

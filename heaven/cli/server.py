@@ -23,7 +23,7 @@ def _browser_host(host: str) -> str:
     A server bound to 0.0.0.0 (all interfaces) or :: is not a routable address
     for a client — the loopback alias is. Everything else is used verbatim.
     """
-    if host in ("0.0.0.0", "::", ""):  # nosec B104 — mapping bind-any → loopback
+    if host in ("0.0.0.0", "::", ""):  # "0.0.0.0" is a match value, not a bind
         return "127.0.0.1"
     return host
 
@@ -37,6 +37,8 @@ def _wait_and_open(host: str, port: int, url: str, timeout: float = 20.0) -> Non
     server must keep running even if no browser is available (e.g. headless).
     """
     deadline = time.monotonic() + timeout
+    # Not a bind: "0.0.0.0" here is a match value we rewrite *to* loopback so the
+    # readiness probe dials localhost, never all-interfaces.
     connect_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
     while time.monotonic() < deadline:
         try:
@@ -68,7 +70,7 @@ def serve(host: str, port: int, open_browser: bool) -> None:
     print_banner()
     _print(f"[cyan]Starting HEAVEN API server on {host}:{port}[/cyan]")
 
-    if host == "0.0.0.0":  # nosec B104 — intentional, user is warned below
+    if host == "0.0.0.0":  # intentional all-interfaces bind; user is warned below
         _print("[yellow]⚠  Binding to 0.0.0.0 — make sure you are behind a reverse proxy with TLS.[/yellow]")
 
     url = f"http://{_browser_host(host)}:{port}/"

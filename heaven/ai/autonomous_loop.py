@@ -287,7 +287,7 @@ async def _execute_action(
                 try:
                     engagement_store.upsert_finding(orch.scan_id, f)
                 except Exception:
-                    pass
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
             engagement_store.record_scan_complete(orch.scan_id, summary)
         return summary
 

@@ -30,8 +30,8 @@ SECRET_PATTERNS = [
 
 # Insecure defaults to check
 INSECURE_DEFAULTS = {
-    "HEAVEN_DB_PASSWORD": "heaven_secret",
-    "HEAVEN_ADMIN_PASSWORD": "",
+    "HEAVEN_DB_PASSWORD": "heaven_secret",  # nosec B105 -- known-bad default this audit flags
+    "HEAVEN_ADMIN_PASSWORD": "",  # nosec B105 -- known-bad default this audit flags
 }
 
 

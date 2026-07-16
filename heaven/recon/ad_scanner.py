@@ -40,12 +40,12 @@ class ADAttackType(str, Enum):
     GOLDEN_TICKET_RISK = "golden_ticket_risk"
     SILVER_TICKET_RISK = "silver_ticket_risk"
     NTLM_RELAY = "ntlm_relay"
-    PASS_THE_HASH = "pass_the_hash"
+    PASS_THE_HASH = "pass_the_hash"  # nosec B105 -- attack-technique enum / empty default
     ACL_ABUSE = "acl_abuse"
     UNCONSTRAINED_DELEG = "unconstrained_delegation"
     CONSTRAINED_DELEG = "constrained_delegation"
     RBCD = "resource_based_constrained_delegation"
-    PASSWORD_SPRAY = "password_spray_risk"
+    PASSWORD_SPRAY = "password_spray_risk"  # nosec B105 -- attack-technique enum / empty default
     ADMINSD_HOLDER = "adminsd_holder_abuse"
     GPP_PASSWORDS = "gpp_passwords"
 
@@ -133,7 +133,7 @@ class ADScanner:
     - BloodHound-style shortest path analysis
     """
 
-    def __init__(self, domain: str, dc_host: str, username: str = "",
+    def __init__(self, domain: str, dc_host: str, username: str = "",  # nosec B107
                  password: str = "", use_ssl: bool = False):
         self.domain = domain
         self.dc_host = dc_host
@@ -202,7 +202,7 @@ class ADScanner:
                 self._conn.search(self.domain_dn, f"(objectClass={obj_class})", search_scope=SUBTREE, attributes=["cn"])
                 setattr(self._domain_info, attr, len(self._conn.entries))
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         # Enumerate privileged group members
         for group_name in ["Domain Admins", "Enterprise Admins", "Administrators"]:
@@ -215,7 +215,7 @@ class ADScanner:
                     members = self._conn.entries[0].member.values if hasattr(self._conn.entries[0], 'member') else []
                     self._domain_info.privileged_groups[group_name] = len(members)
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         logger.info(
             f"Domain: {self._domain_info.total_users} users, "
@@ -358,7 +358,7 @@ class ADScanner:
             from impacket.krb5 import constants as krb5_constants
             import asyncio
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _get_tgt():
                 user_principal = Principal(
@@ -426,7 +426,7 @@ class ADScanner:
             from impacket.krb5 import constants as krb5_constants
             import asyncio
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             for account in self._domain_info.asrep_accounts:
                 username = account["username"]

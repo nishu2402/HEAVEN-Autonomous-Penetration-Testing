@@ -250,7 +250,7 @@ class LLMGateway:
                             timeout=int(timeout_s * 1000),
                         )
                     except Exception:  # noqa: BLE001 — no HttpOptions/timeout support
-                        pass
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
                     self._client = google_genai.Client(**client_kwargs)
                     self._gemini_sdk = "new"
                 except ImportError:
@@ -312,7 +312,7 @@ class LLMGateway:
                 if attempt < self.MAX_RETRIES - 1:
                     retried = True
                     delay = min(
-                        self.BASE_BACKOFF_S * (2 ** attempt) + random.uniform(0, 1),
+                        self.BASE_BACKOFF_S * (2 ** attempt) + random.uniform(0, 1),  # nosec B311
                         self.MAX_BACKOFF_S,
                     )
                     logger.warning(

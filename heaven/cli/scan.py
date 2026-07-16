@@ -262,7 +262,11 @@ def scan(
     config = get_config()
     config.scan_mode = ScanMode(mode)
 
-    orch = build_full_scan(targets, config, checkpoint_store=engagement_store)
+    # Pass the mode explicitly so the orchestrator registers only the tasks
+    # that belong to it (FULL runs everything; a focused mode runs its
+    # dedicated modules + the shared scoring/report tail).
+    orch = build_full_scan(targets, config, checkpoint_store=engagement_store,
+                           scan_mode=ScanMode(mode))
 
     if engagement_store:
         # Name the scan after its targets (e.g. "app.example.com +2") so it reads
@@ -666,7 +670,7 @@ def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
             AsyncIOScheduler = getattr(importlib.import_module("apscheduler.schedulers.asyncio"), "AsyncIOScheduler")
         except Exception:
             raise ImportError
-        import subprocess
+        import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
         from datetime import datetime
 
         def run_scan_job():
@@ -677,7 +681,7 @@ def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
                     cmd.extend(["-u", t])
                 else:
                     cmd.extend(["-t", t])
-            subprocess.run(cmd, check=False)
+            subprocess.run(cmd, check=False)  # nosec B603 -- fixed argv, no shell
 
         run_scan_job()  # Run once immediately
 
@@ -743,8 +747,16 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
 
     from heaven.orchestrator import build_full_scan
     cfg = get_config()
+    # Rebuild the same focused task graph the original scan used so resume
+    # replays the right modules.
+    _resume_mode = target_scan.get("mode") or original_config.get("mode") or "full"
+    try:
+        _resume_scan_mode = ScanMode(_resume_mode)
+    except ValueError:
+        _resume_scan_mode = ScanMode.FULL
     orch = build_full_scan(targets, cfg, checkpoint_store=store,
-                            resume_scan_id=target_scan["id"])
+                            resume_scan_id=target_scan["id"],
+                            scan_mode=_resume_scan_mode)
 
     def progress_callback(progress):
         _print(f"  [{progress.phase.value}] {progress.progress_pct:.0f}% — {progress.current_task}")
@@ -772,7 +784,7 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
         try:
             store.upsert_finding(scan_id_done, f)
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
     store.record_scan_complete(scan_id_done, summary)
 
 

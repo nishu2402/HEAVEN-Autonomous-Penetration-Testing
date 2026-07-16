@@ -226,7 +226,7 @@ def _get_certificate(host: str, port: int, timeout: float = 8.0) -> Optional[Cer
                 else:
                     ci.signature_algorithm = "unknown"
             except Exception:
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
         return ci
     except Exception as e:
@@ -266,6 +266,7 @@ def _get_ciphers(host: str, port: int, timeout: float = 5.0) -> tuple[list[str],
                     if any(p in cipher for p in _WEAK_CIPHER_PATTERNS):
                         weak.append(cipher)
         except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
 
     return supported, weak
@@ -304,7 +305,7 @@ def _check_heartbleed(host: str, port: int, timeout: float = 8.0) -> bool:
         try:
             resp = s.recv(65536)
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
         s.close()
 
         if len(resp) >= 5:
@@ -525,21 +526,24 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             "No Forward Secrecy",
             "Server does not support ECDHE/DHE key exchange. Past sessions can be "
             "decrypted if the server private key is compromised."))
-    # Only claim "no HSTS" when TLS actually works — otherwise the HSTS HEAD
-    # simply couldn't reach an HTTPS listener (e.g. a plain-HTTP port), and
-    # reporting a missing security header we never got to observe is a false
-    # positive.
+    # HSTS is a TLS-only control, so only evaluate it when TLS actually works.
+    # Otherwise the HSTS HEAD never reached an HTTPS listener (e.g. a plain-HTTP
+    # port): "missing HSTS" would report a header we never got to observe, and
+    # the max-age branch would fire "max-age too short (0s)" from the default
+    # max_age=0 — both false positives. Gating the whole block on tls_ok fixes
+    # both (previously only the no_hsts branch was gated).
     tls_ok = result.tls13 or result.tls12 or result.tls11 or result.tls10
-    if not result.hsts and tls_ok:
-        F.append(_make_finding(host, port, "no_hsts", "medium",
-            "HSTS Not Configured",
-            "Missing Strict-Transport-Security header. Browsers will accept HTTP downgrade.",
-            confidence=0.97))
-    elif result.hsts_max_age < 15552000:
-        F.append(_make_finding(host, port, "hsts_short_maxage", "low",
-            f"HSTS max-age Too Short ({result.hsts_max_age}s)",
-            "HSTS max-age should be at least 180 days (15552000s). "
-            "Short values allow HSTS eviction attacks."))
+    if tls_ok:
+        if not result.hsts:
+            F.append(_make_finding(host, port, "no_hsts", "medium",
+                "HSTS Not Configured",
+                "Missing Strict-Transport-Security header. Browsers will accept HTTP downgrade.",
+                confidence=0.97))
+        elif result.hsts_max_age < 15552000:
+            F.append(_make_finding(host, port, "hsts_short_maxage", "low",
+                f"HSTS max-age Too Short ({result.hsts_max_age}s)",
+                "HSTS max-age should be at least 180 days (15552000s). "
+                "Short values allow HSTS eviction attacks."))
     if result.cert:
         c = result.cert
         if c.is_expired:
@@ -568,7 +572,7 @@ async def scan_ssl(host: str, port: int = 443) -> dict:
     Async entry point — runs the blocking scan in a thread pool.
     Returns a standardized findings dict.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result: SSLResult = await loop.run_in_executor(None, _run_ssl_scan, host, port)
     except Exception as e:

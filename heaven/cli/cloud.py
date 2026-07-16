@@ -19,6 +19,9 @@ from typing import Optional
 import click
 
 from heaven.cli._helpers import _print
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @click.group(name="cloud")
@@ -86,6 +89,7 @@ def _persist(engagement: Optional[str], findings: list[dict]) -> int:
                 store.upsert_finding(scan_id, f)
                 stored += 1
             except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
                 continue
         store.record_scan_complete(scan_id, {"findings": len(findings), "source": "cloud"})
         return stored

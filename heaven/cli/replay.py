@@ -19,6 +19,9 @@ import click
 
 from heaven.cli._helpers import _engagement_db_path, _print
 from heaven.config import get_config
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @click.command()
@@ -41,7 +44,9 @@ def replay(scan_id: str, engagement: Optional[str],
         sys.exit(3)
 
     store = EngagementStore(_engagement_db_path(engagement))
-    all_scans = store.list_all_scans()
+    # list_scans() (SELECT *) carries config_json + mode; list_all_scans() drops
+    # them, which would leave every replay with an empty config → no targets.
+    all_scans = store.list_scans(limit=1000)
     target_scan = next((s for s in all_scans if s["id"].startswith(scan_id)), None)
     if not target_scan:
         _print(f"[red]Scan not found:[/red] {scan_id}")
@@ -75,7 +80,17 @@ def replay(scan_id: str, engagement: Optional[str],
         )
 
     cfg = get_config()
-    orch = build_full_scan(targets, cfg, checkpoint_store=store)
+    # Reproduce the original scan's focused mode (not a blanket FULL run) so the
+    # replay exercises the same modules. Stealth level rides inside ``targets``
+    # (targets["stealth_level"]), so it is preserved automatically.
+    from heaven.config import ScanMode
+    try:
+        _replay_mode = ScanMode(target_scan.get("mode")
+                                or original_config.get("mode") or "full")
+    except ValueError:
+        _replay_mode = ScanMode.FULL
+    orch = build_full_scan(targets, cfg, checkpoint_store=store,
+                           scan_mode=_replay_mode)
 
     if store:
         store.record_scan_start(
@@ -105,7 +120,7 @@ def replay(scan_id: str, engagement: Optional[str],
         try:
             store.upsert_finding(new_scan_id, f)
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
     store.record_scan_complete(new_scan_id, summary)
     _print(f"  [dim]Replayed scan saved as[/dim] [cyan]{new_scan_id[:8]}[/cyan]")
     _print(

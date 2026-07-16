@@ -216,7 +216,8 @@ def test_richer_finding_prefers_reviewed_over_higher_raw_confidence():
 
 # ── SSL forward-secrecy false positive ───────────────────────────────────────
 
-def _patch_ssl(monkeypatch, *, tls13, tls12, ciphers, hsts_enabled=True):
+def _patch_ssl(monkeypatch, *, tls13, tls12, ciphers, hsts_enabled=True,
+               hsts_max_age=63072000):
     import heaven.vulnscan.ssl_scanner as sslmod
 
     class _Sock:
@@ -238,9 +239,32 @@ def _patch_ssl(monkeypatch, *, tls13, tls12, ciphers, hsts_enabled=True):
     monkeypatch.setattr(sslmod, "_get_certificate", lambda *a, **k: None)
     monkeypatch.setattr(sslmod, "_check_heartbleed", lambda *a, **k: False)
     monkeypatch.setattr(sslmod, "_check_hsts",
-                        lambda *a, **k: (hsts_enabled, 63072000, True, True))
+                        lambda *a, **k: (hsts_enabled, hsts_max_age, True, True))
     monkeypatch.setattr(sslmod, "_get_ciphers", lambda *a, **k: (ciphers, []))
     return sslmod
+
+
+def test_ssl_hsts_short_not_flagged_on_plain_http(monkeypatch):
+    # A plain-HTTP port: the HTTPS HEAD never reaches a TLS listener, so
+    # _check_hsts returns (False, 0, ...). The max_age=0 must NOT be reported as
+    # "HSTS max-age too short" — HSTS is a TLS-only control and no header was
+    # ever observed. (Regression: the elif branch was ungated and fired 0s.)
+    sslmod = _patch_ssl(monkeypatch, tls13=False, tls12=False, ciphers=[],
+                        hsts_enabled=False, hsts_max_age=0)
+    res = sslmod._run_ssl_scan("t.example", 8091)
+    types = {f["vuln_type"] for f in res.findings}
+    assert "hsts_short_maxage" not in types
+    assert "no_hsts" not in types
+
+
+def test_ssl_hsts_short_flagged_with_tls(monkeypatch):
+    # A real TLS server that DOES send HSTS but with a too-short max-age → the
+    # true positive must still fire.
+    sslmod = _patch_ssl(monkeypatch, tls13=False, tls12=True,
+                        ciphers=["ECDHE-RSA-AES128-GCM-SHA256"],
+                        hsts_enabled=True, hsts_max_age=3600)
+    res = sslmod._run_ssl_scan("t.example", 443)
+    assert "hsts_short_maxage" in {f["vuln_type"] for f in res.findings}
 
 
 def test_ssl_no_forward_secrecy_not_flagged_on_tls13(monkeypatch):
@@ -565,3 +589,62 @@ async def test_prototype_pollution_no_fp_on_reflection():
     cand = await WebAnomalyProbe()._test_prototype_pollution(
         _ParamSession(render), "http://t/x", "id", "GET")
     assert cand is None
+
+
+# ── HTTP request-smuggling precision (web_fuzzer) ────────────────────────────
+
+class _SmugResp:
+    def __init__(self, status: int):
+        self.status = status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def text(self):
+        return ""
+
+
+class _SmugSession:
+    """Fake aiohttp session: distinguishes the well-formed POST baseline from an
+    ambiguous-framing POST probe by the presence of a Transfer-Encoding header."""
+
+    def __init__(self, *, normal_post: int, ambiguous_post: int):
+        self._normal = normal_post
+        self._ambiguous = ambiguous_post
+
+    def get(self, *a, **k):
+        return _SmugResp(200)
+
+    def post(self, *a, headers=None, **k):
+        h = headers or {}
+        if any(kk.lower() == "transfer-encoding" for kk in h):
+            return _SmugResp(self._ambiguous)
+        return _SmugResp(self._normal)
+
+
+@pytest.mark.asyncio
+async def test_smuggling_not_flagged_when_post_route_is_404():
+    # A GET-only route answers POST with 404. The baseline is now a POST (same
+    # method), so the ambiguous POST (also 404) matches it → no indicator.
+    # (Regression: a GET baseline made every 404-on-POST route look anomalous.)
+    from heaven.vulnscan.web_fuzzer import _fuzz_request_smuggling
+
+    sess = _SmugSession(normal_post=404, ambiguous_post=404)
+    findings = await _fuzz_request_smuggling(sess, "http://t/only-get")
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_smuggling_flagged_when_ambiguous_framing_deviates():
+    # A server that answers the ambiguous CL+TE / dup-TE POST *differently* from a
+    # well-formed POST is a genuine (weak) smuggling indicator — must still fire.
+    from heaven.vulnscan.web_fuzzer import _fuzz_request_smuggling
+
+    sess = _SmugSession(normal_post=200, ambiguous_post=405)
+    findings = await _fuzz_request_smuggling(sess, "http://t/api")
+    kinds = {f["vuln_type"] for f in findings}
+    assert "http_smuggling_indicator" in kinds
+    assert "http_smuggling_te_obfuscation" in kinds

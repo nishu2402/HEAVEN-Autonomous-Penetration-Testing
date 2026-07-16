@@ -9,6 +9,9 @@ from pathlib import Path
 import click
 
 from heaven.cli._helpers import _print
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 _DOCS_DIR = Path(__file__).resolve().parents[2] / "docs" / "methodology"
@@ -55,7 +58,7 @@ def show(name: str) -> None:
             console.print(Markdown(content))
             return
     except Exception:
-        pass
+        logger.debug("suppressed non-fatal exception", exc_info=True)
     print(content)
 
 

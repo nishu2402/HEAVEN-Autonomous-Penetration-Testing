@@ -9,7 +9,7 @@ import asyncio
 import math
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -111,7 +111,7 @@ def scan_git_history(repo_path: Path, max_commits: int = 500) -> list[SecretFind
     """Scan git history for secrets in past commits."""
     findings: list[SecretFinding] = []
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 -- fixed argv on PATH, no shell
             ["git", "log", f"--max-count={max_commits}", "--diff-filter=A", "--name-only", "--pretty=format:%H|%aI|%an"],
             cwd=str(repo_path), capture_output=True, text=True, timeout=120,
         )
@@ -166,7 +166,7 @@ async def scan_repository(repo_path: str, include_history: bool = True) -> list[
         if is_remote:
             temp_dir = tempfile.mkdtemp(prefix="heaven_repo_")
             path = Path(temp_dir)
-            result = await loop.run_in_executor(None, lambda: subprocess.run(
+            result = await loop.run_in_executor(None, lambda: subprocess.run(  # nosec B603 B607
                 ["git", "clone", "--depth=50", repo_path, str(path)],
                 capture_output=True, text=True, timeout=120,
             ))

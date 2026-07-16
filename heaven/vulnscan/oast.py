@@ -84,7 +84,7 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             self.wfile.write(_PIXEL)
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         self._record()

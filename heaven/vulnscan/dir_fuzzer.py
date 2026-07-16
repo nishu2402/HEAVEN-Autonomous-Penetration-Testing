@@ -499,7 +499,7 @@ class DirectoryFuzzer:
                     "cwe": "CWE-548",
                 })
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
         Path(out_file).unlink(missing_ok=True)
         Path(wf_path).unlink(missing_ok=True)

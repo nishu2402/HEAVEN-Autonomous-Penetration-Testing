@@ -29,7 +29,7 @@ from __future__ import annotations
 import datetime
 import os
 from typing import Any, Optional
-from xml.sax.saxutils import escape as _xml_escape
+from xml.sax.saxutils import escape as _xml_escape  # nosec B406 -- escape() is OUTPUT encoding (a security control), not XML parsing
 
 from heaven.devsecops.compliance_report import SEVERITY_META, ComplianceReportGenerator
 from heaven.utils.logger import get_logger

@@ -711,34 +711,51 @@ class InjectionScanner:
                     )
                     return
 
-        # 2. Time-based blind (POST)
-        for payload, sleep_secs, probe_name in SQLI_TIME_PROBES[:4]:
-            data = {**other_fields, param: payload}
-            timeout = float(sleep_secs + 6)
-            t_start = time.monotonic()
+        # 2. Time-based blind (POST) — baseline + reproduce, mirroring the GET
+        # path so a naturally slow POST endpoint isn't flagged on one sample.
+        async def _timed_post(value: str, timeout: float) -> tuple[int, float]:
+            d = {**other_fields, param: value}
+            t0 = time.monotonic()
             async with self._sem:
-                status, body = await _post(session, url, data, self._headers, timeout=timeout)
-            elapsed = time.monotonic() - t_start
+                if self._delay:
+                    await asyncio.sleep(self._delay)
+                st, _ = await _post(session, url, d, self._headers, timeout=timeout)
+            return st, time.monotonic() - t0
 
-            if elapsed >= sleep_secs * _TIME_THRESHOLD_FACTOR and status != 0:
-                self._add_finding(
-                    target=url,
-                    vuln_type="sqli",
-                    title=f"SQL Injection (POST, time-based blind) — param '{param}'",
-                    severity="critical",
-                    confidence=0.88,
-                    evidence={
-                        "param": param,
-                        "payload": payload,
-                        "probe": probe_name,
-                        "technique": "time_blind",
-                        "method": "POST",
-                        "elapsed_sec": round(elapsed, 2),
-                    },
-                    remediation="Use parameterised queries / prepared statements.",
-                    cwe="CWE-89",
-                )
-                return
+        _, pb1 = await _timed_post("1", 15.0)
+        _, pb2 = await _timed_post("1", 15.0)
+        post_baseline = max(pb1, pb2)
+
+        for payload, sleep_secs, probe_name in SQLI_TIME_PROBES[:4]:
+            timeout = float(sleep_secs + 8)
+            margin = sleep_secs * _TIME_THRESHOLD_FACTOR
+            status, elapsed = await _timed_post(payload, timeout)
+
+            if status != 0 and elapsed >= post_baseline + margin:
+                # Reproduce — a transient slow response is not an injection.
+                status2, elapsed2 = await _timed_post(payload, timeout)
+                if status2 != 0 and elapsed2 >= post_baseline + margin:
+                    self._add_finding(
+                        target=url,
+                        vuln_type="sqli",
+                        title=f"SQL Injection (POST, time-based blind) — param '{param}'",
+                        severity="critical",
+                        confidence=0.88,
+                        evidence={
+                            "param": param,
+                            "payload": payload,
+                            "probe": probe_name,
+                            "technique": "time_blind",
+                            "method": "POST",
+                            "baseline_sec": round(post_baseline, 2),
+                            "elapsed_sec": round(elapsed, 2),
+                            "reproduce_sec": round(elapsed2, 2),
+                            "sleep_secs": sleep_secs,
+                        },
+                        remediation="Use parameterised queries / prepared statements.",
+                        cwe="CWE-89",
+                    )
+                    return
 
     # ── XSS discovery ─────────────────────────────────────────────
 
@@ -807,7 +824,9 @@ class InjectionScanner:
                 async with self._sem:
                     status, body = await _get(session, url, headers=headers)
 
-                if _XSS_CANARY in body:
+                # Require the payload to reflect in an EXECUTABLE form — a header
+                # echoed but HTML-escaped still contains the canary yet cannot run.
+                if _xss_is_executable(payload, body):
                     self._add_finding(
                         target=url,
                         vuln_type="xss",

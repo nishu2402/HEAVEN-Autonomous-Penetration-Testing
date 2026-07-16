@@ -25,11 +25,14 @@ from __future__ import annotations
 import os
 import shutil
 import signal
-import subprocess
+import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
 import sys
 import threading
 from dataclasses import dataclass
 from typing import Any, Optional
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass(frozen=True)
@@ -329,7 +332,7 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
         popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
     try:
-        proc = subprocess.Popen(
+        proc = subprocess.Popen(  # nosec B603 -- fixed argv, no shell
             run_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -355,7 +358,7 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
             try:
                 proc.kill()
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     watchdog = threading.Timer(timeout, _kill)
     watchdog.start()

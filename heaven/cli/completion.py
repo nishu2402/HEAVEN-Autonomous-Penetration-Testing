@@ -17,7 +17,7 @@ Usage:
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
 import sys
 from typing import Optional
 
@@ -97,7 +97,7 @@ def completion_cmd(shell: Optional[str], install_hint: bool) -> None:
     env["_HEAVEN_COMPLETE"] = f"{shell}_source"
 
     try:
-        proc = subprocess.run(
+        proc = subprocess.run(  # nosec B603 -- fixed argv, no shell
             [sys.executable, "-m", "heaven.main"],
             env=env, capture_output=True, text=True, timeout=10,
         )

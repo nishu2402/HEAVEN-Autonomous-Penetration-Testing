@@ -109,6 +109,25 @@ def test_parse_go_sum_and_pom_and_composer():
     assert ("monolog/monolog", "1.0.0") in gc  # leading v stripped
 
 
+def test_pom_xxe_cannot_read_local_files(tmp_path):
+    """A hostile pom.xml (from a repo we're auditing) must not be able to read
+    files off the analyst's host via an XML external entity. defusedxml rejects
+    the entity, so the parser returns no packages and never leaks the secret."""
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP-SECRET-CONTENTS")
+    malicious = (
+        '<?xml version="1.0"?>'
+        f'<!DOCTYPE project [<!ENTITY xxe SYSTEM "file://{secret}">]>'
+        '<project xmlns="http://maven.apache.org/POM/4.0.0"><dependencies>'
+        '<dependency><groupId>&xxe;</groupId><artifactId>a</artifactId>'
+        '<version>1.0</version></dependency></dependencies></project>'
+    )
+    # Must not raise and must not surface the file contents anywhere.
+    pkgs = sca_scanner.parse_manifest("pom.xml", malicious)
+    assert all("TOP-SECRET" not in p.name and "TOP-SECRET" not in p.version
+               for p in pkgs)
+
+
 def test_parse_nuget_lock():
     text = ('{"version":1,"dependencies":{".NETCoreApp,Version=v6.0":{'
             '"Newtonsoft.Json":{"type":"Direct","resolved":"12.0.1"},'

@@ -53,7 +53,10 @@ def fetch_model(url: str, dest: Path, expected_sha: str | None) -> Path:
         # Only http(s)/file are honoured — never gopher://, data://, etc.
         if not url.startswith(("https://", "http://", "file://")):
             raise click.ClickException(f"refusing to fetch non-web URL: {url[:40]}")
-        with urllib.request.urlopen(url, timeout=60) as resp, open(fd, "wb") as out:  # noqa: S310
+        # Scheme allow-listed above (http/https/file only) and the download is
+        # SHA-256-verified below before it replaces the model, so a hostile URL
+        # can't smuggle an unexpected scheme or a tampered artifact.
+        with urllib.request.urlopen(url, timeout=60) as resp, open(fd, "wb") as out:  # noqa: S310  # nosec B310
             shutil.copyfileobj(resp, out, length=1 << 20)
         if expected_sha:
             got = _sha256_file(tmp)

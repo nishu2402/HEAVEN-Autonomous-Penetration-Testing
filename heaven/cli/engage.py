@@ -77,7 +77,7 @@ def engage_list() -> None:
 
     active = resolve_engagement_name()
     # Dedupe by stem across the canonical + legacy dirs (canonical wins).
-    seen: dict[str, "object"] = {}
+    seen: dict[str, Path] = {}
     for d in _engagement_dirs():
         if not d.is_dir():
             continue

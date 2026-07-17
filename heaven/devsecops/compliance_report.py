@@ -29,6 +29,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from heaven.devsecops.inventory import inventory_totals as _inventory_totals
+from heaven.devsecops.inventory import normalize_assets as _normalize_assets
+
 # Severity → presentation. Colours are chosen to print cleanly on white paper.
 SEVERITY_META: dict[str, dict[str, Any]] = {
     "critical": {"label": "Critical", "color": "#b00020", "cvss": "9.0 – 10.0",
@@ -89,11 +92,17 @@ class ComplianceReportGenerator:
     def generate_html_report(self, findings: list[dict],
                              engagement_name: str = "",
                              output_path: Optional[Path] = None,
-                             meta: Optional[dict] = None) -> str:
+                             meta: Optional[dict] = None,
+                             assets: Optional[list[dict]] = None) -> str:
         """Render the full professional report as one HTML string.
 
         `meta` (all optional) may carry: client, assessor, period, version,
         scope (list of targets). Anything absent is derived from the findings.
+
+        `assets` (optional) are the raw network-scan host records; when present
+        a "Host & Service Inventory" section (open ports / service versions /
+        OS) is inserted, so the report documents the attack surface, not just
+        the findings.
         """
         meta = meta or {}
         findings = findings or []
@@ -115,15 +124,17 @@ class ComplianceReportGenerator:
         version = meta.get("version") or "1.0"
         assessor = meta.get("assessor") or "HEAVEN Autonomous Penetration-Testing Platform"
 
+        inventory = _normalize_assets(assets) if assets else []
         sections = [
             self._styles(),
             self._toolbar(),
             self._cover(eng, overall, counts, len(findings), len(scope), generated, version),
             self._confidentiality(eng),
             self._doc_control(eng, assessor, version, generated, len(scope), len(findings), overall),
-            self._toc(),
+            self._toc(bool(inventory)),
             self._exec_summary(eng, counts, len(findings), overall, ordered, len(scope)),
             self._scope_methodology(scope),
+            self._inventory(inventory),
             self._risk_methodology(),
             self._findings_summary(ordered),
             self._detailed_findings(ordered),
@@ -273,10 +284,14 @@ class ComplianceReportGenerator:
         </div>"""
 
     @staticmethod
-    def _toc() -> str:
+    def _toc(has_inventory: bool = False) -> str:
         items = [
             ("exec", "Executive Summary"),
             ("scope", "Scope & Methodology"),
+        ]
+        if has_inventory:
+            items.append(("inventory", "Host & Service Inventory"))
+        items += [
             ("risk", "Risk Rating Methodology"),
             ("summary", "Findings Summary"),
             ("details", "Detailed Findings"),
@@ -363,6 +378,48 @@ class ComplianceReportGenerator:
             <tr><td>MITRE ATT&amp;CK</td><td>Adversary technique mapping (where applicable)</td></tr>
             <tr><td>CVSS v3.1 / EPSS / CISA KEV</td><td>Severity, exploit-likelihood &amp; known-exploited enrichment</td></tr>
           </table>
+        </div>"""
+
+    @staticmethod
+    def _inventory(inventory: list[dict]) -> str:
+        """Host & service inventory — open ports, service versions and OS.
+
+        ``inventory`` is already normalised (see inventory.normalize_assets).
+        Renders nothing when empty so non-network engagements skip the section.
+        """
+        if not inventory:
+            return ""
+        tot = _inventory_totals(inventory)
+        host_blocks: list[str] = []
+        for h in inventory:
+            os_txt = h.get("os_label") or "OS not determined"
+            ports = h.get("ports") or []
+            if ports:
+                rows = "".join(
+                    f'<tr><td class="small">{_esc(p.get("port"))}</td>'
+                    f'<td class="small">{_esc(p.get("protocol") or "tcp")}</td>'
+                    f'<td>{_esc(p.get("service") or "—")}</td>'
+                    f'<td>{_esc(p.get("service_version") or "—")}</td>'
+                    f'<td class="small">{_esc(p.get("cpe") or "—")}</td></tr>'
+                    for p in ports
+                )
+                tbl = ('<table><tr><th style="width:64px">Port</th>'
+                       '<th style="width:60px">Proto</th><th style="width:120px">Service</th>'
+                       f'<th>Version</th><th>CPE</th></tr>{rows}</table>')
+            else:
+                tbl = '<p class="muted small">No open ports observed.</p>'
+            host_blocks.append(
+                f'<h3>{_esc(h.get("host"))} '
+                f'<span class="muted small">— {_esc(os_txt)}</span></h3>{tbl}'
+            )
+        return f"""<div class="page section" id="inventory"><h2>Host &amp; Service Inventory</h2>
+          <p>The network scan mapped <strong>{tot['hosts']}</strong> host(s) exposing
+          <strong>{tot['open_ports']}</strong> open port(s) across
+          <strong>{tot['distinct_services']}</strong> distinct service(s). Ports, service
+          versions and operating systems are reported exactly as observed by the scanner.
+          An OS marked <em>(heuristic — unconfirmed)</em> was inferred from a TTL value, not a
+          full stack fingerprint, and should be treated as indicative only.</p>
+          {''.join(host_blocks)}
         </div>"""
 
     @staticmethod

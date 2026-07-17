@@ -153,6 +153,7 @@ if HAS_CLICK:
 
     # Wire up every subcommand module
     from heaven.cli import (
+        assets as assets_module,
         audit, autonomous, benchmark as benchmark_module, cloud, completion,
         config_cmd, coverage, cve as cve_module,
         db, demo as demo_module,
@@ -164,6 +165,7 @@ if HAS_CLICK:
         status as status_module, tickets,
         train, update as update_module, use as use_module, watch,
     )
+    assets_module.register(cli)
     audit.register(cli)
     autonomous.register(cli)
     benchmark_module.register(cli)

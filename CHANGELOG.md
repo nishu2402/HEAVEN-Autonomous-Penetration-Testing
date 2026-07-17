@@ -9,6 +9,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scan findings were inaccurate, CVEs were wrong/blank, and the stored results
+  disagreed with the report.** Every CVE discovered on one host collapsed into a
+  *single* finding — the finding identity (`_finding_hash`) keyed only on
+  `(target, vuln_type, endpoint, param)`, which is identical for every
+  `vulnerable_service` CVE on a host — so all but one CVE silently vanished and
+  the surviving `cve_id` (and its severity) was non-deterministic, differing
+  between the engagement store and the report JSON. The identity is now
+  **CVE- and port-aware**: distinct CVEs on a host are distinct findings, the
+  same CVE still dedups across re-scans, and host-level / injection findings
+  still collapse as before. The web scan runner also **reconciles** the store to
+  the final authoritative finding set (`prune_scan_findings`) after the live
+  progress flush, so the engagement view, scan list and downloaded report always
+  agree.
+- **False "Apache" CVEs on ordinary HTTP servers.** The live CVE feed searched
+  NVD/CIRCL for the bare protocol label `http`, which its CPE map resolves to
+  Apache — so any HTTP server (a plain Python `http.server`, a Uvicorn app)
+  collected ~25 confident-looking Apache CVEs. A generic protocol label
+  (`http`, `https`, `ssl`, …) now never drives a live search — only a concrete,
+  identified product does — and the mapper passes the resolved product, not the
+  raw service word, to the feed.
+- **Open ports / services were missing from the Assets view after a web-launched
+  scan.** The web scan runner persisted a summary that dropped the host/service
+  assets (the CLI kept them), so the inventory fell back to a single global
+  "latest report" that could belong to a different engagement. Web scans now
+  persist their assets into the scan summary, and the report-JSON fallback is
+  scoped to the engagement's own scans.
+- **Launching one scan started two.** A double-submit (double-click,
+  Enter-then-click, a retry) sent two `POST /api/scans` and each spawned its own
+  scan. An idempotency guard now returns the in-flight scan for an identical
+  request (same targets + mode + engagement), and the launcher hardens against a
+  rapid re-submit.
+- **Unactionable junk findings.** A finding carrying a CVE but naming no
+  host/target (seen live: a stray `CVE-2020-29396` with an empty target and
+  `vuln_type: unknown`) is now dropped instead of persisting as a bogus
+  high-severity row.
+- **The header/sidebar clock lagged real time by up to a second.** The 1000 ms
+  interval drifted off the wall-clock second; both clocks now re-arm just after
+  each whole second.
+- **The scan progress bar jumped in big steps (2 → 12 → 35 → 89) and sat frozen
+  in between.** Progress only moved when a whole task finished, and the UI
+  sampled it every 8 s. Now an in-flight task earns genuine, time-based partial
+  credit, the orchestrator emits progress on task *start* and on a periodic
+  heartbeat (so a long single task like an nmap sweep keeps advancing), the
+  running scan is polled every 2 s, and the bar eases smoothly toward the real
+  server value. It stays monotonic and never shows a premature 100 — honest
+  motion, not a fabricated animation.
+- **The CVE column read as "blank/broken" on finding detail.** Configuration,
+  policy and hygiene findings (DMARC/SPF, missing headers, weak TLS, …) have no
+  CVE, so the bare "—" looked like a bug. The CVE cell now says *"— (not a
+  CVE-class finding)"* for those classes and *"— (no CVE resolved)"* for a
+  service finding with no match, while real CVE-tracked findings show their CVE.
+- **The CVE Lookup form overflowed its card.** The Limit box spilled past the
+  card edge and the "Look up CVEs" button sat awkwardly. The form's grid columns
+  now shrink correctly (`minmax(0, …)`), the fields stack on narrow screens, and
+  the button is spaced properly.
+
+### Changed
+
+- **A blank "active engagement" now resolves to your most-populated engagement,
+  not `default`.** When no engagement is explicitly selected and no active
+  pointer exists (e.g. the one you were viewing was deleted), the app — and the
+  scan writer — now resolve to the on-disk engagement richest in real data
+  instead of a blank `default` that silently absorbed scans. On startup the app
+  also adopts that engagement as active, so it opens on your actual work.
+
+- **The scan launcher now picks the destination engagement explicitly.** The
+  free-text "engagement name" field is a dropdown of the engagements on disk
+  (plus "＋ New engagement…"), defaulting to the one you're viewing and showing
+  where findings will be saved — so a scan can't silently pile into a surprise
+  or stale engagement.
+
+### Added
+
+- **Rename an engagement — CLI, API and dashboard.** An engagement's name was
+  welded to both its store key *and* its SQLite filename
+  (`engagements/<name>.db`) with no way to change it, so an awkward name (e.g.
+  `certified hacker`) was permanent. You can now rename in place:
+  - New **`heaven engage rename <old> <new>`** CLI command.
+  - New **`POST /api/engagements/{name}/rename`** route, backing a **rename (✎)**
+    action in the dashboard's engagement manager (which now also shows for a
+    single engagement, so you can rename the only one you have).
+  - The rename moves the DB and its WAL/SHM sidecars, rewrites the in-DB name
+    row, handles a case-only rename on case-insensitive filesystems (macOS:
+    `certified hacker` → `Certified Hacker`), and repoints the active pointer if
+    you rename the engagement you're currently viewing. It never clobbers a
+    different existing engagement. Covered by `tests/test_engagement_rename.py`.
+
+- **Host & Service Inventory — open ports, service versions and OS, surfaced
+  everywhere.** The network scanner already ran a full-spectrum nmap scan
+  (`-sV -sC -O`, all 65535 ports by default, plus UDP), but the ports, service
+  versions and OS it captured only lived inside the raw scan summary and never
+  reached the operator. They are now a first-class inventory shown identically
+  across the whole tool:
+  - New **Assets** page in the web UI (host → OS → open ports / service versions
+    / CPE), fed by a reshaped `GET /api/assets` that returns a normalized,
+    deduplicated inventory plus roll-up totals.
+  - New **`heaven assets`** CLI command (table / JSON / markdown), and every
+    `heaven scan` / `heaven resume` now prints the inventory at the end.
+  - A **"Host & Service Inventory" section** added to the HTML, PDF and Markdown
+    reports (and the `heaven report` / `heaven export` / API report exports),
+    so a written report documents the attack surface, not just the findings.
+  - Accuracy improvements in the scanner: the service version now recombines
+    nmap's product + version + extrainfo (previously the product name was
+    dropped), and OS detection records its **source and confidence** — an nmap
+    `-O` stack fingerprint is labelled *(fingerprinted, N%)* while a TTL guess is
+    labelled *(heuristic — unconfirmed)*. Nothing is fabricated: an
+    undetermined OS is shown as such, and a guess is never presented as a fact.
+  - **OS fingerprinting no longer silently needs root.** `nmap -O` (and SYN/UDP
+    scans) require raw sockets and abort the whole scan if run unprivileged, so
+    HEAVEN now auto-elevates via passwordless `sudo -n` when it's available
+    (controllable with `HEAVEN_NMAP_SUDO=auto|always|never`; `-n` never prompts,
+    so no credential is ever handled), and detects an elevated session on
+    Windows. When it genuinely can't fingerprint, it no longer falls straight to
+    a coarse TTL guess: it first infers the OS from nmap's own service-detection
+    evidence (the `ostype` attribute and OS-level CPEs that `-sV` reports without
+    root) — a real, more specific signal — still labelled *unconfirmed*, and logs
+    a one-line hint on how to unlock authoritative results (run as root, enable
+    passwordless sudo, or `setcap cap_net_raw` on nmap).
+  - A shared `heaven/devsecops/inventory.py` is the single source of truth for
+    normalization/labelling reused by the CLI, API, UI and reports;
+    `tests/test_service_inventory.py` locks in the parsing, the no-false-positive
+    OS labelling and the cross-surface rendering.
+
 ### Changed
 
 - **Every scan mode now runs a real, focused pipeline — the mode selector is no
@@ -48,6 +173,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Web UI is responsive again — the dashboard no longer overflows or overlaps
+  on small screens.** The dashboard's two-pane grid was locked to a fixed
+  `1fr 360px` at one viewport height, and the 3D topology `<canvas>` kept its
+  desktop pixel width; because grid/flex children default to `min-width: auto`,
+  that width propagated up and inflated the whole page far past a phone's
+  viewport, so the stat cards were clipped ("CRITIC…", "TARGE…"), the engagement
+  chip was crushed, and the right rail overlapped everything. The layout now
+  uses `minmax(0, 1fr)` tracks (and `min-width: 0` on the content column) so it
+  can shrink to fit; on phones the two panes stack, the stat grid drops to two
+  columns, the map gets a fixed height, and the header keeps the engagement name
+  (ellipsized) while dropping the counts/SIEM/role chips it has no room for.
+  Wide data tables (CVE, findings, assets, scans) now scroll horizontally inside
+  their card instead of being clipped.
+- **Help tooltips (the "?" icons) are no longer clipped.** The explanation bubble
+  was an absolutely-positioned child, so any card with `overflow: hidden` (every
+  stat tile) cut it off or bled it across neighbouring tiles. It now renders
+  through a portal to `<body>` with fixed positioning, so it always appears in
+  full, above everything, on every page — and it opens on tap too, for touch
+  devices with no hover.
+- **"Generate AI remediation" no longer echoes back the same text.** With no LLM
+  key configured the remediation engine returns the knowledge-base text, which
+  the finding page then showed a second time under an "AI-tailored" heading — an
+  identical duplicate. The page now shows the AI block only when the result is
+  genuinely AI-generated *and* differs from the KB text; otherwise it shows a
+  single, clear note that no LLM key is configured, with a link to Settings.
+- **CVE Lookup explains an empty result instead of just going blank.** A lookup
+  that returns nothing (usually NVD rate-limiting an unkeyed request — only ~5
+  lookups per 30 s without an `NVD_API_KEY` — or an offline host, or a
+  product/vendor that doesn't match NVD's CPE dictionary) now spells out those
+  causes and links to Settings to add an NVD key, rather than showing a bare
+  "no results" line that reads as broken.
+- **Grammar: single-item counts.** The header and dashboard now read "1 target"
+  / "1 finding" instead of "1 targets" / "1 findings".
 - **Stealth level now genuinely changes scan behaviour at every setting — it was
   partly cosmetic.** The web launcher / CLI expose four levels (paranoid /
   stealth / normal / aggressive), but several scanners accepted `stealth_level`

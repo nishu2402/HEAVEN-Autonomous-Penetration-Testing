@@ -144,6 +144,27 @@ export default function Dashboard() {
     }
   }
 
+  // Rename an engagement so an operator is never stuck with an awkward name
+  // (the name is welded to the store key + DB filename). The server moves the
+  // DB and repoints the active pointer if you rename the one you're viewing.
+  const renameEngagement = async (name) => {
+    if (busyEng) return
+    const proposed = window.prompt(`Rename engagement “${name}” to:`, name)
+    if (proposed === null) return                       // cancelled
+    const next = proposed.trim()
+    if (!next || next === name) return                  // empty or unchanged
+    setBusyEng(name)
+    try {
+      await Engagements.rename(name, next)
+      await refresh()
+      toast.success(`Renamed “${name}” → “${next}”`)
+    } catch (e) {
+      toast.error(e.message || 'Could not rename engagement')
+    } finally {
+      setBusyEng('')
+    }
+  }
+
   // One-click cleanup for the common "stray empty engagements pile up" case.
   const clearEmpties = async () => {
     const empties = engList.filter((e) => !e.findings && !e.scans).map((e) => e.name)
@@ -206,7 +227,7 @@ export default function Dashboard() {
       <FirstRunGuide />
       {/* Left: topology + stats */}
       <div className="dashboard-left">
-        <div style={{ position: 'relative', overflow: 'hidden' }}>
+        <div className="dashboard-topology" style={{ position: 'relative', overflow: 'hidden' }}>
           <Suspense fallback={<TopologyFallback />}>
             <NetworkTopology3D hosts={hosts} />
           </Suspense>
@@ -289,7 +310,7 @@ export default function Dashboard() {
       {/* Right rail */}
       <div className="dashboard-right">
         <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
-          {engList.length > 1 && (
+          {engList.length >= 1 && (
             <div style={{ marginBottom: 14 }}>
               <div className="stat-label" style={{ marginBottom: 6 }}>Viewing engagement</div>
               <div className="eng-switch-list">
@@ -312,6 +333,18 @@ export default function Dashboard() {
                             ? `${e.findings} finding${e.findings !== 1 ? 's' : ''}`
                             : 'empty'}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="eng-switch-edit"
+                        disabled={!!busyEng || e.name === 'demo'}
+                        onClick={() => renameEngagement(e.name)}
+                        title={e.name === 'demo'
+                          ? 'The sample engagement cannot be renamed'
+                          : `Rename “${e.name}”`}
+                        aria-label={`Rename engagement ${e.name}`}
+                      >
+                        {busy ? '…' : '✎'}
                       </button>
                       <button
                         type="button"
@@ -370,7 +403,8 @@ export default function Dashboard() {
                 {eng.engagement?.name}
               </div>
               <div style={{ color: 'var(--text-1)', fontSize: 12.5 }}>
-                {totalFindings} findings · {stats.scope_targets} targets in scope
+                {totalFindings} finding{totalFindings !== 1 ? 's' : ''} ·{' '}
+                {stats.scope_targets ?? 0} target{(stats.scope_targets ?? 0) !== 1 ? 's' : ''} in scope
               </div>
             </div>
           )}

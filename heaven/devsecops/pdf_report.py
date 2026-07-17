@@ -99,7 +99,8 @@ class PDFReportGenerator:
                 else output_path + ".html"
             findings = self._findings(data)
             html = ComplianceReportGenerator().generate_html_report(
-                findings, engagement_name=self._engagement(data))
+                findings, engagement_name=self._engagement(data),
+                assets=data.get("assets"))
             Path(html_path).write_text(html, encoding="utf-8")
             logger.info(f"HTML report written to {html_path} (install reportlab for PDF)")
             return True
@@ -143,6 +144,9 @@ class PDFReportGenerator:
             counts[_sev_of(f)] += 1
         overall = self._overall(counts)
         scope = data.get("scope") or sorted({str(f.get("target")) for f in findings if f.get("target")})
+        from heaven.devsecops.inventory import inventory_totals, normalize_assets
+        inventory = normalize_assets(data.get("assets"))
+        inv_totals = inventory_totals(inventory)
         now = datetime.datetime.now(datetime.UTC)
         gen_date = now.strftime("%d %B %Y, %H:%M UTC")
         version = str(data.get("version") or "1.0")
@@ -374,6 +378,37 @@ class PDFReportGenerator:
             std.append([Paragraph(_esc(fw), styles["cell"]), Paragraph(_esc(use), styles["cell"])])
         story.append(table(std, [55 * mm, cw - 55 * mm]))
         story.append(PageBreak())
+
+        # ── Host & Service Inventory (only when a network scan ran) ──
+        if inventory:
+            story.append(heading("", "Host & Service Inventory"))
+            story.append(Paragraph(
+                f"The network scan mapped <b>{inv_totals['hosts']}</b> host(s) exposing "
+                f"<b>{inv_totals['open_ports']}</b> open port(s) across "
+                f"<b>{inv_totals['distinct_services']}</b> distinct service(s). Ports, service "
+                "versions and operating systems are reported exactly as observed by the scanner. "
+                "An OS marked <i>(heuristic — unconfirmed)</i> was inferred from a TTL value, not a "
+                "full stack fingerprint, and should be treated as indicative only.", styles["body"]))
+            for h in inventory:
+                os_txt = h.get("os_label") or "OS not determined"
+                story.append(Paragraph(f'{_esc(h.get("host"))} — {_esc(os_txt)}', styles["h3"]))
+                ports = h.get("ports") or []
+                if not ports:
+                    story.append(Paragraph("No open ports observed.", styles["small"]))
+                    continue
+                prows = [[Paragraph(c, styles["th"]) for c in
+                          ("Port", "Proto", "Service", "Version", "CPE")]]
+                for p in ports:
+                    prows.append([
+                        Paragraph(_esc(p.get("port")), styles["cell"]),
+                        Paragraph(_esc(p.get("protocol") or "tcp"), styles["cell"]),
+                        Paragraph(_esc(p.get("service") or "—"), styles["cell"]),
+                        Paragraph(_esc(p.get("service_version") or "—"), styles["cell"]),
+                        Paragraph(_esc(p.get("cpe") or "—"), styles["cell"]),
+                    ])
+                story.append(table(prows,
+                                   [16 * mm, 14 * mm, 26 * mm, cw - 116 * mm, 60 * mm]))
+            story.append(PageBreak())
 
         # ── 7. Risk methodology ──
         story.append(heading("3.", "Risk Rating Methodology"))

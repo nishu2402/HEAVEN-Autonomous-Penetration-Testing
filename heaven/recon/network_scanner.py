@@ -9,7 +9,11 @@ Cross-platform: Linux, macOS, Windows.
 from __future__ import annotations
 
 import asyncio
+import functools
 import ipaddress
+import os
+import shutil
+import subprocess  # nosec B404 -- fixed argv, no shell (see _nmap_sudo_prefix)
 import sys
 import time
 import xml.etree.ElementTree as ET  # nosec B405 -- only ET.ParseError (a type) is used; all parsing goes through defusedxml below
@@ -55,8 +59,10 @@ class PortResult:
     protocol: str = "tcp"
     state: str = "closed"
     service: str = ""
-    version: str = ""
-    banner: str = ""
+    product: str = ""       # nmap product name, e.g. "OpenSSH", "Apache httpd"
+    version: str = ""       # nmap version string, e.g. "8.9p1"
+    banner: str = ""        # product + version + extrainfo (human summary)
+    extrainfo: str = ""     # nmap extrainfo, e.g. "Ubuntu Linux; protocol 2.0"
     cpe: str = ""
     ttl: int = 0
     response_time_ms: float = 0.0
@@ -70,6 +76,12 @@ class HostResult:
     is_alive: bool = False
     open_ports: list[PortResult] = field(default_factory=list)
     os_guess: str = ""
+    # How the OS was determined and how much to trust it:
+    #   "nmap"      → nmap -O TCP/IP stack fingerprint (authoritative)
+    #   "heuristic" → inferred from a single TTL value (indicative only)
+    #   ""          → not determined
+    os_source: str = ""
+    os_accuracy: int = 0    # nmap's own 0-100 confidence for the osmatch
     ttl: int = 0
     scan_time_ms: float = 0.0
     honeypot_indicators: list[str] = field(default_factory=list)
@@ -148,6 +160,139 @@ def guess_os_from_ttl(ttl: int) -> str:
     return "unknown"
 
 
+# ── OS-fingerprinting privileges ────────────────────────────────────────────
+# nmap's -O (TCP/IP stack fingerprint) and its SYN/UDP scans (-sS/-sU) all need
+# raw-socket access. Running -O unprivileged makes nmap abort the whole scan
+# ("requires root privileges … QUITTING!"), so we only add those flags when we
+# are *certain* we have the privileges — as root/Administrator directly, or via
+# passwordless sudo. When we can't, we fall back to service/TTL heuristics that
+# are always labelled unconfirmed, never presented as a real fingerprint.
+
+@functools.lru_cache(maxsize=1)
+def _have_admin_privileges() -> bool:
+    """True when this process can run privileged nmap scans without sudo:
+    root on POSIX, or an elevated (Administrator) token on Windows."""
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is not None:
+        try:
+            return geteuid() == 0
+        except OSError:
+            return False
+    try:  # Windows: no geteuid — check for an elevated token
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 — any failure = assume unprivileged
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _nmap_sudo_prefix() -> tuple[str, ...]:
+    """Return the argv prefix that gives nmap raw-socket privileges via sudo,
+    or ``()`` when sudo shouldn't/can't be used.
+
+    Policy comes from ``HEAVEN_NMAP_SUDO``:
+        auto (default) — use ``sudo -n nmap`` only when passwordless sudo works
+        always         — always prepend ``sudo -n``
+        never          — never use sudo
+
+    ``sudo -n`` never prompts: it fails immediately if a password would be
+    required, so this neither blocks nor handles a credential. Cached per
+    process (the answer can't change mid-run).
+    """
+    policy = os.environ.get("HEAVEN_NMAP_SUDO", "auto").strip().lower()
+    if policy == "never" or _have_admin_privileges():
+        return ()  # disabled, or already privileged so sudo is unnecessary
+    sudo = shutil.which("sudo")
+    if not sudo:
+        return ()
+    if policy == "always":
+        return (sudo, "-n")
+    # auto: confirm passwordless sudo actually works, without ever prompting.
+    try:
+        probe = subprocess.run(  # nosec B603 -- fixed argv, no shell
+            [sudo, "-n", "true"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+        return (sudo, "-n") if probe.returncode == 0 else ()
+    except (OSError, subprocess.SubprocessError):
+        return ()
+
+
+_PRIVILEGE_HINT_LOGGED = False
+
+
+def _log_privilege_hint_once() -> None:
+    """Tell the operator, exactly once per run, how to unlock authoritative OS
+    fingerprinting instead of the heuristic fallback."""
+    global _PRIVILEGE_HINT_LOGGED
+    if _PRIVILEGE_HINT_LOGGED:
+        return
+    _PRIVILEGE_HINT_LOGGED = True
+    logger.info(
+        "nmap OS fingerprinting (-O) and SYN/UDP scans need raw-socket "
+        "privileges; running unprivileged, so OS is inferred from service/TTL "
+        "heuristics and labelled 'unconfirmed'. For authoritative results: run "
+        "as root, enable passwordless sudo (HEAVEN_NMAP_SUDO=always), or grant "
+        "nmap capabilities — "
+        "sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip "
+        "$(command -v nmap)"
+    )
+
+
+def _os_name_from_cpe(cpe: str) -> str:
+    """Map an OS-level CPE (``cpe:/o:…`` / ``cpe:2.3:o:…``) to a friendly OS
+    name. Returns '' for application CPEs or anything we can't confidently map —
+    we never guess an OS we didn't actually see evidence for."""
+    c = cpe.lower()
+    # OS part marker differs by CPE form: URI is `cpe:/o:…`, 2.3 is `cpe:2.3:o:…`
+    if "/o:" not in c and ":o:" not in c:
+        return ""
+    if "microsoft:windows" in c or "microsoft" in c or "windows" in c:
+        return "Windows"
+    if "linux" in c:
+        return "Linux"
+    if "apple:mac" in c or "mac_os" in c or "macos" in c or "apple:iphone" in c:
+        return "macOS"
+    if "freebsd" in c:
+        return "FreeBSD"
+    if "openbsd" in c:
+        return "OpenBSD"
+    if "netbsd" in c:
+        return "NetBSD"
+    if "cisco:ios" in c or ":o:cisco" in c:
+        return "Cisco IOS"
+    if "solaris" in c or "sunos" in c:
+        return "Solaris"
+    if "vmware:esxi" in c or "esxi" in c:
+        return "VMware ESXi"
+    return ""
+
+
+def _os_from_service_evidence(ostypes: list[str], os_cpes: list[str]) -> str:
+    """Infer the OS from nmap's *service-detection* evidence — the ``ostype``
+    attribute and OS-level CPEs that ``-sV`` reports without needing root.
+
+    This is a real, observed signal (e.g. an OpenSSH banner advertising Ubuntu),
+    far more specific than a TTL bucket, but it reflects what the *service*
+    claims rather than a stack fingerprint — so callers still label it as an
+    unconfirmed heuristic. Returns '' when there's no evidence at all.
+    """
+    from collections import Counter
+
+    names = [o.strip() for o in ostypes if o and o.strip()]
+    for cpe in os_cpes:
+        name = _os_name_from_cpe(cpe)
+        if name:
+            names.append(name)
+    if not names:
+        return ""
+    return Counter(names).most_common(1)[0][0]
+
+
 def _build_nmap_port_spec(ports: list[int]) -> str:
     """
     Convert a sorted list of port numbers into a compact nmap port spec string.
@@ -199,8 +344,6 @@ async def scan_host(
     Uses stealth-level-aware timing so the same function works from
     ghost-mode recon through loud exploitation-support scans.
     """
-    import os as _os
-
     sem = semaphore or asyncio.Semaphore(50)
     host_result = HostResult(host=host)
     start = time.time()
@@ -208,34 +351,42 @@ async def scan_host(
     port_str = _build_nmap_port_spec(ports)
     timing = _nmap_timing_args(stealth_level)
 
-    # ── Base TCP command ──────────────────────────────────────────────────────
+    # Decide privileges once: -O / -sS / -sU all need raw sockets, and running
+    # any of them unprivileged makes nmap abort the ENTIRE scan (losing the port
+    # data too). Elevate through passwordless sudo when it's available; when it
+    # isn't, drop those flags and rely on the honestly-labelled service/TTL OS
+    # heuristics instead of killing the scan.
+    sudo_prefix = list(_nmap_sudo_prefix())
+    raw_capable = _have_admin_privileges() or bool(sudo_prefix)
+    if not raw_capable:
+        _log_privilege_hint_once()
+
+    # ── nmap command ──────────────────────────────────────────────────────────
     # -sV  : service / version detection
     # -sC  : run default NSE scripts (banner grab, vuln checks, auth testing)
-    # -O   : OS fingerprinting (requires raw-socket access; skipped if not root)
+    # -O   : OS fingerprinting     (raw sockets — added only when raw_capable)
+    # -sS/-sU : SYN + UDP scanning  (raw sockets — added only when raw_capable)
     # -oX  : XML output → stdout for parsing
     # --host-timeout : abort per-host after this long (prevents hangs on firewalled hosts)
-    cmd = ["nmap", "-sV", "-sC", "-p", port_str, "-oX", "-", "--host-timeout", "30m"]
+    os_flag = ["-O"] if raw_capable else []
 
-    # OS detection needs raw sockets; root on Linux, any user on macOS/Windows
-    try:
-        if _os.geteuid() == 0:
-            cmd.insert(1, "-O")
-    except AttributeError:
-        pass  # Windows — no geteuid; nmap handles privileges itself
-
-    if include_udp and udp_ports:
+    if include_udp and udp_ports and raw_capable:
         udp_str = _build_nmap_port_spec(udp_ports[:100])
-        cmd = ["nmap", "-sV", "-sC", "-sS", "-sU",
-               "-p", f"T:{port_str},U:{udp_str}",
-               "-oX", "-", "--host-timeout", "30m"]
-        try:
-            if _os.geteuid() == 0:
-                cmd.insert(1, "-O")
-        except AttributeError:
-            pass
+        scan_flags = ["-sS", "-sU"]
+        port_args = ["-p", f"T:{port_str},U:{udp_str}"]
+    else:
+        if include_udp and udp_ports and not raw_capable:
+            logger.debug(
+                "UDP/SYN scan needs raw sockets we don't have — "
+                "scanning TCP (connect) only for %s", host,
+            )
+        scan_flags = []
+        port_args = ["-p", port_str]
 
-    cmd.extend(timing)
-    cmd.append(host)
+    cmd = [
+        *sudo_prefix, "nmap", "-sV", "-sC", *os_flag, *scan_flags, *port_args,
+        "-oX", "-", "--host-timeout", "30m", *timing, host,
+    ]
 
     async with sem:
         logger.debug(f"nmap: {' '.join(cmd)}")
@@ -257,6 +408,11 @@ async def scan_host(
                         host_result.is_alive = True
 
                     # ── Open ports + service info ─────────────────────────────
+                    # Service-detection OS evidence (nmap's `ostype` attr + any
+                    # OS-level CPEs) gathered as we go — this needs no raw-socket
+                    # privileges and feeds the heuristic OS fallback below.
+                    os_evidence_types: list[str] = []
+                    os_evidence_cpes: list[str] = []
                     for port_elem in xml_root.findall(".//port"):
                         state_elem = port_elem.find("state")
                         if state_elem is None or state_elem.get("state") != "open":
@@ -275,14 +431,25 @@ async def scan_host(
                         product = svc.get("product", "") if svc is not None else ""
                         version = svc.get("version", "") if svc is not None else ""
                         extra   = svc.get("extrainfo", "") if svc is not None else ""
+                        ostype  = svc.get("ostype", "")    if svc is not None else ""
+                        if ostype:
+                            os_evidence_types.append(ostype)
 
                         banner_parts = [p for p in [product, version, extra] if p]
                         banner = " ".join(banner_parts)
 
+                        # First app-level CPE is the port's; collect OS-level
+                        # CPEs (cpe:/o:…) separately as OS evidence.
                         cpe = ""
-                        cpe_elem = port_elem.find(".//cpe")
-                        if cpe_elem is not None and cpe_elem.text:
-                            cpe = cpe_elem.text
+                        for cpe_elem in port_elem.findall(".//cpe"):
+                            txt = (cpe_elem.text or "").strip()
+                            if not txt:
+                                continue
+                            low = txt.lower()
+                            if "/o:" in low or ":o:" in low:  # OS-level CPE
+                                os_evidence_cpes.append(txt)
+                            elif not cpe:
+                                cpe = txt
 
                         # Collect NSE script output into fingerprint dict
                         script_output: dict = {}
@@ -298,17 +465,36 @@ async def scan_host(
                             protocol=protocol,
                             state="open",
                             service=service,
+                            product=product,
                             version=version,
                             banner=banner,
+                            extrainfo=extra,
                             cpe=cpe,
                             fingerprint=script_output,
                         )
                         host_result.open_ports.append(pr)
 
-                    # ── OS fingerprinting ─────────────────────────────────────
+                    # ── OS detection (three honestly-labelled tiers) ──────────
+                    # 1. nmap -O TCP/IP stack fingerprint → authoritative, with
+                    #    its own confidence (needs raw sockets; see above).
+                    # 2. service-detection evidence (ostype / OS CPEs from -sV) →
+                    #    a real observed signal, but what the service claims, so
+                    #    marked heuristic. Works fully unprivileged.
+                    # 3. a single TTL value → coarsest guess, also heuristic.
+                    # Tiers 2-3 are never presented as a confirmed OS.
                     os_match = xml_root.find(".//osmatch")
-                    if os_match is not None:
+                    if os_match is not None and os_match.get("name"):
                         host_result.os_guess = os_match.get("name", "")
+                        host_result.os_source = "nmap"
+                        try:
+                            host_result.os_accuracy = int(os_match.get("accuracy") or 0)
+                        except (ValueError, TypeError):
+                            host_result.os_accuracy = 0
+                    if not host_result.os_guess:
+                        svc_os = _os_from_service_evidence(os_evidence_types, os_evidence_cpes)
+                        if svc_os:
+                            host_result.os_guess = svc_os
+                            host_result.os_source = "heuristic"
                     if not host_result.os_guess:
                         # Fallback: infer from TTL in host element
                         host_elem = xml_root.find(".//host")
@@ -322,6 +508,7 @@ async def scan_host(
                                     pass
                             if ttl_val:
                                 host_result.os_guess = guess_os_from_ttl(ttl_val)
+                                host_result.os_source = "heuristic"
                                 host_result.ttl = ttl_val
 
                 except ET.ParseError as e:
@@ -545,6 +732,21 @@ def _check_service_consistency(host: HostResult) -> None:
             )
 
 
+def _service_version(product: str, version: str, extrainfo: str) -> str:
+    """Build a clean 'product version (extrainfo)' string from nmap fields.
+
+    nmap splits a service banner into product / version / extrainfo; the raw
+    ``version`` field alone drops the product name (so "8.9p1" instead of
+    "OpenSSH 8.9p1"). This recombines them for display without inventing
+    anything — an empty result simply means nmap reported no version data.
+    """
+    core = " ".join(p for p in (product.strip(), version.strip()) if p)
+    extra = extrainfo.strip()
+    if core and extra:
+        return f"{core} ({extra})"
+    return core or (f"({extra})" if extra else "")
+
+
 def _host_to_dict(host: HostResult) -> dict:
     """Convert HostResult to serialisable dict."""
     return {
@@ -552,6 +754,8 @@ def _host_to_dict(host: HostResult) -> dict:
         "ip": host.host,  # alias so orchestrator service-task injection finds the right key
         "is_alive": host.is_alive,
         "os_guess": host.os_guess,
+        "os_source": host.os_source,
+        "os_accuracy": host.os_accuracy,
         "scan_time_ms": round(host.scan_time_ms, 1),
         "honeypot_indicators": host.honeypot_indicators,
         "open_ports": [
@@ -560,7 +764,9 @@ def _host_to_dict(host: HostResult) -> dict:
                 "protocol": p.protocol,
                 "state": p.state,
                 "service": p.service,
+                "product": p.product,
                 "version": p.version,
+                "service_version": _service_version(p.product, p.version, p.extrainfo),
                 "banner": p.banner[:200] if p.banner else "",
                 "cpe": p.cpe,
                 "response_time_ms": round(p.response_time_ms, 1),

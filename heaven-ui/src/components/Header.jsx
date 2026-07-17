@@ -43,8 +43,17 @@ export default function Header({ onMenu }) {
   }, [location.pathname]);
 
   useEffect(() => {
-    const t = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000);
-    return () => clearInterval(t);
+    // Self-correcting clock. A plain setInterval(…, 1000) drifts off the wall-
+    // clock second (it fires 1000ms after mount, wherever in the second that
+    // fell), so the shown time lagged real time by up to ~1s. Re-arm each tick
+    // to fire just after the *next* whole second instead.
+    let timer;
+    const tick = () => {
+      setClock(new Date().toLocaleTimeString());
+      timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 20);
+    };
+    tick();
+    return () => clearTimeout(timer);
   }, []);
 
   // Global "scan running" indicator — polls so it stays visible after you
@@ -81,14 +90,18 @@ export default function Header({ onMenu }) {
           ☰
         </button>
         {hasEngagement ? (
-          <div className="eng-chip">
+          <div
+            className="eng-chip"
+            title={`Engagement: ${eng.engagement.name}${eng.engagement.client ? ` · ${eng.engagement.client}` : ""} · ${eng.stats.total_findings ?? 0} findings · ${eng.stats.scope_targets ?? 0} in scope`}
+          >
             <span className="eng-label">Engagement</span>
             <span className="eng-name">{eng.engagement.name}</span>
             {eng.engagement.client && (
               <span className="eng-stats">· {eng.engagement.client}</span>
             )}
             <span className="eng-stats">
-              · {eng.stats.total_findings ?? 0} findings · {eng.stats.scope_targets ?? 0} targets
+              · {eng.stats.total_findings ?? 0} finding{(eng.stats.total_findings ?? 0) !== 1 ? "s" : ""}
+              {" · "}{eng.stats.scope_targets ?? 0} target{(eng.stats.scope_targets ?? 0) !== 1 ? "s" : ""}
             </span>
           </div>
         ) : (

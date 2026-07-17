@@ -293,6 +293,14 @@ export const Scans = {
   remove: (id) => api(`/scans/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
 
+// Host & service inventory — open ports, service versions and OS per host, as
+// observed by the network scanner. `scanId` narrows to one scan; otherwise the
+// whole engagement is aggregated. An OS flagged heuristic is a TTL guess.
+export const Assets = {
+  list: (scanId) =>
+    api(`/assets?limit=500${scanId ? `&scan_id=${encodeURIComponent(scanId)}` : ""}`),
+};
+
 // Engagements — list all scanned engagements and switch which one the whole
 // app (dashboard, findings, reports) is currently viewing.
 // Notify in-app listeners (the header engagement chip) that the active
@@ -312,6 +320,12 @@ export const Engagements = {
   // returns the new active name.
   remove: (name) =>
     api(`/engagements/${encodeURIComponent(name)}`, { method: "DELETE" })
+      .then((r) => { notifyEngagementChanged(); return r; }),
+  // Rename an engagement (moves its DB + sidecars and rewrites the stored name).
+  // The active pointer follows it if you rename the one you're viewing.
+  rename: (name, newName) =>
+    api(`/engagements/${encodeURIComponent(name)}/rename`,
+        { method: "POST", body: JSON.stringify({ new_name: newName }) })
       .then((r) => { notifyEngagementChanged(); return r; }),
 };
 

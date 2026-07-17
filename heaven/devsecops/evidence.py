@@ -297,8 +297,14 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
     )
 
 
-def export_findings_markdown(findings: list[dict], engagement_name: str = "") -> str:
-    """Render multiple findings as a single Markdown report."""
+def export_findings_markdown(findings: list[dict], engagement_name: str = "",
+                             assets: Optional[list[dict]] = None) -> str:
+    """Render multiple findings as a single Markdown report.
+
+    When ``assets`` (raw network-scan host records) are supplied, a
+    "Host & Service Inventory" section (open ports / service versions / OS) is
+    appended so the written report matches what the terminal and web UI show.
+    """
     from datetime import datetime, timezone
     out = []
     out.append("# HEAVEN Findings Report")
@@ -331,6 +337,12 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "") ->
         pkg = package_finding(f)
         out.append(pkg.to_markdown())
         out.append("---\n")
+
+    if assets:
+        from heaven.devsecops.inventory import render_markdown as _render_inventory_md
+        section = _render_inventory_md(assets)
+        if section:
+            out.append(section)
 
     return "\n".join(out)
 

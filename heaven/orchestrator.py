@@ -103,12 +103,30 @@ class ScanProgress:
     findings_count: int = 0
     assets_discovered: int = 0
     vulns_found: int = 0
+    # task_id -> (started_at, timeout_seconds) for tasks currently in flight, so
+    # a running task contributes genuine, time-based partial progress instead of
+    # the bar jumping only when whole tasks finish.
+    running: dict = field(default_factory=dict)
 
     @property
     def progress_pct(self) -> float:
         if self.total_tasks == 0:
             return 0.0
-        return (self.completed_tasks / self.total_tasks) * 100
+        # In-flight tasks earn fractional, time-based credit: a task that has
+        # been running for its expected duration is treated as ~90% done (the
+        # last 10% lands when it actually completes). This makes the bar advance
+        # continuously as real work happens — an honest estimate, never a
+        # fabricated animation — rather than teleporting between task
+        # completions (the "2 → 12 → 35 → 89" jumps). It stays monotonic: a task
+        # finishing adds a full 1.0 while removing at most 0.9 of running credit.
+        now = time.time()
+        running_frac = 0.0
+        for started_at, timeout in self.running.values():
+            expected = max(10.0, min(float(timeout) if timeout else 60.0, 60.0))
+            running_frac += min(0.9, max(0.0, (now - started_at) / expected))
+        pct = (self.completed_tasks + running_frac) / self.total_tasks * 100.0
+        # Never show a premature 100 — the final 100 is set once run() returns.
+        return max(0.0, min(99.0, pct))
 
     @property
     def elapsed_seconds(self) -> float:
@@ -258,8 +276,32 @@ class ScanOrchestrator:
         return task.id
 
     def on_progress(self, callback: Callable[[ScanProgress], Any]) -> None:
-        """Register a progress callback (called on each task completion)."""
+        """Register a progress callback (fired on task start, task completion,
+        and on a periodic heartbeat while tasks are in flight)."""
         self._progress_callbacks.append(callback)
+
+    async def _emit_progress(self) -> None:
+        """Fire every registered progress callback with the current snapshot."""
+        for cb in self._progress_callbacks:
+            try:
+                ret = cb(self.progress)
+                if asyncio.iscoroutine(ret):
+                    await ret
+            except Exception as e:
+                logger.debug(f"Progress callback error: {e}")
+
+    async def _progress_heartbeat(self, interval: float = 2.0) -> None:
+        """Emit a progress snapshot on a fixed cadence while tasks are running,
+        so the bar keeps advancing during a single long task (e.g. an nmap
+        sweep) instead of freezing between completions. Read-only and honest —
+        it just re-reads the elapsed-time-based estimate."""
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                if self.progress.running:
+                    await self._emit_progress()
+        except asyncio.CancelledError:
+            return
 
     def on_finding(self, callback: Callable[[dict], Any]) -> None:
         """Register a callback fired for each new finding discovered during the scan."""
@@ -309,6 +351,10 @@ class ScanOrchestrator:
             task.state = TaskState.RUNNING
             self.progress.current_task = task.name
             start = time.time()
+            # Register as in-flight so it earns time-based partial progress, and
+            # push an immediate update so the bar reacts the moment work starts.
+            self.progress.running[task.id] = (start, task.timeout)
+            await self._emit_progress()
 
             MAX_RETRIES = 2
             retry_count = 0
@@ -339,6 +385,8 @@ class ScanOrchestrator:
                     retry_count += 1
 
             duration = (time.time() - start) * 1000
+            # No longer in flight — its credit converts to a full completed unit.
+            self.progress.running.pop(task.id, None)
 
             if last_error is None:
                 result = TaskResult(
@@ -560,14 +608,8 @@ class ScanOrchestrator:
                 self.progress.failed_tasks += 1
                 self.progress.completed_tasks += 1
 
-            # Notify progress callbacks
-            for cb in self._progress_callbacks:
-                try:
-                    ret = cb(self.progress)
-                    if asyncio.iscoroutine(ret):
-                        await ret
-                except Exception as e:
-                    logger.debug(f"Progress callback error: {e}")
+            # Notify progress callbacks (task reached a terminal state)
+            await self._emit_progress()
 
             return result
 
@@ -617,6 +659,10 @@ class ScanOrchestrator:
 
         all_results: list[TaskResult] = []
 
+        # Heartbeat: keeps the progress bar advancing (via the time-based
+        # estimate) during long single tasks, not just at task boundaries.
+        heartbeat = asyncio.create_task(self._progress_heartbeat())
+
         for phase in phase_order:
             if self._cancelled:
                 logger.warning("Scan cancelled — stopping pipeline")
@@ -636,6 +682,13 @@ class ScanOrchestrator:
                     self._inject_service_tasks(net_result.data)
                 else:
                     self.priority_targets = []
+
+        # Stop the progress heartbeat now that all phases are done.
+        heartbeat.cancel()
+        try:
+            await heartbeat
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001 — cleanup only
+            logger.debug("progress heartbeat cleanup", exc_info=True)
 
         self.progress.phase = ScanPhase.DONE
         elapsed = self.progress.elapsed_seconds

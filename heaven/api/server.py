@@ -307,9 +307,11 @@ def require_permission(permission: str):
 # under the historical `_`-prefixed names the rest of this module (and tests) use.
 from heaven.engagement import (  # noqa: E402, F401
     active_engagement_file as _active_engagement_file,  # re-exported for tests
+    best_populated_engagement as _best_populated_engagement,
     clear_active_engagement as _clear_active_engagement,
     delete_engagement_store as _delete_engagement_store,
     get_active_engagement as _get_active_engagement,
+    rename_engagement_store as _rename_engagement_store,
     set_active_engagement as _set_active_engagement,
 )
 
@@ -318,11 +320,16 @@ def _resolve_engagement_name(name: Optional[str] = None) -> str:
     """Single source of truth for 'which engagement is the app looking at'.
 
     Priority: explicit arg > HEAVEN_ENGAGEMENT env > active-engagement pointer >
+    the most-populated real engagement on disk > 'default'. The most-populated
+    fallback means that when no pointer is set (e.g. the viewed engagement was
+    deleted) a page load lands on the operator's actual work instead of a blank
     'default'. Every reader (dashboard, findings, reports) and the scan writer go
     through this, so they can never disagree about which store holds the data.
     """
     return (name or os.environ.get("HEAVEN_ENGAGEMENT")
-            or _get_active_engagement() or "default")
+            or _get_active_engagement()
+            or _best_populated_engagement()
+            or "default")
 
 
 # ── Path-traversal guards for HTTP-supplied identifiers ──
@@ -474,6 +481,23 @@ def create_app() -> FastAPI:
                     logger.info("Removed empty auto-created 'default' engagement")
         except Exception as e:  # noqa: BLE001
             logger.debug("Empty-default prune skipped: %s", e)
+        # Self-heal the active pointer: if nothing is actively selected but the
+        # operator has real work on disk, adopt the most-populated engagement so
+        # the app opens on their data instead of a blank 'default' (which is what
+        # made scans and the dashboard keep landing on the wrong/empty store).
+        try:
+            from heaven.engagement import (
+                best_populated_engagement,
+                get_active_engagement,
+                set_active_engagement,
+            )
+            if not get_active_engagement():
+                best = best_populated_engagement()
+                if best:
+                    set_active_engagement(best)
+                    logger.info("Active engagement defaulted to '%s' (most populated)", best)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Active-engagement self-heal skipped: %s", e)
         yield
         # Shutdown — close any open WebSockets
         for ws in list(ws_connections) + list(log_ws_connections):
@@ -609,6 +633,61 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Failed to read latest report {latest_file}: {e}")
             return {}
+
+    def _collect_raw_assets(engagement: Optional[str] = None,
+                            scan_id: Optional[str] = None) -> list[dict]:
+        """Gather raw network-scan host assets (open ports / service / OS).
+
+        Each completed scan persists its host assets inside ``summary_json`` and
+        mirrors them into ``report_<id>.json``. We read the engagement store
+        first — that covers both web- and CLI-launched scans — and fall back to
+        the report JSON when there's no store row yet. ``normalize_assets`` then
+        dedupes across scans by host, so a fresh scan's data supersedes an older
+        one for the same machine.
+        """
+        raw: list[dict] = []
+        try:
+            store = _read_store(engagement)
+            scans = ([store.get_scan(scan_id)] if scan_id
+                     else store.list_scans(limit=200))
+            for s in scans:
+                if not s:
+                    continue
+                blob = s.get("summary_json")
+                if not blob:
+                    continue
+                try:
+                    summ = json.loads(blob)
+                except (ValueError, TypeError):
+                    continue
+                raw.extend(a for a in (summ.get("assets") or []) if isinstance(a, dict))
+        except Exception:
+            logger.debug("suppressed non-fatal exception collecting store assets",
+                         exc_info=True)
+        if not raw:
+            if scan_id:
+                data = _get_latest_report_data(scan_id)
+                raw.extend(a for a in (data.get("assets") or []) if isinstance(a, dict))
+            else:
+                # Engagement-scoped report fallback: walk only THIS engagement's
+                # own scans (newest first) and use the first report JSON that
+                # carries assets. Reading the single global "latest report" here
+                # leaked another engagement's hosts into this one's Assets view.
+                try:
+                    st = _read_store(engagement)
+                    for s in (st.list_scans(limit=50) if st else []):
+                        sid = s.get("scan_id") or s.get("id")
+                        if not sid or not _is_safe_scan_id(sid):
+                            continue
+                        data = _get_latest_report_data(sid)
+                        found = [a for a in (data.get("assets") or []) if isinstance(a, dict)]
+                        if found:
+                            raw.extend(found)
+                            break
+                except Exception:
+                    logger.debug("suppressed non-fatal exception in report-asset fallback",
+                                 exc_info=True)
+        return raw
 
     # ── Health (unauthenticated) ──
     @app.get("/api/health")
@@ -867,11 +946,54 @@ def create_app() -> FastAPI:
         req.targets = ips
         req.urls = urls
 
+        # Resolve engagement first (explicit field > env var > active pointer >
+        # default) so both the duplicate-submit guard and the active-engagement
+        # pointer key off the real target store.
+        req.engagement = _resolve_engagement_name(req.engagement)
+
+        # ── Duplicate-submit guard ──
+        # One user action can reach this endpoint twice (a double click,
+        # Enter-then-click, a network retry, or a dev StrictMode re-fire). Each
+        # POST otherwise spawns its own scan, so "launch one" quietly ran two.
+        # If an identical scan (same targets + mode + engagement) is already
+        # pending/running — or was created in the last few seconds — return that
+        # scan instead of starting a duplicate.
+        _sig = (
+            tuple(sorted((req.targets or []) + (req.urls or []))),
+            str(req.mode or req.scan_type or "full").lower(),
+            req.engagement,
+        )
+        _now = datetime.now(timezone.utc)
+        for _sid, _sc in list(active_scans.items()):
+            _cfg = _sc.get("config") or {}
+            _osig = (
+                tuple(sorted((_cfg.get("targets") or []) + (_cfg.get("urls") or []))),
+                str(_cfg.get("mode") or _cfg.get("scan_type") or "full").lower(),
+                _sc.get("engagement"),
+            )
+            if _osig != _sig:
+                continue
+            if _sc.get("status") in ("pending", "running"):
+                return ScanResponse(scan_id=_sid, status=str(_sc.get("status", "pending")),
+                                    message="Identical scan already in progress — duplicate ignored")
+            try:
+                _c = _sc.get("created")
+                if _c and (_now - datetime.fromisoformat(_c)).total_seconds() < 8:
+                    return ScanResponse(scan_id=_sid, status=str(_sc.get("status", "completed")),
+                                        message="Duplicate scan submit ignored")
+            except (ValueError, TypeError):
+                pass
+
+        # Persist the resolved engagement as active so the dashboard, findings and
+        # reports immediately follow this scan's data.
+        _set_active_engagement(req.engagement)
+
         active_scans[scan_id] = {
             "status": "pending",
             "config": req.model_dump(),
-            "created": datetime.now(timezone.utc).isoformat(),
+            "created": _now.isoformat(),
             "created_by": user.username,
+            "engagement": req.engagement,
         }
 
         from heaven.security.audit import get_audit_logger, AuditAction, AuditSeverity
@@ -881,16 +1003,7 @@ def create_app() -> FastAPI:
             severity=AuditSeverity.INFO,
         )
 
-        # Resolve engagement: explicit field > env var > active pointer > default.
-        # Persist it as the active engagement so the dashboard, findings and
-        # reports immediately follow this scan's data (previously they always
-        # read the fixed "default" store, so a named-engagement scan vanished
-        # from the UI and the report said "no findings").
-        req.engagement = _resolve_engagement_name(req.engagement)
-        _set_active_engagement(req.engagement)
-
         active_scans[scan_id]["scan_id"] = scan_id
-        active_scans[scan_id]["engagement"] = req.engagement
         # Keep a strong reference to the task in a module-level set. Without it,
         # asyncio only holds a weak ref and the GC can kill a running scan
         # mid-flight. The ref must NOT live in active_scans — that dict is
@@ -1079,11 +1192,25 @@ def create_app() -> FastAPI:
     async def list_assets(
         limit: int = Query(50, ge=1, le=500),
         scan_id: Optional[str] = None,
+        engagement: Optional[str] = None,
         user: User = Depends(require_permission("scan.view")),
     ):
-        data = _get_latest_report_data(scan_id)
-        assets = data.get("assets", [])
-        return {"assets": assets[:limit], "total": len(assets)}
+        """Host & service inventory: open ports, service versions and OS for
+        every host the network scanner discovered.
+
+        Every value is reported exactly as nmap observed it — nothing is
+        fabricated. An OS labelled ``(heuristic — unconfirmed)`` was inferred
+        from a TTL, not an nmap ``-O`` stack fingerprint, and is flagged as such
+        so a guess is never mistaken for a confirmed fact.
+        """
+        from heaven.devsecops.inventory import inventory_totals, normalize_assets
+        raw = _collect_raw_assets(engagement, scan_id)
+        inventory = normalize_assets(raw)
+        return {
+            "assets": inventory[:limit],
+            "total": len(inventory),
+            "totals": inventory_totals(inventory),
+        }
 
     # ── Attack Tree ──
     @app.get("/api/attack-tree/{scan_id}")
@@ -1304,6 +1431,64 @@ def create_app() -> FastAPI:
                     name, user.username, was_active, new_active)
         return {"ok": True, "deleted": name, "active": new_active or _resolve_engagement_name()}
 
+    @app.post("/api/engagements/{name}/rename")
+    async def rename_engagement_endpoint(
+        name: str,
+        body: dict,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Rename an engagement so an operator is never stuck with an awkward
+        name (the name is welded to the store key *and* the DB filename, so this
+        moves the SQLite DB + its WAL sidecars and rewrites the in-DB name row).
+
+        Backs the dashboard "rename" action. If the renamed engagement is the one
+        the app is currently viewing, the active pointer follows it to the new
+        name so the dashboard keeps showing the same data.
+        """
+        from heaven.config import get_config
+
+        new_name = str((body or {}).get("new_name", "")).strip()
+        # Both the current and the new name become DB *filenames* — reject
+        # traversal on either before any filesystem operation.
+        _validate_http_engagement(name)
+        _validate_http_engagement(new_name)
+        if not new_name:
+            raise HTTPException(400, "new_name is required")
+        if new_name == "default":
+            raise HTTPException(400, "'default' is reserved and cannot be used as a name")
+        if new_name == name:
+            # No-op rename — report success so the UI stays simple.
+            return {"ok": True, "renamed": {"from": name, "to": new_name},
+                    "active": _resolve_engagement_name()}
+
+        eng_dir = get_config().data_dir / "engagements"
+        old_db = eng_dir / f"{name}.db"
+        new_db = eng_dir / f"{new_name}.db"
+        if not old_db.exists():
+            raise HTTPException(404, "Engagement not found")
+        # A case-only rename targets the same file on a case-insensitive fs — that
+        # is allowed; only a genuinely different existing engagement is a clash.
+        if new_db.exists() and not new_db.samefile(old_db):
+            raise HTTPException(409, f"An engagement named '{new_name}' already exists")
+
+        was_active = _resolve_engagement_name() == name
+        try:
+            _rename_engagement_store(old_db, new_db)
+        except FileExistsError:
+            raise HTTPException(409, f"An engagement named '{new_name}' already exists")
+        except FileNotFoundError:
+            raise HTTPException(404, "Engagement not found")
+        except OSError as e:
+            logger.warning("Rename '%s'→'%s' failed: %s", name, new_name, e)
+            raise HTTPException(500, "Could not rename engagement")
+
+        if was_active:
+            _set_active_engagement(new_name)
+        logger.info("Engagement '%s' renamed to '%s' by %s (was_active=%s)",
+                    name, new_name, user.username, was_active)
+        return {"ok": True, "renamed": {"from": name, "to": new_name},
+                "active": _resolve_engagement_name()}
+
     @app.get("/api/engagement/findings")
     async def engagement_findings(
         severity: Optional[str] = None,
@@ -1456,6 +1641,11 @@ def create_app() -> FastAPI:
             }
             findings.append(enrich_finding(d))
 
+        # Host/service inventory (open ports, versions, OS) for this engagement,
+        # so HTML/PDF/Markdown reports document the attack surface, not just the
+        # findings. Empty for engagements with no network scan.
+        raw_assets = _collect_raw_assets(engagement)
+
         fmt = (format or "html").lower()
         media = {
             "html": "text/html", "markdown": "text/markdown", "csv": "text/csv",
@@ -1479,7 +1669,7 @@ def create_app() -> FastAPI:
                 tmp.close()
                 ok = PDFReportGenerator().generate(
                     {"engagement": eng_name, "vulnerabilities": findings,
-                     "findings": findings}, tmp.name)
+                     "findings": findings, "assets": raw_assets}, tmp.name)
                 if not ok or not os.path.getsize(tmp.name):
                     try:
                         os.unlink(tmp.name)
@@ -1493,10 +1683,11 @@ def create_app() -> FastAPI:
             if fmt == "html":
                 from heaven.devsecops.compliance_report import ComplianceReportGenerator
                 body = ComplianceReportGenerator().generate_html_report(
-                    findings, engagement_name=eng_name)
+                    findings, engagement_name=eng_name, assets=raw_assets)
             elif fmt == "markdown":
                 from heaven.devsecops.evidence import export_findings_markdown
-                body = export_findings_markdown(findings, engagement_name=eng_name)
+                body = export_findings_markdown(findings, engagement_name=eng_name,
+                                                assets=raw_assets)
             elif fmt == "csv":
                 from heaven.devsecops.evidence import export_findings_csv
                 body = export_findings_csv(findings)
@@ -3167,7 +3358,9 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         async def progress_update(progress):
             pct = getattr(progress, "progress_pct", None)
             if pct is not None:
-                active_scans[scan_id]["progress_pct"] = round(pct)
+                # Keep one decimal so the fine-grained, time-based advances the
+                # orchestrator now emits aren't rounded away into visible steps.
+                active_scans[scan_id]["progress_pct"] = round(pct, 1)
             active_scans[scan_id]["progress"] = progress.to_dict() if hasattr(progress, "to_dict") else {}
             for ws in list(ws_connections):
                 try:
@@ -3182,7 +3375,12 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                         if res.state != "completed" or not res.data:
                             continue
                         data = res.data if isinstance(res.data, dict) else {}
-                        for key in ("vulnerabilities", "findings", "candidates", "validated_findings"):
+                        # Flush validated findings for a live view only — NOT raw
+                        # "candidates", which are pre-validation and often false
+                        # positives. The authoritative set is reconciled at
+                        # completion, so anything shown early that the final
+                        # dedup/FP-suppression drops is removed again.
+                        for key in ("vulnerabilities", "findings", "validated_findings"):
                             for f in data.get(key, []):
                                 fkey = f"{f.get('target','')}:{f.get('vuln_type','')}:{f.get('title','')}"
                                 if fkey not in persisted_finding_keys:
@@ -3209,8 +3407,19 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         # 1. Persist findings to engagement store (powers /api/engagement/findings + dashboard)
         if store:
             try:
-                for finding in findings:
-                    store.upsert_finding(scan_id, finding)
+                final_ids = {store.upsert_finding(scan_id, finding) for finding in findings}
+                # Reconcile the store to the FINAL authoritative set. The live
+                # progress flush above persists findings as they surface, but the
+                # final result is deduped + FP-suppressed — so drop any of this
+                # scan's rows that aren't in the final set. Without this the store
+                # kept superseded/suppressed candidates the report had already
+                # dropped, so the engagement view, scan list and downloaded report
+                # disagreed (the "results don't match / look fake" symptom).
+                try:
+                    store.prune_scan_findings(scan_id, final_ids)
+                except Exception:
+                    logger.debug("suppressed non-fatal exception pruning scan findings",
+                                 exc_info=True)
                 # Authoritative finding count = deduped rows actually in the
                 # store, so the scan list, kill chain and engagement view all
                 # report the same number.
@@ -3219,6 +3428,12 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                 store.record_scan_complete(scan_id, summary={
                     "total": persisted_count,
                     "elapsed_seconds": result.get("elapsed_seconds", 0),
+                    # Persist host/service assets INTO the scan summary (the CLI
+                    # path already does this via the full summary). The inventory
+                    # /api/assets reads the store first; without assets here a
+                    # web-launched scan's open ports/services were invisible unless
+                    # the global "latest report" happened to be this exact scan.
+                    "assets": result.get("assets", []),
                     "severity": {
                         s: sum(1 for f in findings if (f.get("severity") or "info").lower() == s)
                         for s in ("critical", "high", "medium", "low", "info")

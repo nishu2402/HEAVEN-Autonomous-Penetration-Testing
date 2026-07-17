@@ -24,6 +24,7 @@ const Findings       = lazy(() => import("./pages/Findings.jsx"));
 const FindingDetail  = lazy(() => import("./pages/FindingDetail.jsx"));
 const KillChain      = lazy(() => import("./pages/KillChain.jsx"));
 const Scans          = lazy(() => import("./pages/Scans.jsx"));
+const AssetsPage     = lazy(() => import("./pages/Assets.jsx"));
 const AIPlans        = lazy(() => import("./pages/AIPlans.jsx"));
 const Benchmark      = lazy(() => import("./pages/Benchmark.jsx"));
 const Methodology    = lazy(() => import("./pages/Methodology.jsx"));
@@ -131,6 +132,7 @@ function Shell() {
               <Route path="/findings/:id" element={<FindingDetail />} />
               <Route path="/kill-chain" element={<KillChain />} />
               <Route path="/scans" element={<Scans />} />
+              <Route path="/assets" element={<AssetsPage />} />
               <Route path="/diff" element={<DiffPage />} />
               <Route path="/autonomous" element={<AutonomousPage />} />
               <Route path="/coverage" element={<CoveragePage />} />

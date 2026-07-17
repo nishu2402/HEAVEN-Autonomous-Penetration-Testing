@@ -30,6 +30,30 @@ class _SkipHud(Exception):
     scan persistence."""
 
 
+def _print_inventory(assets: Optional[list]) -> None:
+    """Print the host & service inventory (open ports / versions / OS).
+
+    Fed by the network scanner's ``assets``; values are shown exactly as nmap
+    observed them. Silent when no network scan ran (e.g. a web-only mode).
+    """
+    from heaven.devsecops.inventory import inventory_totals, normalize_assets
+    inventory = normalize_assets(assets)
+    if not inventory:
+        return
+    tot = inventory_totals(inventory)
+    _print(f"\n[bold]Host & Service Inventory[/bold]  [dim]— {tot['hosts']} host(s), "
+           f"{tot['open_ports']} open port(s), {tot['distinct_services']} service(s)[/dim]")
+    for h in inventory:
+        os_txt = h.get("os_label") or "OS not determined"
+        _print(f"  [cyan]{h['host']}[/cyan]  [dim]{os_txt}[/dim]")
+        for p in h.get("ports", []):
+            ver = p.get("service_version") or ""
+            _print(f"    [dim]{p['port']:>5}/{p.get('protocol','tcp')}[/dim]  "
+                   f"{(p.get('service') or '—')[:14]:14}  {ver}")
+    _print("  [dim]View later:[/dim] [cyan]heaven assets[/cyan]  "
+           "[dim](an OS marked 'heuristic — unconfirmed' is a TTL guess)[/dim]")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # scan — the big one
 # ═══════════════════════════════════════════════════════════════════════════
@@ -565,6 +589,8 @@ def scan(
     _print(f"\n[green]Scan completed in {summary['elapsed_seconds']}s[/green]")
     _print(f"  Tasks: {summary['completed']}/{summary['total_tasks']} (failed: {summary['failed']})")
 
+    _print_inventory(summary.get("assets"))
+
     if engagement_store:
         scan_id = summary.get("scan_id", orch.scan_id)
         findings_in_summary = (
@@ -611,7 +637,8 @@ def scan(
                     summary.get("vulnerabilities", [])
                     + summary.get("findings", [])
                 )
-                Path(output_file).write_text(export_findings_markdown(findings_in_summary))
+                Path(output_file).write_text(export_findings_markdown(
+                    findings_in_summary, assets=summary.get("assets")))
                 _print(f"  Markdown report written to: {output_file}")
             else:
                 Path(output_file).write_text(json.dumps(summary, indent=2, default=str))
@@ -778,6 +805,8 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
 
     _print(f"\n[green]Resumed scan completed in {summary['elapsed_seconds']}s[/green]")
     _print(f"  Tasks: {summary['completed']}/{summary['total_tasks']} (failed: {summary['failed']})")
+
+    _print_inventory(summary.get("assets"))
 
     scan_id_done = target_scan["id"]
     for f in summary.get("vulnerabilities", []) + summary.get("findings", []):

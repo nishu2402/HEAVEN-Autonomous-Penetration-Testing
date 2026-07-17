@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Scans as ScansApi, Demo, Engagement } from "../api";
+import { Scans as ScansApi, Demo, Engagement, Engagements } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import HelpTip from "../components/HelpTip.jsx";
 import TargetsInput, { classifyTarget } from "../components/TargetsInput.jsx";
@@ -29,9 +29,18 @@ export default function Scans() {
   const [targets, setTargets]   = useState("");
   const [mode, setMode]         = useState(initialMode);
   const [stealth, setStealth]   = useState("3");
-  const [engagement, setEngagement] = useState("");
+  // Which engagement the scan's findings will be saved into. A picker of the
+  // engagements on disk (+ "new") replaces the old free-text field so a scan
+  // can never silently pile into a surprise/sticky engagement — the operator
+  // always SEES and chooses the destination. "__new__" reveals the name input.
+  const [engList, setEngList]   = useState([]);
+  const [engChoice, setEngChoice] = useState("");   // name | "__new__" | "" (loading)
+  const [newEng, setNewEng]     = useState("");
   const [authorized, setAuthorized] = useState(false);
   const [launching, setLaunching]   = useState(false);
+  // Hard guard against a double-submit firing two POSTs before `launching`
+  // re-renders the disabled button (double click / Enter-then-click).
+  const submittingRef = useRef(false);
   const [launchError, setLaunchError] = useState(null);
   const [launchSuccess, setLaunchSuccess] = useState(null);
   // Bumping this forces the scan list to reload right after a launch/demo,
@@ -51,6 +60,25 @@ export default function Scans() {
   useEffect(() => { Engagement.summary().then(setEngSummary).catch(() => {}); }, []);
   const scopeCount = engSummary?.stats?.scope_targets ?? 0;
   const engName = engSummary?.engagement?.name;
+
+  // Load the engagements on disk and default the destination to the active one
+  // so the operator always knows (and can change) where findings will be saved.
+  useEffect(() => {
+    Engagements.list()
+      .then((r) => {
+        const list = r.engagements || [];
+        setEngList(list);
+        setEngChoice((prev) => {
+          if (prev) return prev;                       // keep an explicit choice
+          const active = list.find((e) => e.active);
+          return active ? active.name : (list[0]?.name || "__new__");
+        });
+      })
+      .catch(() => {});
+  }, [listRefresh]);
+
+  // Resolved destination engagement name for the launch payload.
+  const destEngagement = engChoice === "__new__" ? newEng.trim() : (engChoice || "").trim();
 
   // Parse + classify targets live for inline validation feedback.
   const parsed = useMemo(() => {
@@ -77,10 +105,15 @@ export default function Scans() {
 
   async function launchScan(e) {
     e.preventDefault();
+    if (submittingRef.current) return;               // ignore a rapid double-submit
     if (!authorized) { setLaunchError("You must confirm written authorization before scanning."); return; }
     const rawTargets = targets.split(/[\n,]+/).map(t => t.trim()).filter(Boolean);
     if (rawTargets.length === 0) { setLaunchError("Enter at least one target URL or IP."); return; }
+    if (engChoice === "__new__" && !destEngagement) {
+      setLaunchError("Name the new engagement, or pick an existing one."); return;
+    }
 
+    submittingRef.current = true;
     setLaunching(true);
     setLaunchError(null);
     setLaunchSuccess(null);
@@ -89,17 +122,21 @@ export default function Scans() {
         targets: rawTargets,
         mode,
         stealth_level: parseInt(stealth, 10),
-        engagement: engagement.trim() || undefined,
+        engagement: destEngagement || undefined,
         i_have_authorization: true,
       };
       const result = await ScansApi.create(payload);
-      setLaunchSuccess(`Scan launched · ID: ${result.scan_id || result.id || "—"}`);
+      setLaunchSuccess(
+        `Scan launched · ID: ${result.scan_id || result.id || "—"}` +
+        (destEngagement ? ` · saving to “${destEngagement}”` : "")
+      );
       setTargets("");
       setAuthorized(false);
       setTimeout(bumpList, 1500);
     } catch (err) {
       setLaunchError(err.message || "Launch failed");
     } finally {
+      submittingRef.current = false;
       setLaunching(false);
     }
   }
@@ -167,14 +204,39 @@ export default function Scans() {
           </label>
 
           <label className="form-group form-full">
-            <span className="form-label">Engagement name <span className="dim">(optional)</span></span>
-            <input
-              className="form-input"
-              type="text"
-              value={engagement}
-              onChange={e => setEngagement(e.target.value)}
-              placeholder="e.g. acme-webapp-pentest"
-            />
+            <span className="form-label">
+              Save findings to engagement
+              <HelpTip text="The engagement the scan's findings, scope and report are saved into. Defaults to the one you're currently viewing — change it here so a scan never lands in the wrong engagement. Pick “＋ New engagement…” to start a fresh one." />
+            </span>
+            <select
+              className="form-select"
+              value={engChoice}
+              onChange={e => setEngChoice(e.target.value)}
+            >
+              {engList.map(e => (
+                <option key={e.name} value={e.name}>
+                  {(e.display_name || e.name)}{e.active ? " — current" : ""}
+                  {` (${e.findings} finding${e.findings === 1 ? "" : "s"})`}
+                </option>
+              ))}
+              <option value="__new__">＋ New engagement…</option>
+            </select>
+            {engChoice === "__new__" && (
+              <input
+                className="form-input"
+                type="text"
+                value={newEng}
+                onChange={e => setNewEng(e.target.value)}
+                placeholder="e.g. acme-webapp-pentest"
+                style={{ marginTop: 8 }}
+                autoFocus
+              />
+            )}
+            {destEngagement && (
+              <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                Findings, scope and report will be saved to “{destEngagement}”.
+              </span>
+            )}
           </label>
 
           <label className={"consent-row form-full" + (authorized ? " is-ack" : "")}>

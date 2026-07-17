@@ -296,6 +296,14 @@ class LiveCVEFeed:
         product = (product or "").strip()
         if not product and not cpe:
             return []
+        # Refuse a search keyed on a generic protocol label ("http", "ssl", …)
+        # unless an explicit CPE pins the real product. The feed would otherwise
+        # return every product that speaks the protocol (Apache/nginx CVEs for a
+        # bare "http"), producing confident-looking false positives on unrelated
+        # servers. A version does NOT rescue it — a Python http.server's "0.6" is
+        # not Apache's "0.6", so "http"+version must still be rejected.
+        if not cpe and _product_key(product) in _GENERIC_PRODUCT_KEYS:
+            return []
         cache_key = f"{vendor}:{product}:{version}:{cpe}"
         cached = self._cache_read(cache_key)
         if cached is not None:
@@ -384,6 +392,11 @@ class LiveCVEFeed:
         """Convenience: resolve a service/banner to a product then discover."""
         fp = _fingerprint_from_banner(banner) if banner else None
         product_key = fp[0] if fp else _product_key(service)
+        # A bare protocol label (e.g. "http") resolves via the CPE map to whatever
+        # product speaks it (Apache), so a generic key must never drive a search —
+        # that produced Apache CVEs on plain HTTP servers. A concrete product only.
+        if product_key in _GENERIC_PRODUCT_KEYS:
+            return []
         ver = version or (fp[1] if fp else "")
         vendor, product = _vendor_product_for(product_key, service)
         return await self.discover(product, ver, vendor=vendor)
@@ -434,6 +447,17 @@ class LiveCVEFeed:
 # ── helpers ──────────────────────────────────────────────────────────────────
 def _product_key(service: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", (service or "").lower().replace("-", "_"))
+
+
+# Normalised protocol labels that name no concrete product. A version-less,
+# CPE-less search on one of these would return every product speaking the
+# protocol, so ``discover`` refuses them (see the guard there).
+_GENERIC_PRODUCT_KEYS = frozenset({
+    "", "http", "https", "http_proxy", "http_alt", "www", "web", "ssl", "tls",
+    "tcp", "udp", "tcpwrapped", "unknown", "service", "socks", "proxy",
+    "rpcbind", "netbios_ssn", "microsoft_ds", "domain", "rtsp", "upnp", "soap",
+    "ident", "ssl_http", "https_alt",
+})
 
 
 def _vendor_product_for(product_key: str, service: str) -> tuple[str, str]:

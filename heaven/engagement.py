@@ -83,6 +83,51 @@ def clear_active_engagement() -> bool:
     return False
 
 
+def best_populated_engagement() -> Optional[str]:
+    """Name of the on-disk engagement richest in real data — most findings,
+    then most scans, then most-recently modified.
+
+    Used as a smarter fallback than a bare ``default`` when nothing is
+    explicitly selected and no active pointer exists (e.g. right after the
+    engagement the app was viewing got deleted): a page load then lands on the
+    operator's actual work instead of an empty ``default`` that also silently
+    absorbs new scans. Opens each DB read-only (never materialises one), skips
+    the dedicated demo DB, and returns ``None`` when no engagement holds real
+    data.
+    """
+    from heaven.config import get_config
+    try:
+        eng_dir = get_config().data_dir / "engagements"
+        if not eng_dir.exists():
+            return None
+    except Exception:  # noqa: BLE001 — config problems just mean "no fallback"
+        return None
+
+    best: Optional[str] = None
+    best_key: tuple = (0, 0, 0.0)
+    for db in eng_dir.glob("*.db"):
+        if db.stem == DEMO_DB_NAME:
+            continue
+        try:
+            stats = EngagementStore(db, create=False).stats()
+        except Exception:  # noqa: BLE001 — skip locked/unreadable DBs
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+            continue
+        findings = int(stats.get("total_findings", 0) or 0)
+        scans = int(stats.get("scans_run", 0) or 0)
+        if findings <= 0 and scans <= 0:
+            continue  # empty — not a real fallback candidate
+        try:
+            mtime = db.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        key = (findings, scans, mtime)
+        if key > best_key:
+            best_key = key
+            best = db.stem
+    return best
+
+
 def delete_engagement_store(db_path: Path | str) -> bool:
     """Permanently delete an engagement's SQLite DB and its sidecar files.
 
@@ -103,6 +148,71 @@ def delete_engagement_store(db_path: Path | str) -> bool:
         except OSError as e:
             logger.warning("Could not delete %s: %s", sidecar, e)
     return removed_main
+
+
+def rename_engagement_store(old_path: Path | str, new_path: Path | str) -> None:
+    """Rename an engagement's SQLite DB (plus its WAL/SHM/journal sidecars) and
+    rewrite the engagement's own name row so its label stays consistent.
+
+    The engagement name is welded to the DB filename (``engagements/<name>.db``)
+    and ``EngagementStore.get_engagement`` resolves the canonical row by that
+    stem. A correct rename therefore has to (1) fold the WAL back into the main
+    DB, (2) move every sidecar alongside the main file — moving only ``.db``
+    would strand the WAL and let SQLite resurrect stale rows — and (3) update the
+    in-DB ``engagement.name`` to the new filename stem, or the dashboard label
+    falls back to a stale row.
+
+    Handles a case-only rename on a case-insensitive filesystem (e.g. macOS:
+    ``certified hacker`` → ``Certified Hacker``, which is the *same* inode) by
+    hopping through a temp name so the stored case actually changes.
+
+    Raises ``FileNotFoundError`` if the source is missing and ``FileExistsError``
+    if the destination is a *different* existing engagement (never silently
+    clobber another engagement's data).
+    """
+    old_p = Path(old_path)
+    new_p = Path(new_path)
+    if old_p == new_p:
+        return
+    if not old_p.exists():
+        raise FileNotFoundError(old_p)
+    # A case-insensitive filesystem reports the differently-cased target as
+    # "existing" because it is the same file — that is an allowed case-only
+    # rename, not a clobber. Only a genuinely distinct existing file is a clash.
+    if new_p.exists() and not new_p.samefile(old_p):
+        raise FileExistsError(new_p)
+
+    # Fold the WAL back into the main DB so there is no live -wal to move.
+    try:
+        conn = sqlite3.connect(old_p, timeout=30.0)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:  # checkpoint is best-effort — the move still works
+        logger.debug("WAL checkpoint before rename failed (continuing): %s", e)
+
+    def _move(src: Path, dst: Path) -> None:
+        if src == dst or not src.exists():
+            return
+        if dst.exists() and dst.samefile(src):
+            # Case-only rename on a case-insensitive fs: go via a temp name so
+            # the on-disk case is actually updated rather than being a no-op.
+            tmp = src.with_name(src.name + ".renaming.tmp")
+            src.rename(tmp)
+            tmp.rename(dst)
+        else:
+            src.rename(dst)
+
+    new_p.parent.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        src = old_p if suffix == "" else old_p.with_name(old_p.name + suffix)
+        dst = new_p if suffix == "" else new_p.with_name(new_p.name + suffix)
+        _move(src, dst)
+
+    # Keep the in-DB engagement name consistent with the new filename stem.
+    EngagementStore(new_p).set_engagement_name(new_p.stem)
 
 
 SCHEMA = """
@@ -286,7 +396,7 @@ def _strip_query(url: str) -> str:
 
 
 def _finding_hash(target: str, vuln_type: str, param: str = "",
-                  endpoint: str = "") -> str:
+                  endpoint: str = "", cve: str = "", port: str = "") -> str:
     """
     Stable hash that identifies a finding across re-scans.
 
@@ -297,9 +407,23 @@ def _finding_hash(target: str, vuln_type: str, param: str = "",
     crawled page. For path-level vulns the query string is stripped from the
     identity so the same injectable parameter probed with N payloads collapses
     to a single finding (the parameter, not the payload, is the vulnerability).
+
+    CVE-bearing service/component findings are identified by ``(host, port,
+    CVE)``. Without the CVE in the key every CVE on one host shares the same
+    identity (``target=host``, ``vuln_type=vulnerable_service``, no
+    endpoint/param), so N distinct CVEs collapse into a single finding and all
+    but the first silently vanish — with a *non-deterministic* surviving
+    ``cve_id`` that decoupled the persisted severity/title from the real
+    finding. Only a real ``CVE-…`` id discriminates; ``HEAVEN-HEURISTIC`` and
+    empty values fall through to the normal path.
     """
     vt = (vuln_type or "").strip().lower()
-    if is_host_level(vt):
+    cve_norm = (cve or "").strip().upper()
+    if cve_norm.startswith("CVE-"):
+        host = _host_key(target)
+        p = str(port or "").strip()
+        key = f"{host}|{p}|{cve_norm}"
+    elif is_host_level(vt):
         key = f"{_host_key(target)}|{vt}"
     else:
         base = _strip_query(target).lower()
@@ -308,13 +432,20 @@ def _finding_hash(target: str, vuln_type: str, param: str = "",
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
-def _finding_identity(f: dict) -> tuple[str, str, str, str]:
-    """Pull (target, vuln_type, param, endpoint) out of a raw finding dict."""
+def _finding_identity(f: dict) -> tuple[str, str, str, str, str, str]:
+    """Pull (target, vuln_type, param, endpoint, cve, port) out of a finding.
+
+    ``cve``/``port`` feed :func:`_finding_hash` so distinct CVEs on one host do
+    not collapse into a single row. ``cve`` is normalised the same way it is
+    persisted (via :func:`_cve_id_of`, which accepts either ``cve`` or
+    ``cve_id``)."""
     target = f.get("target", "") or f.get("target_url", "") or f.get("host", "")
     vuln_type = f.get("vuln_type", "") or f.get("type", "") or "unknown"
     param = f.get("param", "") or ""
     endpoint = f.get("endpoint", "") or f.get("url", "") or ""
-    return str(target), str(vuln_type), str(param), str(endpoint)
+    cve = _cve_id_of(f)
+    port = str(f.get("port", "") or "")
+    return str(target), str(vuln_type), str(param), str(endpoint), cve, port
 
 
 def _risk_value(finding: dict) -> float:
@@ -384,6 +515,13 @@ def _is_junk_finding(f: dict) -> bool:
     real result.
     """
     vt = (f.get("vuln_type") or f.get("type") or "").strip().lower()
+    target = (f.get("target") or f.get("target_url") or f.get("host") or "").strip()
+    # A CVE finding that names no host/target points a vulnerability at nothing —
+    # you can't say what to patch. Drop it even though it carries a CVE and a
+    # confidence (seen live: a stray CVE-2020-29396 with an empty target and
+    # vuln_type 'unknown', which otherwise persisted as a bogus high-severity row).
+    if _cve_id_of(f) and not target:
+        return True
     if vt and vt != "unknown":
         return False
     if f.get("evidence"):
@@ -443,8 +581,8 @@ def dedup_findings(findings: list) -> list:
             continue
         if _is_junk_finding(f):
             continue
-        target, vuln_type, param, endpoint = _finding_identity(f)
-        key = _finding_hash(target, vuln_type, param, endpoint)
+        target, vuln_type, param, endpoint, cve, port = _finding_identity(f)
+        key = _finding_hash(target, vuln_type, param, endpoint, cve, port)
         # A finding the FP layer adjudicated as a false positive taints its whole
         # identity: drop every copy — including any raw candidate for the same
         # vuln that slipped through unmarked — so a rejected finding never reaches
@@ -611,6 +749,42 @@ class EngagementStore:
                 ).fetchone()
             return Engagement(**dict(row)) if row else None
 
+    def set_engagement_name(self, new_name: str) -> None:
+        """Rename this store's engagement row to ``new_name``.
+
+        The canonical name is the DB filename stem and ``get_engagement``
+        resolves the row by that stem, so after the DB file is renamed the in-DB
+        ``engagement.name`` must be rewritten to match or the label falls back to
+        a stale row. Updates the row ``get_engagement`` would pick (the
+        most-recently-updated one), leaves any other rows untouched, and is
+        constraint-safe if a row already carries the target name.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT id FROM engagement ORDER BY updated_at DESC, id DESC LIMIT 1"
+            ).fetchone()
+            if row is None:
+                c.execute(
+                    "INSERT INTO engagement (name, client, statement_of_work, "
+                    "created_at, updated_at) VALUES (?, '', '', ?, ?)",
+                    (new_name, now, now),
+                )
+                return
+            clash = c.execute(
+                "SELECT id FROM engagement WHERE name = ? AND id != ?",
+                (new_name, row["id"]),
+            ).fetchone()
+            if clash is not None:
+                # Another row already holds the target name (the column is
+                # UNIQUE). The rename target file did not exist, so this is an
+                # internal duplicate — leave it rather than violate the constraint.
+                return
+            c.execute(
+                "UPDATE engagement SET name = ?, updated_at = ? WHERE id = ?",
+                (new_name, now, row["id"]),
+            )
+
     # ── Scope ──────────────────────────────────────────────────────────
     def add_scope(self, target: str, kind: str = "host", in_scope: bool = True,
                   notes: str = "", criticality: str = "medium") -> None:
@@ -774,6 +948,25 @@ class EngagementStore:
                 (now, status, json.dumps(summary), scan_id),
             )
 
+    def prune_scan_findings(self, scan_id: str, keep_ids) -> int:
+        """Delete this scan's findings whose id is not in ``keep_ids``.
+
+        Reconciles the store to a scan's FINAL authoritative finding set after a
+        live progress flush persisted intermediate candidates that the final
+        dedup / FP-suppression later dropped. Only rows whose ``scan_id`` matches
+        are considered, so findings owned by other scans are never touched.
+        Returns the number of rows removed.
+        """
+        keep = {str(k) for k in (keep_ids or ())}
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id FROM findings WHERE scan_id = ?", (scan_id,)
+            ).fetchall()
+            stale = [r[0] for r in rows if r[0] not in keep]
+            for fid in stale:
+                c.execute("DELETE FROM findings WHERE id = ?", (fid,))
+            return len(stale)
+
     def delete_scan(self, scan_id: str) -> bool:
         """Delete a scan and everything it produced (findings + checkpoints).
 
@@ -909,10 +1102,14 @@ class EngagementStore:
         vuln_type = finding.get("vuln_type", "") or finding.get("type", "") or "unknown"
         param = finding.get("param", "")
         endpoint = finding.get("endpoint", "") or finding.get("url", "") or ""
+        cve = _cve_id_of(finding)
+        port = str(finding.get("port", "") or "")
         # Always derive the id from content. A scanner-supplied "id" is not a
         # stable cross-scan identifier and would defeat dedup — the content
-        # hash IS the canonical id.
-        fid = _finding_hash(target, vuln_type, param, endpoint)
+        # hash IS the canonical id. The CVE + port are part of the identity so
+        # distinct CVEs on the same host each get their own row instead of
+        # collapsing into one (with a non-deterministic surviving cve_id).
+        fid = _finding_hash(target, vuln_type, param, endpoint, cve, port)
         # Host-level findings (missing headers, TLS, smuggling, SPF/DMARC)
         # store the host as the target so the UI shows one row per host, not
         # one per crawled path.

@@ -184,7 +184,10 @@ a:hover { color: var(--accent-2); }
    ════════════════════════════════════════════════════════════════════ */
 .app-shell {
   display: grid;
-  grid-template-columns: 248px 1fr;
+  /* minmax(0, 1fr) — NOT plain 1fr — so the content column's minimum is 0, not
+     its min-content width. Plain 1fr lets a wide child (3D canvas, tables) blow
+     the track past the viewport; minmax(0,…) makes it shrink/scroll instead. */
+  grid-template-columns: 248px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
@@ -285,6 +288,7 @@ a:hover { color: var(--accent-2); }
 .main-pane {
   display: grid;
   grid-template-rows: 58px 1fr;
+  grid-template-columns: minmax(0, 1fr);   /* 0-minimum column → never blows out */
   overflow: hidden;
   background: transparent;
 }
@@ -303,15 +307,21 @@ a:hover { color: var(--accent-2); }
 
 .eng-chip {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 5px 12px; border-radius: 999px;
+  padding: 5px 12px; border-radius: 999px; min-width: 0; max-width: 100%;
   background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  white-space: nowrap;
 }
 .eng-label {
   color: var(--text-2); text-transform: uppercase; font-size: 9.5px;
-  letter-spacing: 0.14em; font-weight: 600;
+  letter-spacing: 0.14em; font-weight: 600; flex-shrink: 0;
 }
-.eng-name { color: var(--text-0); font-weight: 600; }
-.eng-stats { color: var(--text-1); font-size: 12px; }
+/* Name can be arbitrarily long ("certified hacker", a full URL, …) — keep it on
+   one line and ellipsize instead of wrapping/overflowing the header bar. */
+.eng-name {
+  color: var(--text-0); font-weight: 600; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.eng-stats { color: var(--text-1); font-size: 12px; flex-shrink: 0; }
 .eng-warn { color: var(--med); font-size: 12.5px; }
 .header-clock { color: var(--text-2); font-size: 12px; font-family: var(--font-mono); letter-spacing: 0.04em; }
 
@@ -346,6 +356,13 @@ a:hover { color: var(--accent-2); }
   border-radius: 999px; padding: 1px 6px;
 }
 .eng-switch-count { flex-shrink: 0; color: var(--text-2); font-size: 11px; font-family: var(--font-mono); }
+.eng-switch-edit {
+  flex-shrink: 0; width: 34px; background: none; border: none;
+  border-left: 1px solid var(--border); cursor: pointer;
+  color: var(--text-2); font-size: 13px;
+}
+.eng-switch-edit:hover:not(:disabled) { background: rgba(52,229,163,0.10); color: var(--brand); }
+.eng-switch-edit:disabled { cursor: default; opacity: 0.5; }
 .eng-switch-del {
   flex-shrink: 0; width: 34px; background: none; border: none;
   border-left: 1px solid var(--border); cursor: pointer;
@@ -395,7 +412,12 @@ a:hover { color: var(--accent-2); }
 .logout-btn:hover { border-color: rgba(255,77,106,0.6); color: var(--crit); background: rgba(255,77,106,0.06); }
 
 /* ── Content area ── */
-.content { overflow-y: auto; overflow-x: hidden; height: 100%; display: flex; flex-direction: column; }
+/* min-width: 0 is load-bearing: `.content` is a grid item of `.main-pane`, so its
+   automatic minimum size is its content's min-content width. Without this, any
+   page whose content has a wide min-content (the 3D dashboard, wide tables…)
+   stretches this track past the viewport and the layout overflows horizontally
+   instead of the inner content scrolling/shrinking. */
+.content { overflow-y: auto; overflow-x: hidden; height: 100%; display: flex; flex-direction: column; min-width: 0; }
 .content > .dashboard-grid { flex: 1; min-height: 0; }
 .content > .page { flex: none; }
 
@@ -538,6 +560,14 @@ a:hover { color: var(--accent-2); }
 .filters input::placeholder, .form-input::placeholder { color: var(--text-3); }
 .filters select option, .form-select option { background: var(--bg-2); color: var(--text-0); }
 .form-full { grid-column: 1 / -1; }
+/* Multi-column form rows (e.g. the CVE lookup) must never push the card wider
+   than its container: min-width:0 lets each field shrink, and on narrow screens
+   the columns stack instead of overflowing. */
+.cve-form-row { min-width: 0; }
+.cve-form-row .form-input { min-width: 0; }
+@media (max-width: 640px) {
+  .cve-form-row { grid-template-columns: 1fr !important; }
+}
 .form-checkbox { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 13px; color: var(--text-1); }
 .form-checkbox input { accent-color: var(--accent); width: 15px; height: 15px; }
 
@@ -737,15 +767,22 @@ a:hover { color: var(--accent-2); }
    DASHBOARD
    ════════════════════════════════════════════════════════════════════ */
 .dashboard-grid {
-  display: grid; grid-template-columns: 1fr 360px; grid-template-rows: 1fr;
-  height: calc(100vh - 58px); overflow: hidden;
+  display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: 1fr;
+  height: calc(100vh - 58px); overflow: hidden; min-width: 0;
 }
-.dashboard-left { display: grid; grid-template-rows: 1fr auto; overflow: hidden; min-height: 0; }
+/* `min-width: 0` is essential: these are grid children, and a grid item's
+   default `min-width: auto` refuses to shrink below its content's intrinsic
+   width. The 3D <canvas> keeps an explicit pixel width, so without this the
+   column (and the whole dashboard) inflates to the canvas width and overflows
+   on narrow screens instead of shrinking to fit. */
+.dashboard-left { display: grid; grid-template-rows: 1fr auto; overflow: hidden; min-height: 0; min-width: 0; }
 .dashboard-right {
   border-left: 1px solid var(--border);
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden; min-width: 0;
   background: var(--glass); backdrop-filter: blur(10px);
 }
+/* The r3f canvas must never dictate layout width — clamp it to its container. */
+.topology-container canvas { max-width: 100%; }
 
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 18px; }
 .stat-card {
@@ -1260,17 +1297,21 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
   transition: color .12s ease, border-color .12s ease;
 }
 .helptip:hover .helptip-icon, .helptip:focus .helptip-icon { color: var(--text-0); border-color: var(--brand); }
-.helptip-bubble {
-  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  width: max-content; max-width: 260px; padding: 8px 11px;
-  background: var(--bg-2); border: 1px solid var(--border-strong);
+/* The bubble is portalled to <body> and positioned with fixed coords (see
+   HelpTip.jsx) so no card's `overflow: hidden` can clip it. Placement classes
+   only supply the transform anchor; top/left come from inline styles. */
+.helptip-portal {
+  position: fixed; z-index: 9999; width: max-content; max-width: 260px;
+  padding: 8px 11px; background: var(--bg-2); border: 1px solid var(--border-strong);
   border-radius: var(--radius-md); color: var(--text-1);
   font-size: 11.5px; line-height: 1.55; font-weight: 400;
   text-transform: none; letter-spacing: normal; text-align: left; white-space: normal;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.45); z-index: 60;
-  opacity: 0; visibility: hidden; transition: opacity .12s ease; pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45); pointer-events: none;
+  animation: helptip-fade .12s ease;
 }
-.helptip:hover .helptip-bubble, .helptip:focus .helptip-bubble { opacity: 1; visibility: visible; }
+.helptip-portal--top { transform: translate(-50%, -100%); }
+.helptip-portal--bottom { transform: translate(-50%, 0); }
+@keyframes helptip-fade { from { opacity: 0 } to { opacity: 1 } }
 
 /* ── Header controls: theme toggle + mobile hamburger ───────────────── */
 .theme-toggle, .nav-toggle {
@@ -1286,7 +1327,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
 
 /* ── Responsive: off-canvas sidebar on narrow screens ───────────────── */
 @media (max-width: 860px) {
-  .app-shell { grid-template-columns: 1fr; }
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
     position: fixed; top: 0; left: 0; bottom: 0; width: 248px; z-index: 1000;
     transform: translateX(-100%); transition: transform .22s ease;
@@ -1297,6 +1338,54 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
     background: rgba(0,0,0,0.5);
   }
   .nav-toggle { display: inline-flex; }
-  .header { padding-left: 12px; padding-right: 12px; }
+  .header { padding-left: 12px; padding-right: 12px; gap: 8px; }
   .header-clock { display: none; }   /* save space on small screens */
+
+  /* ── Dashboard: the two-pane grid (topology/stats + right rail) is a fixed
+     `1fr 360px` locked to one viewport height on desktop. On a phone that rail
+     can't sit beside the map — it must stack UNDER it, and the whole thing has
+     to grow with its content and scroll (the content pane owns the scroll),
+     instead of being clipped by `overflow: hidden`. ── */
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    height: auto; min-height: 0; overflow: visible;
+  }
+  .content > .dashboard-grid { flex: none; }
+  .dashboard-left { display: block; overflow: visible; min-height: 0; }
+  .dashboard-right {
+    overflow: visible; min-height: 0;
+    border-left: none; border-top: 1px solid var(--border);
+  }
+  /* The 3D map wrapper takes its height from the grid `1fr` on desktop; once the
+     column stacks it has no intrinsic height, so pin one or it collapses to 0. */
+  .dashboard-topology { height: 300px; }
+
+  /* Four stat cards can't fit legibly across a phone — the labels ("CRITICAL",
+     "TARGETS") were being clipped by the card's `overflow: hidden`. Drop to two. */
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 14px; }
+
+  /* Wide data tables (CVE = 8 cols, findings, assets, scans) can't shrink to a
+     phone without clipping columns off the right. Make each table its own
+     horizontal-scroll container so every column stays reachable by swiping,
+     instead of being cut off by the page's overflow-x: hidden. (kv-table is a
+     2-col key/value layout and is intentionally left to wrap.) */
+  .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+}
+
+@media (max-width: 640px) {
+  /* The header can't fit the engagement chip AND every right-side control on a
+     phone. Keep the engagement identity (the important context) + theme + sign
+     out; drop the counts (shown on the dashboard rail), the SIEM badge and the
+     role pill so the chip has room instead of being crushed to nothing. */
+  .eng-stats { display: none; }
+  .eng-label { display: none; }   /* drop the "ENGAGEMENT" word so the name fits */
+  .user-badge { display: none; }
+  .user-role-chip { display: none; }
+}
+
+@media (max-width: 380px) {
+  /* Very narrow: give the stat number a little less size so nothing clips. */
+  .stat-value { font-size: 2.1rem; }
+  .stat-card { padding: 14px 15px; }
 }

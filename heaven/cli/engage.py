@@ -15,6 +15,7 @@ from heaven.cli._helpers import (
     clear_current_engagement,
     get_current_engagement,
     resolve_engagement_name,
+    set_current_engagement,
 )
 
 
@@ -101,6 +102,7 @@ def engage_list() -> None:
                   f"{scans} scan{'s' if scans != 1 else ''}")
         _print(f"  {marker} [bold]{name}[/bold]{tag}  [dim]— {detail}[/dim]")
     _print("\nSwitch with [cyan]heaven use <name>[/cyan] · "
+           "rename with [cyan]heaven engage rename <old> <new>[/cyan] · "
            "delete with [cyan]heaven engage delete <name>[/cyan]")
 
 
@@ -151,6 +153,61 @@ def engage_delete(name: str, yes: bool) -> None:
         clear_active_engagement()
 
     _print(f"[green]✓[/green] Deleted engagement [bold]{name}[/bold].")
+
+
+@engage.command("rename")
+@click.argument("old_name")
+@click.argument("new_name")
+def engage_rename(old_name: str, new_name: str) -> None:
+    """Rename an engagement (OLD_NAME → NEW_NAME).
+
+    The engagement name is welded to the DB filename, so this moves the SQLite
+    DB and its WAL sidecars and rewrites the stored name. If the renamed
+    engagement is your current selection, the `heaven use` context and the web
+    UI's active pointer follow it to the new name.
+    """
+    from heaven.engagement import (
+        get_active_engagement,
+        rename_engagement_store,
+        set_active_engagement,
+    )
+
+    new_name = new_name.strip()
+    if not new_name:
+        _print("[red]New name must not be empty.[/red]")
+        sys.exit(2)
+    if new_name == "default" or any(ch in new_name for ch in ("/", "\\")) or ".." in new_name:
+        _print(f"[red]Invalid engagement name: {new_name!r}[/red]")
+        sys.exit(2)
+
+    old_path = _engagement_db_path(old_name)
+    if not old_path.exists():
+        _print(f"[red]Engagement DB not found: {old_path}[/red]")
+        sys.exit(2)
+    # Keep the renamed DB in the same directory it already lives in (canonical or
+    # legacy), so nothing about which store the app reads changes but the name.
+    new_path = old_path.with_name(f"{new_name}.db")
+    if new_path.exists() and not new_path.samefile(old_path):
+        _print(f"[red]An engagement named '{new_name}' already exists: {new_path}[/red]")
+        sys.exit(1)
+
+    try:
+        rename_engagement_store(old_path, new_path)
+    except FileExistsError:
+        _print(f"[red]An engagement named '{new_name}' already exists.[/red]")
+        sys.exit(1)
+    except OSError as e:
+        _print(f"[red]Could not rename engagement: {e}[/red]")
+        sys.exit(1)
+
+    # Repoint the sticky `use` context + web active pointer if they named the old
+    # engagement, so the app keeps showing the same data under its new name.
+    if get_current_engagement() == old_name:
+        set_current_engagement(new_name)  # also syncs the web active pointer
+    elif get_active_engagement() == old_name:
+        set_active_engagement(new_name)
+
+    _print(f"[green]✓[/green] Renamed [bold]{old_name}[/bold] → [bold]{new_name}[/bold].")
 
 
 # ── scope group ──────────────────────────────────────────────────────────────

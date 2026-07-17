@@ -6,7 +6,7 @@
 // its own runs in one consistent, well-managed place instead of everything
 // piling into a single merged list.
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Scans as ScansApi, Replay } from "../api";
 import { useToast } from "./Toast.jsx";
@@ -15,6 +15,30 @@ import { sevColor } from "../theme";
 const SEV_ORDER = ["critical", "high", "medium", "low", "info"];
 
 const isRunning = (s) => s.status === "running" || s.status === "pending";
+
+// Smoothly eases the fill toward the real server percentage each time it
+// changes, so a jump like 12% → 35% animates over ~1s instead of teleporting.
+// It only ever moves toward the true value the backend reports — no fabricated
+// progress — turning the coarse steps into continuous motion.
+function ProgressFill({ target }) {
+  const tgt = Math.max(0, Math.min(100, Number(target) || 0));
+  const [w, setW] = useState(tgt);
+  const wRef = useRef(tgt);
+  useEffect(() => {
+    let raf;
+    const step = () => {
+      const cur = wRef.current;
+      const diff = tgt - cur;
+      if (Math.abs(diff) < 0.25) { wRef.current = tgt; setW(tgt); return; }
+      const next = cur + diff * 0.08;   // ease ~8% of the gap per frame
+      wRef.current = next; setW(next);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [tgt]);
+  return <div className="progress-fill" style={{ width: `${w}%`, transition: "none" }} />;
+}
 
 function fmtStarted(s) {
   const raw = s.created || s.started_at || "";
@@ -72,11 +96,17 @@ export default function ScanList({
   const navigate = useNavigate();
   const toast = useToast();
 
+  // True while any scan is running — drives a faster poll so the progress bar
+  // reflects real work closely instead of teleporting between sparse samples.
+  const runningRef = useRef(false);
+
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
       const d = await ScansApi.list(50, kind);
-      setScans(d.scans || []);
+      const list = d.scans || [];
+      setScans(list);
+      runningRef.current = list.some(isRunning);
       setError(null);
     } catch (e) {
       setError(e.message);
@@ -85,10 +115,18 @@ export default function ScanList({
     }
   }, [kind]);
 
+  // Adaptive polling: every 2s while a scan is live (so progress updates feel
+  // continuous), backing off to 8s when everything is idle.
   useEffect(() => {
-    load();
-    const i = setInterval(load, 8000);
-    return () => clearInterval(i);
+    let timer;
+    let cancelled = false;
+    const tick = async () => {
+      await load();
+      if (cancelled) return;
+      timer = setTimeout(tick, runningRef.current ? 2000 : 8000);
+    };
+    tick();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [load, refreshKey]);
 
   // 1-second tick so a running scan's elapsed time updates live.
@@ -221,7 +259,9 @@ export default function ScanList({
                   {running ? (
                     <div className="scan-progress-wrap">
                       <div className={`progress-bar ${progress === null ? "progress-indeterminate" : ""}`}>
-                        <div className="progress-fill" style={{ width: `${progress ?? 40}%` }} />
+                        {progress === null
+                          ? <div className="progress-fill" style={{ width: "40%" }} />
+                          : <ProgressFill target={progress} />}
                       </div>
                       {progress !== null && <span className="scan-progress-pct">{Math.round(progress)}%</span>}
                     </div>

@@ -4,6 +4,7 @@
 // looked up live against NVD + CIRCL, merged/de-duped, and version-confirmed.
 
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { Cve } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
@@ -57,42 +58,47 @@ export default function CvePage() {
           are instant and work offline.
         </p>
 
-        <div className="form-row" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+        <div className="form-row cve-form-row" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: 12 }}>
           <label className="form-group">
             <span className="form-label">Product *</span>
             <input className="form-input mono-input" type="text" value={product}
+                   style={{ minWidth: 0 }}
                    onChange={(e) => setProduct(e.target.value)} onKeyDown={onKey}
                    placeholder="openssh · nginx · log4j · apache …" />
           </label>
           <label className="form-group">
             <span className="form-label">Version (optional — enables version-confirm)</span>
             <input className="form-input mono-input" type="text" value={version}
+                   style={{ minWidth: 0 }}
                    onChange={(e) => setVersion(e.target.value)} onKeyDown={onKey}
                    placeholder="9.5" />
           </label>
         </div>
 
-        <div className="form-row" style={{ display: "grid", gridTemplateColumns: "1fr 2fr 80px", gap: 12 }}>
+        <div className="form-row cve-form-row" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 2fr) minmax(72px, 0.6fr)", gap: 12 }}>
           <label className="form-group">
             <span className="form-label">Vendor (optional)</span>
             <input className="form-input mono-input" type="text" value={vendor}
+                   style={{ minWidth: 0 }}
                    onChange={(e) => setVendor(e.target.value)} onKeyDown={onKey}
                    placeholder="openbsd" />
           </label>
           <label className="form-group">
             <span className="form-label">Exact CPE 2.3 (optional — overrides product/version)</span>
             <input className="form-input mono-input" type="text" value={cpe}
+                   style={{ minWidth: 0 }}
                    onChange={(e) => setCpe(e.target.value)} onKeyDown={onKey}
                    placeholder="cpe:2.3:a:openbsd:openssh:9.5:*:*:*:*:*:*:*" />
           </label>
           <label className="form-group">
             <span className="form-label">Limit</span>
             <input className="form-input" type="number" min={1} max={100} value={limit}
+                   style={{ minWidth: 0 }}
                    onChange={(e) => setLimit(e.target.value)} onKeyDown={onKey} />
           </label>
         </div>
 
-        <button className="btn btn-primary" disabled={loading} onClick={run}>
+        <button className="btn btn-primary" disabled={loading} onClick={run} style={{ marginTop: 14 }}>
           {loading ? "Querying NVD + CIRCL…" : "Look up CVEs"}
         </button>
 
@@ -125,8 +131,17 @@ export default function CvePage() {
             </div>
 
             {cves.length === 0 ? (
-              <div className="dim" style={{ padding: 8 }}>
-                No CVEs returned by the live feeds (or offline / not indexed).
+              <div className="dim" style={{ padding: 8, lineHeight: 1.65 }}>
+                No CVEs came back for this query. Common causes:
+                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  <li>The product/vendor spelling doesn't match NVD's CPE dictionary —
+                    try the <strong>Vendor</strong> field or an exact <strong>CPE 2.3</strong>.</li>
+                  <li>NVD rate-limited the request (only ~5 lookups / 30&nbsp;s without a key).
+                    Add an <code>NVD_API_KEY</code> in{" "}
+                    <Link to="/settings" style={{ color: "var(--accent-2)" }}>Settings</Link>{" "}
+                    and retry for reliable results.</li>
+                  <li>The server has no outbound internet access (fully offline).</li>
+                </ul>
               </div>
             ) : (
               <table className="data-table">

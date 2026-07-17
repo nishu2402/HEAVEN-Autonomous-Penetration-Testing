@@ -735,6 +735,18 @@ def detect_zero_day_indicators(service: str, version: str, banner: str) -> list[
     return indicators
 
 
+# Generic service labels that name a *protocol*, not a *product*. Searching a
+# live CVE feed for these pulls unrelated product CVEs onto any host that speaks
+# the protocol (the word "http" matches Apache/nginx), so they must never drive a
+# dynamic CVE sweep on their own — a concrete product has to be identified first.
+_GENERIC_SERVICE_KEYS = frozenset({
+    "", "http", "https", "http-proxy", "http-alt", "www", "web", "ssl", "tls",
+    "tcp", "udp", "tcpwrapped", "unknown", "service", "socks", "proxy", "rpcbind",
+    "netbios-ssn", "microsoft-ds", "domain", "rtsp", "upnp", "soap", "ident",
+    "ssl/http", "https-alt",
+})
+
+
 # ── Main mapping entry point ──
 
 async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
@@ -759,23 +771,43 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
             service = port_info.get("service", "")
             banner  = port_info.get("banner", "")
             version = port_info.get("version", "")
+            nmap_product = (port_info.get("product") or "").strip()
 
-            # 1. Inline CVE matching
+            # 1. Inline CVE matching. Prefer a banner fingerprint, then nmap's
+            #    identified product, and only fall back to the bare service label.
             fp = _fingerprint_from_banner(banner)
-            product_key  = fp[0] if fp else service.lower()
+            if fp:
+                product_key = fp[0]
+            elif nmap_product:
+                product_key = nmap_product.lower()
+            else:
+                product_key = service.lower()
             version_str  = (fp[1] if fp else "") or version
 
             inline_cves = lookup_inline_cves(product_key, version_str)
 
             # 3a. Dynamic fallback — only when the inline DB knows nothing about
-            #     this product (that is exactly the "not in my DB" situation).
+            #     this product (that is exactly the "not in my DB" situation) AND
+            #     the product_key names a concrete PRODUCT rather than a bare
+            #     protocol. A generic label ("http", "https", "www", "ssl", …)
+            #     must NOT trigger a live NVD sweep: searching the feed for the
+            #     word "http" pulls every Apache/nginx CVE onto any HTTP server,
+            #     so a plain Python http.server was landing ~25 false "Apache"
+            #     CVEs. A specific service name (e.g. "gizmoserver", "vsftpd") is
+            #     a valid product to search even without a banner fingerprint.
             if (live_feed is not None and not INLINE_CVE_DB.get(product_key)
                     and live_used < max_live_lookups
+                    and product_key not in _GENERIC_SERVICE_KEYS
                     and (service or banner)):
                 live_used += 1
                 try:
+                    # Pass the RESOLVED product_key, not the raw service label:
+                    # the feed maps a bare "http" to Apache via its CPE map, which
+                    # is exactly how a Python http.server was collecting Apache
+                    # CVEs. We already fingerprinted the product above, so hand the
+                    # feed that (and skip the banner to avoid a re-fingerprint).
                     live_hits = await live_feed.discover_for_service(
-                        service, banner, version_str)
+                        product_key, "", version_str)
                     host_name = host.get("host", "unknown")
                     for lc in live_hits:
                         all_vulns.append({

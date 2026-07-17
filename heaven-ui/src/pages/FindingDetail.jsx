@@ -3,6 +3,34 @@ import { useParams, Link } from "react-router-dom";
 import { Engagement, ExploitProof, AI, ExploitDB } from "../api";
 import Markdown from "../components/Markdown";
 
+// Finding classes that are tied to a specific published CVE (a version of a
+// product). Everything else — misconfigurations, missing headers, weak TLS,
+// email/DNS policy, exposure — is a class of issue, not a CVE, so a blank CVE is
+// correct and expected there rather than a bug.
+const CVE_BEARING = new Set([
+  "vulnerable_service", "outdated_software", "known_vulnerability",
+  "vulnerable_component", "cve", "vulnerable_dependency",
+]);
+
+// Render the CVE cell so an absent CVE reads as intentional, not broken.
+function cveCell(f) {
+  if (f.cve_id) return f.cve_id;
+  const cveClass = CVE_BEARING.has(f.vuln_type);
+  return (
+    <span
+      className="dim"
+      title={cveClass
+        ? "No matching CVE was resolved for this service/version."
+        : "This finding is a configuration, policy, or hygiene issue — it is not tracked by a specific CVE."}
+    >
+      —{" "}
+      <span style={{ fontSize: 11 }}>
+        {cveClass ? "(no CVE resolved)" : "(not a CVE-class finding)"}
+      </span>
+    </span>
+  );
+}
+
 const STATUSES = ["open", "verified", "false_positive", "accepted_risk", "fixed"];
 const STATUS_COLORS = {
   open: "var(--med)", verified: "var(--brand)",
@@ -96,7 +124,7 @@ export default function FindingDetail() {
               </span>
               {f.confidence_bucket && <span className="dim" style={{ marginLeft: 6 }}>({f.confidence_bucket})</span>}
             </td></tr>
-            <tr><td>CVE</td><td>{f.cve_id || "—"}</td></tr>
+            <tr><td>CVE</td><td>{cveCell(f)}</td></tr>
             <tr><td>CVSS</td><td>
               {f.predicted_cvss_score?.toFixed?.(1)
                 ?? (f.typical_cvss ? Number(f.typical_cvss).toFixed(1) : "—")}
@@ -273,38 +301,56 @@ function RemediationCard({ id, staticText }) {
     }
   }
 
-  // Nothing to show at all until there's KB text or the user asks for AI text.
-  if (!staticText && !ai && !error && !loading) {
-    return (
-      <div className="card">
-        <div className="card-title">Remediation</div>
-        <button className="btn" onClick={generate} disabled={loading}>
-          ✨ Generate AI remediation
-        </button>
-      </div>
-    );
-  }
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+  // The AI button only adds value when the engine returns genuinely AI-tailored
+  // text that DIFFERS from the KB text already on screen. Without an LLM key the
+  // engine returns the very same KB text — rendering it again as "AI-tailored
+  // remediation" is exactly the duplicate the operator was seeing. So: only show
+  // an AI block when it's truly tailored; otherwise show a clear note (and, if we
+  // had no KB text at all, the returned text once) pointing at Settings.
+  const aiIsTailored = ai && ai.ai_generated && norm(ai.remediation) !== norm(staticText);
+  const aiUnavailable = ai && !aiIsTailored;
 
   return (
     <div className="card">
       <div className="card-title">Remediation</div>
-      {staticText && <div className="evidence-block">{staticText}</div>}
-      {ai && (
-        <div style={{ marginTop: staticText ? 12 : 0 }}>
-          <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>
-            {ai.ai_generated
-              ? "✨ AI-tailored remediation"
-              : "Knowledge-base remediation (set an LLM key for AI-tailored guidance)"}
-          </div>
-          <div className="md-block">
-            <Markdown>{ai.remediation}</Markdown>
-          </div>
+
+      {staticText ? (
+        <div className="evidence-block">{staticText}</div>
+      ) : (!ai && !error && !loading) ? (
+        <div className="dim" style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.5 }}>
+          No knowledge-base remediation for this finding class yet — generate
+          AI-tailored guidance below.
+        </div>
+      ) : null}
+
+      {aiIsTailored && (
+        <div style={{ marginTop: staticText ? 14 : 0 }}>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>✨ AI-tailored remediation</div>
+          <div className="md-block"><Markdown>{ai.remediation}</Markdown></div>
         </div>
       )}
+
+      {/* No LLM configured. Show the returned KB text once ONLY if nothing was
+          already displayed above, then explain why there's no AI text to add. */}
+      {aiUnavailable && !staticText && (
+        <div className="md-block"><Markdown>{ai.remediation}</Markdown></div>
+      )}
+      {aiUnavailable && (
+        <div className="dim" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.55 }}>
+          {staticText
+            ? "The knowledge-base guidance above is the best available — "
+            : "That's the knowledge-base guidance — "}
+          no LLM key is configured, so there's no AI-tailored version to add. Add a
+          Gemini / OpenAI / Anthropic key in{" "}
+          <Link to="/settings" style={{ color: "var(--cyan)" }}>Settings</Link> to enable it.
+        </div>
+      )}
+
       {error && <div className="evidence-block" style={{ color: "var(--red)" }}>{error}</div>}
-      <button className="btn" onClick={generate} disabled={loading}
-              style={{ marginTop: 12 }}>
-        {loading ? "Generating…" : ai ? "↻ Regenerate" : "✨ Generate AI remediation"}
+
+      <button className="btn" onClick={generate} disabled={loading} style={{ marginTop: 14 }}>
+        {loading ? "Generating…" : aiIsTailored ? "↻ Regenerate" : "✨ Generate AI remediation"}
       </button>
     </div>
   );

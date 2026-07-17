@@ -13,6 +13,7 @@ const GROUPS = [
     items: [
       { to: "/",            label: "Dashboard",    icon: "▣" },
       { to: "/scans",       label: "Scans",        icon: "⚡" },
+      { to: "/assets",      label: "Assets",       icon: "🖧" },
       { to: "/watch",       label: "Watch",        icon: "🔁" },
       { to: "/autonomous",  label: "Autonomous",   icon: "∞" },
       { to: "/diff",        label: "Scan Diff",    icon: "↹" },
@@ -87,8 +88,16 @@ export default function Sidebar() {
   const loc = useLocation();
 
   useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(t);
+    // Self-correcting clock — re-arm each tick to fire just after the next whole
+    // second so the display never lags real time (a plain 1000ms interval
+    // drifts off the second boundary). Mirrors the header clock.
+    let timer;
+    const tick = () => {
+      setTime(new Date());
+      timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 20);
+    };
+    tick();
+    return () => clearTimeout(timer);
   }, []);
 
   return (

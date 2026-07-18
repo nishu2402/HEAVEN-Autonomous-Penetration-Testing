@@ -153,8 +153,9 @@ export default function Reports() {
           live from that engagement's findings, so it always reflects current data.
         </p>
 
-        {/* Engagement picker — surfaces only when there's more than one to choose. */}
-        {engList.length > 1 && (
+        {/* Engagement picker — always shown so it's explicit WHICH engagement the
+            report covers, even when there's only one to choose. */}
+        {engList.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                         margin: "6px 0 4px" }}>
             <label htmlFor="report-eng" className="form-label" style={{ margin: 0 }}>

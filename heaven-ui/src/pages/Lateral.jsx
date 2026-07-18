@@ -33,7 +33,9 @@ export default function LateralPage() {
     setFormError(null);
     setLoadingHosts(true);
     try {
-      const data = await Assets.list();
+      // Pivot candidates should span the whole engagement, not just the most
+      // recent scan — pass { all: true } for the engagement-wide host union.
+      const data = await Assets.list(null, { all: true });
       const pairs = [];
       for (const h of (data?.assets || [])) {
         for (const p of (h.ports || [])) {

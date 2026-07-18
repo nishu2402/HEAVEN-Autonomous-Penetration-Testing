@@ -1145,6 +1145,13 @@ class EngagementStore:
                         "epss", "in_kev"):
                 if mlk not in evidence and finding.get(mlk) is not None:
                     evidence[mlk] = finding[mlk]
+            # Preserve the component-identity fields (product / version / CWE /
+            # exploit availability) so per-CVE remediation and the finding detail
+            # can be reconstructed after the DB round-trip — the columns don't
+            # hold these, so without this they'd be lost.
+            for ck in ("product", "version", "cwe", "exploit_available"):
+                if ck not in evidence and finding.get(ck):
+                    evidence[ck] = finding[ck]
             evidence_json = json.dumps(evidence)
             risk_score = _risk_value(finding)
             confidence = float(finding.get("confidence", 0.0) or 0.0)

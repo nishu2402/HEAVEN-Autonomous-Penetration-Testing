@@ -297,8 +297,11 @@ export const Scans = {
 // observed by the network scanner. `scanId` narrows to one scan; otherwise the
 // whole engagement is aggregated. An OS flagged heuristic is a TTL guess.
 export const Assets = {
-  list: (scanId) =>
-    api(`/assets?limit=500${scanId ? `&scan_id=${encodeURIComponent(scanId)}` : ""}`),
+  // scanId → a single scan's inventory (default: the backend's most recent).
+  // { all: true } → the engagement-wide union of every scan (pivot-host lists).
+  list: (scanId, { all = false } = {}) =>
+    api(`/assets?limit=500${all ? "&all=1" : ""}` +
+        `${scanId ? `&scan_id=${encodeURIComponent(scanId)}` : ""}`),
 };
 
 // Engagements — list all scanned engagements and switch which one the whole

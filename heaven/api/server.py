@@ -284,12 +284,16 @@ async def require_user(
         if user:
             return user
     if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(None, 1)[1].strip()
-        session = auth._sessions.get(token)
-        if session and session.expires_at > __import__("time").time():
-            user = auth._users.get(session.user_id)
-            if user and user.is_active:
-                return user
+        # A header of "Bearer" / "Bearer " with no token splits to a single part —
+        # guard the index so a malformed header returns 401, not a 500.
+        parts = authorization.split(None, 1)
+        token = parts[1].strip() if len(parts) > 1 else ""
+        if token:
+            session = auth._sessions.get(token)
+            if session and session.expires_at > __import__("time").time():
+                user = auth._users.get(session.user_id)
+                if user and user.is_active:
+                    return user
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
@@ -688,6 +692,41 @@ def create_app() -> FastAPI:
                     logger.debug("suppressed non-fatal exception in report-asset fallback",
                                  exc_info=True)
         return raw
+
+    def _asset_scan_index(engagement: Optional[str] = None) -> list[dict]:
+        """Newest-first list of scans that carry host assets, for the picker.
+
+        The inventory view is per-scan: showing every scan's hosts merged into
+        one table blends two unrelated engagements' targets together. This lets
+        the UI/CLI offer one scan at a time and default to the most recent.
+        """
+        out: list[dict] = []
+        try:
+            store = _read_store(engagement)
+            for s in (store.list_scans(limit=200) if store else []):
+                sid = s.get("id") or s.get("scan_id")
+                if not sid:
+                    continue
+                blob = s.get("summary_json")
+                if not blob:
+                    continue
+                try:
+                    summ = json.loads(blob)
+                except (ValueError, TypeError):
+                    continue
+                n_hosts = len([a for a in (summ.get("assets") or [])
+                               if isinstance(a, dict)])
+                if n_hosts:
+                    out.append({
+                        "scan_id": sid,
+                        "label": s.get("name") or sid,
+                        "when": s.get("started_at") or s.get("completed_at") or "",
+                        "hosts": n_hosts,
+                    })
+        except Exception:
+            logger.debug("suppressed non-fatal exception building asset scan index",
+                         exc_info=True)
+        return out
 
     # ── Health (unauthenticated) ──
     @app.get("/api/health")
@@ -1197,6 +1236,7 @@ def create_app() -> FastAPI:
         limit: int = Query(50, ge=1, le=500),
         scan_id: Optional[str] = None,
         engagement: Optional[str] = None,
+        all_scans: bool = Query(False, alias="all"),
         user: User = Depends(require_permission("scan.view")),
     ):
         """Host & service inventory: open ports, service versions and OS for
@@ -1208,12 +1248,30 @@ def create_app() -> FastAPI:
         so a guess is never mistaken for a confirmed fact.
         """
         from heaven.devsecops.inventory import inventory_totals, normalize_assets
-        raw = _collect_raw_assets(engagement, scan_id)
+        # The inventory is scoped to ONE scan so two separate scans never merge
+        # into a single blended host table. Default to the most recent scan that
+        # produced assets; the caller can pass ?scan_id= to view an older one, or
+        # ?all=1 for the engagement-wide union (used by the lateral-movement page
+        # to gather every discovered pivot host).
+        scans = _asset_scan_index(engagement)
+        if all_scans:
+            selected = None  # scan_id=None → _collect_raw_assets merges every scan
+        elif scan_id and _is_safe_scan_id(scan_id):
+            selected = scan_id
+        elif scans:
+            selected = scans[0]["scan_id"]
+        else:
+            selected = None
+        # selected None → engagement-wide (either ?all=1, or no scan carries
+        # summary assets and we fall back to the report-JSON path for legacy data).
+        raw = _collect_raw_assets(engagement, selected)
         inventory = normalize_assets(raw)
         return {
             "assets": inventory[:limit],
             "total": len(inventory),
             "totals": inventory_totals(inventory),
+            "scans": scans,
+            "scan_id": selected,
         }
 
     # ── Attack Tree ──
@@ -1857,6 +1915,7 @@ def create_app() -> FastAPI:
         """The 'fix this first' list — findings ranked by risk_score (then
         severity), each with a one-line remediation so an operator knows the
         highest-impact next action at a glance."""
+        from heaven.devsecops.vuln_kb import component_remediation
         from heaven.devsecops.vuln_kb import lookup as kb_lookup
         store = _read_store()
         results = store.list_findings(limit=2000)
@@ -1871,8 +1930,20 @@ def create_app() -> FastAPI:
         top = []
         for f in results[:limit]:
             ev = getattr(f, "evidence", {}) or {}
-            remediation = (ev.get("remediation")
-                           or kb_lookup(getattr(f, "vuln_type", "")).get("remediation") or "")
+            # Prefer a stored remediation; otherwise build one. For a CVE/component
+            # finding, generate the per-CVE remediation (naming the actual product
+            # + CVE + weakness class) so the "fix this first" list never shows the
+            # same generic component boilerplate for every different CVE.
+            remediation = ev.get("remediation") or ""
+            if not remediation:
+                remediation = component_remediation({
+                    "vuln_type": getattr(f, "vuln_type", ""),
+                    "cve_id": getattr(f, "cve_id", ""),
+                    "title": getattr(f, "title", ""),
+                    "evidence": ev,
+                })
+            if not remediation:
+                remediation = kb_lookup(getattr(f, "vuln_type", "")).get("remediation") or ""
             top.append({
                 "id": getattr(f, "id", ""),
                 "title": getattr(f, "title", ""),

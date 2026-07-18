@@ -17,12 +17,19 @@ from heaven.cli._helpers import _engagement_db_path, _print, json_output
 
 
 def _collect_engagement_assets(engagement: Optional[str],
-                               scan_id: Optional[str] = None) -> list[dict]:
-    """Raw host assets from an engagement's persisted scan summaries."""
+                               scan_id: Optional[str] = None,
+                               all_scans: bool = False) -> list[dict]:
+    """Raw host assets from an engagement's persisted scan summaries.
+
+    Scoped to a single scan by default (the most recent one that produced
+    assets) so two unrelated scans don't blend into one host table. Pass
+    ``all_scans=True`` for the engagement-wide union, or ``scan_id`` to pin a
+    specific scan.
+    """
     from heaven.engagement import EngagementStore
     store = EngagementStore(_engagement_db_path(engagement), create=False)
     scans = ([store.get_scan(scan_id)] if scan_id
-             else store.list_scans(limit=200))
+             else store.list_scans(limit=200))  # newest first
     raw: list[dict] = []
     for s in scans:
         if not s:
@@ -34,17 +41,29 @@ def _collect_engagement_assets(engagement: Optional[str],
             summ = json.loads(blob)
         except (ValueError, TypeError):
             continue
-        raw.extend(a for a in (summ.get("assets") or []) if isinstance(a, dict))
+        found = [a for a in (summ.get("assets") or []) if isinstance(a, dict)]
+        if not found:
+            continue
+        raw.extend(found)
+        if not all_scans and not scan_id:
+            break  # default: only the most recent scan that carries assets
     return raw
 
 
 @click.command()
 @click.option("--engagement", help="Engagement name")
-@click.option("--scan-id", help="Limit to a single scan id (default: whole engagement)")
+@click.option("--scan-id", help="Show a single scan id (default: the most recent scan)")
+@click.option("--all", "all_scans", is_flag=True,
+              help="Merge every scan in the engagement into one inventory")
 @click.option("--format", "fmt", type=click.Choice(["table", "json", "markdown"]),
               default="table", help="Output format")
-def assets(engagement: Optional[str], scan_id: Optional[str], fmt: str) -> None:
-    """Show the host & service inventory (open ports, versions, OS)."""
+def assets(engagement: Optional[str], scan_id: Optional[str],
+           all_scans: bool, fmt: str) -> None:
+    """Show the host & service inventory (open ports, versions, OS).
+
+    Shows the most recent scan by default; use --scan-id to pin one or --all to
+    merge every scan in the engagement.
+    """
     from heaven.devsecops.inventory import (
         inventory_totals,
         normalize_assets,
@@ -53,7 +72,7 @@ def assets(engagement: Optional[str], scan_id: Optional[str], fmt: str) -> None:
     if json_output():
         fmt = "json"
 
-    raw = _collect_engagement_assets(engagement, scan_id)
+    raw = _collect_engagement_assets(engagement, scan_id, all_scans)
     inventory = normalize_assets(raw)
 
     if fmt == "json":

@@ -22,7 +22,6 @@ Covers the batch of user-reported issues:
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
 

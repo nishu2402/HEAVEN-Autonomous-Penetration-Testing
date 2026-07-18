@@ -109,6 +109,45 @@ VULN_KILLCHAIN_MAP: dict[str, list[KillChainPhase]] = {
     "hardcoded_secret": [KillChainPhase.EXPLOITATION,
                           KillChainPhase.ACTIONS_ON_OBJECTIVES],
     "data_exfil_channel": [KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    # ── Aliases for the vuln_type strings HEAVEN's scanners actually emit, so
+    # real findings map to a phase instead of falling through to the default.
+    # Matched by substring, so "sql_injection", "blind_sql_injection", etc. all
+    # resolve. (Order-independent; the substring pass unions all matches.)
+    "sql_injection": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "cross_site_scripting": [KillChainPhase.EXPLOITATION, KillChainPhase.DELIVERY],
+    "code_injection": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "remote_code_execution": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "rce": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "lfi": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "rfi": [KillChainPhase.DELIVERY, KillChainPhase.EXPLOITATION],
+    "idor": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "broken_access_control": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "broken_auth": [KillChainPhase.EXPLOITATION],
+    "authentication_bypass": [KillChainPhase.EXPLOITATION],
+    "weak_credentials": [KillChainPhase.EXPLOITATION],
+    "weak_password": [KillChainPhase.EXPLOITATION],
+    "jwt": [KillChainPhase.EXPLOITATION],
+    "cors": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "csrf": [KillChainPhase.DELIVERY, KillChainPhase.EXPLOITATION],
+    "file_upload": [KillChainPhase.DELIVERY, KillChainPhase.INSTALLATION],
+    "vulnerable_service": [KillChainPhase.WEAPONIZATION, KillChainPhase.EXPLOITATION],
+    "vulnerable_component": [KillChainPhase.WEAPONIZATION, KillChainPhase.EXPLOITATION],
+    "vulnerable_dependency": [KillChainPhase.WEAPONIZATION, KillChainPhase.EXPLOITATION],
+    "known_vulnerability": [KillChainPhase.WEAPONIZATION, KillChainPhase.EXPLOITATION],
+    "missing_security_header": [KillChainPhase.DELIVERY],
+    "security_header": [KillChainPhase.DELIVERY],
+    "clickjack": [KillChainPhase.DELIVERY],
+    "insecure_cookie": [KillChainPhase.DELIVERY],
+    "ssl": [KillChainPhase.DELIVERY, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "tls": [KillChainPhase.DELIVERY, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "weak_cipher": [KillChainPhase.DELIVERY, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "certificate": [KillChainPhase.DELIVERY],
+    "sensitive_file": [KillChainPhase.RECONNAISSANCE],
+    "sensitive_data": [KillChainPhase.RECONNAISSANCE, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "exposed_admin": [KillChainPhase.RECONNAISSANCE, KillChainPhase.DELIVERY],
+    "smb": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "rdp": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "misconfig": [KillChainPhase.RECONNAISSANCE, KillChainPhase.DELIVERY],
 }
 
 
@@ -217,11 +256,18 @@ class KillChainAnalyzer:
         """Resolve which kill chain phase(s) a finding lights up."""
         phases: set[KillChainPhase] = set()
 
-        # 1. Direct mapping by vuln_type / type
+        # 1. Mapping by vuln_type / type — exact first, then substring so the
+        # many real scanner vuln_types ("blind_sql_injection", "ssl_weak_cipher",
+        # "missing_security_headers", …) resolve to a phase instead of falling
+        # through to the Reconnaissance default.
         vuln_type = (finding.get("vuln_type") or finding.get("type")
                      or finding.get("category") or "").lower()
         if vuln_type in VULN_KILLCHAIN_MAP:
             phases.update(VULN_KILLCHAIN_MAP[vuln_type])
+        elif vuln_type:
+            for key, kphases in VULN_KILLCHAIN_MAP.items():
+                if key in vuln_type:
+                    phases.update(kphases)
 
         # 2. By MITRE technique ID if present
         tech = finding.get("mitre_technique") or finding.get("technique") or ""

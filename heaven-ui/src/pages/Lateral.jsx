@@ -2,9 +2,12 @@
 // Wraps POST /api/lateral/run. Admin-only (config.modify permission).
 
 import React, { useState } from "react";
-import { Lateral, getUser } from "../api";
+import { Lateral, Assets, getUser } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+
+// Ports worth spraying credentials at, and the protocol each implies.
+const LATERAL_PORTS = { 22: "ssh", 445: "smb", 3389: "rdp", 139: "smb" };
 
 export default function LateralPage() {
   const [sshKey, setSshKey] = useState("");
@@ -19,8 +22,36 @@ export default function LateralPage() {
   // across page navigation. `formError` is local pre-flight validation only.
   const { loading, result, error, start } = useJob("lateral");
   const [formError, setFormError] = useState(null);
+  const [loadingHosts, setLoadingHosts] = useState(false);
   const user = getUser();
   const isAdmin = (user?.role === "admin");
+
+  // Pull the hosts the network scan already discovered and pre-fill the targets
+  // with each host:port that speaks a lateral-movement protocol (SSH/SMB/RDP) —
+  // so the spray targets come from real findings instead of manual entry.
+  async function loadDiscoveredHosts() {
+    setFormError(null);
+    setLoadingHosts(true);
+    try {
+      const data = await Assets.list();
+      const pairs = [];
+      for (const h of (data?.assets || [])) {
+        for (const p of (h.ports || [])) {
+          if (LATERAL_PORTS[p.port]) pairs.push(`${h.host}:${p.port}`);
+        }
+      }
+      const uniq = [...new Set(pairs)];
+      if (uniq.length === 0) {
+        setFormError("No SSH/SMB/RDP hosts in the active engagement's inventory yet — run a network scan first.");
+      } else {
+        setTargetsText(uniq.join("\n"));
+      }
+    } catch (e) {
+      setFormError(e.message || "Could not load discovered hosts");
+    } finally {
+      setLoadingHosts(false);
+    }
+  }
 
   function run() {
     setFormError(null);
@@ -60,9 +91,9 @@ export default function LateralPage() {
       <div className="card">
         <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>↔ Lateral Movement</h2>
         <p className="page-lead">
-          SSH key reuse + SMB PsExec + pass-the-hash. Outputs a hop graph of
-          which target accepted which credential. Mirrors{" "}
-          <code>heaven lateral</code> from the CLI.
+          SSH key reuse, SMB PsExec and pass-the-hash. Produces a hop graph of
+          which target accepted which credential. Also available as{" "}
+          <code>heaven lateral</code> on the CLI.
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -100,9 +131,16 @@ export default function LateralPage() {
           </fieldset>
         </div>
 
-        <label className="form-label" style={{ marginTop: 14, display: "block", marginBottom: 6 }}>
-          Targets (host:port, one per line)
-        </label>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                      marginTop: 14, marginBottom: 6, gap: 10, flexWrap: "wrap" }}>
+          <label className="form-label" style={{ margin: 0 }}>
+            Targets (host:port, one per line)
+          </label>
+          <button type="button" className="btn-small" onClick={loadDiscoveredHosts}
+                  disabled={loadingHosts}>
+            {loadingHosts ? "Loading…" : "⤵ Load discovered SSH/SMB/RDP hosts"}
+          </button>
+        </div>
         <textarea className="form-input mono-input" value={targetsText} rows={4}
                   onChange={(e) => setTargetsText(e.target.value)} />
 

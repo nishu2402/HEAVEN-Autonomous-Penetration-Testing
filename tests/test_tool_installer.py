@@ -36,13 +36,33 @@ def test_install_hint_is_always_actionable():
 
 
 def test_darwin_docker_hint_is_not_apt(monkeypatch):
-    """On macOS, docker has no brew formula for the daemon → hint is the URL, not apt."""
+    """On macOS with NO package manager, the docker hint stays platform-correct —
+    never suggests apt, and always includes the official docs URL."""
     monkeypatch.setattr(ti.sys, "platform", "darwin")
     # No package manager detected → fall through to the platform-aware fallback.
     monkeypatch.setattr(ti.shutil, "which", lambda _cmd: None)
     hint = ti.install_hint(ti.get_spec("docker"))
     assert "apt" not in hint
     assert "docker.com" in hint
+
+
+def test_docker_auto_installs_via_brew_on_macos(monkeypatch):
+    """Regression: docker must be auto-installable on macOS (it previously had no
+    brew formula in the catalog, so `heaven install-tools` marked it 'manual')."""
+    monkeypatch.setattr(ti.sys, "platform", "darwin")
+    monkeypatch.setattr(ti, "_pkg_manager", lambda: "brew")
+    cmd = ti.build_install_command(ti.get_spec("docker"))
+    assert cmd == ["brew", "install", "docker"]
+
+
+def test_every_tool_auto_installs_on_a_brew_host(monkeypatch):
+    """With Homebrew present, every catalog tool resolves to a real install
+    command — no tool is left 'manual' on a standard macOS/Linuxbrew box."""
+    monkeypatch.setattr(ti.sys, "platform", "darwin")
+    monkeypatch.setattr(ti, "_pkg_manager", lambda: "brew")
+    for spec in ti.TOOLS:
+        cmd = ti.build_install_command(spec)
+        assert cmd is not None, f"{spec.name} has no auto-install command on a brew host"
 
 
 # ── Command construction ──────────────────────────────────────────────────────
@@ -68,10 +88,16 @@ def test_build_command_pip_fallback_when_no_manager(monkeypatch):
 
 
 def test_build_command_none_when_manual_only(monkeypatch):
-    """docker has no pip/go recipe → no auto-command when no OS manager applies."""
+    """A spec with only a docs URL (no manager recipe, no pip/go) → no
+    auto-command, so it is correctly reported 'manual' rather than silently
+    skipped."""
+    manual_only = ti.ToolSpec(name="somewidget", purpose="example",
+                              url="https://example.com/install")
     monkeypatch.setattr(ti.sys, "platform", "darwin")
-    monkeypatch.setattr(ti, "_pkg_manager", lambda: "brew")  # no brew formula for docker
-    assert ti.build_install_command(ti.get_spec("docker")) is None
+    monkeypatch.setattr(ti, "_pkg_manager", lambda: "brew")
+    # No pip/go recipe and no matching brew formula → None (manual).
+    monkeypatch.setattr(ti.shutil, "which", lambda _cmd: None)
+    assert ti.build_install_command(manual_only) is None
 
 
 # ── install_tools ─────────────────────────────────────────────────────────────

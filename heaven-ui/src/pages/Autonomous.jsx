@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { Autonomous, Engagement, openAutonomousStream } from "../api";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import TargetsInput from "../components/TargetsInput.jsx";
+import EngagementPicker from "../components/EngagementPicker.jsx";
 
 const JOB_KEY = "heaven.autonomous.job";
 const POLL_MS = 4000;
@@ -218,12 +219,9 @@ export default function AutonomousPage() {
               placeholder="e.g. 10.0.0.5  ·  https://app.example.com"
             />
           </div>
-          <label className="form-group">
-            <span className="form-label">Engagement</span>
-            <input className="form-input" type="text" value={engagement}
-                   onChange={(e) => setEngagement(e.target.value)}
-                   placeholder="active engagement name" />
-          </label>
+          <EngagementPicker value={engagement} onChange={setEngagement}
+                            id="autonomous-engagement"
+                            label="Save findings to engagement" />
           <label className="form-group">
             <span className="form-label">Objective (optional)</span>
             <input className="form-input" type="text" value={objective}
@@ -299,6 +297,7 @@ export default function AutonomousPage() {
           {result && (
             <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
               Iterations: {result.iterations_run} · Duration: {result.duration_s?.toFixed(0)}s ·
+              Hosts engaged: {result.hosts_engaged?.length ?? 0} ·
               Findings: {result.total_findings} (critical: {result.total_critical}, high: {result.total_high})
             </div>
           )}
@@ -307,7 +306,52 @@ export default function AutonomousPage() {
               ✓ Objective met: {result.objective}
             </div>
           )}
-          <table className="data-table" style={{ marginTop: 12 }}>
+
+          {/* Executive summary — the professional headline */}
+          {result?.executive_summary && (
+            <div style={{
+              marginTop: 12, padding: "12px 14px", borderRadius: 8,
+              background: "var(--surface-1)", border: "1px solid var(--border)",
+              lineHeight: 1.5,
+            }}>
+              <div className="form-label" style={{ marginBottom: 4 }}>Executive summary</div>
+              <div style={{ color: "var(--text-1)" }}>{result.executive_summary}</div>
+            </div>
+          )}
+
+          {/* Severity breakdown chips */}
+          {result?.severity_breakdown && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+              {["critical", "high", "medium", "low", "info"].map((sev) => (
+                <span key={sev} className={`sev-chip sev-${sev}`}
+                      style={{ fontSize: 12, padding: "3px 10px", borderRadius: 12 }}>
+                  {sev}: <strong>{result.severity_breakdown[sev] ?? 0}</strong>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Top findings */}
+          {result?.top_findings?.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div className="form-label" style={{ marginBottom: 6 }}>Top findings</div>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
+                {result.top_findings.map((f, i) => (
+                  <li key={i}>
+                    <span className={`sev-dot sev-${f.severity}`} style={{ marginRight: 6 }} />
+                    <span style={{ color: "var(--text-0)" }}>{f.title}</span>
+                    {f.cve_id && (
+                      <a href={`https://nvd.nist.gov/vuln/detail/${f.cve_id}`} target="_blank"
+                         rel="noreferrer" style={{ marginLeft: 6, fontSize: 12 }}>{f.cve_id}</a>
+                    )}
+                    {f.target && <code className="dim" style={{ marginLeft: 6, fontSize: 11 }}>{f.target.slice(0, 40)}</code>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <table className="data-table" style={{ marginTop: 14 }}>
             <thead><tr>
               <th className="num">#</th><th>Action</th>
               <th>Target</th><th className="num">+Find</th>
@@ -326,6 +370,16 @@ export default function AutonomousPage() {
               ))}
             </tbody>
           </table>
+          {/* Recommendations */}
+          {result?.recommendations?.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div className="form-label" style={{ marginBottom: 6 }}>Recommendations</div>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: "var(--text-1)" }}>
+                {result.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+
           {result && (result.total_findings ?? 0) > 0 && (
             <Link to="/findings" className="btn-small" style={{ marginTop: 12 }}>
               View {result.total_findings} finding{result.total_findings === 1 ? "" : "s"} →

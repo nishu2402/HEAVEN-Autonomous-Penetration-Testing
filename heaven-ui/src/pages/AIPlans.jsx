@@ -55,10 +55,11 @@ export default function AIPlans() {
       <div className="card">
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>✦ AI Attack-Chain Planner</h2>
         <p className="page-lead">
-          Layer D — LLM proposes multi-step attack chains from a finding list.
-          Requires <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, or{" "}
-          <code>GEMINI_API_KEY</code> on the server. If none is set the endpoint
-          returns <code>{`{"skipped": "LLM gateway unavailable"}`}</code>.
+          Proposes multi-step attack chains from a list of findings. HEAVEN
+          builds a plan on its own — adding an AI provider key
+          (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code> or{" "}
+          <code>GEMINI_API_KEY</code>) on the server enriches that reasoning
+          with an LLM.
         </p>
 
         {siemStatus && (
@@ -113,7 +114,10 @@ export default function AIPlans() {
         <div className="card" style={{ marginTop: 12 }}>
           <h3 style={{ color: "var(--cyan)" }}>Planner output</h3>
           {output.skipped && (
-            <div className="dim">Skipped: {output.skipped}</div>
+            <div className="dim">
+              AI enrichment is unavailable — add an AI provider key in Settings
+              to enrich these plans with an LLM.
+            </div>
           )}
           {output.no_chain_possible && (
             <div className="dim">{output.reasoning || "No chain possible from these findings."}</div>

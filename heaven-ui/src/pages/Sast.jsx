@@ -7,6 +7,7 @@ import { SAST, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import ScanList from "../components/ScanList.jsx";
+import EngagementPicker from "../components/EngagementPicker.jsx";
 import { sevColor } from "../theme";
 
 export default function SastPage() {
@@ -85,12 +86,9 @@ export default function SastPage() {
                  placeholder="/path/to/source-code" />
         </label>
 
-        <label className="form-group" style={{ marginBottom: 12 }}>
-          <span className="form-label">Engagement (optional, persists findings)</span>
-          <input className="form-input" type="text" value={engagement}
-                 onChange={(e) => setEngagement(e.target.value)}
-                 placeholder="active engagement name" />
-        </label>
+        <EngagementPicker value={engagement} onChange={setEngagement}
+                          id="sast-engagement"
+                          label="Save findings to engagement" />
 
         <label className="form-group" style={{ marginBottom: 12 }}>
           <span className="form-label">Extra Semgrep configs (one per line or comma-sep)</span>

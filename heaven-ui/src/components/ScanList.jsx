@@ -216,7 +216,10 @@ export default function ScanList({
             const isActive = selected === id;
             const det = details[id];
             const running = isRunning(s);
-            const mode = (s.mode || s.config?.scan_type || "full");
+            // Prefer the operator-selected mode. The launcher sends `mode`
+            // (e.g. "network") while `scan_type` stays at its "full" default, so
+            // reading scan_type first mislabelled every focused scan as FULL.
+            const mode = (s.mode || s.config?.mode || s.config?.scan_type || "full");
             const dur = fmtDuration(s, now);
             const tgts = scanTargets(s);
             const label = s.name && s.name !== "HEAVEN Scan" ? s.name : (tgts[0] || null);

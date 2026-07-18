@@ -133,18 +133,61 @@ def autonomous(
 
     out_dict = summary.to_dict()
     _print("")
-    _print(f"[bold cyan]Loop summary:[/bold cyan] {out_dict['stop_reason']}")
+    _print("[bold magenta]══ AUTONOMOUS RUN REPORT ══[/bold magenta]")
+
+    # Executive summary — the professional headline.
+    if out_dict.get("executive_summary"):
+        _print("")
+        _print("[bold]Executive summary[/bold]")
+        _print(f"  {out_dict['executive_summary']}")
+
+    _print("")
+    _print(f"[bold cyan]Run:[/bold cyan] {out_dict['stop_reason']}")
     _print(f"  Iterations:   {out_dict['iterations_run']}")
     _print(f"  Duration:     {out_dict['duration_s']:.0f}s")
-    _print(f"  Findings:     {out_dict['total_findings']}  "
-           f"(critical: {out_dict['total_critical']}, high: {out_dict['total_high']})")
+    _print(f"  Hosts engaged: {len(out_dict.get('hosts_engaged', []))}")
+    if out_dict.get("actions_taken"):
+        acts = ", ".join(f"{k}×{v}" for k, v in out_dict["actions_taken"].items())
+        _print(f"  Actions:      {acts}")
     if out_dict["objective_met"]:
         _print(f"  [green]✓ Objective met:[/green] {out_dict['objective']}")
 
-    for r in out_dict["iterations"]:
-        _print(f"  [{r['n']}] {r['action']['kind']:20s} "
-               f"target={r['action']['target'][:40]:40s} "
-               f"+{r['new_findings']} findings  reward={r['reward']:.2f}")
+    # Severity breakdown.
+    sb = out_dict.get("severity_breakdown") or {}
+    _print("")
+    _print(f"[bold]Findings ({out_dict['total_findings']} total)[/bold]")
+    _print(f"  [red]critical {sb.get('critical', 0)}[/red]  "
+           f"[bright_red]high {sb.get('high', 0)}[/bright_red]  "
+           f"[yellow]medium {sb.get('medium', 0)}[/yellow]  "
+           f"[cyan]low {sb.get('low', 0)}[/cyan]  "
+           f"[dim]info {sb.get('info', 0)}[/dim]")
+
+    # Top findings.
+    top = out_dict.get("top_findings") or []
+    if top:
+        _print("")
+        _print("[bold]Top findings[/bold]")
+        for f in top:
+            cve = f" [dim]{f['cve_id']}[/dim]" if f.get("cve_id") else ""
+            _print(f"  [{f['severity']:8s}] {f['title'][:56]:56s} "
+                   f"[dim]{(f.get('target') or '')[:32]}[/dim]{cve}")
+
+    # Iteration trace.
+    if out_dict["iterations"]:
+        _print("")
+        _print("[bold]Iteration trace[/bold]")
+        for r in out_dict["iterations"]:
+            _print(f"  [{r['n']}] {r['action']['kind']:18s} "
+                   f"target={(r['action']['target'] or '-')[:38]:38s} "
+                   f"+{r['new_findings']} findings  reward={r['reward']:.2f}")
+
+    # Recommendations.
+    recs = out_dict.get("recommendations") or []
+    if recs:
+        _print("")
+        _print("[bold]Recommendations[/bold]")
+        for rec in recs:
+            _print(f"  • {rec}")
 
     if output:
         Path(output).write_text(json.dumps(out_dict, indent=2, default=str))

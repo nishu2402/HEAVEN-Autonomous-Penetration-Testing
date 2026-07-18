@@ -18,7 +18,12 @@ export default function DiffPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    Scans.list(50).then((d) => setScans(d.scans || [])).catch((e) => setError(e.message));
+    // Only completed scans can be diffed (a running scan has no final finding
+    // set). Filtering here is what makes the two pickers show comparable runs.
+    Scans.list(50)
+      .then((d) => setScans((d.scans || []).filter(
+        (s) => ["completed", "done", "finished"].includes(String(s.status || "").toLowerCase()))))
+      .catch((e) => setError(e.message));
   }, []);
 
   function run() {

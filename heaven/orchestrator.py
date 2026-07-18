@@ -744,6 +744,21 @@ class ScanOrchestrator:
             f"{self.progress.failed_tasks} failed) ══╝"
         )
 
+        # Populate the cross-engagement knowledge graph from this scan's real
+        # outcomes so it learns which techniques work against which target
+        # profiles (previously nothing wrote to it, so it stayed permanently
+        # empty). Best-effort — never let learning capture fail a scan.
+        try:
+            from heaven.ai.knowledge_graph import record_findings_to_knowledge
+            eng_name = ""
+            _cp = getattr(self, "_checkpoint_store", None)
+            _dbp = getattr(_cp, "db_path", None) if _cp is not None else None
+            if _dbp is not None:
+                eng_name = getattr(_dbp, "stem", "") or ""
+            record_findings_to_knowledge(all_vulns, all_assets, engagement_name=eng_name)
+        except Exception:  # noqa: BLE001
+            logger.debug("knowledge-graph capture skipped", exc_info=True)
+
         return summary
 
 
@@ -778,7 +793,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # Each add_task is tagged with the set of modes it belongs to. `None`
     # (the add_task default) means "every mode". FULL always registers all.
     M = ScanMode
-    NET_MODES = frozenset({M.NETWORK, M.AD, M.IOT, M.OT, M.CONTAINER})
+    # Network reconnaissance (open ports / service versions / OS) is foundational
+    # recon for every host-based assessment, so it runs for WEB and API too — not
+    # just NETWORK. That is what populates the Host & Service Inventory; without
+    # WEB/API here, a web/api scan produced an empty inventory. CLOUD and EMAIL
+    # (no network host to port-scan) and the code-analysis modes are excluded.
+    NET_MODES = frozenset({M.NETWORK, M.WEB, M.API, M.AD, M.IOT, M.OT, M.CONTAINER})
     WEB_MODES = frozenset({M.WEB})
     WEBAPI_MODES = frozenset({M.WEB, M.API})
     WEBNET_MODES = frozenset({M.WEB, M.NETWORK, M.API})
@@ -800,11 +820,37 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         logger.debug(f"no active auth session for crawl: {e}")
 
     # ═══ Phase: RECON (parallel multi-vector) ═══
+    # Network recon must scan every target host — whether the operator entered a
+    # bare IP, a hostname, or a full URL. Previously it only received `ips`, so a
+    # URL target (e.g. https://app.example.com) never reached nmap and the Host &
+    # Service Inventory came back empty. Derive the host from each URL and merge.
+    from urllib.parse import urlparse as _urlparse
+
+    def _host_of(value: str) -> str:
+        v = (value or "").strip()
+        if not v:
+            return ""
+        if "://" in v:
+            return (_urlparse(v).hostname or "").strip()
+        # bare host[:port][/path] — strip path then a trailing :port
+        v = v.split("/", 1)[0]
+        if v.count(":") == 1:
+            v = v.split(":", 1)[0]
+        return v.strip()
+
+    _net_targets: list[str] = []
+    _seen_net: set[str] = set()
+    for _t in list(targets.get("ips", [])) + [_host_of(u) for u in targets.get("urls", [])]:
+        _t = (_t or "").strip()
+        if _t and _t.lower() not in _seen_net:
+            _seen_net.add(_t.lower())
+            _net_targets.append(_t)
+
     net_id = orch.add_task(
         "Network Reconnaissance", scan_network,
         phase=ScanPhase.RECON, concurrency_group="network",
         modes=NET_MODES,
-        targets=targets.get("ips", []),
+        targets=_net_targets,
         port_range=targets.get("ports", "1-65535"),
         stealth_level=stealth,
     )

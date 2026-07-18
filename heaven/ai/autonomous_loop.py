@@ -32,10 +32,40 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from heaven.utils.logger import get_logger
 
 logger = get_logger("ai.autonomous_loop")
+
+
+# Vuln-type fragments that are worth an active exploitation-proof pass. Kept
+# broad (substring match) so real scanner vuln_types — ``sql_injection``,
+# ``command_injection``, ``ssrf_confirmed`` … — all trigger the proof phase.
+_EXPLOITABLE_FRAGMENTS = (
+    "sql", "sqli", "injection", "cmdi", "command_inj", "rce", "remote_code",
+    "ssrf", "xxe", "lfi", "rfi", "path_traversal", "ssti", "deserial",
+    "file_upload", "auth_bypass",
+)
+
+# Vuln-types / title fragments that mean we recovered or can guess credentials.
+_CRED_VULN_TYPES = frozenset({
+    "weak_credentials", "default_credentials", "exposed_credentials",
+    "hardcoded_credentials", "credential_exposure",
+})
+
+
+def _root_url(target: str) -> str:
+    """``scheme://host[:port]`` for a URL target, or the bare host for a
+    non-URL. Used to dedupe "already web-scanned" surfaces so the loop follows
+    *new* hosts instead of re-scanning every path of one it already covered."""
+    target = (target or "").strip()
+    if not target:
+        return ""
+    if target.startswith("http://") or target.startswith("https://"):
+        p = urlparse(target)
+        return f"{p.scheme}://{p.netloc}" if p.netloc else target
+    return target
 
 
 # ═══════════════════════════════════════════
@@ -96,6 +126,13 @@ class AutonomousRunSummary:
     total_high: int = 0
     target_objective: str = ""
     objective_met: bool = False
+    # ── Professional executive layer (filled by _finalize_report) ──
+    severity_breakdown: dict[str, int] = field(default_factory=dict)
+    top_findings: list[dict] = field(default_factory=list)
+    hosts_engaged: list[str] = field(default_factory=list)
+    actions_taken: dict[str, int] = field(default_factory=dict)
+    executive_summary: str = ""
+    recommendations: list[str] = field(default_factory=list)
 
     @property
     def duration_s(self) -> float:
@@ -111,6 +148,12 @@ class AutonomousRunSummary:
             "total_findings": self.total_findings,
             "total_critical": self.total_critical,
             "total_high": self.total_high,
+            "severity_breakdown": self.severity_breakdown,
+            "top_findings": self.top_findings,
+            "hosts_engaged": self.hosts_engaged,
+            "actions_taken": self.actions_taken,
+            "executive_summary": self.executive_summary,
+            "recommendations": self.recommendations,
             "iterations": [r.to_dict() for r in self.iterations],
         }
 
@@ -124,67 +167,99 @@ class AutonomousRunSummary:
 def _rule_based_next_action(
     findings: list[dict], iteration: int,
     targets_seed: dict,
+    history: list[AutonomousAction],
 ) -> AutonomousAction:
-    """When no LLM is available, fall back to a deterministic playbook.
+    """Deterministic playbook used when no LLM is configured.
 
-    Order:
-      1. First iteration → recon scan the seed targets
-      2. If any web URLs discovered but no SQLi tested → web scan
-      3. If any sqli/cmdi/ssrf finding has high confidence → exploit_proof
-      4. If any credentials discovered → cred-reuse / lateral
-      5. Otherwise → noop (planner has nothing more to recommend)
+    Unlike a single-shot "recon then give up", this mirrors how a methodical
+    tester works a target end-to-end, and — crucially — never repeats an action
+    it has already run (``history`` is the ordered log of executed actions), so
+    it keeps making forward progress across iterations instead of stalling:
+
+      1. **Recon** — full-scan every seed *host* and web-scan every seed *URL*
+         (all of them, not just the first).
+      2. **Follow the surface** — web-scan any *new* http(s) host that turned up
+         in findings but hasn't been scanned yet (deduped by scheme://host).
+      3. **Prove impact** — when an exploitable finding (SQLi/RCE/SSRF/XXE/LFI/…)
+         reaches ≥0.6 confidence, run the exploitation-proof pass once.
+      4. **Fan out** — when credentials are recovered, attempt read-only
+         credential reuse once.
+      5. Otherwise the playbook is exhausted → ``noop`` (a clean, explained stop,
+         not a silent one).
     """
-    if iteration == 0:
-        seeds = targets_seed.get("ips") or targets_seed.get("urls") or []
-        if not seeds:
-            return AutonomousAction(kind="noop", rationale="no seed targets given")
-        return AutonomousAction(
-            kind="scan", target=seeds[0],
-            mode="full" if targets_seed.get("ips") else "web",
-            rationale="iteration 0: full recon on seed target",
-            estimated_value=0.9,
-        )
+    done: set[tuple[str, str, str]] = {(a.kind, a.target, a.mode) for a in history}
+    kinds_done: set[str] = {a.kind for a in history}
+    scanned_roots: set[str] = {
+        _root_url(t) for (k, t, _m) in done if k == "scan" and t
+    }
 
-    # Collect signal from findings so far
-    has_web = any("http" in (f.get("target") or "") for f in findings)
-    has_sqli_high = any(
-        ("sqli" in (f.get("vuln_type") or "").lower()
-         and float(f.get("confidence") or 0) >= 0.7)
-        for f in findings
-    )
-    has_cmdi_high = any(
-        (("cmdi" in (f.get("vuln_type") or "").lower()
-          or "rce" in (f.get("vuln_type") or "").lower())
-         and float(f.get("confidence") or 0) >= 0.7)
-        for f in findings
-    )
-    has_creds = any(
-        f.get("vuln_type") in ("weak_credentials", "default_credentials")
-        or "password" in (f.get("title") or "").lower()
-        for f in findings
-    )
+    ip_seeds = [s for s in (targets_seed.get("ips") or []) if s]
+    url_seeds = [s for s in (targets_seed.get("urls") or []) if s]
+    if not (ip_seeds or url_seeds):
+        return AutonomousAction(kind="noop", rationale="no seed targets given")
 
-    if has_sqli_high or has_cmdi_high:
-        return AutonomousAction(
-            kind="exploit_proof", rationale="high-confidence injection — prove impact",
-            estimated_value=0.85,
-        )
-    if has_creds:
-        return AutonomousAction(
-            kind="postex_credreuse",
-            rationale="credentials discovered — fan out cred reuse",
-            estimated_value=0.7,
-        )
-    if has_web and iteration < 3:
-        urls = [f.get("target") for f in findings if "http" in (f.get("target") or "")]
-        if urls:
+    # ── Phase 1: recon every seed exactly once ──
+    for host in ip_seeds:
+        if _root_url(host) not in scanned_roots:
             return AutonomousAction(
-                kind="scan", target=urls[0], mode="web",
-                rationale="web surface discovered — deep web scan",
+                kind="scan", target=host, mode="full",
+                rationale="recon: full network + service scan of seed host",
+                estimated_value=0.9,
+            )
+    for u in url_seeds:
+        if _root_url(u) not in scanned_roots:
+            return AutonomousAction(
+                kind="scan", target=u, mode="web",
+                rationale="recon: web application scan of seed URL",
+                estimated_value=0.9,
+            )
+
+    # ── Phase 2: follow any NEW web surface discovered in findings ──
+    discovered = sorted({
+        _root_url(f.get("target") or "")
+        for f in findings
+        if (f.get("target") or "").startswith("http")
+    })
+    for root in discovered:
+        if root and root not in scanned_roots:
+            return AutonomousAction(
+                kind="scan", target=root, mode="web",
+                rationale="new web surface discovered in findings — deep web scan",
                 estimated_value=0.65,
             )
+
+    # ── Phase 3: prove exploitable, high-confidence findings ──
+    exploitable = [
+        f for f in findings
+        if any(frag in (f.get("vuln_type") or "").lower() for frag in _EXPLOITABLE_FRAGMENTS)
+        and float(f.get("confidence") or 0) >= 0.6
+    ]
+    if exploitable and "exploit_proof" not in kinds_done:
+        return AutonomousAction(
+            kind="exploit_proof",
+            rationale=f"{len(exploitable)} exploitable high-confidence finding(s) "
+                      f"— run read-only exploitation proof",
+            estimated_value=0.85,
+        )
+
+    # ── Phase 4: credential reuse when creds were recovered ──
+    has_creds = any(
+        (f.get("vuln_type") or "") in _CRED_VULN_TYPES
+        or "password" in (f.get("title") or "").lower()
+        or "credential" in (f.get("title") or "").lower()
+        for f in findings
+    )
+    if has_creds and "postex_credreuse" not in kinds_done:
+        return AutonomousAction(
+            kind="postex_credreuse",
+            rationale="credentials discovered — attempt read-only credential reuse",
+            estimated_value=0.7,
+        )
+
     return AutonomousAction(
-        kind="noop", rationale="rule-based planner found no profitable next action",
+        kind="noop",
+        rationale="playbook complete — recon, surface-follow, proof and cred-reuse "
+                  "all exhausted for the discovered attack surface",
         estimated_value=0.0,
     )
 
@@ -379,6 +454,7 @@ async def run_autonomous(
         started_at=time.time(), target_objective=objective,
     )
     iter_n = 0
+    history: list[AutonomousAction] = []   # ordered log of executed actions
 
     while iter_n < max_iterations:
         elapsed = time.time() - summary.started_at
@@ -416,11 +492,13 @@ async def run_autonomous(
         if use_llm_planner:
             action = await _llm_next_action(findings, iter_n, seed_targets, objective)
         if action is None:
-            action = _rule_based_next_action(findings, iter_n, seed_targets)
+            action = _rule_based_next_action(findings, iter_n, seed_targets, history)
 
         if action.kind == "noop":
             summary.stop_reason = f"planner_done:{action.rationale}"
             break
+
+        history.append(action)
 
         logger.info(
             f"[autonomous iter {iter_n}] {action.kind} → {action.target} "
@@ -473,16 +551,169 @@ async def run_autonomous(
     else:
         summary.stop_reason = "max_iterations_reached"
 
-    # Final stats
+    # Final stats + the professional executive layer.
     summary.ended_at = time.time()
-    if engagement_store is not None:
-        all_findings = engagement_store.list_findings(limit=10000)
-        summary.total_findings = len(all_findings)
-        summary.total_critical = sum(1 for f in all_findings if f.severity == "critical")
-        summary.total_high = sum(1 for f in all_findings if f.severity == "high")
+    _finalize_report(summary, engagement_store, history)
 
     logger.info(
         f"autonomous loop finished: {len(summary.iterations)} iter(s), "
         f"{summary.total_findings} total findings, stop={summary.stop_reason}"
     )
     return summary
+
+
+# ═══════════════════════════════════════════
+# EXECUTIVE REPORT
+# Turns a raw run into a professional, self-explaining summary so the output
+# reads like a report even on a lean rule-based (no-LLM) run.
+# ═══════════════════════════════════════════
+
+
+_SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _host_of(target: str) -> str:
+    """Bare host for a URL/host target — used to count distinct hosts engaged."""
+    t = (target or "").strip()
+    if not t:
+        return ""
+    if t.startswith("http://") or t.startswith("https://"):
+        return urlparse(t).hostname or t
+    return t.split("/")[0].split(":")[0]
+
+
+def _finalize_report(
+    summary: AutonomousRunSummary,
+    engagement_store,
+    history: list[AutonomousAction],
+) -> None:
+    """Populate the executive layer of the summary from the engagement store.
+
+    Best-effort: any failure leaves the (already-serialisable) base summary
+    intact rather than breaking the run.
+    """
+    summary.actions_taken = _count_actions(history)
+
+    findings: list = []
+    if engagement_store is not None:
+        try:
+            findings = engagement_store.list_findings(limit=10000)
+        except Exception:  # noqa: BLE001 — a report must never break a completed run
+            logger.debug("list_findings failed during finalize", exc_info=True)
+            findings = []
+
+    breakdown = {k: 0 for k in ("critical", "high", "medium", "low", "info")}
+    hosts: set[str] = set()
+    for f in findings:
+        sev = (getattr(f, "severity", "") or "info").lower()
+        breakdown[sev] = breakdown.get(sev, 0) + 1
+        h = _host_of(getattr(f, "target", "") or "")
+        if h:
+            hosts.add(h)
+
+    summary.total_findings = len(findings)
+    summary.total_critical = breakdown.get("critical", 0)
+    summary.total_high = breakdown.get("high", 0)
+    summary.severity_breakdown = breakdown
+    summary.hosts_engaged = sorted(hosts)
+
+    # Top findings — already severity-then-confidence sorted by list_findings.
+    summary.top_findings = [
+        {
+            "title": getattr(f, "title", "") or getattr(f, "vuln_type", "") or "finding",
+            "severity": (getattr(f, "severity", "") or "info").lower(),
+            "target": getattr(f, "target", "") or "",
+            "vuln_type": getattr(f, "vuln_type", "") or "",
+            "confidence": round(float(getattr(f, "confidence", 0) or 0), 2),
+            "cve_id": getattr(f, "cve_id", "") or "",
+        }
+        for f in findings[:8]
+    ]
+
+    summary.executive_summary = _executive_summary(summary)
+    summary.recommendations = _recommendations(summary)
+
+
+def _count_actions(history: list[AutonomousAction]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for a in history:
+        counts[a.kind] = counts.get(a.kind, 0) + 1
+    return counts
+
+
+def _executive_summary(s: AutonomousRunSummary) -> str:
+    """A short, factual narrative — no fabrication, only what the run produced."""
+    n_hosts = len(s.hosts_engaged)
+    host_word = "host" if n_hosts == 1 else "hosts"
+    iters = len(s.iterations)
+    iter_word = "iteration" if iters == 1 else "iterations"
+
+    if s.total_findings == 0:
+        body = (
+            f"The autonomous loop ran {iters} {iter_word} across {n_hosts} {host_word} "
+            f"and surfaced no confirmed findings. The attack surface reached appears "
+            f"hardened against the checks exercised, or the seed targets exposed little "
+            f"to probe."
+        )
+    else:
+        c, h = s.total_critical, s.total_high
+        sev_bits = []
+        if c:
+            sev_bits.append(f"{c} critical")
+        if h:
+            sev_bits.append(f"{h} high")
+        med = s.severity_breakdown.get("medium", 0)
+        low = s.severity_breakdown.get("low", 0)
+        if med:
+            sev_bits.append(f"{med} medium")
+        if low:
+            sev_bits.append(f"{low} low")
+        sev_str = ", ".join(sev_bits) if sev_bits else "informational-only"
+        headline = (
+            "immediate remediation is warranted"
+            if c else "prompt remediation is advised"
+            if h else "the exposure is limited but worth addressing"
+        )
+        body = (
+            f"Across {iters} planned {iter_word} the loop engaged {n_hosts} {host_word} "
+            f"and confirmed {s.total_findings} finding(s) ({sev_str}). "
+            f"Given the severity profile, {headline}."
+        )
+    if s.objective_met and s.target_objective:
+        body += f" The stated objective — \"{s.target_objective}\" — was met."
+    return body
+
+
+def _recommendations(s: AutonomousRunSummary) -> list[str]:
+    """Actionable next steps derived from what the run actually found."""
+    recs: list[str] = []
+    if s.total_critical:
+        recs.append(
+            f"Triage and remediate the {s.total_critical} critical finding(s) first — "
+            f"these are directly exploitable and should block release."
+        )
+    if s.total_high:
+        recs.append(
+            f"Schedule fixes for the {s.total_high} high-severity finding(s) within the "
+            f"current sprint and re-scan to confirm closure."
+        )
+    med = s.severity_breakdown.get("medium", 0)
+    if med:
+        recs.append(f"Address the {med} medium finding(s) as part of routine hardening.")
+    if s.total_findings == 0:
+        recs.append(
+            "No findings surfaced. Broaden the seed scope (add discovered subdomains / "
+            "internal hosts) or run with an LLM planner key set for deeper hypothesis-driven "
+            "testing."
+        )
+    else:
+        recs.append(
+            "Export the full report (heaven report export) and re-run after fixes to "
+            "produce a delta and evidence of remediation."
+        )
+    if not s.actions_taken.get("exploit_proof") and (s.total_critical or s.total_high):
+        recs.append(
+            "Run an exploitation-proof pass on the high-impact findings to attach "
+            "reproducible evidence before reporting to stakeholders."
+        )
+    return recs

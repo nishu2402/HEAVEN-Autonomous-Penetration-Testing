@@ -500,6 +500,15 @@ a:hover { color: var(--accent-2); }
 .sev-low,      .sev-pill.sev-low      { color: var(--low);  background: rgba(56,189,248,0.12); box-shadow: inset 0 0 0 1px rgba(56,189,248,0.30); }
 .sev-info,     .sev-pill.sev-info     { color: var(--info); background: rgba(133,147,173,0.12); box-shadow: inset 0 0 0 1px rgba(133,147,173,0.28); }
 
+/* Compact severity chip + inline dot (autonomous run summary, etc.).
+   Reuse the .sev-<sev> colour classes for the fill; these add the shape. */
+.sev-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-ui); font-weight: 600; text-transform: capitalize;
+}
+.sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: currentColor; box-shadow: 0 0 6px currentColor; vertical-align: middle; }
+
 .status-pill { background: rgba(255,255,255,0.04); box-shadow: inset 0 0 0 1px var(--border); }
 .status-pill.status-open           { color: var(--med); }
 .status-pill.status-verified       { color: var(--brand); }

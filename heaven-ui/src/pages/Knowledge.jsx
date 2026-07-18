@@ -37,10 +37,10 @@ export default function KnowledgePage() {
       <div className="card">
         <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🧠 Knowledge Graph</h2>
         <p className="page-lead">
-          Cross-engagement memory: (target_profile, technique, outcome)
-          tuples stored in <code>~/.heaven/knowledge.db</code>. Used by the
-          autonomous planner to bias next-step selection toward techniques
-          that have worked on similar targets before.
+          A cross-engagement memory of what has worked before. HEAVEN records
+          which techniques succeeded against which kinds of target, then uses
+          that history to prioritise the most promising next steps against
+          similar targets in future engagements.
         </p>
 
         {error && <div className="error">{error}</div>}
@@ -96,15 +96,16 @@ export default function KnowledgePage() {
       <div className="card" style={{ marginTop: 12 }}>
         <div className="card-title">Query rankings for a target profile</div>
         <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
-          Returns Beta-smoothed posterior success-rate per technique for a
-          target with this fingerprint. The planner uses the same query at
-          plan-time.
+          Estimates a success rate for each technique against a target with
+          this fingerprint, based on how often it has worked before (smoothed
+          for small sample sizes). HEAVEN uses the same ranking when it decides
+          what to try next.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, marginBottom: 10, alignItems: "center" }}>
           <input className="form-input" value={profileOs} onChange={(e) => setProfileOs(e.target.value)}
                  placeholder="OS (linux/windows)" />
           <input className="form-input" value={webTech} onChange={(e) => setWebTech(e.target.value)}
-                 placeholder="web_tech (php,wordpress)" />
+                 placeholder="Web tech (e.g. php, wordpress)" />
           <input className="form-input" value={ports} onChange={(e) => setPorts(e.target.value)}
                  placeholder="ports (22,80,443)" />
           <button className="btn" onClick={loadRank} disabled={rankLoading}>

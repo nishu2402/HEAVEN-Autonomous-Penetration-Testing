@@ -10,7 +10,7 @@
 // of what will be in the report so it's clear the output reflects current data.
 
 import React, { useEffect, useState } from "react";
-import { Engagement, downloadReport, previewReport, downloadSbom } from "../api";
+import { Engagement, Engagements, downloadReport, previewReport, downloadSbom } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
 
@@ -37,22 +37,34 @@ export default function Reports() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState("");
+  // Engagement picker: when more than one engagement exists the operator must
+  // be able to choose WHICH one to export, not just the active one.
+  const [engList, setEngList] = useState([]);      // [{name, display_name, findings, scans, active}]
+  const [selected, setSelected] = useState("");    // DB-stem name — the export selector
   const toast = useToast();
 
   useEffect(() => {
-    Engagement.summary()
-      .then(setSummary)
-      .catch((e) => setError(e.message));
+    Engagement.summary().then(setSummary).catch((e) => setError(e.message));
+    Engagements.list()
+      .then((r) => {
+        const list = r?.engagements || [];
+        setEngList(list);
+        // Default the picker to the active engagement (or the richest one).
+        const active = list.find((e) => e.active) || list[0];
+        if (active) setSelected(active.name);
+      })
+      .catch(() => { /* picker is optional; active export still works */ });
   }, []);
 
-  // Export the *active* engagement — the same store this page's summary was
-  // loaded from. We deliberately do NOT pass the engagement's display name as a
-  // selector: the server resolves a name to a DB file, and a display name that
-  // differs from the DB stem (e.g. set via `heaven init`) would point at a
-  // different, empty store — which produced the "No findings to report" error.
+  // Export the SELECTED engagement. We pass the engagement's DB-stem `name`
+  // (from /api/engagements) — never a display name — because the server
+  // resolves a name to a DB file, and the stem is the authoritative key.
   function engOpts() {
-    return {};
+    return selected ? { engagement: selected } : {};
   }
+
+  const selectedEntry = engList.find((e) => e.name === selected) || null;
+  const isActiveSelected = !selectedEntry || selectedEntry.active;
 
   async function pick(fmt) {
     setBusy(fmt);
@@ -108,17 +120,21 @@ export default function Reports() {
 
   const stats = summary.stats || {};
   const eng = summary.engagement;
-  const total = stats.total_findings ?? 0;
-  const bySev = stats.by_severity || {};
+  // Totals reflect the SELECTED engagement: the active one has a live severity
+  // breakdown from the summary; any other engagement uses its list counts.
+  const total = isActiveSelected ? (stats.total_findings ?? 0) : (selectedEntry?.findings ?? 0);
+  const bySev = isActiveSelected ? (stats.by_severity || {}) : {};
 
-  // No engagement / nothing to report yet → actionable empty state.
-  if (summary.no_engagement || total === 0) {
+  // Only show the "nothing to report" empty state when NO engagement anywhere
+  // has findings — otherwise the operator can pick a populated one below.
+  const anyFindings = total > 0 || engList.some((e) => (e.findings || 0) > 0);
+  if (!anyFindings) {
     return (
       <div className="page">
         <EmptyState
           icon="📄"
           headline="No findings to report yet"
-          body="Reports are generated from the active engagement's findings. Run a scan first, then come back to export a deliverable in any format."
+          body="Reports are generated from an engagement's findings. Run a scan first, then come back to export a deliverable in any format."
           cta="Launch a scan →"
           ctaTo="/scans"
         />
@@ -126,16 +142,39 @@ export default function Reports() {
     );
   }
 
+  const selName = selectedEntry?.display_name || selectedEntry?.name || eng?.name || "engagement";
+
   return (
     <div className="page">
       <div className="card">
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>📄 Reports</h2>
         <p className="dim" style={{ fontSize: 12 }}>
-          Generate a deliverable from the active engagement
-          {eng?.name ? <> — <strong style={{ color: "var(--text-0)" }}>{eng.name}</strong></> : null}.
-          Output is built live from the findings below, so it always reflects the
-          current state of the engagement.
+          Generate a deliverable from the engagement selected below. Output is built
+          live from that engagement's findings, so it always reflects current data.
         </p>
+
+        {/* Engagement picker — surfaces only when there's more than one to choose. */}
+        {engList.length > 1 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                        margin: "6px 0 4px" }}>
+            <label htmlFor="report-eng" className="form-label" style={{ margin: 0 }}>
+              Engagement to export
+            </label>
+            <select
+              id="report-eng"
+              className="form-select"
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+              style={{ maxWidth: 360, minWidth: 0 }}
+            >
+              {engList.map((e) => (
+                <option key={e.name} value={e.name}>
+                  {(e.display_name || e.name)}{e.active ? "  (active)" : ""} — {e.findings} finding{e.findings === 1 ? "" : "s"}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Live snapshot of what the report will contain */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 18, margin: "14px 0 6px" }}>
@@ -145,11 +184,13 @@ export default function Reports() {
           </div>
           <div>
             <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-0)" }}>
-              {stats.scope_targets ?? 0}
+              {isActiveSelected ? (stats.scope_targets ?? 0) : (selectedEntry?.scans ?? 0)}
             </div>
-            <div className="dim" style={{ fontSize: 11 }}>targets in scope</div>
+            <div className="dim" style={{ fontSize: 11 }}>
+              {isActiveSelected ? "targets in scope" : "scans"}
+            </div>
           </div>
-          {["critical", "high", "medium", "low", "info"].map((s) => (
+          {isActiveSelected && ["critical", "high", "medium", "low", "info"].map((s) => (
             <div key={s}>
               <div style={{ fontSize: 22, fontWeight: 700, color: SEV_COLORS[s] }}>
                 {bySev[s] ?? 0}
@@ -158,6 +199,12 @@ export default function Reports() {
             </div>
           ))}
         </div>
+        {!isActiveSelected && (
+          <div className="dim" style={{ fontSize: 11 }}>
+            Exporting <strong style={{ color: "var(--text-0)" }}>{selName}</strong> — switch it to
+            active on the dashboard to see its full severity breakdown here.
+          </div>
+        )}
       </div>
 
       {/* Hero: the professional deliverable, one click */}

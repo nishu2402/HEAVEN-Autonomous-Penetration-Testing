@@ -12,9 +12,38 @@ const CVE_BEARING = new Set([
   "vulnerable_component", "cve", "vulnerable_dependency",
 ]);
 
-// Render the CVE cell so an absent CVE reads as intentional, not broken.
+// Extract every CVE id mentioned on a finding (cve_id may hold one or several,
+// comma/space separated; cve_ids may be a list). Deduped, order-preserving.
+function cveIdsOf(f) {
+  const raw = [];
+  if (Array.isArray(f.cve_ids)) raw.push(...f.cve_ids);
+  if (f.cve_id) raw.push(f.cve_id);
+  const found = raw.join(" ").match(/CVE-\d{4}-\d{4,}/gi) || [];
+  return [...new Set(found.map((c) => c.toUpperCase()))];
+}
+
+// Render the CVE cell. When a CVE is present it links straight to the live NVD
+// record (dynamic, not a static label); an absent CVE reads as intentional.
 function cveCell(f) {
-  if (f.cve_id) return f.cve_id;
+  const cves = cveIdsOf(f);
+  if (cves.length) {
+    return (
+      <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 8 }}>
+        {cves.map((cve) => (
+          <a
+            key={cve}
+            href={`https://nvd.nist.gov/vuln/detail/${cve}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${cve} on the NVD (nvd.nist.gov)`}
+            style={{ color: "var(--cyan)", textDecoration: "underline" }}
+          >
+            {cve}
+          </a>
+        ))}
+      </span>
+    );
+  }
   const cveClass = CVE_BEARING.has(f.vuln_type);
   return (
     <span
@@ -406,10 +435,10 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className="btn" disabled={proving} onClick={runProof}>
-          {proving ? "Proving…" : "Prove via exploit (Gap 4)"}
+          {proving ? "Proving…" : "Prove via exploit"}
         </button>
         <button className="btn-small" disabled={reviewing} onClick={runReview}>
-          {reviewing ? "Reviewing…" : "LLM FP review (Gap 6)"}
+          {reviewing ? "Reviewing…" : "LLM false-positive review"}
         </button>
       </div>
 
@@ -435,7 +464,10 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
       {result && result.kind === "review" && (
         <div style={{ marginTop: 12 }}>
           {result.payload.skipped ? (
-            <div className="dim">Skipped: {result.payload.skipped}</div>
+            <div className="dim">
+              LLM review is unavailable — add an AI provider key in Settings to
+              enable a second-opinion verdict.
+            </div>
           ) : (
             <>
               <div>

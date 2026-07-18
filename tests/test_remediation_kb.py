@@ -112,3 +112,77 @@ def test_ai_remediation_offline_uses_kb_not_generic_string():
     assert "## How to fix it" in out
     assert "external entity" in out.lower()
     assert out != "Apply standard security patches for this vulnerability."
+
+
+# ── Dynamic, per-CVE remediation for known-vulnerable-component findings ──
+# The bug: every CVE finding is typed ``vulnerable_service`` and previously shared
+# ONE generic three-line remediation, so OpenSSH regreSSHion and an Apache SSRF
+# read identically. These tests pin that each CVE now gets a remediation naming
+# its own product + CVE and a weakness-class-appropriate interim control.
+
+_CVE_FINDINGS = [
+    {"vuln_type": "vulnerable_service", "cve": "CVE-2024-6387",
+     "title": "OpenSSH regreSSHion RCE (signal handler race condition)",
+     "product": "openssh", "version": "9.6", "cwe": "CWE-364",
+     "exploit_available": True},
+    {"vuln_type": "vulnerable_service", "cve": "CVE-2021-41773",
+     "title": "Apache path traversal and RCE (mod_cgi)",
+     "product": "apache_http_server", "version": "2.4.49", "cwe": "CWE-22"},
+    {"vuln_type": "vulnerable_service", "cve": "CVE-2022-22721",
+     "title": "Apache SSRF via mod_lua",
+     "product": "apache_http_server", "version": "2.4.52", "cwe": "CWE-918"},
+]
+
+
+def test_component_remediation_names_the_actual_cve_and_product():
+    txt = kb.component_remediation(_CVE_FINDINGS[0])
+    assert "CVE-2024-6387" in txt
+    assert "OpenSSH" in txt and "9.6" in txt
+    assert "nvd.nist.gov/vuln/detail/CVE-2024-6387" in txt
+
+
+def test_component_remediation_is_distinct_per_cve():
+    """The whole point: two different CVEs must not share one remediation."""
+    texts = [kb.component_remediation(f) for f in _CVE_FINDINGS]
+    assert len(set(texts)) == len(texts), "per-CVE remediation collapsed to duplicates"
+    # And it must differ from the static KB component boilerplate.
+    generic = kb.lookup("vulnerable_component").get("remediation")
+    for t in texts:
+        assert t != generic
+
+
+def test_component_remediation_interim_matches_weakness_class():
+    # SSRF → egress / metadata blocking; path traversal → `../` WAF rule.
+    ssrf = kb.component_remediation(_CVE_FINDINGS[2])
+    traversal = kb.component_remediation(_CVE_FINDINGS[1])
+    assert "metadata" in ssrf.lower() or "egress" in ssrf.lower()
+    assert "../" in traversal or "traversal" in traversal.lower()
+    assert "exploit is available" in kb.component_remediation(_CVE_FINDINGS[0]).lower()
+
+
+def test_component_remediation_empty_for_non_cve_finding():
+    # A config/policy finding has no CVE — must fall back to the KB entry.
+    assert kb.component_remediation({"vuln_type": "missing_security_headers"}) == ""
+    assert kb.component_remediation({"vuln_type": "vulnerable_service"}) == ""  # no CVE
+
+
+def test_enrich_stores_dynamic_remediation_in_evidence():
+    out = kb.enrich_finding(_CVE_FINDINGS[1])
+    rem = out["evidence"]["remediation"]
+    assert "CVE-2021-41773" in rem
+    assert rem != kb.lookup("vulnerable_component").get("remediation")
+
+
+def test_remediation_reads_fields_from_evidence_after_db_roundtrip():
+    """After storage only cve_id + evidence survive — the generator must still
+    reconstruct a specific remediation from evidence.product/version/cwe."""
+    stored = {
+        "vuln_type": "vulnerable_service",
+        "cve_id": "CVE-2022-22721",
+        "title": "Apache SSRF via mod_lua",
+        "evidence": {"product": "apache_http_server", "version": "2.4.52",
+                     "cwe": "CWE-918", "exploit_available": False},
+    }
+    txt = kb.component_remediation(stored)
+    assert "CVE-2022-22721" in txt and "Apache HTTP Server" in txt
+    assert "metadata" in txt.lower() or "egress" in txt.lower()

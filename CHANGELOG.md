@@ -34,6 +34,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Malformed `Authorization: Bearer` header returned 500 instead of 401.** A
+  bearer header with no token (`"Bearer"` / `"Bearer "`) hit an unguarded list
+  index and raised a server error; it now returns a clean 401. Found while
+  live-verifying the dashboard fixes.
+- **Every CVE finding showed the same generic remediation.** Every
+  known-vulnerable-component finding (inline DB / live feed / NVD) is typed
+  `vulnerable_service` and resolved to one KB entry, so OpenSSH regreSSHion, an
+  Apache path-traversal RCE and an Apache SSRF all displayed the identical
+  three-line "upgrade / SBOM / virtual-patch" advice. Remediation for these
+  findings is now generated per-CVE: it names the actual product and version,
+  cites the specific CVE (with its NVD link), flags a public exploit when one
+  exists, and picks an interim control that fits the weakness class (SSRF →
+  block egress + metadata endpoints; path traversal → `../` WAF rule;
+  deserialization → firewall the listener; memory-safety → reduce exposure).
+  The product/version/CWE now survive the DB round-trip, so the dashboard
+  "Fix this first", the finding detail and every report show the tailored text.
+- **Dashboard "Fix this first" cards overflowed with no way to scroll.** A
+  finding title set to `white-space:nowrap` inside a grid item (whose default
+  `min-width:auto` refuses to shrink below its content) forced each card wider
+  than the pane, pushing the risk score and remediation off-screen. The cards
+  now shrink to the pane and ellipsis/clamp their own contents.
+- **Reports engagement selector was hidden with a single engagement.** The
+  "Engagement to export" picker only appeared when more than one engagement
+  existed, so with one engagement it looked missing. It's now always shown, so
+  the export scope is explicit.
+- **Host & Service Inventory merged two scans' ports together.** Running two
+  separate scans blended every discovered host/port into one table. The inventory
+  is now scoped to a single scan — the most recent by default — with a scan
+  picker in the Assets page (and `heaven assets --scan-id` / `--all` on the CLI)
+  so two scans stay independent. The lateral-movement page opts into the
+  engagement-wide union (`?all=1`) since it wants every pivot host.
+- **Scan launcher targets couldn't be edited after entry.** Once a target became
+  a chip you had to delete and retype it to fix a typo. Click a chip's text (or
+  Backspace on the empty field) to pull it back into the input and edit it.
+- **Copying a target chip smuggled junk on paste.** Copying a chip picked up its
+  "URL/IP" kind-label and the "×" remove glyph; pasting it back created garbage
+  tokens. The label and × are now excluded from text selection, and paste strips
+  the × glyph plus zero-width/BOM/non-breaking-space characters.
 - **README stats and model names were stale and inconsistent.** The badges and
   tables cited conflicting figures (967 vs 981 tests, 47 CLI commands, 59 vs 60
   API routes, 21 vs 22 UI pages) and retired model defaults (`claude-sonnet-4-6`,

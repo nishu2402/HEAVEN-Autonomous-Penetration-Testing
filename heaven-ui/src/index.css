@@ -658,14 +658,25 @@ a:hover { color: var(--accent-2); }
 .tag-kind {
   font-family: var(--font-ui); font-size: 8.5px; font-weight: 700;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-2);
+  user-select: none;   /* keep the "URL/IP" label out of a copy of the chip */
 }
-.tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The chip label is a button (click to edit the target back into the field),
+   but its text must stay cleanly selectable/copyable — only the target text,
+   never the kind label or the × glyph. */
+.tag-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  max-width: 42ch;
+  border: none; background: transparent; padding: 0; margin: 0;
+  color: inherit; font: inherit; cursor: pointer; user-select: text;
+}
+.tag-text:hover { text-decoration: underline; text-underline-offset: 2px; }
 .tag.is-invalid { background: rgba(255,197,61,0.10); border-color: rgba(255,197,61,0.38); }
 .tag.is-invalid .tag-kind { color: var(--med); }
 .tag-remove {
   display: inline-grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0;
   border: none; background: transparent; color: var(--text-2); cursor: pointer;
   border-radius: 50%; font-size: 14px; line-height: 1; padding: 0;
+  user-select: none;   /* keep the × glyph out of a copy of the chip */
 }
 .tag-remove:hover { background: rgba(255,255,255,0.12); color: var(--text-0); }
 .tags-input-field {

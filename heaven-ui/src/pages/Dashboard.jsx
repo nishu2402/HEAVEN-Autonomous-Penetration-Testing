@@ -429,7 +429,7 @@ export default function Dashboard() {
                 ({Number(topFindings[0].risk_score || 0).toFixed(0)}).</>
               )}
             </div>
-            <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
               {topFindings.map((f) => (
                 <button
                   key={f.id}
@@ -439,24 +439,29 @@ export default function Dashboard() {
                     border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
                     padding: '9px 11px', cursor: 'pointer', color: 'var(--text-0)',
                     fontFamily: 'var(--font-ui)',
+                    // Grid items default to min-width:auto, so a nowrap title would
+                    // force the card wider than the pane (horizontal overflow, no
+                    // scroll). Let it shrink and clamp its own contents instead.
+                    minWidth: 0, maxWidth: '100%', width: '100%', boxSizing: 'border-box',
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--border-strong)')}
                   onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                                    background: SEV[f.severity]?.color || 'var(--text-2)' }} />
-                    <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1, overflow: 'hidden',
-                                   textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.title}</span>
-                    <span className="mono" style={{ fontSize: 11, color: 'var(--text-2)' }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1, minWidth: 0,
+                                   overflow: 'hidden', textOverflow: 'ellipsis',
+                                   whiteSpace: 'nowrap' }}>{f.title}</span>
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--text-2)', flexShrink: 0 }}>
                       {Number(f.risk_score || 0).toFixed(1)}
                     </span>
                   </div>
                   {f.remediation && (
                     <div className="dim" style={{ fontSize: 11, marginTop: 3, lineHeight: 1.45,
-                                                  overflow: 'hidden', textOverflow: 'ellipsis',
+                                                  minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
                                                   display: '-webkit-box', WebkitLineClamp: 2,
-                                                  WebkitBoxOrient: 'vertical' }}>
+                                                  WebkitBoxOrient: 'vertical', wordBreak: 'break-word' }}>
                       {f.remediation}
                     </div>
                   )}

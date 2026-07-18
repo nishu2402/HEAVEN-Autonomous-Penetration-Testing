@@ -466,3 +466,44 @@ def test_api_assets_returns_normalized_inventory(api_client):
     assert host["ports"][0]["service_version"] == "OpenSSH 8.9p1"
     assert body["totals"]["open_ports"] == 1
     assert body["totals"]["os_identified"] == 1
+    # A single scan still exposes the picker list (one entry) and its id.
+    assert [s["scan_id"] for s in body["scans"]] == ["s1"]
+    assert body["scan_id"] == "s1"
+
+
+def test_api_assets_scopes_to_one_scan_not_merged(api_client):
+    """Two separate scans must NOT blend into one host table.
+
+    Regression for the reported bug: running two different scans made the
+    Host & Service Inventory show both scans' ports merged together. The view
+    is now scoped to a single scan (latest by default) with a picker.
+    """
+    from heaven.api import server
+    store = server._engagement_store_factory("mergetest")
+    store.create_engagement(name="mergetest")
+    store.record_scan_start("scanA", name="10.0.0.5", mode="network")
+    store.record_scan_complete("scanA", {"scan_id": "scanA", "assets": _ASSETS})
+    assets_b = [{"host": "192.168.1.10", "ip": "192.168.1.10", "is_alive": True,
+                 "open_ports": [{"port": 443, "service": "https", "protocol": "tcp"}]}]
+    store.record_scan_start("scanB", name="192.168.1.10", mode="network")
+    store.record_scan_complete("scanB", {"scan_id": "scanB", "assets": assets_b})
+
+    expect = {"scanA": "10.0.0.5", "scanB": "192.168.1.10"}
+
+    # Default view = exactly one scan's hosts, never the union of both.
+    body = api_client.get("/api/assets?engagement=mergetest").json()
+    assert body["total"] == 1, "two scans must not merge into one host table"
+    assert {s["scan_id"] for s in body["scans"]} == {"scanA", "scanB"}
+    assert body["scan_id"] in expect
+    assert body["assets"][0]["host"] == expect[body["scan_id"]]
+
+    # Selecting the other scan shows the other host (independent inventories).
+    other = "scanA" if body["scan_id"] == "scanB" else "scanB"
+    b2 = api_client.get(f"/api/assets?engagement=mergetest&scan_id={other}").json()
+    assert b2["total"] == 1
+    assert b2["assets"][0]["host"] == expect[other]
+
+    # ?all=1 is the explicit opt-in for the engagement-wide union (lateral page).
+    b3 = api_client.get("/api/assets?engagement=mergetest&all=1").json()
+    assert b3["total"] == 2
+    assert {h["host"] for h in b3["assets"]} == {"10.0.0.5", "192.168.1.10"}

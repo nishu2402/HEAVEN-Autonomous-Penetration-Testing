@@ -4,7 +4,8 @@
 // entry into tactile chips: type a target and press Enter / comma / space (or
 // paste a whole list) → each becomes a removable pill, colour-coded and validated
 // live (URL / IP / CIDR / host, or flagged if unrecognised). Backspace on an empty
-// field removes the last chip; duplicates are ignored.
+// field removes the last chip; duplicates are ignored. Click a chip's text to pull
+// it back into the field and edit it (fix a typo without deleting + retyping).
 //
 // It is a drop-in for the old <textarea>: `value` is a newline-joined string and
 // `onChange` returns the same shape, so the parent's existing split()/parse logic
@@ -28,8 +29,19 @@ export function classifyTarget(t) {
 // uses when pasting a target list.
 const SPLIT = /[\s,]+/;
 
+// Characters that leak in when text is copied out of the chips themselves (the
+// "×" remove glyph and its "✕" variant) or from rich sources
+// (zero-width space/joiners U+200B–U+200D, BOM U+FEFF, non-breaking space U+00A0).
+// Strip them so a copy → paste round-trip of an existing chip can't smuggle the
+// chip's own decoration back into the field as junk tokens.
+const JUNK = /[×✕​‌‍﻿ ]/g;
+
 function parse(value) {
-  return String(value || "").split(SPLIT).map((s) => s.trim()).filter(Boolean);
+  return String(value || "")
+    .replace(JUNK, " ")
+    .split(SPLIT)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export default function TargetsInput({ value, onChange, placeholder = "Add a target…", id }) {
@@ -60,6 +72,23 @@ export default function TargetsInput({ value, onChange, placeholder = "Add a tar
     inputRef.current?.focus();
   }
 
+  // Pull chip `i` back into the editable field: commit any half-typed draft
+  // first (so it isn't lost), drop the chip, and load its text for editing.
+  function editAt(i) {
+    const target = tokens[i];
+    const next = tokens.slice();
+    next.splice(i, 1);
+    if (draft.trim()) {
+      const seen = new Set(next);
+      for (const p of parse(draft)) {
+        if (!seen.has(p)) { seen.add(p); next.push(p); }
+      }
+    }
+    setTokens(next);
+    setDraft(target);
+    inputRef.current?.focus();
+  }
+
   function onKeyDown(e) {
     if (e.key === "Enter" || e.key === "," || e.key === " ") {
       // Enter would also submit the surrounding <form> — always swallow it here.
@@ -67,7 +96,9 @@ export default function TargetsInput({ value, onChange, placeholder = "Add a tar
       if (draft.trim()) commit(draft);
     } else if (e.key === "Backspace" && !draft && tokens.length) {
       e.preventDefault();
-      removeAt(tokens.length - 1);
+      // Backspace on an empty field pulls the last chip back for editing rather
+      // than silently discarding it — a fat-finger delete is recoverable.
+      editAt(tokens.length - 1);
     }
   }
 
@@ -88,9 +119,13 @@ export default function TargetsInput({ value, onChange, placeholder = "Add a tar
         const kind = classifyTarget(t);
         return (
           <span key={`${t}-${i}`} className={"tag" + (kind ? "" : " is-invalid")}
-                title={kind ? `${kind}: ${t}` : `Unrecognised target: ${t}`}>
-            <span className="tag-kind">{kind || "?"}</span>
-            <span className="tag-text">{t}</span>
+                title={kind ? `${kind}: ${t} — click to edit` : `Unrecognised target: ${t} — click to edit`}>
+            <span className="tag-kind" aria-hidden="true">{kind || "?"}</span>
+            <button
+              type="button" className="tag-text"
+              onClick={(e) => { e.stopPropagation(); editAt(i); }}
+              aria-label={`Edit ${t}`}
+            >{t}</button>
             <button
               type="button" className="tag-remove" aria-label={`Remove ${t}`}
               onClick={(e) => { e.stopPropagation(); removeAt(i); }}

@@ -18,28 +18,45 @@ function osStyle(host) {
   return { color: "var(--text-dim)", border: "var(--border)" };
 }
 
+// Short, human label for one scan in the picker: "target — 3 hosts · Jul 18 14:22".
+function scanOptionLabel(s) {
+  const when = s.when ? new Date(s.when).toLocaleString([], {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  }) : "";
+  const hosts = `${s.hosts} host${s.hosts === 1 ? "" : "s"}`;
+  return [s.label, hosts, when].filter(Boolean).join("  ·  ");
+}
+
 export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [inventory, setInventory] = useState([]);
   const [totals, setTotals] = useState(null);
+  const [scans, setScans] = useState([]);
+  const [scanId, setScanId] = useState(null);
 
-  function load() {
+  // Pass scanId=null to let the backend pick the most recent scan. The
+  // inventory is scoped to ONE scan so two separate scans never blend into a
+  // single host table; the picker below switches between them.
+  function load(sid) {
     setLoading(true);
     setError(null);
-    Assets.list()
+    Assets.list(sid || undefined)
       .then((d) => {
         setInventory(d.assets || []);
         setTotals(d.totals || null);
+        setScans(d.scans || []);
+        setScanId(d.scan_id || null);
       })
       .catch((e) => setError(e.message || String(e)))
       .finally(() => setLoading(false));
   }
 
-  // Reload when the operator switches engagements from the header chip.
+  // Reload when the operator switches engagements from the header chip — reset
+  // to that engagement's most recent scan (don't carry a stale scan id over).
   useEffect(() => {
-    load();
-    const onChange = () => load();
+    load(null);
+    const onChange = () => load(null);
     window.addEventListener("heaven:engagement-changed", onChange);
     return () => window.removeEventListener("heaven:engagement-changed", onChange);
   }, []);
@@ -60,9 +77,27 @@ export default function AssetsPage() {
           discovered — reported exactly as observed by nmap, nothing fabricated.
           An OS shown as <em>heuristic — unconfirmed</em> was inferred from a TTL
           value, not a full stack fingerprint, and should be treated as
-          indicative only. Run a network scan (<code>heaven scan -m network</code>
+          indicative only. The inventory is scoped to a single scan (most recent
+          by default) so two scans never blend into one host table — use the
+          picker to switch. Run a network scan (<code>heaven scan -m network</code>
           {" "}or the <Link to="/scans">Scans</Link> launcher) to populate this.
         </p>
+
+        {scans.length > 0 && (
+          <label className="form-group" style={{ maxWidth: 460, marginTop: 6 }}>
+            <span className="form-label">Scan{scans.length > 1 ? ` (${scans.length})` : ""}</span>
+            <select
+              className="form-select"
+              value={scanId || ""}
+              onChange={(e) => load(e.target.value)}
+              disabled={loading}
+            >
+              {scans.map((s) => (
+                <option key={s.scan_id} value={s.scan_id}>{scanOptionLabel(s)}</option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {totals && (
           <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
@@ -74,7 +109,7 @@ export default function AssetsPage() {
             ))}
           </div>
         )}
-        <button className="btn-small" style={{ marginTop: 12 }} onClick={load} disabled={loading}>
+        <button className="btn-small" style={{ marginTop: 12 }} onClick={() => load(scanId)} disabled={loading}>
           {loading ? "Loading…" : "↻ Refresh"}
         </button>
         {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}

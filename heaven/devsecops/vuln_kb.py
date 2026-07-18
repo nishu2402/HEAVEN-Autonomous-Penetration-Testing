@@ -1468,6 +1468,211 @@ def lookup(vuln_type: str) -> dict[str, Any]:
     return _KB.get(_ALIASES.get(key, ""), {})
 
 
+# ── Dynamic, per-CVE remediation for known-vulnerable-component findings ──
+#
+# Every CVE finding (inline DB / live feed / NVD) is typed ``vulnerable_service``
+# and aliases to the single ``vulnerable_component`` KB entry — so *without* this
+# generator they would all show the same generic three-line fix. That reads as
+# "fake" because OpenSSH regreSSHion and an Apache SSRF get identical advice.
+# ``component_remediation`` builds a remediation that names the actual product,
+# version and CVE, and picks an interim mitigation that fits the *weakness class*
+# (CWE) — so a path-traversal RCE, an SSRF and a deserialization bug each get the
+# control that actually blunts them. Nothing is fabricated: the upgrade target is
+# stated as "the vendor's fixed release" (we don't invent a precise version), and
+# the interim control is standard, class-accurate guidance.
+
+# The vuln_types that mean "a specific product version is known-vulnerable".
+_COMPONENT_KEYS = frozenset({
+    "vulnerable_component", "vulnerable_service", "known_vulnerable_version",
+    "outdated_component", "vulnerable_dependency",
+})
+
+# Human-readable product names for the CPE product keys used by the CVE mapper.
+_PRODUCT_DISPLAY: dict[str, str] = {
+    "openssh": "OpenSSH", "apache_http_server": "Apache HTTP Server",
+    "nginx": "nginx", "microsoft_iis": "Microsoft IIS", "tomcat": "Apache Tomcat",
+    "mysql": "MySQL", "mariadb_server": "MariaDB", "postgresql": "PostgreSQL",
+    "redis": "Redis", "mongodb": "MongoDB", "elasticsearch": "Elasticsearch",
+    "jenkins": "Jenkins", "gitlab": "GitLab", "confluence": "Atlassian Confluence",
+    "weblogic_server": "Oracle WebLogic", "apache_struts": "Apache Struts",
+    "log4j": "Apache Log4j", "spring_framework": "Spring Framework",
+    "apache_shiro": "Apache Shiro", "phpmyadmin": "phpMyAdmin",
+    "wordpress": "WordPress", "drupal": "Drupal", "openssl": "OpenSSL",
+    "exim": "Exim", "samba": "Samba", "dovecot": "Dovecot", "nodejs": "Node.js",
+    "php": "PHP", "kubernetes": "Kubernetes", "docker": "Docker",
+    "vsftpd": "vsftpd", "proftpd": "ProFTPD", "rabbitmq": "RabbitMQ",
+}
+
+# Interim mitigation keyed by CWE — the control that genuinely reduces exposure
+# for that weakness class while the upgrade is scheduled. Grouped so several
+# related CWEs share one accurate control.
+_CWE_INTERIM: dict[str, str] = {
+    # SSRF
+    "CWE-918": "block the affected component's outbound network egress and deny "
+               "access to internal and cloud-metadata endpoints (e.g. "
+               "169.254.169.254) at the firewall",
+    # Path / directory traversal & file handling
+    "CWE-22": "add a WAF or reverse-proxy rule that rejects `../` and encoded "
+              "traversal sequences, and canonicalise paths before any file access",
+    "CWE-23": "add a WAF or reverse-proxy rule that rejects `../` and encoded "
+              "traversal sequences, and canonicalise paths before any file access",
+    "CWE-36": "add a WAF or reverse-proxy rule that rejects `../` and encoded "
+              "traversal sequences, and canonicalise paths before any file access",
+    "CWE-61": "restrict symlink following and canonicalise paths before file "
+              "access; deny the affected path prefixes at the proxy",
+    "CWE-434": "block uploads of executable/script extensions at the proxy and "
+               "store uploads outside the web root",
+    # Deserialization
+    "CWE-502": "disable or firewall the affected listener, reject untrusted "
+               "serialized input, and expose the service only to trusted networks",
+    # Command / argument injection
+    "CWE-78": "disable the affected module if unused (e.g. mod_cgi) and restrict "
+              "the interface to trusted hosts; allowlist any command arguments",
+    "CWE-88": "disable the affected module if unused and restrict the interface "
+              "to trusted hosts; allowlist any command arguments",
+    # SQL injection
+    "CWE-89": "deploy a WAF signature for the injection pattern and route all "
+              "database access through parameterised queries",
+    # Expression / template / JNDI injection (Log4Shell, Spring4Shell, OGNL)
+    "CWE-917": "apply the vendor mitigation (disable message lookups / remove the "
+               "affected JAR) and add a WAF signature for the exploit string",
+    "CWE-94": "apply the vendor mitigation (disable the vulnerable evaluation "
+              "feature) and add a WAF signature for the exploit pattern",
+    "CWE-74": "apply the vendor mitigation (disable the vulnerable evaluation "
+              "feature) and add a WAF signature for the exploit pattern",
+    # XXE
+    "CWE-611": "disable external-entity and DTD resolution in the affected parser "
+               "and strip DTDs at the gateway",
+    # Auth bypass / access control / privilege
+    "CWE-287": "place the service behind an authenticated reverse proxy and "
+               "disable remote or anonymous access until the fix is deployed",
+    "CWE-290": "place the service behind an authenticated reverse proxy and "
+               "disable remote or anonymous access until the fix is deployed",
+    "CWE-306": "place the service behind an authenticated reverse proxy and "
+               "disable remote or anonymous access until the fix is deployed",
+    "CWE-640": "restrict the password-reset / account endpoints to trusted "
+               "networks and monitor for abuse until patched",
+    "CWE-284": "tighten access control at the proxy and restrict the endpoint to "
+               "authenticated, trusted callers",
+    "CWE-285": "tighten authorisation at the proxy and restrict the endpoint to "
+               "authenticated, trusted callers",
+    "CWE-269": "restrict the interface to trusted administrators and remove any "
+               "unneeded privileged access paths",
+    "CWE-862": "enforce authorisation at the proxy and restrict the endpoint to "
+               "authenticated callers",
+    "CWE-863": "enforce authorisation at the proxy and restrict the endpoint to "
+               "authenticated callers",
+    # XSS
+    "CWE-79": "enable a WAF XSS ruleset and enforce output encoding and a strict "
+              "Content-Security-Policy on the affected pages",
+    # HTTP request smuggling
+    "CWE-444": "normalise HTTP framing at the front-end proxy and reject requests "
+               "with conflicting Content-Length / Transfer-Encoding headers",
+    # Resource exhaustion / DoS
+    "CWE-400": "add rate limits and request/resource caps at the proxy to blunt "
+               "resource-exhaustion attempts",
+    "CWE-770": "add rate limits and request/resource caps at the proxy to blunt "
+               "resource-exhaustion attempts",
+    "CWE-835": "add rate limits and request timeouts at the proxy to blunt "
+               "resource-exhaustion attempts",
+    # Open redirect
+    "CWE-601": "allowlist redirect destinations at the proxy and reject "
+               "off-site redirect targets",
+    # Weak crypto / transport
+    "CWE-310": "restrict the service to trusted networks and enforce strong "
+               "transport crypto until patched",
+    "CWE-924": "restrict the service to trusted networks and enforce strong "
+               "transport crypto until patched",
+    "CWE-330": "restrict the service to trusted networks and rotate any "
+               "predictable secrets until patched",
+}
+
+# Memory-safety CWEs: no reliable virtual patch exists, so the honest interim
+# control is exposure reduction, not a WAF rule.
+_MEMORY_CWES = frozenset({
+    "CWE-119", "CWE-120", "CWE-121", "CWE-122", "CWE-125", "CWE-126", "CWE-127",
+    "CWE-787", "CWE-416", "CWE-415", "CWE-190", "CWE-191", "CWE-193", "CWE-476",
+    "CWE-617", "CWE-134", "CWE-364", "CWE-749", "CWE-668",
+})
+
+
+def _product_display(product_key: str) -> str:
+    key = (product_key or "").strip().lower()
+    if key in _PRODUCT_DISPLAY:
+        return _PRODUCT_DISPLAY[key]
+    return key.replace("_", " ").title() if key else "the affected component"
+
+
+def _cwe_interim(cwe: str) -> str:
+    cwe = (cwe or "").upper().strip()
+    if cwe in _CWE_INTERIM:
+        return _CWE_INTERIM[cwe]
+    if cwe in _MEMORY_CWES:
+        return ("reduce network exposure (firewall / allowlist) — no reliable "
+                "virtual patch exists for this memory-safety flaw, so prioritise "
+                "the upgrade")
+    return ("apply a virtual patch / WAF rule targeting the exploit pattern for "
+            "this CVE as an interim control")
+
+
+def _is_real_cve(cve: str) -> bool:
+    return bool(re.match(r"^CVE-\d{4}-\d{3,}$", (cve or "").strip(), re.IGNORECASE))
+
+
+def component_remediation(finding: dict) -> str:
+    """Tailored remediation for a known-vulnerable-component finding, or "" if the
+    finding isn't one (so callers fall back to the generic KB entry).
+
+    Reads product / version / CVE / CWE from either the top level or ``evidence``
+    (fields survive the DB round-trip that way), and produces numbered steps that
+    name the real component and CVE and choose a class-appropriate interim
+    control. Never fabricates a precise fixed version.
+    """
+    ev = finding.get("evidence") or {}
+    vt = normalize_key(finding.get("vuln_type", "") or finding.get("type", ""))
+    cve = (finding.get("cve") or finding.get("cve_id")
+           or ev.get("cve") or ev.get("cve_id") or "").strip()
+    is_component = vt in _COMPONENT_KEYS or _ALIASES.get(vt) == "vulnerable_component"
+
+    # Only specialise when this is a component finding tied to a real CVE — that's
+    # exactly the case that otherwise collapses to the generic three-liner.
+    if not (is_component and _is_real_cve(cve)):
+        return ""
+
+    product = (finding.get("product") or ev.get("product") or "").strip()
+    version = (finding.get("version") or ev.get("version") or "").strip()
+    cwe = (finding.get("cwe") or ev.get("cwe") or "").strip()
+    title = (finding.get("title") or "").strip()
+    exploit = bool(finding.get("exploit_available") or ev.get("exploit_available")
+                   or finding.get("in_kev") or ev.get("in_kev"))
+
+    prod = _product_display(product)
+    # Step 1 — the specific upgrade action, leading with product + version + CVE
+    # so it stays informative even when a UI clamps it to a line or two.
+    running = f" {version}" if version and version.lower() not in ("unknown", "") else ""
+    fix = (f"Upgrade {prod}{running} to the vendor's latest patched release that "
+           f"resolves {cve.upper()}")
+    if title and title.lower() not in prod.lower():
+        fix += f" ({title})"
+    fix += "."
+    steps = [f"1. {fix}"]
+
+    # Step 2 — interim mitigation matched to the weakness class.
+    steps.append(f"2. Interim control: {_cwe_interim(cwe)}.")
+
+    # Step 3 — durable hygiene (SBOM + advisory monitoring), still relevant.
+    steps.append("3. Track this component in an SBOM and subscribe to the vendor's "
+                 "security advisories so future CVEs are caught early.")
+
+    if exploit:
+        steps.append("⚠ A public exploit is available for this CVE — treat it as "
+                     "actively exploitable and patch on an emergency timeline.")
+    steps.append(f"Verify: confirm the running version is outside the range "
+                 f"affected by {cve.upper()} and re-scan to close this finding.")
+    steps.append(f"Reference: https://nvd.nist.gov/vuln/detail/{cve.upper()}")
+    return "\n".join(steps)
+
+
 def remediation_text(finding: dict) -> str:
     """A complete, human-readable remediation write-up for a finding — built
     entirely in-house from the KB, no LLM required.
@@ -1508,7 +1713,12 @@ def remediation_text(finding: dict) -> str:
         lines += ["", "## What it is", entry["description"]]
     if entry.get("impact"):
         lines += ["", "## Impact", entry["impact"]]
-    if entry.get("remediation"):
+    # A known-vulnerable-component finding gets a remediation tailored to its
+    # actual product + CVE + weakness class, not the generic component boilerplate.
+    dynamic = component_remediation(finding)
+    if dynamic:
+        lines += ["", "## How to fix it", dynamic]
+    elif entry.get("remediation"):
         lines += ["", "## How to fix it", entry["remediation"]]
     refs = entry.get("references") or []
     if refs:
@@ -1525,11 +1735,18 @@ def enrich_finding(finding: dict) -> dict:
     entry = lookup(finding.get("vuln_type", ""))
     ev = dict(out.get("evidence") or {})
 
+    # A component/CVE finding gets a remediation tailored to its real product +
+    # CVE + weakness class (so two different CVEs never share one generic fix).
+    # This wins over the KB's generic component remediation.
+    dynamic_rem = component_remediation(out)
+
     if entry:
         ev.setdefault("description", entry.get("description", ""))
         if entry.get("impact"):
             ev.setdefault("impact", entry["impact"])
-        if not ev.get("remediation") and entry.get("remediation"):
+        if dynamic_rem:
+            ev["remediation"] = dynamic_rem
+        elif not ev.get("remediation") and entry.get("remediation"):
             ev["remediation"] = entry["remediation"]
         if not ev.get("references") and entry.get("references"):
             ev["references"] = entry["references"]
@@ -1538,6 +1755,10 @@ def enrich_finding(finding: dict) -> dict:
                 f"Matches the {entry.get('title', finding.get('vuln_type'))} "
                 f"class ({entry.get('cwe', '')})."
             ]
+    # Belt-and-suspenders: apply the per-CVE remediation even for a component
+    # finding whose vuln_type isn't in the KB (so it still beats a blank fix).
+    if dynamic_rem:
+        ev["remediation"] = dynamic_rem
     out["evidence"] = ev
 
     if not out.get("mitre_technique") and entry.get("mitre"):

@@ -1,11 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%20967%20Tests%20%C2%B7%20137%20Modules%20%C2%B7%2047%20CLI%20Commands%20%C2%B7%2059%20API%20Routes&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%201028%20Tests%20%C2%B7%20145%20Modules%20%C2%B7%2050%20CLI%20Commands%20%C2%B7%2064%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;967+Tests+%C2%B7+137+Modules+%C2%B7+21+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;1028+Tests+%C2%B7+145+Modules+%C2%B7+24+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
 </p>
 
 <p align="center">
@@ -18,16 +18,16 @@
 
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-    <img src="https://img.shields.io/badge/API-FastAPI_59_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+    <img src="https://img.shields.io/badge/API-FastAPI_64_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
     <img src="https://img.shields.io/github/actions/workflow/status/nishu2402/HEAVEN-Autonomous-Penetration-Testing/ci.yml?style=for-the-badge&logo=pytest&logoColor=black&label=Tests" alt="Tests"/>
     <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
     <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-137-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
-    <img src="https://img.shields.io/badge/CLI_Commands-47-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
-    <img src="https://img.shields.io/badge/UI_Pages-22-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
+    <img src="https://img.shields.io/badge/Modules-145-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/CLI_Commands-50-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
+    <img src="https://img.shields.io/badge/UI_Pages-24-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
   </p>
@@ -93,9 +93,9 @@ HEAVEN is a **production-grade penetration-testing platform** that automates the
 
 It runs three ways from the **same engagement dataset**:
 
-- **CLI** — 47 commands for scriptable, CI-friendly workflows.
-- **Web UI** — a 21-page React command centre (scan launcher, live findings, kill-chain, reports).
-- **REST + WebSocket API** — 59 RBAC-protected routes for automation and integration.
+- **CLI** — 50 commands for scriptable, CI-friendly workflows.
+- **Web UI** — a 24-page React command centre (scan launcher, live findings, kill-chain, reports).
+- **REST + WebSocket API** — 64 RBAC-protected routes for automation and integration.
 
 <div align="center">
 <img width="760" alt="HEAVEN — Autonomous Penetration Testing Platform v1.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
@@ -114,12 +114,12 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 981 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 1028 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 137 |
-| ⌨️ **CLI Commands** | 47 |
-| 🌐 **API Routes** | 60 RBAC-protected routes |
-| 🖥️ **UI Pages** | 22 (React + Vite, dark glassmorphic) |
+| 🧩 **Modules** | 145 |
+| ⌨️ **CLI Commands** | 50 |
+| 🌐 **API Routes** | 64 RBAC-protected routes |
+| 🖥️ **UI Pages** | 24 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
 | 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · **deterministic fallback (no API key needed)** |
@@ -361,7 +361,7 @@ false-positive review). Add only what you want.
 Confirm it's active:
 
 ```bash
-heaven doctor        # shows  ✓ LLM  gemini (gemini-1.5-pro)  when working
+heaven doctor        # shows  ✓ LLM  gemini (gemini-flash-latest)  when working
 ```
 
 ### Five ways to set any key
@@ -385,11 +385,11 @@ directory. **Never commit `.env`** — it's already in `.gitignore`.
 
 ```bash
 export HEAVEN_LLM_PROVIDER=gemini        # force a provider (else auto-detected)
-export HEAVEN_LLM_MODEL=gemini-1.5-pro   # override the default model
+export HEAVEN_LLM_MODEL=gemini-pro-latest # override the default model
 ```
 
-Default models: Claude `claude-sonnet-4-6` · OpenAI `gpt-4o` · Gemini
-`gemini-1.5-pro`. With no key set anywhere, every AI feature falls back to a
+Default models: Claude `claude-sonnet-5` · OpenAI `gpt-4o` · Gemini
+`gemini-flash-latest`. With no key set anywhere, every AI feature falls back to a
 deterministic heuristic (or pass `--no-llm`).
 
 ---
@@ -401,7 +401,7 @@ deterministic heuristic (or pass `--no-llm`).
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,33:7400B8,66:FF36AB,100:FF6E00"/>
 </p>
 
-47 commands. Run `heaven <command> --help` for full options.
+50 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
 <img width="820" alt="heaven CLI dashboard — module status + live command reference (v1.0.0)" src="docs/screenshots/Heaven_cli.png" />
@@ -472,7 +472,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 <img width="900" alt="HEAVEN web UI — Dashboard: 3D attack-surface topology, severity distribution, and Fix-This-First priorities" src="docs/screenshots/web-app_dashboard.png" />
 </div>
 
-**22 pages:**
+**24 pages:**
 
 <div align="center">
 
@@ -480,6 +480,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 |---|---|
 | **Dashboard** | Severity distribution · MITRE ATT&CK heat-map |
 | **Engagement** | Active engagement · in-scope targets · asset criticality |
+| **Assets** | Host & service inventory — open ports · service versions · OS fingerprint |
 | **Scans** | Launch · history · live progress |
 | **Findings** | Filter · triage · **download report** |
 | **Finding Detail** | Description · impact · remediation · CWE/OWASP/MITRE · evidence · curl repro |
@@ -528,7 +529,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7400B8,50:00D2FF,100:B8FF00"/>
 </p>
 
-59 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
+64 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
 
 ```bash
 # Health (no auth)
@@ -675,7 +676,7 @@ The 48 MB model isn't bundled in the wheel or git — fetch it once (SHA-256 ver
 </p>
 
 ```
-heaven/                   ← Python package (137 modules)
+heaven/                   ← Python package (145 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines — Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -685,11 +686,11 @@ heaven/                   ← Python package (137 modules)
 ├── devsecops/            PDF/compliance reports · vuln KB · SBOM · diff · alerting · ticketing
 ├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
-├── api/                  FastAPI server + WebSocket (59 routes)
-└── cli/                  Click CLI — one module per command group (47 commands)
+├── api/                  FastAPI server + WebSocket (64 routes)
+└── cli/                  Click CLI — one module per command group (50 commands)
 
-heaven-ui/                React + Vite web console (22 pages)
-tests/                    967 pytest tests + native & DVWA benchmark suites
+heaven-ui/                React + Vite web console (24 pages)
+tests/                    1028 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -775,7 +776,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>981 tests · 137 modules · 47 CLI commands · 60 API routes · 22 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>1028 tests · 145 modules · 50 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

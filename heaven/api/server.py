@@ -990,6 +990,10 @@ def create_app() -> FastAPI:
 
         active_scans[scan_id] = {
             "status": "pending",
+            # Authoritative mode for the badge/filter while the scan is in memory.
+            # The launcher sends `mode`; `scan_type` stays at its "full" default,
+            # so the UI must not fall back to scan_type or focused scans show FULL.
+            "mode": (req.mode or req.scan_type or "full"),
             "config": req.model_dump(),
             "created": _now.isoformat(),
             "created_by": user.username,
@@ -2240,16 +2244,18 @@ def create_app() -> FastAPI:
                 profile = await agent.parse(body.get("recon", {}))
                 return profile.model_dump() if hasattr(profile, "model_dump") else profile.__dict__
             if kind == "plan":
+                # The planner always produces grounded chains from the findings
+                # (deterministic builder); an LLM key just adds creative variants.
                 from heaven.ai import AttackChainPlanner
                 planner = AttackChainPlanner()
-                if not planner.available:
-                    return {"skipped": "LLM gateway unavailable"}
                 out = await planner.plan(
                     findings=body.get("findings", []),
                     assets=body.get("assets", []),
                     objective_hint=body.get("objective_hint", ""),
                 )
-                return out.model_dump() if hasattr(out, "model_dump") else out.__dict__
+                result = out.model_dump() if hasattr(out, "model_dump") else out.__dict__
+                result["llm_used"] = planner.available
+                return result
             if kind == "fp-review":
                 from heaven.ai import FPReviewer
                 reviewer = FPReviewer()
@@ -3066,7 +3072,17 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(500, f"diff_finder unavailable: {e}")
         store = _engagement_store_factory(engagement)
-        report = compute_diff(store, baseline, scan_id)
+        # compute_diff raises ValueError when a scan id isn't in THIS engagement
+        # (the common "diff isn't working" cause: the two scans live in different
+        # engagements). Surface that as an actionable 400, not an opaque 500.
+        try:
+            report = compute_diff(store, baseline, scan_id)
+        except ValueError as e:
+            raise HTTPException(
+                400,
+                f"{e}. Both scans must belong to the engagement you're viewing — "
+                "switch to that engagement, or pick two scans from the same one.",
+            )
         out = report.to_dict()
         if include_unchanged:
             from heaven.devsecops.diff_finder import _row_dict

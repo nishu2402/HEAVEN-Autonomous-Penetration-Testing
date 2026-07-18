@@ -9,7 +9,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Autonomous run now produces an executive report.** Every autonomous run ends
+  with a professional summary — a plain-English executive narrative, a full
+  severity breakdown (critical→info), the distinct hosts engaged, the top findings
+  (with live NVD CVE links), the actions taken, and prioritised recommendations —
+  rendered in both the CLI and the web UI. This makes the output read like a report
+  even on a lean rule-based (no-LLM) run.
+- **Engagement picker on every launcher.** The Autonomous, SAST and SCA sections
+  now have the same "Save findings to engagement" dropdown as the scan launcher
+  (existing engagements with finding counts + "＋ New engagement…"), so a run's
+  findings always land where you explicitly chose instead of a mistyped, empty
+  engagement. New reusable `EngagementPicker` component.
+- **Report download engagement selector.** The Reports page now lets you pick
+  *which* engagement to export when more than one exists (defaults to the active
+  one), passing the engagement's DB-stem name to every export format.
+- **Lateral movement — load discovered hosts.** A one-click button pre-fills the
+  spray targets with each `host:port` the network scan discovered speaking
+  SSH/SMB/RDP, so targets come from real findings instead of manual entry.
+- **Cross-engagement knowledge graph now populates.** Every completed scan records
+  its findings' outcomes (per target-profile technique success/failure) into the
+  knowledge graph — previously nothing wrote to it, so it was permanently empty.
+
 ### Fixed
+
+- **README stats and model names were stale and inconsistent.** The badges and
+  tables cited conflicting figures (967 vs 981 tests, 47 CLI commands, 59 vs 60
+  API routes, 21 vs 22 UI pages) and retired model defaults (`claude-sonnet-4-6`,
+  `gemini-1.5-pro`). All are now synced to the actual project — **1028 tests · 145
+  modules · 50 CLI commands · 64 API routes · 24 UI pages**, with current model
+  defaults (`claude-sonnet-5` / `gemini-flash-latest`) — and the previously
+  undocumented **Assets** (Host & Service Inventory) page was added to the Web UI
+  page table.
+- **Web UI leaked internal implementation details in user-facing text.** Several
+  descriptions read like developer notes: the Knowledge Graph exposed an on-disk
+  path (`~/.heaven/knowledge.db`) and an internal record schema; the AI
+  Attack-Chain Planner showed an internal architecture label ("Layer D") and a
+  raw internal API response (`{"skipped": "LLM gateway unavailable"}`); two
+  finding-detail buttons carried internal issue-tracker tags ("(Gap 4)",
+  "(Gap 6)"). All were rewritten as professional, product-facing copy with no
+  filesystem paths, internal identifiers, or raw response shapes — and the
+  "unavailable" states now guide the user to add a provider key in Settings.
+- **Host & Service Inventory was empty after scanning a URL target, in every
+  mode.** Network reconnaissance only received bare IP targets, so a URL/hostname
+  target (e.g. `https://app.example.com`) never reached nmap and the inventory
+  came back empty — even on a FULL scan. Recon now scans the host parsed from
+  every URL target too, and runs for WEB/API (not only NETWORK), so any
+  host-based mode populates the inventory.
+- **Focused scans showed the FULL badge.** A running scan carried no top-level
+  mode and the UI read `config.scan_type` (always its "full" default) instead of
+  the operator-selected `mode`, so a network scan displayed as FULL. The
+  in-memory scan now carries an authoritative `mode`, and the badge prefers it.
+- **AI Attack-Chain Planner returned nothing without an LLM key.** It was purely
+  LLM-driven and returned `{"skipped": …}` when no key was set. It now always
+  builds grounded chains deterministically from the real findings
+  (vuln-class → MITRE technique → kill-chain stage, per-host + cross-host lateral
+  chains), and the LLM only layers creative variants on top when a key is present.
+- **OWASP Top 10 (2021) coverage wasn't linked to findings.** The report re-derived
+  categories from an incomplete keyword map that missed most vuln types (headers,
+  TLS, CSRF, credentials, …), so their findings vanished from the matrix. It now
+  maps each finding to its enriched OWASP category first (keyword fallback second),
+  renders the full 10-category matrix, and lists the actual findings under each.
+- **Cyber Kill Chain dumped every finding into Reconnaissance.** Phase mapping only
+  matched a few exact vuln_type keys, so real scanner types (`sql_injection`,
+  `missing_security_headers`, `ssl_weak_cipher`, …) fell through to the default.
+  Aliases + substring matching now distribute findings across the real phases.
+- **CVE was a static string in findings and reports.** Findings' CVE(s) now link
+  straight to the live NVD record (`nvd.nist.gov/vuln/detail/…`) in both the
+  finding-detail view and the exported HTML/PDF report.
+- **Scan diff surfaced an opaque 500 and offered running scans.** Diffing two scans
+  from different engagements now returns an actionable 400, and the diff pickers
+  list only completed scans.
+- **Autonomous run gave thin output and stopped after one iteration without an
+  LLM.** The rule-based fallback recon'd only the *first* seed then bailed unless
+  it happened to find a high-confidence SQLi. It's now a thorough deterministic
+  playbook that recons *every* seed, follows newly-discovered web surfaces, runs
+  an exploitation-proof pass on exploitable findings, attempts read-only
+  credential reuse, and only stops when the playbook is genuinely exhausted —
+  never repeating an action. Paired with the new executive report, a no-LLM run
+  now does real work and reads professionally.
+- **`heaven install-tools` couldn't auto-install Docker on macOS.** The catalog had
+  no Homebrew formula for `docker`, so on macOS it was reported "manual" instead
+  of installed. Added `brew install docker` (the CLI client HEAVEN shells out to),
+  so all seven external tools now auto-install from the standard package manager.
 
 - **Scan findings were inaccurate, CVEs were wrong/blank, and the stored results
   disagreed with the report.** Every CVE discovered on one host collapsed into a

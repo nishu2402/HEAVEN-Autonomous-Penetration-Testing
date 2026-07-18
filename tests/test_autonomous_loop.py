@@ -15,11 +15,15 @@ import pytest
 
 
 class TestRuleBasedPlanner:
+    def _scan(self, target, mode):
+        from heaven.ai.autonomous_loop import AutonomousAction
+        return AutonomousAction(kind="scan", target=target, mode=mode)
+
     def test_iteration_zero_picks_scan_for_ip_seed(self):
         from heaven.ai.autonomous_loop import _rule_based_next_action
         action = _rule_based_next_action(
             findings=[], iteration=0,
-            targets_seed={"ips": ["10.0.0.1"], "urls": []},
+            targets_seed={"ips": ["10.0.0.1"], "urls": []}, history=[],
         )
         assert action.kind == "scan"
         assert action.target == "10.0.0.1"
@@ -29,19 +33,52 @@ class TestRuleBasedPlanner:
         from heaven.ai.autonomous_loop import _rule_based_next_action
         action = _rule_based_next_action(
             findings=[], iteration=0,
-            targets_seed={"ips": [], "urls": ["http://x"]},
+            targets_seed={"ips": [], "urls": ["http://x"]}, history=[],
         )
         assert action.kind == "scan"
         assert action.mode == "web"
 
+    def test_recons_every_seed_before_moving_on(self):
+        # The playbook must recon ALL seeds, not just the first — a run with two
+        # hosts should scan both before deciding it's done.
+        from heaven.ai.autonomous_loop import _rule_based_next_action
+        seed = {"ips": ["10.0.0.1", "10.0.0.2"], "urls": []}
+        history = [self._scan("10.0.0.1", "full")]
+        action = _rule_based_next_action([], 1, seed, history)
+        assert action.kind == "scan" and action.target == "10.0.0.2"
+
+    def test_follows_newly_discovered_web_surface(self):
+        from heaven.ai.autonomous_loop import _rule_based_next_action
+        seed = {"ips": [], "urls": ["https://app.example.com"]}
+        history = [self._scan("https://app.example.com", "web")]
+        findings = [{"target": "https://api.example.com/v1", "vuln_type": "info",
+                     "severity": "info", "confidence": 0.3}]
+        action = _rule_based_next_action(findings, 1, seed, history)
+        assert action.kind == "scan"
+        assert action.target == "https://api.example.com"
+
     def test_high_confidence_sqli_triggers_exploit_proof(self):
+        # Once the seed is scanned (in history), an exploitable finding drives proof.
         from heaven.ai.autonomous_loop import _rule_based_next_action
         action = _rule_based_next_action(
-            findings=[{"vuln_type": "sqli_boolean", "confidence": 0.91,
+            findings=[{"vuln_type": "sql_injection", "confidence": 0.91,
                        "target": "http://x"}],
             iteration=1, targets_seed={"urls": ["http://x"]},
+            history=[self._scan("http://x", "web")],
         )
         assert action.kind == "exploit_proof"
+
+    def test_exploit_proof_not_repeated(self):
+        # If proof already ran, the planner must not loop on it forever.
+        from heaven.ai.autonomous_loop import _rule_based_next_action, AutonomousAction
+        history = [self._scan("http://x", "web"),
+                   AutonomousAction(kind="exploit_proof")]
+        action = _rule_based_next_action(
+            findings=[{"vuln_type": "sql_injection", "confidence": 0.91,
+                       "target": "http://x"}],
+            iteration=2, targets_seed={"urls": ["http://x"]}, history=history,
+        )
+        assert action.kind == "noop"
 
     def test_creds_discovered_triggers_postex(self):
         from heaven.ai.autonomous_loop import _rule_based_next_action
@@ -49,13 +86,14 @@ class TestRuleBasedPlanner:
             findings=[{"vuln_type": "default_credentials", "confidence": 0.95,
                        "title": "default admin password", "target": "10.0.0.5"}],
             iteration=1, targets_seed={"ips": ["10.0.0.5"]},
+            history=[self._scan("10.0.0.5", "full")],
         )
         assert action.kind == "postex_credreuse"
 
     def test_no_seed_yields_noop(self):
         from heaven.ai.autonomous_loop import _rule_based_next_action
         action = _rule_based_next_action(
-            findings=[], iteration=0, targets_seed={"ips": [], "urls": []},
+            findings=[], iteration=0, targets_seed={"ips": [], "urls": []}, history=[],
         )
         assert action.kind == "noop"
 
@@ -110,7 +148,7 @@ class TestAutonomousLoopDiffMath:
         async def fake_llm_next(*_a, **_kw):
             return None  # force rule-based path
 
-        def fake_rule(_findings, _i, seed):
+        def fake_rule(_findings, _i, seed, _history):
             return AutonomousAction(
                 kind="scan", target="10.0.0.1", mode="full",
                 rationale="test", estimated_value=0.5,
@@ -136,6 +174,78 @@ class TestAutonomousLoopDiffMath:
         assert it.new_high == 1, \
             f"new high finding not detected: {it.new_high}"
         assert it.new_findings == 1
+
+
+# ═══════════════════════════════════════════
+# EXECUTIVE REPORT LAYER
+# The autonomous summary must read like a professional report, not a bare
+# number dump — even on a lean rule-based (no-LLM) run.
+# ═══════════════════════════════════════════
+
+
+class _FakeFinding:
+    def __init__(self, severity, target, vuln_type, confidence, cve_id="", title=""):
+        self.severity = severity
+        self.target = target
+        self.vuln_type = vuln_type
+        self.confidence = confidence
+        self.cve_id = cve_id
+        self.title = title or vuln_type
+
+
+class _FakeStore:
+    def __init__(self, findings):
+        self._f = findings
+
+    def list_findings(self, **_kw):
+        return list(self._f)
+
+
+class TestExecutiveReport:
+    def _summary(self, findings, objective="", objective_met=False, history=None):
+        from heaven.ai.autonomous_loop import (
+            _finalize_report, AutonomousRunSummary, AutonomousAction, IterationReport,
+        )
+        s = AutonomousRunSummary(started_at=0.0, ended_at=30.0,
+                                 target_objective=objective, objective_met=objective_met)
+        s.iterations = [IterationReport(iteration=i, action=AutonomousAction(kind="scan"),
+                                        duration_s=5.0) for i in range(3)]
+        hist = history or [AutonomousAction(kind="scan"), AutonomousAction(kind="scan")]
+        _finalize_report(s, _FakeStore(findings), hist)
+        return s.to_dict()
+
+    def test_breakdown_hosts_and_top_findings(self):
+        findings = [
+            _FakeFinding("critical", "https://app.example.com/x", "sql_injection", 0.95,
+                         "CVE-2021-41773", "SQL injection"),
+            _FakeFinding("high", "https://app.example.com/y", "ssrf", 0.8),
+            _FakeFinding("medium", "10.0.0.5", "ssl_weak_cipher", 0.6),
+            _FakeFinding("low", "10.0.0.5", "missing_security_headers", 0.5),
+            _FakeFinding("info", "10.0.0.6", "info_disclosure", 0.3),
+        ]
+        d = self._summary(findings)
+        assert d["severity_breakdown"] == {"critical": 1, "high": 1, "medium": 1,
+                                           "low": 1, "info": 1}
+        assert d["total_findings"] == 5 and d["total_critical"] == 1
+        # distinct hosts, URL-normalised
+        assert d["hosts_engaged"] == ["10.0.0.5", "10.0.0.6", "app.example.com"]
+        assert d["top_findings"][0]["cve_id"] == "CVE-2021-41773"
+        assert d["actions_taken"] == {"scan": 2}
+
+    def test_executive_summary_and_recommendations_present(self):
+        findings = [_FakeFinding("critical", "10.0.0.1", "rce", 0.9)]
+        d = self._summary(findings, objective="rce on host", objective_met=True)
+        assert "critical" in d["executive_summary"].lower()
+        assert "objective" in d["executive_summary"].lower()
+        assert d["recommendations"]
+        assert any("critical" in r.lower() for r in d["recommendations"])
+
+    def test_empty_run_still_has_narrative_and_advice(self):
+        d = self._summary([])
+        assert d["total_findings"] == 0
+        assert d["executive_summary"]  # never blank
+        assert any("no findings" in r.lower() or "broaden" in r.lower()
+                   for r in d["recommendations"])
 
 
 # ═══════════════════════════════════════════

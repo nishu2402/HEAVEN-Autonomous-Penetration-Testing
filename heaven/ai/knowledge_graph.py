@@ -331,3 +331,95 @@ def get_knowledge_graph() -> KnowledgeGraph:
     if _kg is None:
         _kg = KnowledgeGraph()
     return _kg
+
+
+# ═══════════════════════════════════════════
+# POPULATION — called after every scan completes
+# ═══════════════════════════════════════════
+
+def _host_of(target: str) -> str:
+    from urllib.parse import urlparse
+    t = str(target or "").strip()
+    if not t:
+        return ""
+    if "://" in t:
+        return (urlparse(t).hostname or "").lower()
+    return t.split("/", 1)[0].split(":", 1)[0].lower()
+
+
+def record_findings_to_knowledge(
+    findings: list[dict],
+    assets: Optional[list[dict]] = None,
+    engagement_name: str = "",
+    graph: Optional[KnowledgeGraph] = None,
+) -> int:
+    """Populate the knowledge graph from one completed scan's findings.
+
+    Builds a :class:`TargetProfile` per host (OS + web stack + top open ports
+    from the asset inventory), then records one attempt per finding keyed to
+    that profile — ``success`` for a validated/high-confidence finding (the
+    technique demonstrably worked against this kind of target), ``inconclusive``
+    otherwise. This is what turns the Knowledge Graph from a permanently-empty
+    store into a live, learning one. Returns the number of attempts recorded.
+
+    Never raises: knowledge capture is best-effort and must not fail a scan.
+    """
+    kg = graph or get_knowledge_graph()
+    assets = assets or []
+
+    # Per-host context from the asset inventory (OS, service stack, open ports).
+    host_ctx: dict[str, dict] = {}
+    for a in assets:
+        if not isinstance(a, dict):
+            continue
+        h = _host_of(a.get("ip") or a.get("host") or "")
+        if not h:
+            continue
+        ctx = host_ctx.setdefault(h, {"os": "", "ports": set(), "tech": set()})
+        ctx["os"] = ctx["os"] or str(a.get("os") or a.get("os_guess") or "")
+        for p in (a.get("open_ports") or a.get("ports") or []):
+            if isinstance(p, dict):
+                try:
+                    ctx["ports"].add(int(p.get("port")))
+                except (TypeError, ValueError):
+                    pass
+                prod = str(p.get("product") or p.get("service") or "").strip().lower()
+                if prod:
+                    ctx["tech"].add(prod.split()[0])
+            elif isinstance(p, int):
+                ctx["ports"].add(p)
+
+    recorded = 0
+    for f in findings or []:
+        if not isinstance(f, dict):
+            continue
+        technique = str(f.get("vuln_type") or f.get("type") or "").strip()
+        if not technique:
+            continue
+        h = _host_of(f.get("target") or f.get("url") or f.get("host") or "")
+        ctx = host_ctx.get(h, {"os": "", "ports": set(), "tech": set()})
+        profile = TargetProfile(
+            os=str(ctx.get("os") or ""),
+            web_tech=",".join(sorted(ctx.get("tech") or [])),
+            open_ports_top=sorted(ctx.get("ports") or [])[:10],
+        )
+        try:
+            conf = float(f.get("confidence") or 0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        validated = bool(f.get("validated") or f.get("verified") or f.get("exploited"))
+        outcome = "success" if (validated or conf >= 0.7) else "inconclusive"
+        try:
+            kg.record_attempt(
+                profile, technique, outcome,
+                tactic_phase=str(f.get("severity") or ""),
+                confidence_delta=conf,
+                finding_id=str(f.get("id") or ""),
+                engagement_name=engagement_name,
+            )
+            recorded += 1
+        except Exception:  # noqa: BLE001 — best-effort learning
+            logger.debug("knowledge record_attempt failed", exc_info=True)
+    if recorded:
+        logger.info("knowledge graph: recorded %d attempt(s) from scan", recorded)
+    return recorded

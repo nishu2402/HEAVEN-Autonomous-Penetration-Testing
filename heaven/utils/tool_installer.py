@@ -90,8 +90,12 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="docker", purpose="Container/Kubernetes recon + DVWA benchmark",
+        # macOS: the `docker` formula installs the CLI client HEAVEN shells out to
+        # (a daemon — Docker Desktop / colima — is only needed to actually run
+        # containers, which the container recon degrades gracefully without).
+        brew="docker",
         apt="docker.io", dnf="docker", pacman="docker",
-        winget="Docker.DockerDesktop", choco="docker-desktop",
+        winget="Docker.DockerDesktop", choco="docker-desktop", scoop="docker",
         url="https://docs.docker.com/get-docker/",
     ),
 ]

@@ -7,6 +7,7 @@ import { SCA, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import ScanList from "../components/ScanList.jsx";
+import EngagementPicker from "../components/EngagementPicker.jsx";
 import { sevColor } from "../theme";
 
 export default function ScaPage() {
@@ -71,12 +72,9 @@ export default function ScaPage() {
                  placeholder="/path/to/project  or  /path/to/requirements.txt" />
         </label>
 
-        <label className="form-group" style={{ marginBottom: 12 }}>
-          <span className="form-label">Engagement (optional, persists findings)</span>
-          <input className="form-input" type="text" value={engagement}
-                 onChange={(e) => setEngagement(e.target.value)}
-                 placeholder="active engagement name" />
-        </label>
+        <EngagementPicker value={engagement} onChange={setEngagement}
+                          id="sca-engagement"
+                          label="Save findings to engagement" />
 
         <button className="btn btn-primary" disabled={loading} onClick={run}>
           {loading ? "Auditing…" : "Run SCA"}

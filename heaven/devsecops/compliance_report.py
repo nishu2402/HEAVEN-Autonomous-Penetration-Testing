@@ -62,27 +62,95 @@ def _sev_of(f: dict) -> str:
 class ComplianceReportGenerator:
 
     # vuln_type substring → (OWASP 2021 control id, name)
+    # Canonical OWASP Top 10 (2021) — always rendered in full so the report is
+    # a genuine coverage matrix (present vs not-observed), not just a list of hits.
+    OWASP_2021 = [
+        ("A01:2021", "Broken Access Control"),
+        ("A02:2021", "Cryptographic Failures"),
+        ("A03:2021", "Injection"),
+        ("A04:2021", "Insecure Design"),
+        ("A05:2021", "Security Misconfiguration"),
+        ("A06:2021", "Vulnerable and Outdated Components"),
+        ("A07:2021", "Identification and Authentication Failures"),
+        ("A08:2021", "Software and Data Integrity Failures"),
+        ("A09:2021", "Security Logging and Monitoring Failures"),
+        ("A10:2021", "Server-Side Request Forgery (SSRF)"),
+    ]
+
+    # Fallback vuln_type → OWASP category, used only when a finding carries no
+    # enriched ``owasp`` field. Broad keyword coverage so no real finding is
+    # silently dropped from the matrix.
     OWASP_MAP = {
+        # A01 Broken Access Control
+        "access_control": ("A01:2021", "Broken Access Control"),
+        "idor": ("A01:2021", "Broken Access Control"),
+        "bola": ("A01:2021", "Broken Access Control"),
+        "lfi": ("A01:2021", "Broken Access Control"),
+        "path_traversal": ("A01:2021", "Broken Access Control"),
+        "directory_traversal": ("A01:2021", "Broken Access Control"),
+        "unauthorized": ("A01:2021", "Broken Access Control"),
+        "cors": ("A01:2021", "Broken Access Control"),
+        "csrf": ("A01:2021", "Broken Access Control"),
+        # A02 Cryptographic Failures
+        "sensitive_data": ("A02:2021", "Cryptographic Failures"),
+        "crypto": ("A02:2021", "Cryptographic Failures"),
+        "ssl": ("A02:2021", "Cryptographic Failures"),
+        "tls": ("A02:2021", "Cryptographic Failures"),
+        "cipher": ("A02:2021", "Cryptographic Failures"),
+        "certificate": ("A02:2021", "Cryptographic Failures"),
+        "cleartext": ("A02:2021", "Cryptographic Failures"),
+        # A03 Injection
         "sqli": ("A03:2021", "Injection"),
         "sql_injection": ("A03:2021", "Injection"),
         "xss": ("A03:2021", "Injection"),
         "command_injection": ("A03:2021", "Injection"),
         "code_injection": ("A03:2021", "Injection"),
-        "broken_auth": ("A07:2021", "Identification and Authentication Failures"),
-        "auth": ("A07:2021", "Identification and Authentication Failures"),
-        "sensitive_data": ("A02:2021", "Cryptographic Failures"),
-        "crypto": ("A02:2021", "Cryptographic Failures"),
+        "rce": ("A03:2021", "Injection"),
+        "rfi": ("A03:2021", "Injection"),
+        "template_injection": ("A03:2021", "Injection"),
+        "ssti": ("A03:2021", "Injection"),
+        "ldap_injection": ("A03:2021", "Injection"),
+        "header_injection": ("A03:2021", "Injection"),
+        # A04 Insecure Design
+        "insecure_design": ("A04:2021", "Insecure Design"),
+        "open_redirect": ("A04:2021", "Insecure Design"),
+        "business_logic": ("A04:2021", "Insecure Design"),
+        # A05 Security Misconfiguration
         "xxe": ("A05:2021", "Security Misconfiguration"),
         "misconfig": ("A05:2021", "Security Misconfiguration"),
-        "access_control": ("A01:2021", "Broken Access Control"),
-        "idor": ("A01:2021", "Broken Access Control"),
-        "ssrf": ("A10:2021", "Server-Side Request Forgery"),
-        "insecure_design": ("A04:2021", "Insecure Design"),
+        "security_header": ("A05:2021", "Security Misconfiguration"),
+        "missing_header": ("A05:2021", "Security Misconfiguration"),
+        "clickjack": ("A05:2021", "Security Misconfiguration"),
+        "directory_listing": ("A05:2021", "Security Misconfiguration"),
+        "default_page": ("A05:2021", "Security Misconfiguration"),
+        "exposed_admin": ("A05:2021", "Security Misconfiguration"),
+        "verbose_error": ("A05:2021", "Security Misconfiguration"),
+        "cookie": ("A05:2021", "Security Misconfiguration"),
+        # A06 Vulnerable and Outdated Components
         "vulnerable_component": ("A06:2021", "Vulnerable and Outdated Components"),
+        "vulnerable_dependency": ("A06:2021", "Vulnerable and Outdated Components"),
+        "vulnerable_service": ("A06:2021", "Vulnerable and Outdated Components"),
         "outdated": ("A06:2021", "Vulnerable and Outdated Components"),
+        "known_vuln": ("A06:2021", "Vulnerable and Outdated Components"),
+        "cve": ("A06:2021", "Vulnerable and Outdated Components"),
+        # A07 Identification and Authentication Failures
+        "broken_auth": ("A07:2021", "Identification and Authentication Failures"),
+        "auth": ("A07:2021", "Identification and Authentication Failures"),
+        "default_cred": ("A07:2021", "Identification and Authentication Failures"),
+        "weak_cred": ("A07:2021", "Identification and Authentication Failures"),
+        "weak_password": ("A07:2021", "Identification and Authentication Failures"),
+        "session": ("A07:2021", "Identification and Authentication Failures"),
+        "jwt": ("A07:2021", "Identification and Authentication Failures"),
+        # A08 Software and Data Integrity Failures
+        "deserial": ("A08:2021", "Software and Data Integrity Failures"),
+        "integrity": ("A08:2021", "Software and Data Integrity Failures"),
+        "unsigned": ("A08:2021", "Software and Data Integrity Failures"),
+        "supply_chain": ("A08:2021", "Software and Data Integrity Failures"),
+        # A09 Security Logging and Monitoring Failures
         "logging": ("A09:2021", "Security Logging and Monitoring Failures"),
-        "lfi": ("A01:2021", "Broken Access Control"),
-        "rfi": ("A03:2021", "Injection"),
+        "monitoring": ("A09:2021", "Security Logging and Monitoring Failures"),
+        # A10 SSRF
+        "ssrf": ("A10:2021", "Server-Side Request Forgery (SSRF)"),
     }
 
     SEV_ORDER = {k: v["order"] for k, v in SEVERITY_META.items()}
@@ -479,19 +547,23 @@ class ComplianceReportGenerator:
         # OWASP from finding or map
         owasp = f.get("owasp") or self._owasp_for(f.get("vuln_type", ""))
         meta_rows = [
-            ("Target", f.get("target") or "—"),
-            ("Severity", m["label"]),
-            ("CVSS (predicted)", cvss),
-            ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),
-            ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
-            ("CWE", f.get("cwe") or "—"),
-            ("OWASP", owasp or "—"),
-            ("CVE", f.get("cve_id") or f.get("cve") or "—"),
-            ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
-            ("CVSS vector", f.get("cvss_vector") or "—"),
-            ("Status", (f.get("status") or "open").title()),
+            ("Target", f.get("target") or "—", False),
+            ("Severity", m["label"], False),
+            ("CVSS (predicted)", cvss, False),
+            ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—", False),
+            ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—", False),
+            ("CWE", f.get("cwe") or "—", False),
+            ("OWASP", owasp or "—", False),
+            # CVE links straight to the live NVD record — dynamic, not a bare string.
+            ("CVE", self._cve_links(f), True),
+            ("MITRE ATT&CK", f.get("mitre_technique") or "—", False),
+            ("CVSS vector", f.get("cvss_vector") or "—", False),
+            ("Status", (f.get("status") or "open").title(), False),
         ]
-        meta_html = "".join(f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>" for k, v in meta_rows)
+        meta_html = "".join(
+            f"<tr><td>{_esc(k)}</td><td>{v if raw else _esc(v)}</td></tr>"
+            for k, v, raw in meta_rows
+        )
 
         def block(label: str, text: Any) -> str:
             if not text:
@@ -548,31 +620,87 @@ class ComplianceReportGenerator:
                 return f"{cid} {cn}"
         return ""
 
+    @staticmethod
+    def _cve_links(f: dict) -> str:
+        """Render a finding's CVE(s) as links to the live NVD record.
+
+        Only strings matching the strict CVE pattern are emitted, so injecting
+        the anchor as raw (un-escaped) HTML is safe.
+        """
+        import re
+        raw = str(f.get("cve_id") or f.get("cve") or "")
+        cves: list[str] = []
+        seen: set[str] = set()
+        for c in re.findall(r"CVE-\d{4}-\d{4,}", raw, re.IGNORECASE):
+            cu = c.upper()
+            if cu not in seen:
+                seen.add(cu)
+                cves.append(cu)
+        if not cves:
+            return "—"
+        return ", ".join(
+            f'<a href="https://nvd.nist.gov/vuln/detail/{c}" target="_blank" '
+            f'rel="noopener noreferrer">{c}</a>'
+            for c in cves
+        )
+
+    def _owasp_category_id(self, f: dict) -> str:
+        """The OWASP-2021 control id for one finding, e.g. ``A03:2021``.
+
+        Prefers the category ``vuln_kb`` already enriched onto the finding
+        (``owasp`` field), so the report agrees with the per-finding detail
+        view. Falls back to a keyword match on vuln_type/title. '' if none.
+        """
+        import re
+        raw = str(f.get("owasp") or f.get("owasp_category") or "").strip()
+        m = re.match(r"\s*(A\d{2}:2021)", raw)
+        if m:
+            return m.group(1)
+        hay = f"{f.get('vuln_type', '')} {f.get('type', '')} {f.get('title', '')}".lower()
+        for key, (cid, _cn) in self.OWASP_MAP.items():
+            if key in hay:
+                return cid
+        return ""
+
     def _owasp_coverage(self, findings: list[dict]) -> str:
-        coverage: dict[str, dict[str, Any]] = {}
+        # Bucket each finding under its OWASP category — dynamically, from the
+        # actual finding set (its enriched category first, keyword fallback
+        # second) so every real finding lands in the matrix.
+        buckets: dict[str, list[dict]] = {cid: [] for cid, _ in self.OWASP_2021}
         for f in findings:
-            vt = (f.get("vuln_type") or "").lower()
-            for key, (cid, cn) in self.OWASP_MAP.items():
-                if key in vt:
-                    coverage.setdefault(cid, {"name": cn, "n": 0})
-                    coverage[cid]["n"] += 1
+            cid = self._owasp_category_id(f)
+            if cid in buckets:
+                buckets[cid].append(f)
+
+        covered = sum(1 for cid, _ in self.OWASP_2021 if buckets[cid])
         rows = ""
-        seen = set()
-        for _key, (cid, cn) in self.OWASP_MAP.items():
-            if cid in seen:
-                continue
-            seen.add(cid)
-            hit = cid in coverage
-            n = coverage.get(cid, {}).get("n", 0)
-            status = "Findings present" if hit else "No findings"
-            color = "#b00020" if hit else "#1a7f37"
-            rows += (f'<tr><td class="small">{_esc(cid)}</td><td>{_esc(cn)}</td>'
+        for cid, cn in self.OWASP_2021:
+            hits = buckets[cid]
+            n = len(hits)
+            status = "Findings present" if hits else "Not observed"
+            color = "#b00020" if hits else "#1a7f37"
+            # Link the category to the concrete findings that landed in it.
+            examples = ""
+            if hits:
+                worst = sorted(hits, key=lambda x: SEVERITY_META.get(
+                    _sev_of(x), {}).get("order", 4))[:4]
+                items = "".join(
+                    f"<li>{_esc(h.get('title') or h.get('vuln_type') or 'Finding')}"
+                    f" <span class='small muted'>({_esc(_sev_of(h))}"
+                    f"{' · ' + _esc(str(h.get('target'))) if h.get('target') else ''})</span></li>"
+                    for h in worst)
+                more = f"<li class='small muted'>+{n - len(worst)} more…</li>" if n > len(worst) else ""
+                examples = f"<ul class='small' style='margin:4px 0 0 16px'>{items}{more}</ul>"
+            rows += (f'<tr><td class="small">{_esc(cid)}</td>'
+                     f'<td>{_esc(cn)}{examples}</td>'
                      f'<td style="color:{color};font-weight:600">{status}</td>'
                      f'<td class="small">{n}</td></tr>')
         return f"""<div class="page section" id="owasp"><h2>OWASP Top 10 (2021) Coverage</h2>
-          <p class="small muted">Mapping of identified findings to the OWASP Top 10 risk categories.</p>
+          <p class="small muted">Every identified finding mapped to its OWASP Top 10 (2021) risk
+          category — {covered} of 10 categories have findings in this engagement. Categories marked
+          <em>Not observed</em> had no matching finding (either tested-clean or out of this scan's scope).</p>
           <table>
-            <tr><th style="width:110px">Control</th><th>Category</th><th style="width:160px">Status</th><th style="width:80px">Findings</th></tr>
+            <tr><th style="width:90px">Control</th><th>Category &amp; findings</th><th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
             {rows}
           </table>
         </div>"""

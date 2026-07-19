@@ -200,7 +200,7 @@ export default function FindingDetail() {
         </div>
       )}
 
-      {/* Active confirmation — Gap 4 + Gap 6 */}
+      {/* Active confirmation — controlled exploit proof + optional LLM FP review */}
       <ExploitAndReviewActions id={id} finding={f} onChange={load} />
 
       {/* Exploit-DB lookup (only when finding has a CVE) */}

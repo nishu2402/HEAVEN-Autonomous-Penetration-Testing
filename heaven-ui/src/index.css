@@ -568,6 +568,20 @@ a:hover { color: var(--accent-2); }
 }
 .filters input::placeholder, .form-input::placeholder { color: var(--text-3); }
 .filters select option, .form-select option { background: var(--bg-2); color: var(--text-0); }
+/* Native <select> draws its own arrow at the right edge, and long option text
+   ran underneath it (visible overlap in the Assets scan picker and every other
+   dropdown). Drop the native arrow, paint one custom chevron, reserve room for
+   it, and truncate cleanly — one rule fixes every .form-select / filters select
+   app-wide, in both themes. */
+.filters select, .form-select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding-right: 36px;
+  text-overflow: ellipsis; white-space: nowrap;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238593AD' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  background-size: 11px 8px;
+}
 .form-full { grid-column: 1 / -1; }
 /* Multi-column form rows (e.g. the CVE lookup) must never push the card wider
    than its container: min-width:0 lets each field shrink, and on narrow screens
@@ -800,6 +814,17 @@ a:hover { color: var(--accent-2); }
   border-left: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden; min-width: 0;
   background: var(--glass); backdrop-filter: blur(10px);
+}
+/* The rail's upper stack (engagement switcher + severity + "Fix this first")
+   used to sit as fixed-height siblings of the flex:1 terminal, so a tall stack
+   overflowed a fixed-height rail with `overflow:hidden` and no way to scroll —
+   the lower findings were simply unreachable. Give that stack its own scroll
+   region and pin the terminal beneath it so a live scan stays visible. */
+.dashboard-right-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+}
+.dashboard-right > .terminal-pane {
+  flex: 0 0 auto; height: 38%; min-height: 150px;
 }
 /* The r3f canvas must never dictate layout width — clamp it to its container. */
 .topology-container canvas { max-width: 100%; }
@@ -1377,6 +1402,10 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
     overflow: visible; min-height: 0;
     border-left: none; border-top: 1px solid var(--border);
   }
+  /* Stacked layout owns the page scroll here, so the rail's inner scroll region
+     and the pinned-terminal height must relax back to natural flow. */
+  .dashboard-right-scroll { overflow: visible; min-height: 0; }
+  .dashboard-right > .terminal-pane { height: auto; }
   /* The 3D map wrapper takes its height from the grid `1fr` on desktop; once the
      column stacks it has no intrinsic height, so pin one or it collapses to 0. */
   .dashboard-topology { height: 300px; }

@@ -1,9 +1,10 @@
 // HEAVEN — Command palette (⌘K / Ctrl+K quick launcher)
 //
-// Why: 33 CLI commands + 19 UI pages + 42 API endpoints is too many to
-// reach via mouse. Every modern pro tool (Linear, Slack, Vercel, GitHub)
-// has this. Press ⌘K (mac) or Ctrl+K (Linux/Windows) anywhere → fuzzy
-// search jumps to the right page or triggers the right action.
+// Why: the full CLI/UI/API surface is too large to reach by mouse. Every
+// modern pro tool (Linear, Slack, Vercel, GitHub) has this. Press ⌘K (mac)
+// or Ctrl+K (Linux/Windows) anywhere → fuzzy search jumps to the right page
+// or triggers the right action. Keep the Navigate group in sync with the
+// Sidebar's pages so every destination is reachable here too.
 
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -22,9 +23,11 @@ const CATALOGUE = [
   { group: "Navigate", icon: "⚠",  label: "Findings",     hint: "g f",        nav: "/findings" },
   { group: "Navigate", icon: "⛓",  label: "Kill Chain",   hint: "g k",        nav: "/kill-chain" },
   { group: "Navigate", icon: "⚡", label: "Scans",        hint: "g s",        nav: "/scans" },
+  { group: "Navigate", icon: "🖧", label: "Assets",       hint: "",           nav: "/assets" },
   { group: "Navigate", icon: "🔁", label: "Watch",        hint: "g w",        nav: "/watch" },
   { group: "Navigate", icon: "↹",  label: "Scan Diff",    hint: "g D",        nav: "/diff" },
   { group: "Navigate", icon: "🔬", label: "SAST",         hint: "g S",        nav: "/sast" },
+  { group: "Navigate", icon: "📦", label: "SCA · Deps",   hint: "",           nav: "/sca" },
   { group: "Navigate", icon: "🧾", label: "CVE Lookup",   hint: "",           nav: "/cve" },
   { group: "Navigate", icon: "∞",  label: "Autonomous",   hint: "g a",        nav: "/autonomous" },
   { group: "Navigate", icon: "✦",  label: "AI Plans",     hint: "g p",        nav: "/ai-plans" },

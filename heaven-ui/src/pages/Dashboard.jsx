@@ -309,6 +309,10 @@ export default function Dashboard() {
 
       {/* Right rail */}
       <div className="dashboard-right">
+        {/* Scrollable content region. The live terminal below stays pinned so a
+            running scan is always visible while this stack (engagement switcher,
+            severity, "Fix this first") scrolls instead of being clipped. */}
+        <div className="dashboard-right-scroll">
         <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
           {engList.length >= 1 && (
             <div style={{ marginBottom: 14 }}>
@@ -470,6 +474,8 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        </div>
 
         <LiveTerminal scanId={liveScanId} />
       </div>

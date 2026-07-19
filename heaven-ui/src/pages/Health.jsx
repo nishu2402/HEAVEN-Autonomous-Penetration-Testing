@@ -5,6 +5,7 @@
 // API keys are configured, Python module health, and actionable next steps.
 
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { System } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
@@ -146,8 +147,7 @@ export default function Health() {
             {llm.available ? `✓ ${llm.provider} (${llm.model})` : "not configured (deterministic fallback in use)"}
           </span>
           {"  ·  "}
-          <a href="#/settings" onClick={(e) => { e.preventDefault(); window.location.hash = "#/settings"; }}
-             style={{ color: "var(--brand)" }}>Manage keys in Settings →</a>
+          <Link to="/settings" style={{ color: "var(--brand)" }}>Manage keys in Settings →</Link>
         </div>
       </Card>
 

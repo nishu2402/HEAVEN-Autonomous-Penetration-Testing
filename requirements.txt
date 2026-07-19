@@ -62,8 +62,6 @@ httpx>=0.27.0
 selenium>=4.17.0
 # playwright is optional — faster for JS-heavy SPAs; install with: pip install playwright && playwright install chromium
 playwright>=1.43.0
-# pymetasploit3 is optional — only needed for Metasploit RPC integration
-pymetasploit3>=1.0.0
 
 # ─── Active Directory & Kerberos ─────────────────────────────────────
 impacket>=0.11.0

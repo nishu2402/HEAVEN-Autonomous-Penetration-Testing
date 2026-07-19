@@ -370,6 +370,53 @@ class TestCoverageGrader:
         assert _classify("weak_credentials") == "A07_2021"
         assert _classify("") is None
 
+    def test_cve_findings_classify_to_owasp(self):
+        # Regression: CVE-derived findings carry vuln_type "vulnerable_service".
+        # The old exact-token map had no such key, so every CVE finding
+        # classified to None and the Coverage page read 0% OWASP coverage even
+        # with dozens of findings. It must now map to A06 (Vulnerable and
+        # Outdated Components), matching the HTML/PDF report.
+        from heaven.ai.coverage_grader import _classify, _classify_finding
+        assert _classify("vulnerable_service") == "A06_2021"
+        assert _classify("ssl_weak_cipher") == "A02_2021"
+
+        class _F:
+            def __init__(self, vuln_type="", title="", evidence=None):
+                self.vuln_type = vuln_type
+                self.title = title
+                self.evidence = evidence or {}
+
+        # vuln_type + title keyword match
+        assert _classify_finding(_F("vulnerable_service", "Apache mod_lua flaw")) == "A06_2021"
+        # an enriched owasp evidence field wins over keyword guessing
+        assert _classify_finding(
+            _F("misc", "x", {"owasp": "A01:2021 Broken Access Control"})
+        ) == "A01_2021"
+
+    def test_grade_owasp_coverage_nonzero_with_cve_findings(self, tmp_path):
+        # The reported bug end-to-end: an engagement full of CVE findings graded
+        # 0% OWASP coverage. It must now be non-zero and mark A06 covered.
+        from heaven.ai.coverage_grader import grade_engagement_rule_based
+        store = self._store(tmp_path)
+        store.record_scan_start("scan-cve", name="t", mode="network",
+                                config={"targets": {"ips": ["10.0.0.9"]}})
+        for i, title in enumerate([
+            "OpenSSH regreSSHion signal handler race",
+            "Apache mod_lua vulnerable version",
+            "OpenSSL outdated build",
+        ]):
+            store.upsert_finding("scan-cve", {
+                "id": f"cve{i}", "target": "10.0.0.9:443",
+                "vuln_type": "vulnerable_service", "title": title,
+                "cve_id": f"CVE-2024-{1000 + i}",
+                "severity": "high", "confidence": 0.9,
+            })
+        report = grade_engagement_rule_based(store)
+        assert report.total_findings == 3
+        assert report.owasp_coverage_pct > 0.0, "CVE findings must populate OWASP coverage"
+        a06 = next(c for c in report.owasp_top10 if c.code == "A06_2021")
+        assert a06.covered and a06.finding_count >= 1
+
     def test_grade_with_scope_and_findings(self, tmp_path):
         from heaven.ai.coverage_grader import grade_engagement_rule_based
         store = self._store(tmp_path)

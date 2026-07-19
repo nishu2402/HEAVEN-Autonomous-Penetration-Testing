@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import { Postex, getUser } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import Markdown from "../components/Markdown.jsx";
 
 const MODULES = [
   { key: "full", label: "★ Full playbook (enum + loot + AI kill-chain)" },
@@ -185,7 +186,7 @@ function ResultView({ result }) {
           {ai.top_vector && (
             <div><strong>Top path:</strong> {ai.top_vector}</div>
           )}
-          {ai.rationale && <p style={{ fontSize: 13 }}>{ai.rationale}</p>}
+          {ai.rationale && <Markdown>{ai.rationale}</Markdown>}
           {ai.recommended_next_steps?.length > 0 && (
             <ul style={{ fontSize: 13, marginBottom: 6 }}>
               {ai.recommended_next_steps.map((s, i) => <li key={i}>{s}</li>)}

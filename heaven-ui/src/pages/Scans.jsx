@@ -37,6 +37,13 @@ export default function Scans() {
   const [engChoice, setEngChoice] = useState("");   // name | "__new__" | "" (loading)
   const [newEng, setNewEng]     = useState("");
   const [authorized, setAuthorized] = useState(false);
+  // Optional authenticated-scan credentials (the TARGET's login, so HEAVEN can
+  // reach pages behind auth and run the IDOR / Broken Access Control audits).
+  // Empty by default — the section is a collapsed disclosure.
+  const [cookie, setCookie]               = useState("");   // raw Cookie header
+  const [authSpec, setAuthSpec]           = useState("");   // form-login spec
+  const [lowPrivCookie, setLowPrivCookie] = useState("");   // 2nd identity cookie
+  const [lowPrivAuth, setLowPrivAuth]     = useState("");   // 2nd identity login
   const [launching, setLaunching]   = useState(false);
   // Hard guard against a double-submit firing two POSTs before `launching`
   // re-renders the disabled button (double click / Enter-then-click).
@@ -124,6 +131,11 @@ export default function Scans() {
         stealth_level: parseInt(stealth, 10),
         engagement: destEngagement || undefined,
         i_have_authorization: true,
+        // Only send auth fields that are actually filled in.
+        ...(cookie.trim()        && { cookie: cookie.trim() }),
+        ...(authSpec.trim()      && { auth: authSpec.trim() }),
+        ...(lowPrivCookie.trim() && { low_priv_cookie: lowPrivCookie.trim() }),
+        ...(lowPrivAuth.trim()   && { low_priv_auth: lowPrivAuth.trim() }),
       };
       const result = await ScansApi.create(payload);
       setLaunchSuccess(
@@ -132,6 +144,7 @@ export default function Scans() {
       );
       setTargets("");
       setAuthorized(false);
+      setCookie(""); setAuthSpec(""); setLowPrivCookie(""); setLowPrivAuth("");
       setTimeout(bumpList, 1500);
     } catch (err) {
       setLaunchError(err.message || "Launch failed");
@@ -238,6 +251,59 @@ export default function Scans() {
               </span>
             )}
           </label>
+
+          {/* Optional authenticated scanning — collapsed by default so the
+              common (unauthenticated) launch stays uncluttered. */}
+          <details className="form-full" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+            <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              🔐 Authenticated scan <span className="dim" style={{ fontWeight: 400 }}>— optional · reach pages behind a login (enables IDOR &amp; access-control audits)</span>
+            </summary>
+            <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+              <span className="dim" style={{ fontSize: 11, lineHeight: 1.6 }}>
+                Supply the <b>target’s</b> credentials so HEAVEN can crawl and test
+                authenticated pages. Use either a raw cookie header or a form login —
+                same as the CLI’s <code>--cookie-file</code> / <code>--auth</code>.
+              </span>
+
+              <label className="form-group form-full">
+                <span className="form-label">
+                  Session cookie
+                  <HelpTip text="A raw Cookie header copied from your browser's dev tools, e.g. 'session=abc123; csrftoken=xyz'. HEAVEN sends it with every request." />
+                </span>
+                <input className="form-input" type="text" value={cookie}
+                  onChange={e => setCookie(e.target.value)}
+                  placeholder="session=abc123; role=admin" autoComplete="off" />
+              </label>
+
+              <label className="form-group form-full">
+                <span className="form-label">
+                  …or form login
+                  <HelpTip text="HEAVEN logs in once and reuses the session. Format: url=/login,user=admin,pass=secret. Add csrf_field=<name> for CSRF-protected forms." />
+                </span>
+                <input className="form-input" type="text" value={authSpec}
+                  onChange={e => setAuthSpec(e.target.value)}
+                  placeholder="url=/login,user=admin,pass=secret" autoComplete="off" />
+              </label>
+
+              <span className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                <b>Lower-privilege identity (optional)</b> — a second, less-privileged
+                account. Enables the multi-role Broken Access Control audit to
+                <i> prove</i> when a low-priv user reaches protected content.
+              </span>
+              <label className="form-group form-full">
+                <span className="form-label">Low-priv session cookie</span>
+                <input className="form-input" type="text" value={lowPrivCookie}
+                  onChange={e => setLowPrivCookie(e.target.value)}
+                  placeholder="session=def456" autoComplete="off" />
+              </label>
+              <label className="form-group form-full">
+                <span className="form-label">…or low-priv form login</span>
+                <input className="form-input" type="text" value={lowPrivAuth}
+                  onChange={e => setLowPrivAuth(e.target.value)}
+                  placeholder="url=/login,user=guest,pass=guest" autoComplete="off" />
+              </label>
+            </div>
+          </details>
 
           <label className={"consent-row form-full" + (authorized ? " is-ack" : "")}>
             <input

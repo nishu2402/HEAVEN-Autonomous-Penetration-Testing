@@ -11,6 +11,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Authenticated scanning from the web UI.** The scan launcher now has an
+  optional "Authenticated scan" panel — supply the target's session cookie or a
+  form-login spec (and, optionally, a second lower-privilege identity) and the
+  web-launched scan runs its authenticated crawl, IDOR checks and the multi-role
+  Broken Access Control audit, exactly like the CLI's `--cookie-file`/`--auth`
+  and `--low-priv-*` flags. Previously credentials could only be passed on the
+  command line, so BAC's *proven* mode was unreachable from the browser. The
+  `POST /api/scans` body gains `cookie` / `auth` / `low_priv_cookie` /
+  `low_priv_auth`; sessions are activated before the pipeline runs and cleared
+  after, so one scan's credentials never leak into the next.
+- **Hidden-parameter mining (Arjun-style).** A new `param_miner` recon module
+  discovers *unlinked* GET parameters (`?debug=`, `?redirect=`, `?file=`, …) that
+  the crawler can't see by observing the target's own reaction — reflection and
+  out-of-band length/status deltas, isolated with bucket binary-search. Every
+  candidate is confirmed with a fresh canary **and** a control junk parameter, so
+  a name that merely rides response jitter never survives. Discovered parameters
+  are emitted as input vectors and fed to the injection/anomaly scanners, which
+  find (and actively confirm) vulns behind inputs nothing linked to. WEB/API modes.
+- **Multi-role Broken Access Control audit (OWASP A01).** A new `access_control`
+  module replays privileged-session URLs as anonymous — and, when you supply a
+  second `--low-priv-cookie-file` / `--low-priv-auth` session, as that lower role
+  — and raises a finding only on a *proven differential*: the app protects a
+  resource (anonymous denied) yet a lower identity still retrieves the same
+  content. Correctly-enforced resources and public pages raise nothing. High +
+  proven for the differential, medium + "verify" for a privileged path served
+  anonymously.
+- **Blind out-of-band command injection + reachable collaborator.** The OOB
+  prober now proves blind OS command injection (a `curl`/`wget`/`certutil` payload
+  that calls the in-house collaborator back = zero-FP RCE proof), alongside the
+  existing SSRF/XXE. The collaborator can now advertise a routable address for
+  remote engagements via `HEAVEN_OAST_HOST` / `HEAVEN_OAST_BIND` /
+  `HEAVEN_OAST_PORT` (`OASTListener.from_env()`) while still defaulting to
+  loopback.
+- **Exposed-file & secret discovery (content-verified).** A new
+  `exposure_scanner` finds world-readable `.git`, `.env`, `.htpasswd`, `phpinfo()`,
+  `.DS_Store`, published JavaScript source maps and backup/editor copies of
+  server-side files. Each hit is confirmed against a strict artefact signature and
+  screened against a soft-404 baseline, so a SPA that answers `200` for every path
+  produces no false positives.
+- **Mid-scan session renewal.** A form login is now remembered (`remember_login`)
+  so a session that dies during a long authenticated scan can be transparently
+  re-authenticated (`refresh_active_session`) instead of the scan silently going
+  unauthenticated.
 - **Autonomous run now produces an executive report.** Every autonomous run ends
   with a professional summary — a plain-English executive narrative, a full
   severity breakdown (critical→info), the distinct hosts engaged, the top findings
@@ -34,6 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Test suite polluted the operator's live engagement.** The `/api/sca`
+  smoke-test did not isolate its data directory, so every full-suite run
+  persisted a `SCA: test_…` junk scan into the real active engagement DB under
+  `./data/engagements/`. It now `chdir`s to a tmp path like its sibling tests;
+  the full suite no longer touches real operator data (verified by byte-level
+  before/after comparison).
 - **Malformed `Authorization: Bearer` header returned 500 instead of 401.** A
   bearer header with no token (`"Bearer"` / `"Bearer "`) hit an unguarded list
   index and raised a server error; it now returns a clean 401. Found while

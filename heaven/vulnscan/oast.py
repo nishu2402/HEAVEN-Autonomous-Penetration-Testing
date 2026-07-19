@@ -113,13 +113,45 @@ class OASTListener:
                 hits = oast.interactions(token)
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 0,
+                 advertised_host: str = "") -> None:
+        # ``host`` is the address we BIND to; ``advertised_host`` is the address
+        # we tell the target to call back on. They differ when the operator
+        # binds all interfaces (0.0.0.0) but must advertise a routable IP /
+        # hostname the target can reach (NAT, port-forward, cloud egress). When
+        # unset the advertised host is the bind host (loopback/lab default).
         self._host = host
+        self._advertised = advertised_host or host
         self._want_port = port
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._interactions: list[Interaction] = []
         self._lock = threading.Lock()
+
+    @classmethod
+    def from_env(cls) -> "OASTListener":
+        """Build a collaborator honouring the OAST environment variables:
+
+        * ``HEAVEN_OAST_HOST`` — the routable address advertised to targets.
+        * ``HEAVEN_OAST_BIND`` — the local address to bind (defaults to the
+          advertised host; set to ``0.0.0.0`` to accept callbacks on every
+          interface behind NAT/port-forward).
+        * ``HEAVEN_OAST_PORT`` — a fixed port (defaults to an OS-assigned one),
+          useful when you have to punch a specific hole in a firewall.
+
+        With no variables set it returns a loopback collaborator — the safe
+        default that already covers localhost/lab targets.
+        """
+        import os
+        adv = os.getenv("HEAVEN_OAST_HOST", "").strip()
+        bind = os.getenv("HEAVEN_OAST_BIND", "").strip()
+        try:
+            port = int(os.getenv("HEAVEN_OAST_PORT", "0").strip() or "0")
+        except ValueError:
+            port = 0
+        if adv:
+            return cls(host=bind or adv, port=port, advertised_host=adv)
+        return cls(port=port)
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def start(self) -> "OASTListener":
@@ -161,8 +193,14 @@ class OASTListener:
         return self._server.server_address[1]
 
     @property
+    def advertised_host(self) -> str:
+        return self._advertised
+
+    @property
     def base_url(self) -> str:
-        return f"http://{self._host}:{self.port}"
+        # Uses the ADVERTISED host so the callback URL is reachable by the target
+        # even when we bound a different (e.g. all-interfaces) local address.
+        return f"http://{self._advertised}:{self.port}"
 
     @staticmethod
     def new_token() -> str:

@@ -78,6 +78,31 @@ def clear_active_session() -> None:
     set_active_session(None)
 
 
+# ── Second (low-privilege) session — for multi-role Broken Access Control ────
+# The primary session above is the higher-privilege / admin identity the crawler
+# uses. A second, deliberately LOWER-privilege session lets the access-control
+# audit prove that a lower role can reach content the app gates from anonymous
+# users. It is optional; when unset, the audit still runs its anonymous-vs-
+# privileged differential.
+_low_priv: Optional["AuthSession"] = None
+
+
+def get_low_priv_session() -> Optional["AuthSession"]:
+    """Return the low-privilege session used for access-control differential
+    testing, if the operator supplied one."""
+    return _low_priv
+
+
+def set_low_priv_session(session: Optional["AuthSession"]) -> None:
+    global _low_priv
+    _low_priv = session
+    if session:
+        logger.info(f"low-priv session set: {session.label} "
+                    f"(cookies={len(session.cookies)} headers={len(session.headers)})")
+    else:
+        logger.info("low-priv session cleared")
+
+
 # ── Loaders ────────────────────────────────────────────────────────────────
 
 def load_cookie_file(path: Path, origin: str = "") -> AuthSession:
@@ -199,6 +224,54 @@ async def perform_form_login(base_url: str, spec: dict[str, str]) -> AuthSession
         cookies=cookies, origin=base_url,
         label=f"form-login:{spec.get('user','?')}({len(cookies)} cookies)",
     )
+
+
+# ── Mid-scan re-authentication ──────────────────────────────────────────────
+# A long authenticated scan can outlive its session (idle timeout, rotation),
+# after which every scanner silently probes UNAUTHENTICATED and finds nothing.
+# When the operator used a form login we remember the spec so the session can be
+# transparently renewed instead of the scan going blind halfway through.
+_login_memo: Optional[tuple[str, dict[str, str]]] = None
+
+
+def remember_login(base_url: str, spec: dict[str, str]) -> None:
+    """Store the form-login parameters so the active session can be renewed
+    later with :func:`refresh_active_session`."""
+    global _login_memo
+    _login_memo = (base_url, dict(spec))
+
+
+def session_looks_expired(body: str, status: int = 200) -> bool:
+    """Heuristic: does a response look like the app bounced us back to a login
+    wall (session died)? Used to decide when to re-authenticate mid-scan."""
+    if status in (401, 403):
+        return True
+    low = (body or "").lower()
+    return any(m in low for m in (
+        'name="password"', "name='password'", "please log in", "please login",
+        "sign in to continue", "session expired", "your session has expired",
+        "login required", "authentication required",
+    ))
+
+
+async def refresh_active_session() -> bool:
+    """Re-run the remembered form login and replace the active session.
+
+    Returns ``True`` when the session was renewed, ``False`` when there is no
+    remembered login (cookie-file sessions can't be renewed) or the re-login
+    failed. Never raises — a failed renewal must not crash the scan.
+    """
+    if _login_memo is None:
+        return False
+    base, spec = _login_memo
+    try:
+        sess = await perform_form_login(base, spec)
+    except Exception as e:  # noqa: BLE001 — renewal failure must not abort the scan
+        logger.warning(f"session refresh failed: {e}")
+        return False
+    set_active_session(sess)
+    logger.info("active session refreshed via remembered login")
+    return True
 
 
 # ── Convenience: build a ClientSession kwargs dict ──────────────────────────

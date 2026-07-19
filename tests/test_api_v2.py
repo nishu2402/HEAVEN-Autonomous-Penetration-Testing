@@ -386,6 +386,10 @@ def test_sca_requires_path(api_client):
 def test_sca_endpoint_returns_shape(api_client, monkeypatch, tmp_path):
     """The /api/sca route audits a path and returns normalised findings.
     scan_path is stubbed so the test never touches the network."""
+    # Isolate the engagement store: /api/sca persists a scan record, and without
+    # chdir it lands in the real ./data/engagements/<active>.db, polluting the
+    # operator's live engagement with a "SCA: test_..." junk scan on every run.
+    monkeypatch.chdir(tmp_path)
     import heaven.vulnscan.sca_scanner as sca
 
     async def fake_scan_path(root, max_files=200, client=None):

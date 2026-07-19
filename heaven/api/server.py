@@ -118,6 +118,17 @@ class ScanRequest(BaseModel):
     stealth_level: int = 3
     engagement: Optional[str] = None
     i_have_authorization: bool = False
+    # ── Authenticated scanning (optional) — the target credentials HEAVEN uses
+    # to reach pages behind a login. Mirrors the CLI's --cookie-file/--auth and
+    # --low-priv-* flags so the web path can run authenticated crawls, IDOR and
+    # the multi-role Broken Access Control audit. `cookie` is a raw Cookie header
+    # ("k=v; k2=v2"); `auth` is a form-login spec ("url=/login,user=a,pass=b").
+    # The low-priv pair supplies a second, deliberately lower-privilege identity
+    # that lets the access-control audit prove authorization is not enforced.
+    cookie: str = ""
+    auth: str = ""
+    low_priv_cookie: str = ""
+    low_priv_auth: str = ""
 
 
 class ScanResponse(BaseModel):
@@ -3352,6 +3363,92 @@ npm run build</pre>
 </div></body></html>"""
 
 
+def _parse_cookie_header(raw: str) -> dict[str, str]:
+    """Parse a raw Cookie header ("k=v; k2=v2") into a name→value dict."""
+    out: dict[str, str] = {}
+    for part in (raw or "").split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, v = part.split("=", 1)
+            k = k.strip()
+            if k:
+                out[k] = v.strip()
+    return out
+
+
+def _auth_base_url(req: ScanRequest) -> str:
+    """Pick the base URL a form login should target — the first http(s) target,
+    falling back to the first target (http-prefixed) or localhost."""
+    cands = [str(c).strip() for c in (list(req.urls) + list(req.targets)) if str(c).strip()]
+    for c in cands:
+        if c.startswith(("http://", "https://")):
+            return c
+    if cands:
+        c = cands[0]
+        return c if "://" in c else f"http://{c}"
+    return "http://localhost"
+
+
+async def _setup_scan_auth(req: ScanRequest) -> list[str]:
+    """Activate the authenticated-scan session(s) for a web-launched scan.
+
+    Mirrors the CLI's ``--cookie-file``/``--auth`` and ``--low-priv-*`` handling
+    so the web path can run authenticated crawls, IDOR and the multi-role Broken
+    Access Control audit. ``req.cookie`` is a raw Cookie header; ``req.auth`` is a
+    form-login spec (``url=/login,user=a,pass=b``). The low-priv pair supplies a
+    second, lower-privilege identity for the access-control differential.
+
+    Sessions are process-wide singletons, so the caller MUST clear them in a
+    ``finally`` (``_clear_scan_auth``) — otherwise one scan's credentials leak
+    into the next. Raises ``ValueError`` on a login failure so the caller can
+    fail the scan visibly instead of silently scanning unauthenticated.
+    """
+    from heaven.recon.auth_session import (
+        AuthSession, parse_auth_string, perform_form_login,
+        remember_login, set_active_session, set_low_priv_session,
+    )
+    notes: list[str] = []
+    base = _auth_base_url(req)
+
+    # Primary (higher-privilege) session.
+    if req.cookie.strip():
+        sess = AuthSession(cookies=_parse_cookie_header(req.cookie),
+                           origin=base, label="web-cookie")
+        if not sess.cookies:
+            raise ValueError("cookie header supplied but no name=value pairs parsed")
+        set_active_session(sess)
+        notes.append(f"primary session via cookie ({len(sess.cookies)} cookie(s))")
+    elif req.auth.strip():
+        spec = parse_auth_string(req.auth)
+        sess = await perform_form_login(base, spec)
+        set_active_session(sess)
+        remember_login(base, spec)          # renew if the session dies mid-scan
+        notes.append(f"primary session via form login: {sess.label}")
+
+    # Second, lower-privilege session for the access-control differential.
+    if req.low_priv_cookie.strip():
+        lp = AuthSession(cookies=_parse_cookie_header(req.low_priv_cookie),
+                         origin=base, label="web-cookie-lowpriv")
+        if not lp.cookies:
+            raise ValueError("low-priv cookie header supplied but no name=value pairs parsed")
+        set_low_priv_session(lp)
+        notes.append(f"low-priv session via cookie ({len(lp.cookies)} cookie(s))")
+    elif req.low_priv_auth.strip():
+        spec = parse_auth_string(req.low_priv_auth)
+        lp = await perform_form_login(base, spec)
+        set_low_priv_session(lp)
+        notes.append(f"low-priv session via form login: {lp.label}")
+
+    return notes
+
+
+def _clear_scan_auth() -> None:
+    """Drop any authenticated-scan sessions so they never leak into a later scan."""
+    from heaven.recon.auth_session import clear_active_session, set_low_priv_session
+    clear_active_session()
+    set_low_priv_session(None)
+
+
 async def _run_scan_background(scan_id: str, req: ScanRequest):
     """Run a scan in the background, persist findings to engagement store and report file."""
     active_scans[scan_id]["status"] = "running"
@@ -3431,6 +3528,19 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             _mode = ScanMode(req.mode or req.scan_type or "full")
         except ValueError:
             _mode = ScanMode.FULL
+
+        # Authenticated scanning — activate the operator-supplied session(s)
+        # before building the pipeline so every scanner module (crawler, IDOR,
+        # access-control audit) picks them up. A login failure raises here and
+        # fails the scan visibly rather than silently scanning unauthenticated.
+        # Sessions are process-wide singletons, cleared in the finally below.
+        try:
+            _auth_notes = await _setup_scan_auth(req)
+        except Exception as _auth_err:
+            raise RuntimeError(f"Authenticated-scan setup failed: {_auth_err}") from _auth_err
+        if _auth_notes:
+            active_scans[scan_id]["auth"] = _auth_notes
+            logger.info("scan %s authenticated: %s", scan_id, "; ".join(_auth_notes))
 
         orch = build_full_scan(
             scan_targets,
@@ -3580,3 +3690,8 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             actor=active_scans[scan_id].get("created_by", "system"),
             severity=AuditSeverity.WARNING,
         )
+
+    finally:
+        # Drop any authenticated-scan session so it never leaks into a later
+        # scan run in this long-lived server process.
+        _clear_scan_auth()

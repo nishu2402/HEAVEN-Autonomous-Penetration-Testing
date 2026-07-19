@@ -865,6 +865,36 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         auth_config=_auth_cfg,
     )
 
+    # ═══ Phase: PARAMETER MINING ═══
+    # Discover *unlinked* GET parameters (?debug= / ?redirect= / ?file= …) that
+    # the crawler can't see because nothing links to them. Each confirmed
+    # parameter is emitted as an ``input_vector`` so the injection/anomaly
+    # scanners fuzz it and actively confirm any vuln — discovery alone never
+    # raises a finding. Runs in RECON so its output is present before the
+    # VULN_SCAN injection task gathers endpoints.
+    async def _param_mine(**kw):
+        try:
+            from heaven.recon.param_miner import mine_parameters
+        except ImportError:
+            return {}
+        mine_urls: list[str] = list(targets.get("urls", []))
+        web_res = orch.results.get(web_id)
+        if web_res and web_res.state == TaskState.COMPLETED and isinstance(web_res.data, dict):
+            for ep in web_res.data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else (ep.get("url", "") if isinstance(ep, dict) else "")
+                if ep_url and ep_url not in mine_urls:
+                    mine_urls.append(ep_url)
+        if not mine_urls:
+            return {"skipped": True, "reason": "no URLs for parameter mining"}
+        return await mine_parameters(mine_urls, stealth_level=stealth)
+
+    orch.add_task(
+        "Parameter Mining (hidden inputs)", _param_mine,
+        phase=ScanPhase.RECON, depends_on=[web_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=600,
+    )
+
     cloud_id = orch.add_task(
         "Cloud Asset Enumeration", enumerate_cloud,
         phase=ScanPhase.RECON, concurrency_group="cloud",
@@ -1397,7 +1427,6 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             from heaven.vulnscan.oob_scanner import scan_oob
         except ImportError:
             return {}
-        import os
 
         urls = list(targets.get("urls", []))
         for _tid, res in orch.results.items():
@@ -1416,13 +1445,13 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         mis = await scan_misconfig(urls)
         findings.extend(mis.get("findings", []))
 
-        # Out-of-band SSRF/XXE proof needs a collaborator the target can reach.
-        # Loopback by default (covers localhost/lab targets); override with
-        # HEAVEN_OAST_HOST=<routable-ip> for a remote engagement you're
-        # authorized to receive callbacks from.
-        oast_host = os.getenv("HEAVEN_OAST_HOST", "127.0.0.1")
+        # Out-of-band SSRF / XXE / blind-cmdi proof needs a collaborator the
+        # target can reach. Loopback by default (covers localhost/lab targets);
+        # for a remote engagement you're authorized to receive callbacks from,
+        # set HEAVEN_OAST_HOST=<routable-ip> (and optionally HEAVEN_OAST_BIND=
+        # 0.0.0.0 / HEAVEN_OAST_PORT). A finding fires only on a real callback.
         try:
-            with OASTListener(host=oast_host) as oast:
+            with OASTListener.from_env() as oast:
                 oob = await scan_oob(urls, oast=oast)
                 findings.extend(oob.get("findings", []))
         except OSError as e:
@@ -1513,6 +1542,43 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="web", timeout=900,
     )
 
+    # ═══ Phase: EXPOSED FILE & SECRET DISCOVERY ═══
+    # Content-verified disclosure checks (.git / .env / .htpasswd / source maps /
+    # backup copies). Cheap, high-accuracy, and complementary to dir fuzzing —
+    # every hit is confirmed against a strict artefact signature, so a soft-404
+    # server can't produce a false positive.
+    async def _exposure_scan(**kw):
+        try:
+            from heaven.vulnscan.exposure_scanner import scan_exposures
+        except ImportError:
+            return {}
+        base_urls: list[str] = list(targets.get("urls", []))
+        js_files: list[str] = []
+        page_urls: list[str] = []
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not isinstance(res.data, dict):
+                continue
+            for ep in res.data.get("endpoints", []):
+                if isinstance(ep, dict):
+                    if ep.get("url"):
+                        page_urls.append(ep["url"])
+                    js_files.extend(ep.get("js_files", []) or [])
+                elif isinstance(ep, str):
+                    page_urls.append(ep)
+        if not base_urls and not page_urls:
+            return {"skipped": True, "reason": "no URLs for exposure scan"}
+        return await scan_exposures(
+            base_urls or page_urls, js_files=list(dict.fromkeys(js_files)),
+            page_urls=list(dict.fromkeys(page_urls)), stealth_level=stealth,
+        )
+
+    orch.add_task(
+        "Exposed File & Secret Discovery", _exposure_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, dir_fuzz_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=600,
+    )
+
     # ═══ Phase: IDOR SCANNING ═══
     async def _idor_scan(**kw):
         try:
@@ -1538,6 +1604,37 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     idor_id = orch.add_task(
         "IDOR & Privilege Escalation Scan", _idor_scan,
         phase=ScanPhase.VULN_SCAN, depends_on=[web_id, inject_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=600,
+    )
+
+    # ═══ Phase: ACCESS-CONTROL AUDIT (multi-role, OWASP A01) ═══
+    # Replays privileged-session URLs as anonymous (and, if the operator loaded a
+    # second --low-priv session, as that lower role) and raises a finding only on
+    # a PROVEN differential — the app protects a resource yet a lower identity
+    # still retrieves it. No privileged session ⇒ the task self-skips (nothing to
+    # diff against). Crawler ran authenticated, so its endpoints are the
+    # privileged-visible surface.
+    async def _access_control(**kw):
+        try:
+            from heaven.vulnscan.access_control import scan_access_control
+        except ImportError:
+            return {}
+        ac_urls: list[str] = list(targets.get("urls", []))
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not isinstance(res.data, dict):
+                continue
+            for ep in res.data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else (ep.get("url", "") if isinstance(ep, dict) else "")
+                if ep_url and ep_url not in ac_urls:
+                    ac_urls.append(ep_url)
+        if not ac_urls:
+            return {"skipped": True, "reason": "no URLs for access-control audit"}
+        return await scan_access_control(ac_urls, stealth_level=stealth)
+
+    orch.add_task(
+        "Access Control Audit (multi-role)", _access_control,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, idor_id],
         modes=WEBAPI_MODES,
         concurrency_group="web", timeout=600,
     )

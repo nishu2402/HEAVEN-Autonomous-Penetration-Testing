@@ -225,6 +225,30 @@ _KB: dict[str, dict[str, Any]] = {
             "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html",
         ],
     },
+    "broken_access_control": {
+        "title": "Broken Access Control",
+        "cwe": "CWE-284",
+        "owasp": "A01:2021 Broken Access Control",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.2,
+        "description": (
+            "A protected resource or privileged function is reachable by a session "
+            "that should not have access — an unauthenticated request, or a lower-"
+            "privileged user retrieving another role's content — because the server "
+            "does not enforce authorization on the endpoint."
+        ),
+        "impact": "Unauthorized access to privileged data/functions; privilege escalation.",
+        "remediation": (
+            "1. Enforce authorization server-side on every request; deny by default.\n"
+            "2. Check the authenticated principal's role and object ownership for the "
+            "specific action — not merely that a session exists.\n"
+            "3. Centralise access control in middleware and add per-role automated "
+            "access-control tests to CI so regressions are caught."
+        ),
+        "references": [
+            "https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+        ],
+    },
     "auth_bypass": {
         "title": "Authentication Bypass",
         "cwe": "CWE-287",
@@ -1255,6 +1279,13 @@ _ALIASES: dict[str, str] = {
     "cookie_insecure": "insecure_cookie",
     "bola": "idor",
     "enumerable_reference": "idor",  # informational IDOR-adjacent (unproven authz)
+    "bac": "broken_access_control",
+    "access_control": "broken_access_control",
+    "missing_function_level_access_control": "broken_access_control",
+    "forced_browsing": "broken_access_control",
+    "missing_authentication": "broken_access_control",
+    "unauthenticated_access": "broken_access_control",
+    "privilege_escalation": "broken_access_control",
     "rce": "rce",
     "remote_code_execution": "rce",
     "code_injection": "rce",

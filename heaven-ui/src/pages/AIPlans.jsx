@@ -1,4 +1,4 @@
-// HEAVEN — AI Plans page (Layer D / Gap 6)
+// HEAVEN — AI Attack-Chain Planner page.
 //
 // Lets the operator paste a list of findings (or use the active engagement
 // store) and ask the LLM-backed planner to propose attack chains.
@@ -9,6 +9,7 @@ import React, { useState } from "react";
 import { AI, SIEM, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import Markdown from "../components/Markdown.jsx";
 
 export default function AIPlans() {
   const [findingsJson, setFindingsJson] = useState("");
@@ -120,7 +121,9 @@ export default function AIPlans() {
             </div>
           )}
           {output.no_chain_possible && (
-            <div className="dim">{output.reasoning || "No chain possible from these findings."}</div>
+            output.reasoning
+              ? <Markdown>{output.reasoning}</Markdown>
+              : <div className="dim">No chain possible from these findings.</div>
           )}
           {(output.plans || []).map((p, i) => (
             <div key={i} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
@@ -140,8 +143,9 @@ export default function AIPlans() {
                 <div className="dim" style={{ fontSize: 11 }}>MITRE tactics: {p.mitre_tactics.join(", ")}</div>
               )}
               {p.reasoning && (
-                <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
-                  Reasoning: {p.reasoning}
+                <div style={{ marginTop: 4 }}>
+                  <div className="dim" style={{ fontSize: 11, marginBottom: 2 }}>Reasoning</div>
+                  <Markdown>{p.reasoning}</Markdown>
                 </div>
               )}
             </div>

@@ -7,6 +7,7 @@ import { Coverage, Engagement, Priors } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import Markdown from "../components/Markdown.jsx";
 import { GRADE_COLOR } from "../theme";
 
 export default function CoveragePage() {
@@ -154,7 +155,7 @@ export default function CoveragePage() {
           {report.llm_gap_summary && (
             <div className="card" style={{ marginTop: 12 }}>
               <div className="card-title">LLM gap analysis</div>
-              <pre className="cli-block">{report.llm_gap_summary}</pre>
+              <div className="md-block"><Markdown>{report.llm_gap_summary}</Markdown></div>
             </div>
           )}
 

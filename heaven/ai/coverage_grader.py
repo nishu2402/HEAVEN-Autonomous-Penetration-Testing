@@ -68,21 +68,13 @@ OWASP_API_2023 = {
     "API10": "Unsafe Consumption of APIs",
 }
 
-_VULN_TO_OWASP: dict[str, str] = {
-    "sqli": "A03_2021", "xss": "A03_2021", "cmdi": "A03_2021",
-    "ssti": "A03_2021", "ldap_injection": "A03_2021", "xxe": "A03_2021",
-    "ssrf": "A10_2021",
-    "idor": "A01_2021", "csrf": "A01_2021", "open_redirect": "A01_2021",
-    "broken_access_control": "A01_2021",
-    "weak_auth": "A07_2021", "default_credentials": "A07_2021",
-    "weak_credentials": "A07_2021",
-    "lfi": "A05_2021", "file_upload": "A05_2021",
-    "security_misconfig": "A05_2021",
-    "auth_bypass": "A07_2021",
-    "deserialization": "A08_2021",
-    "info_disclosure": "A09_2021",
-    "rfi": "A03_2021",
-}
+# NOTE: the vuln_type → OWASP mapping deliberately does NOT live here as a
+# second, hand-maintained dict. That is exactly what drifted: a sparse local map
+# classified real CVE findings (vuln_type ``vulnerable_service``) to nothing, so
+# the Coverage page read 0% OWASP coverage on an engagement whose HTML/PDF report
+# bucketed every finding correctly. ``_classify`` now reuses the report's single
+# source of truth (``ComplianceReportGenerator.OWASP_MAP``) so the Coverage
+# self-grade can never disagree with the report again.
 
 
 # ═══════════════════════════════════════════
@@ -194,11 +186,57 @@ class CoverageReport:
 # ═══════════════════════════════════════════
 
 
+def _norm_owasp_code(raw: str) -> Optional[str]:
+    """``A03:2021`` / ``A03_2021`` (with or without a trailing name) → ``A03_2021``.
+
+    The report layer speaks ``A03:2021``; the grader keys its buckets on
+    ``A03_2021``. Normalising here lets both formats feed the same counters.
+    """
+    import re
+    m = re.match(r"\s*A(\d{2})[:_]2021", raw or "")
+    return f"A{m.group(1)}_2021" if m else None
+
+
+def _owasp_map() -> dict[str, tuple[str, str]]:
+    """The canonical vuln_type→OWASP substring map — imported from the report
+    generator so there is exactly ONE mapping across the CLI, the Coverage page
+    and the HTML/PDF report (see the note above the removed local dict)."""
+    from heaven.devsecops.compliance_report import ComplianceReportGenerator
+    return ComplianceReportGenerator.OWASP_MAP
+
+
 def _classify(vuln_type: str) -> Optional[str]:
-    if not vuln_type:
+    """Map a vuln_type to its OWASP-2021 code (e.g. ``A03_2021``), or ``None``.
+
+    Substring match against the canonical report map — so ``sqli_boolean``,
+    ``vulnerable_service``, ``ssl_weak_cipher`` and friends all classify. The
+    previous exact-token lookup silently dropped anything not spelled exactly
+    like a dict key, which zeroed OWASP coverage on CVE-derived findings.
+    """
+    vt = (vuln_type or "").lower()
+    if not vt:
         return None
-    head = vuln_type.lower().split("_")[0]
-    return _VULN_TO_OWASP.get(head) or _VULN_TO_OWASP.get(vuln_type.lower())
+    for key, (cid, _name) in _owasp_map().items():
+        if key in vt:
+            return _norm_owasp_code(cid)
+    return None
+
+
+def _classify_finding(f: Any) -> Optional[str]:
+    """OWASP-2021 code for one stored ``Finding``.
+
+    Prefers an enriched ``owasp`` field (persisted onto the finding's evidence by
+    ``vuln_kb``), then a keyword match over ``vuln_type + title`` — the same
+    precedence the report's ``_owasp_category_id`` uses, so the Coverage matrix
+    never disagrees with the HTML/PDF report.
+    """
+    ev = getattr(f, "evidence", None)
+    if isinstance(ev, dict):
+        code = _norm_owasp_code(str(ev.get("owasp") or ev.get("owasp_category") or ""))
+        if code:
+            return code
+    hay = f"{getattr(f, 'vuln_type', '') or ''} {getattr(f, 'title', '') or ''}"
+    return _classify(hay)
 
 
 def _target_host(target: str) -> str:
@@ -244,9 +282,9 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
     # OWASP buckets
     owasp_counts: dict[str, int] = {code: 0 for code in OWASP_2021}
     for f in findings:
-        owasp_code = _classify(f.vuln_type or "")
-        if owasp_code:
-            owasp_counts[owasp_code] = owasp_counts.get(owasp_code, 0) + 1
+        owasp_code = _classify_finding(f)
+        if owasp_code and owasp_code in owasp_counts:
+            owasp_counts[owasp_code] += 1
 
     owasp_status = [
         CategoryStatus(code=code, name=OWASP_2021[code],

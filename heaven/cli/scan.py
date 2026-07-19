@@ -98,6 +98,13 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
 @click.option("--auth", default="", metavar="SPEC",
               help='Form-login spec: "url=/login,user=admin,pass=password[,csrf_field=token]". '
                    "HEAVEN logs in once and reuses the session cookies for the whole scan.")
+@click.option("--low-priv-cookie-file", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Netscape cookie file for a SECOND, lower-privilege user. Enables the "
+                   "multi-role Broken Access Control audit (OWASP A01): HEAVEN proves when a "
+                   "low-privilege session can reach content the app gates from anonymous users.")
+@click.option("--low-priv-auth", default="", metavar="SPEC",
+              help="Form-login spec for the lower-privilege user (same syntax as --auth). "
+                   "Used together with the primary session for the access-control differential.")
 @click.option("--auto-prove", is_flag=True,
               help="After detection, automatically run exploit_proof on every high-confidence "
                    "SQLi/cmdi/SSRF finding. Captures proof artifacts (sqlmap dump, RCE canary, "
@@ -123,7 +130,8 @@ def scan(
     engagement: Optional[str], use_scope: bool,
     i_have_authorization: bool, skip_dep_check: bool,
     seed: Optional[int], cookie_file: Optional[str], auth: str,
-    auto_prove: bool, autonomous: bool,
+    low_priv_cookie_file: Optional[str] = None, low_priv_auth: str = "",
+    auto_prove: bool = False, autonomous: bool = False,
     watch_tail: bool = False, cloud_buckets: bool = False,
 ) -> None:
     """Launch a vulnerability scan against specified targets."""
@@ -140,8 +148,8 @@ def scan(
     # Activated process-wide so every scanner module picks it up.
     if cookie_file or auth:
         from heaven.recon.auth_session import (
-            load_cookie_file, parse_auth_string,
-            perform_form_login, set_active_session,
+            load_cookie_file, parse_auth_string, perform_form_login,
+            remember_login, set_active_session,
         )
         try:
             if cookie_file:
@@ -153,9 +161,34 @@ def scan(
                 base = url[0] if url else (target[0] if target else "http://localhost")
                 sess = asyncio.run(perform_form_login(base, spec))
                 set_active_session(sess)
+                # Remember the login so a session that dies mid-scan can be renewed.
+                remember_login(base, spec)
                 _print(f"[cyan]Authenticated scan:[/cyan] {sess.label}")
         except Exception as e:
             _print(f"[red]Auth setup failed:[/red] {e}")
+            sys.exit(4)
+
+    # Second, lower-privilege session — enables the multi-role access-control
+    # audit. The primary (above) is the higher-privilege baseline the crawler
+    # uses; this one only feeds the differential comparison.
+    if low_priv_cookie_file or low_priv_auth:
+        from heaven.recon.auth_session import (
+            load_cookie_file, parse_auth_string,
+            perform_form_login, set_low_priv_session,
+        )
+        try:
+            if low_priv_cookie_file:
+                lp = load_cookie_file(Path(low_priv_cookie_file))
+                set_low_priv_session(lp)
+                _print(f"[cyan]Low-priv session:[/cyan] {lp.label}")
+            if low_priv_auth:
+                spec = parse_auth_string(low_priv_auth)
+                base = url[0] if url else (target[0] if target else "http://localhost")
+                lp = asyncio.run(perform_form_login(base, spec))
+                set_low_priv_session(lp)
+                _print(f"[cyan]Low-priv session:[/cyan] {lp.label}")
+        except Exception as e:
+            _print(f"[red]Low-priv auth setup failed:[/red] {e}")
             sys.exit(4)
 
     # --autonomous implies --auto-prove

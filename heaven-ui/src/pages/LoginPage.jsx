@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { login } from "../api";
+import Logo from "../components/Logo.jsx";
 
 const CAPS = [
   { icon: "🛰", title: "Autonomous recon", body: "LLM-driven attack-chain planning across scope" },
@@ -47,7 +48,7 @@ export default function LoginPage() {
         transition={{ duration: 0.6, ease }}
       >
         <div className="login-brand">
-          <div className="brand-mark login-mark">⚡</div>
+          <Logo size={56} className="brand-logo login-logo" />
           <div>
             <div className="login-wordmark gradient-text">HEAVEN</div>
             <div className="login-tagline">Autonomous Penetration Testing</div>

@@ -3346,7 +3346,9 @@ _UI_NOT_BUILT_HTML = """<!doctype html>
  a{color:#00FF41}
  .ok{color:#00FF41}.warn{color:#FFB800}
 </style></head><body><div class="box">
- <h1>&#9889; HEAVEN</h1>
+ <h1 style="display:flex;align-items:center;gap:14px">
+   <svg width="38" height="38" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="HEAVEN"><defs><linearGradient id="e" x1="18" y1="12" x2="110" y2="118" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6D7CFF"/><stop offset=".5" stop-color="#22D3EE"/><stop offset="1" stop-color="#34E5A3"/></linearGradient></defs><polygon points="64,10 110,37 110,91 64,118 18,91 18,37" fill="#05070f" stroke="url(#e)" stroke-width="7" stroke-linejoin="round"/><g stroke="url(#e)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M48 52V88"/><path d="M80 52V88"/><path d="M48 72 64 54 80 72"/></g><circle cx="64" cy="45" r="5.5" fill="#34E5A3"/></svg>
+   HEAVEN</h1>
  <div class="sub">AUTONOMOUS PENETRATION TESTING</div>
  <p class="ok">&#10003; API server is running.</p>
  <p class="warn">&#9888; The web UI has not been built yet.</p>

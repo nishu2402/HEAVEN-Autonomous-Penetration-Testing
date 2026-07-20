@@ -46,7 +46,31 @@ SEVERITY_META: dict[str, dict[str, Any]] = {
                  "sla": "Best effort", "order": 4},
 }
 
-_BRAND = "#1f6feb"
+_BRAND = "#4f46e5"          # HEAVEN indigo (matches the app's light-theme accent)
+_BRAND_EMERALD = "#12b981"  # HEAVEN emerald
+
+# The "Ascendant Aegis" mark, inlined so reports are fully self-contained (no
+# external asset). Kept in lock-step with heaven-ui/src/components/Logo.jsx and
+# heaven-ui/public/heaven-mark.svg. No blur filter — crisp for print/PDF.
+_LOGO_SVG = (
+    "<svg width=\"58\" height=\"58\" viewBox=\"0 0 128 128\" fill=\"none\" "
+    "xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"HEAVEN\">"
+    "<defs>"
+    "<linearGradient id=\"rpEdge\" x1=\"18\" y1=\"12\" x2=\"110\" y2=\"118\" gradientUnits=\"userSpaceOnUse\">"
+    "<stop offset=\"0\" stop-color=\"#6D7CFF\"/><stop offset=\"0.5\" stop-color=\"#22D3EE\"/>"
+    "<stop offset=\"1\" stop-color=\"#34E5A3\"/></linearGradient>"
+    "<linearGradient id=\"rpMono\" x1=\"48\" y1=\"45\" x2=\"80\" y2=\"88\" gradientUnits=\"userSpaceOnUse\">"
+    "<stop offset=\"0\" stop-color=\"#8AA0FF\"/><stop offset=\"0.5\" stop-color=\"#34E5A3\"/>"
+    "<stop offset=\"1\" stop-color=\"#22D3EE\"/></linearGradient></defs>"
+    "<polygon points=\"64,10 110,37 110,91 64,118 18,91 18,37\" fill=\"#0B1220\" "
+    "stroke=\"url(#rpEdge)\" stroke-width=\"5\" stroke-linejoin=\"round\"/>"
+    "<polygon points=\"64,22 101,44 101,84 64,106 27,84 27,44\" stroke=\"url(#rpEdge)\" "
+    "stroke-width=\"1.1\" stroke-opacity=\"0.35\" stroke-linejoin=\"round\"/>"
+    "<g stroke=\"url(#rpMono)\" stroke-width=\"7.5\" stroke-linecap=\"round\" "
+    "stroke-linejoin=\"round\" fill=\"none\">"
+    "<path d=\"M48 50V88\"/><path d=\"M80 50V88\"/><path d=\"M48 72 64 54 80 72\"/></g>"
+    "<circle cx=\"64\" cy=\"45\" r=\"4.6\" fill=\"#EAFBF4\"/></svg>"
+)
 
 
 def _esc(value: Any) -> str:
@@ -236,7 +260,7 @@ class ComplianceReportGenerator:
     @staticmethod
     def _styles() -> str:
         return """<style>
-        :root{--brand:#1f6feb;--ink:#1a1f29;--muted:#5b6472;--line:#e3e7ee;--bg:#fff;}
+        :root{--brand:#4f46e5;--brand2:#12b981;--ink:#1a1f29;--muted:#5b6472;--line:#e3e7ee;--bg:#fff;}
         *{box-sizing:border-box;}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
              color:var(--ink);background:#f4f6f9;margin:0;line-height:1.55;font-size:14px;}
@@ -272,6 +296,10 @@ class ComplianceReportGenerator:
             font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;}
         .block-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin:14px 0 4px;}
         .cover{min-height:78vh;display:flex;flex-direction:column;justify-content:center;}
+        .brandbar{display:flex;align-items:center;gap:14px;margin-bottom:34px;}
+        .brandbar svg{flex-shrink:0;}
+        .brandbar .bn{font-size:26px;font-weight:800;letter-spacing:.14em;color:var(--brand);line-height:1;}
+        .brandbar .bt{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:5px;}
         .classif{display:inline-block;border:1.5px solid #b00020;color:#b00020;font-weight:800;
                   font-size:12px;letter-spacing:.18em;padding:4px 12px;border-radius:4px;}
         .cover h1{font-size:40px;margin:24px 0 6px;letter-spacing:-.5px;}
@@ -283,7 +311,7 @@ class ComplianceReportGenerator:
         .note{background:#fff8e6;border:1px solid #f0d98c;border-radius:8px;padding:14px 16px;font-size:13px;}
         .toolbar{position:fixed;top:16px;right:16px;z-index:99;}
         .btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:10px 16px;
-             font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(31,111,235,.35);}
+             font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(79,70,229,.35);}
         @media print{
           body{background:#fff;} .page{box-shadow:none;margin:0;max-width:none;padding:0;}
           .no-print{display:none!important;}
@@ -304,6 +332,10 @@ class ComplianceReportGenerator:
         col = next((m["color"] for m in SEVERITY_META.values()
                     if m["label"] == overall), _BRAND)
         return f"""<div class="page"><div class="cover">
+          <div class="brandbar">{_LOGO_SVG}
+            <div><div class="bn">HEAVEN</div>
+              <div class="bt">Autonomous Penetration-Testing Platform</div></div>
+          </div>
           <div><span class="classif">CONFIDENTIAL</span></div>
           <h1>Penetration Test Report</h1>
           <div class="sub">{_esc(eng)}</div>

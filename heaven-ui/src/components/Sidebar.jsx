@@ -6,6 +6,7 @@
 
 import React, { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import Logo from "./Logo.jsx";
 
 const GROUPS = [
   {
@@ -103,7 +104,7 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark" aria-hidden="true">⚡</div>
+        <Logo size={38} className="brand-logo" />
         <div className="brand-text">
           <span className="brand-title">HEAVEN</span>
           <span className="brand-sub">Pentest Platform</span>

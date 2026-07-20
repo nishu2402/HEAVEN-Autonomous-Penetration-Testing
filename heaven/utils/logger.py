@@ -146,12 +146,38 @@ def log_vuln_found(logger: logging.Logger, cve: str, severity: str, target: str,
 
 
 def print_banner() -> None:
-    """Print the HEAVEN ASCII banner."""
+    """Print the HEAVEN banner with a violet→cyan→emerald vertical gradient."""
     try:
         from heaven import __banner__
-        if console:
-            console.print(__banner__, style="bold cyan")
-        else:
-            print(__banner__)
     except (ImportError, AttributeError):
-        print("═══ HEAVEN Vulnerability Scanner ═══")
+        print("═══ HEAVEN — Autonomous Penetration-Testing Platform ═══")
+        return
+
+    if console is None:
+        print(__banner__)
+        return
+
+    # Rich available → render a genuine top-to-bottom gradient across the box,
+    # matching the web/report brand ramp (#6D7CFF → #22D3EE → #34E5A3).
+    try:
+        from rich.text import Text
+
+        stops = [(0x6D, 0x7C, 0xFF), (0x22, 0xD3, 0xEE), (0x34, 0xE5, 0xA3)]
+
+        def _hex_at(t: float) -> str:
+            t = 0.0 if t < 0 else 1.0 if t > 1 else t
+            seg = 0 if t <= 0.5 else 1
+            lo, hi = stops[seg], stops[seg + 1]
+            tt = (t - seg * 0.5) / 0.5
+            r, g, b = (round(lo[i] + (hi[i] - lo[i]) * tt) for i in range(3))
+            return f"#{r:02x}{g:02x}{b:02x}"
+
+        lines = __banner__.split("\n")
+        span = max(len(lines) - 1, 1)
+        text = Text()
+        for i, line in enumerate(lines):
+            nl = "\n" if i < len(lines) - 1 else ""
+            text.append(line + nl, style=f"bold {_hex_at(i / span)}")
+        console.print(text)
+    except Exception:  # pragma: no cover - defensive fallback
+        console.print(__banner__, style="bold cyan")

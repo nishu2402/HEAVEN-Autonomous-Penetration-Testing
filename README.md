@@ -1,6 +1,10 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
+<img src="heaven-ui/public/heaven-mark.svg" width="128" height="128" alt="HEAVEN — Ascendant Aegis mark"/>
+</p>
+
+<p align="center">
 <img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%201076%20Tests%20%C2%B7%20148%20Modules%20%C2%B7%2050%20CLI%20Commands%20%C2%B7%2064%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 

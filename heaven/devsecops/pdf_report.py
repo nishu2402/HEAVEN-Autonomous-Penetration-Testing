@@ -52,6 +52,48 @@ _CVSS_VECTORS = {
 }
 
 
+def _logo_drawing(size_pt: float = 46.0):
+    """The 'Ascendant Aegis' mark as a ReportLab vector Drawing.
+
+    Redrawn (not rasterised) so the PDF cover carries a crisp brand icon that
+    matches the web/CLI mark: a faceted hexagonal aegis enclosing an "H" whose
+    crossbar ascends to a glowing apex node. Colours are solid (ReportLab shapes
+    have no gradients) but echo the emerald/cyan brand ramp.
+    """
+    from reportlab.graphics.shapes import Circle, Drawing, Line, Polygon
+    from reportlab.lib import colors
+
+    s = size_pt / 128.0
+
+    def pt(x: float, y: float) -> tuple[float, float]:
+        # map 128-unit design space (y-down) → Drawing space (y-up)
+        return (x * s, (128 - y) * s)
+
+    edge = colors.HexColor("#34E5A3")   # emerald
+    mono = colors.HexColor("#22D3EE")   # cyan
+    d = Drawing(size_pt, size_pt)
+
+    hex_flat: list[float] = []
+    for x, y in [(64, 10), (110, 37), (110, 91), (64, 118), (18, 91), (18, 37)]:
+        px, py = pt(x, y)
+        hex_flat += [px, py]
+    d.add(Polygon(hex_flat, strokeColor=edge, strokeWidth=5 * s,
+                  fillColor=colors.HexColor("#0B1220"), strokeLineJoin=1))
+
+    def seg(x0: float, y0: float, x1: float, y1: float) -> None:
+        a, b = pt(x0, y0), pt(x1, y1)
+        d.add(Line(a[0], a[1], b[0], b[1], strokeColor=mono,
+                   strokeWidth=8 * s, strokeLineCap=1))
+
+    seg(48, 50, 48, 88)          # left bar
+    seg(80, 50, 80, 88)          # right bar
+    seg(48, 72, 64, 54)          # chevron ↑
+    seg(64, 54, 80, 72)          # chevron ↓
+    nx, ny = pt(64, 45)
+    d.add(Circle(nx, ny, 4.6 * s, fillColor=colors.HexColor("#EAFBF4"), strokeColor=None))
+    return d
+
+
 def _sev_of(f: dict) -> str:
     s = (f.get("severity") or "info").lower()
     return s if s in SEVERITY_META else "info"
@@ -222,12 +264,14 @@ class PDFReportGenerator:
 
         # ── 1. Cover ──
         story.append(Spacer(1, 22 * mm))
-        band = Table([[Paragraph('<font color="white"><b>HEAVEN</b></font>',
+        band = Table([[_logo_drawing(46),
+                       Paragraph('<font color="white"><b>HEAVEN</b></font>',
                                  ParagraphStyle("brand", fontName="Helvetica-Bold",
                                                 fontSize=30, textColor=colors.white, leading=34))]],
-                     colWidths=[cw], rowHeights=[20 * mm])
+                     colWidths=[20 * mm, cw - 20 * mm], rowHeights=[20 * mm])
         band.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0d1b2a")),
-                                  ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                                  ("LEFTPADDING", (0, 0), (0, 0), 14),
+                                  ("LEFTPADDING", (1, 0), (1, 0), 6),
                                   ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
         story.append(band)
         story.append(Spacer(1, 2 * mm))

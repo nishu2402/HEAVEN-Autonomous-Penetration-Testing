@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-label="HEAVEN">
+  <title>HEAVEN</title>
+  <defs>
+    <linearGradient id="hvnEdge" x1="18" y1="12" x2="110" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6D7CFF"/>
+      <stop offset="0.5" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#34E5A3"/>
+    </linearGradient>
+    <linearGradient id="hvnMono" x1="48" y1="45" x2="80" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9BA8FF"/>
+      <stop offset="0.5" stop-color="#34E5A3"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <radialGradient id="hvnCore" cx="0.5" cy="0.42" r="0.72">
+      <stop offset="0" stop-color="#101B2E"/>
+      <stop offset="1" stop-color="#070A12"/>
+    </radialGradient>
+    <filter id="hvnGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.1" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- aegis: faceted hexagonal gem (guardian + reticle vertices) -->
+  <polygon points="64,10 110,37 110,91 64,118 18,91 18,37"
+           fill="url(#hvnCore)" stroke="url(#hvnEdge)" stroke-width="4.5" stroke-linejoin="round"/>
+  <polygon points="64,22 101,44 101,84 64,106 27,84 27,44"
+           stroke="url(#hvnEdge)" stroke-width="1.1" stroke-opacity="0.32" stroke-linejoin="round"/>
+
+  <!-- monogram H whose crossbar ascends to a glowing apex -->
+  <g stroke="url(#hvnMono)" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#hvnGlow)">
+    <path d="M48 50V88"/>
+    <path d="M80 50V88"/>
+    <path d="M48 72 64 54 80 72"/>
+  </g>
+  <circle cx="64" cy="45" r="4.6" fill="#EAFBF4" filter="url(#hvnGlow)"/>
+</svg>

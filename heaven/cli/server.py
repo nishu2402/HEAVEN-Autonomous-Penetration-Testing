@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import socket
 import sys
@@ -15,6 +16,36 @@ from heaven.cli._helpers import _print, check_module_health
 from heaven.utils.logger import get_logger, print_banner
 
 logger = get_logger("cli.serve")
+
+
+def _port_available(host: str, port: int) -> bool:
+    """Return True if ``host:port`` is free to bind (mirrors uvicorn's bind).
+
+    Lets ``serve`` fail fast with a friendly message instead of booting the whole
+    application and dying on uvicorn's raw ``[Errno 48] address already in use``.
+    An actively-listening socket cannot be re-bound even with SO_REUSEADDR, so
+    this reliably detects "a server is already running here". A rare check→bind
+    race is harmless: uvicorn would then surface the genuine (now uncommon) error.
+    """
+    bind_host = host or "0.0.0.0"
+    try:
+        infos = socket.getaddrinfo(
+            bind_host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE
+        )
+    except socket.gaierror:
+        return True  # can't resolve → let uvicorn produce the real error
+    for family, socktype, proto, _canon, sockaddr in infos:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(sockaddr)
+        except OSError as exc:
+            if exc.errno == errno.EADDRINUSE:
+                return False
+            # Any other bind error (e.g. EACCES on a privileged <1024 port) is
+            # not "already in use" — let uvicorn surface its own precise error.
+            return True
+    return True
 
 
 def _browser_host(host: str) -> str:
@@ -68,6 +99,22 @@ def _wait_and_open(host: str, port: int, url: str, timeout: float = 20.0) -> Non
 def serve(host: str, port: int, open_browser: bool) -> None:
     """Start the HEAVEN API server and Command Centre."""
     print_banner()
+
+    # Pre-flight: if the port is already taken, stop now with a clear, actionable
+    # message rather than booting the app and crashing on uvicorn's raw errno.
+    if not _port_available(host, port):
+        reachable = f"http://{_browser_host(host)}:{port}/"
+        _print(f"[red]✗ Cannot start: {host}:{port} is already in use.[/red]")
+        _print("[yellow]  Something is already listening there — most likely a HEAVEN "
+               "server you started earlier.[/yellow]")
+        _print("")
+        _print("[dim]  Do one of these:[/dim]")
+        _print(f"[dim]   • If that server is the one you want, just open[/dim] [cyan]{reachable}[/cyan]")
+        _print(f"[dim]   • Start this one on a free port:[/dim] [cyan]heaven serve --port {port + 1}[/cyan]")
+        _print("[dim]   • Or stop whatever holds the port, then retry:[/dim]")
+        _print(f"[cyan]       lsof -ti tcp:{port} | xargs kill[/cyan]   [dim](macOS / Linux)[/dim]")
+        sys.exit(1)
+
     _print(f"[cyan]Starting HEAVEN API server on {host}:{port}[/cyan]")
 
     if host == "0.0.0.0":  # intentional all-interfaces bind; user is warned below

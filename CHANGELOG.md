@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New "Ascendant Aegis" brand identity — one mark, synced everywhere.** HEAVEN
+  now has a proper logo: a faceted violet→cyan→emerald hexagonal aegis (the app's
+  own `#6D7CFF → #22D3EE → #34E5A3` ramp) enclosing an "H" whose crossbar rises to
+  a glowing apex node, its six vertices reading as a targeting reticle. It is
+  single-sourced (`heaven-ui/src/components/Logo.jsx` for the app, a canonical
+  `heaven-ui/public/heaven-mark.svg` for everything else) and carried consistently
+  across every surface: the web UI sidebar and login screen, the browser favicon,
+  the CLI startup banner — reframed as a gradient box that renders a genuine
+  top-to-bottom violet→cyan→emerald ramp — the `heaven` command-centre dashboard,
+  the HTML and PDF report cover pages, and the README. Report covers also adopt
+  the HEAVEN indigo accent (`#4f46e5`) so client deliverables match the identity.
+  The old ⚡ emoji placeholder is gone; the screenshots in `docs/` were regenerated
+  against the new look.
 - **Authenticated scanning from the web UI.** The scan launcher now has an
   optional "Authenticated scan" panel — supply the target's session cookie or a
   form-login spec (and, optionally, a second lower-privilege identity) and the

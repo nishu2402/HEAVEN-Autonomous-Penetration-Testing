@@ -114,6 +114,10 @@ def _patch_serve_deps(monkeypatch, threads_started: list):
     monkeypatch.setattr(srv.threading, "Thread", _record_thread)
     # Force the non-headless branch so the flag alone decides.
     monkeypatch.setattr(srv.sys, "platform", "darwin")
+    # These tests exercise browser-thread wiring, not the port pre-flight — keep
+    # them hermetic (the stub port "9" is privileged and would otherwise fail the
+    # real bind check).
+    monkeypatch.setattr(srv, "_port_available", lambda *a, **k: True)
 
 
 def test_serve_no_open_does_not_start_browser_thread(monkeypatch):
@@ -133,3 +137,50 @@ def test_serve_default_starts_browser_thread(monkeypatch):
     assert r.exit_code == 0, r.output
     assert len(threads) == 1
     assert threads[0].daemon is True
+
+
+# ── _port_available + pre-flight ─────────────────────────────────────────────
+def test_port_available_true_for_free_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    assert srv._port_available("127.0.0.1", port) is True
+
+
+def test_port_available_false_when_listening():
+    lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    lsock.bind(("127.0.0.1", 0))
+    port = lsock.getsockname()[1]
+    lsock.listen(1)
+    try:
+        assert srv._port_available("127.0.0.1", port) is False
+    finally:
+        lsock.close()
+
+
+def test_serve_fails_fast_when_port_in_use(monkeypatch):
+    """A busy port → a clear message + non-zero exit, and uvicorn is never run."""
+    lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    lsock.bind(("127.0.0.1", 0))
+    port = lsock.getsockname()[1]
+    lsock.listen(1)
+
+    ran: list[bool] = []
+    import sys
+    import types
+    fake = types.ModuleType("uvicorn")
+    fake.run = lambda *_a, **_k: ran.append(True)
+    monkeypatch.setitem(sys.modules, "uvicorn", fake)
+    monkeypatch.setattr(srv, "print_banner", lambda: None)
+
+    try:
+        r = CliRunner().invoke(srv.serve, ["--port", str(port), "--no-open"])
+    finally:
+        lsock.close()
+
+    assert r.exit_code == 1
+    assert "already in use" in r.output
+    assert ran == []  # bailed out before starting the server

@@ -90,6 +90,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Real findings *still* showed blank CWE / OWASP / MITRE / CVSS-vector.** The
+  earlier fix only stopped attack-plan artifacts; genuine findings whose
+  `vuln_type` was simply not in the knowledge base (e.g. the OPTIONS-methods
+  finding `dangerous_methods_allowed`, plus ~40 more from the auth/web-fuzzer/
+  DNS/e-mail detectors) still rendered every taxonomy cell as `—`. Root cause was
+  a coverage gap between the detector spellings and the KB keys. Fixed at two
+  levels: (1) curated aliases + new KB entries so every class a detector actually
+  emits (CSRF, session fixation, host-header injection, HTTP parameter pollution,
+  web-cache poisoning/deception, SMTP open relay, MTA-STS, weak password policy /
+  no lockout, DNS zone transfer, the network-device and Active-Directory classes
+  below) resolves to real CWE/OWASP/MITRE + a CVSS v3.1 vector; and (2) a
+  **dynamic keyword fallback** so *any* uncurated finding still derives standard
+  taxonomy from its type/title — and, failing that, at least a severity-based
+  CVSS vector — so a real finding is never blank again. Positive/informational
+  posture (e.g. "DNSSEC enabled") is intentionally left without a weakness CWE
+  rather than mislabelled. Applied on read, so existing stored findings are fixed
+  with no re-scan.
+- **Scanning a network device (router / switch / firewall) produced "No findings
+  recorded".** Network recon discovered the device's open ports but nothing turned
+  its exposures into findings — the service-injection layer only handled SSH/SMB/
+  RDP/DB and web ports. A new **network service exposure analyzer**
+  (`recon/network_exposure.py`, wired as a mode-gated orchestrator task) now emits
+  real findings for cleartext / legacy management protocols (Telnet, FTP,
+  r-services, TFTP, Finger), SNMP exposure — with an active, strictly **read-only**
+  default-community probe (`public`/`private`) that proves the weakness from a live
+  `sysDescr.0` reply — and high-risk appliance planes (Cisco Smart Install,
+  IPMI/BMC). A hardened host (only SSH + HTTPS) still yields zero findings, and the
+  service-name matching is exact-token (never substring) so an unrelated service
+  can't trip a false positive.
+- **The Active Directory scan was shallow and usually skipped entirely.**
+  `scan_active_directory` bailed out whenever a domain name wasn't supplied — so
+  the SMB-triggered AD scan (which passes only the DC's IP) always skipped, and the
+  AD mode did almost nothing. It now runs a real **pre-auth assessment from a DC IP
+  alone**: it reads the DC's RootDSE anonymously to auto-derive the domain / forest
+  / DC hostname / functional level (and flags anonymous LDAP), and runs an SMB layer
+  that detects **SMB signing not required** (the genuine NTLM-relay signal, replacing
+  a bogus LDAP heuristic), **legacy SMBv1 / MS17-010 exposure**, and **null-session
+  share enumeration**. Authenticated runs additionally check the **machine-account
+  quota** (RBCD/noPac prerequisite). AD findings now also carry full CWE/OWASP/CVSS
+  taxonomy.
 - **Most findings showed blank CWE / OWASP / MITRE / CVSS-vector and a 0.00
   confidence.** The AI attack-chain planner converts its *hypothetical* steps for
   the kill-chain analyzer with `vuln_type` set to a bare MITRE technique id

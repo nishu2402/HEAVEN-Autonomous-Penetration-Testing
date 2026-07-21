@@ -66,7 +66,7 @@ def _print_inventory(assets: Optional[list]) -> None:
             if cap.get("remedy"):
                 _print(f"    [dim]Unlock full detection:[/dim] [cyan]{cap['remedy']}[/cyan]")
     except Exception:  # noqa: BLE001 — a hint must never break the scan summary
-        pass
+        logger.debug("privilege-hint probe failed", exc_info=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

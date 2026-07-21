@@ -391,6 +391,37 @@ def test_render_markdown_empty_is_blank():
     assert render_markdown([]) == ""
 
 
+def test_cli_inventory_prefers_scan_with_open_ports(tmp_path, monkeypatch):
+    """Regression: a dead/mistyped-host scan records a host row with zero open
+    ports. Defaulting the inventory to it (as the newest asset-bearing scan) made
+    the whole inventory look empty even when an earlier scan found real services.
+    The default view must skip a 0-port scan for one that actually has ports."""
+    from heaven.engagement import EngagementStore
+    from heaven.cli import assets as assets_cli
+
+    db = tmp_path / "eng.db"
+    store = EngagementStore(db, create=True)
+    # Older scan: a live host with real open ports.
+    store.record_scan_start("scan-old", name="192.168.1.10", mode="network")
+    store.record_scan_complete("scan-old", {"assets": [
+        {"ip": "192.168.1.10", "is_alive": True,
+         "open_ports": [{"port": 80, "service": "http"},
+                        {"port": 443, "service": "https"}]},
+    ]})
+    # Newer scan: a mistyped/dead host — a bare host row, no ports.
+    store.record_scan_start("scan-new", name="192.186.1.100", mode="network")
+    store.record_scan_complete("scan-new", {"assets": [
+        {"ip": "192.186.1.100", "is_alive": False, "open_ports": []},
+    ]})
+
+    monkeypatch.setattr(assets_cli, "_engagement_db_path", lambda eng=None: db)
+    raw = assets_cli._collect_engagement_assets(None)
+    inv = normalize_assets(raw)
+    # The default view must land on the scan that has ports, not the newest empty one.
+    assert [h["host"] for h in inv] == ["192.168.1.10"]
+    assert inventory_totals(inv)["open_ports"] == 2
+
+
 # ── reports carry the inventory section ─────────────────────────────────────
 
 _ASSETS = [

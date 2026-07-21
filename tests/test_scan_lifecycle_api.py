@@ -83,6 +83,62 @@ def test_findings_filter_by_scan(client):
     assert [f["title"] for f in r.json()["findings"]] == ["Reflected XSS"]
 
 
+def test_engagement_findings_drops_attack_plan_artifacts(client):
+    """A finding whose vuln_type is a bare MITRE technique (T1190) is a leaked
+    attack-chain planner step — it has no taxonomy, so it rendered blank in the
+    detail view. Older scans persisted these; the list endpoint must filter them
+    out so the operator isn't left with a screen of empty rows (and no re-scan is
+    needed to clear them)."""
+    client.post("/api/engagements/active", json={"name": "e2e-artifact"})
+    _seed("e2e-artifact", {
+        "scanA": [
+            {"target": "http://192.168.1.101/", "vuln_type": "csp_missing",
+             "title": "Content-Security-Policy (CSP) Missing", "severity": "medium",
+             "confidence": 0.98, "risk_score": 4.6},
+            # Leaked planner step, persisted as a pseudo-finding.
+            {"target": "192.168.1.101", "vuln_type": "T1190",
+             "title": "Exploit Public-Facing Application", "severity": "high",
+             "confidence": 0.0, "risk_score": 6.2},
+        ],
+    })
+    r = client.get("/api/engagement/findings")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    types = [f["vuln_type"] for f in body["findings"]]
+    assert "csp_missing" in types
+    assert "T1190" not in types
+    assert body["count"] == 1
+
+
+def test_assets_default_prefers_scan_with_open_ports(client):
+    """The inventory picker must not default to a dead/mistyped-host scan (a host
+    row with zero ports) when an earlier scan actually found services."""
+    from heaven.api.server import _engagement_store_factory
+    client.post("/api/engagements/active", json={"name": "e2e-assets"})
+    store = _engagement_store_factory("e2e-assets")
+    store.create_engagement(name="e2e-assets")
+    store.record_scan_start("scan-ported", name="192.168.1.10", mode="network")
+    store.record_scan_complete("scan-ported", {"assets": [
+        {"ip": "192.168.1.10", "is_alive": True,
+         "open_ports": [{"port": 80, "service": "http"},
+                        {"port": 22, "service": "ssh"}]},
+    ]})
+    store.record_scan_start("scan-dead", name="192.186.1.100", mode="network")
+    store.record_scan_complete("scan-dead", {"assets": [
+        {"ip": "192.186.1.100", "is_alive": False, "open_ports": []},
+    ]})
+
+    r = client.get("/api/assets")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["scan_id"] == "scan-ported"          # not the newer, empty scan
+    assert body["totals"]["open_ports"] == 2
+    assert [h["host"] for h in body["assets"]] == ["192.168.1.10"]
+    # The picker still lists both scans, annotated with their port counts.
+    ports_by_scan = {s["scan_id"]: s["ports"] for s in body["scans"]}
+    assert ports_by_scan == {"scan-ported": 2, "scan-dead": 0}
+
+
 def test_scan_detail_and_delete(client):
     """A completed scan not in memory is still viewable (store fallback), and a
     finished scan can be permanently removed."""

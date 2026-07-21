@@ -623,18 +623,138 @@ def expand_targets(targets: list[str]) -> list[str]:
     return expanded
 
 
+# A range bigger than this many addresses (e.g. a CIDR /27 or wider, or a large
+# explicit list) is discovered-first: we sweep for live hosts and only deep-scan
+# those. A single host or a small explicit list is scanned directly with -Pn —
+# the operator named it, so we trust it's up even behind a firewall. This is what
+# stops "scan 192.168.1.0/24" from spending its whole budget full-scanning ~250
+# dead addresses and returning nothing.
+_DISCOVERY_THRESHOLD = 16
+
+# Ports probed during the fast liveness sweep — the services most likely to be
+# open on a live host. A host answering a TCP connect on ANY of these is "up".
+_LIVENESS_PROBE_PORTS: tuple[int, ...] = (
+    80, 443, 22, 445, 3389, 8080, 139, 135, 53, 21, 23, 25, 110, 143,
+    3306, 5432, 1433, 8443, 8000, 8888, 5900, 111, 993, 995, 6379, 27017,
+)
+
+
+async def _nmap_ping_sweep(
+    raw_targets: list[str], expanded: list[str],
+) -> Optional[list[str]]:
+    """Discover live hosts with a single ``nmap -sn`` sweep (no port scan).
+
+    With raw-socket privileges nmap uses ICMP echo/timestamp + ARP (on a LAN) +
+    TCP SYN to 443/80, which catches hosts that a bare TCP-connect probe would
+    miss; unprivileged it TCP-connects to 80/443. Returns the list of responding
+    addresses, or ``None`` when nmap is unavailable / the sweep failed so the
+    caller can fall back to the pure-Python probe.
+    """
+    if not shutil.which("nmap"):
+        return None
+    sudo_prefix = list(_nmap_sudo_prefix())
+    # -sn host-discovery only · -n no DNS · -T4 fast. Pass the RAW targets so
+    # nmap expands the CIDR itself (far more efficient than 254 argv entries).
+    cmd = [*sudo_prefix, "nmap", "-sn", "-n", "-T4", "-oX", "-", *raw_targets]
+    # Bound the sweep: ~0.5s/host, floor 60s, ceiling 5min. Discovery is cheap.
+    sweep_timeout = max(60.0, min(300.0, len(expanded) * 0.5))
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=sweep_timeout,
+        )
+    except (asyncio.TimeoutError, OSError, ValueError) as e:
+        logger.debug(f"nmap -sn discovery unavailable, falling back: {e}")
+        return None
+    if not stdout:
+        return None
+    try:
+        root = _safe_xml_fromstring(stdout)
+    except (ET.ParseError, ValueError) as e:
+        logger.debug(f"nmap -sn XML parse failed, falling back: {e}")
+        return None
+    live: list[str] = []
+    for host_el in root.findall(".//host"):
+        st = host_el.find("status")
+        if st is None or st.get("state") != "up":
+            continue
+        addr = ""
+        for a in host_el.findall("address"):
+            if a.get("addrtype") in ("ipv4", "ipv6"):
+                addr = a.get("addr", "")
+                break
+        if addr:
+            live.append(addr)
+    return live
+
+
+async def _tcp_ping_sweep(hosts: list[str], timeout: float = 2.0) -> list[str]:
+    """Pure-Python liveness fallback: a host is live if it accepts a TCP connect
+    on any common port. No raw sockets required, so it works on a minimal install
+    with no nmap. Probes run highly concurrently, so a /24 sweeps in seconds."""
+    sem = asyncio.Semaphore(500)
+    probe_timeout = min(1.5, max(0.4, timeout))
+
+    async def _port_open(host: str, port: int) -> bool:
+        try:
+            fut = asyncio.open_connection(host, port)
+            _reader, writer = await asyncio.wait_for(fut, timeout=probe_timeout)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (OSError, asyncio.TimeoutError):
+                pass
+            return True
+        except (OSError, asyncio.TimeoutError):
+            return False
+
+    async def _alive(host: str) -> Optional[str]:
+        async with sem:
+            outcomes = await asyncio.gather(
+                *[_port_open(host, p) for p in _LIVENESS_PROBE_PORTS]
+            )
+            return host if any(outcomes) else None
+
+    results = await asyncio.gather(*[_alive(h) for h in hosts])
+    return [h for h in results if h]
+
+
+async def _discover_live_hosts(
+    raw_targets: list[str], expanded: list[str], timeout: float = 2.0,
+) -> list[str]:
+    """Return the subset of *expanded* that responds to a fast liveness sweep.
+    Prefers nmap ``-sn`` (catches ICMP/ARP-only hosts); falls back to a
+    concurrent TCP-connect probe when nmap is absent."""
+    live = await _nmap_ping_sweep(raw_targets, expanded)
+    if live is None:
+        live = await _tcp_ping_sweep(expanded, timeout=timeout)
+    # nmap may report addresses in a slightly different form; keep any host we
+    # actually intended to scan, plus any extra live address nmap surfaced.
+    expanded_set = set(expanded)
+    ordered = [h for h in expanded if h in set(live)]
+    extra = [h for h in live if h not in expanded_set]
+    return ordered + extra
+
+
 async def scan_network(
     targets: list[str],
     port_range: str = "1-65535",
     timeout: float = 2.0,
     include_udp: bool = False,
     stealth_level: str = "normal",
+    time_budget: Optional[float] = None,
     **kwargs,
 ) -> dict[str, Any]:
     """
     Main entry point: scan multiple hosts across specified port ranges.
     Integrates evasion engine, honeypot avoidance, and CTF flag extraction.
     Called by the orchestrator. Cross-platform: Linux, macOS, Windows.
+
+    ``time_budget`` (seconds) bounds the deep-scan phase: hosts still in flight
+    when it elapses are stopped and whatever finished is returned, so a large
+    sweep yields partial results instead of being hard-cancelled with nothing.
     """
     if not targets:
         logger.info("No network targets specified — skipping network scan")
@@ -660,15 +780,40 @@ async def scan_network(
     except Exception as e:
         logger.warning(f"Honeypot/CTF evasion modules unavailable — continuing without: {e}")
 
-    # Expand CIDR targets
+    # Expand CIDR targets → individual addresses.
     expanded_targets = expand_targets(targets)
     ports = parse_port_range(port_range)
 
     concurrency = profile.max_concurrent if profile else 500
     sem = asyncio.Semaphore(concurrency)
 
+    # ── Host-discovery sweep for broad ranges ─────────────────────────────────
+    # A /24 expands to 254 addresses, most of them dead. Under -Pn (which we use
+    # so firewalled hosts aren't skipped) nmap would faithfully full-scan every
+    # one of them — so a "scan 192.168.1.0/24" spent its entire deadline on dead
+    # air and returned nothing, the exact "it's vulnerable but shows nothing"
+    # symptom. For a broad range we first sweep for live hosts (fast, cheap) and
+    # only deep-scan the ones that answer. A single host / small explicit list
+    # skips discovery — the operator named it, so we trust -Pn to reach it.
+    discovery: Optional[dict[str, Any]] = None
+    if len(expanded_targets) > _DISCOVERY_THRESHOLD:
+        _range_size = len(expanded_targets)
+        live = await _discover_live_hosts(targets, expanded_targets, timeout=timeout)
+        discovery = {"range_size": _range_size, "hosts_up": len(live)}
+        logger.info(
+            f"Host discovery: {len(live)}/{_range_size} address(es) responded — "
+            f"deep-scanning the live host(s)"
+        )
+        expanded_targets = live
+        if not expanded_targets:
+            logger.warning(
+                "Host discovery found no live hosts in the range. If you know a "
+                "specific host is up but hardened, scan it directly (e.g. "
+                "`heaven scan -t <ip>`) to force a full -Pn scan."
+            )
+
     logger.info(
-        f"Scanning {len(expanded_targets)} hosts × {len(ports)} ports "
+        f"Scanning {len(expanded_targets)} host(s) × {len(ports)} ports "
         f"(stealth={stealth_level}, concurrency={concurrency}, platform={sys.platform})"
     )
 
@@ -677,22 +822,23 @@ async def scan_network(
         import random
         random.shuffle(expanded_targets)
 
-    host_results = []
-    total_open = 0
     honeypots_skipped = 0
 
-    for host in expanded_targets:
+    async def _scan_and_analyze(host: str) -> Optional[HostResult]:
+        """Deep-scan one host, then run honeypot avoidance + CTF extraction.
+        Returns the HostResult to keep, or ``None`` when the host is skipped
+        (unparseable result or a detected honeypot)."""
+        nonlocal honeypots_skipped
         await engine.apply_evasion_delay()
 
         result = await scan_host(
             host, ports, timeout=timeout, semaphore=sem,
             include_udp=include_udp, stealth_level=stealth_level,
         )
-
         if not isinstance(result, HostResult):
-            continue
+            return None
 
-        # Run honeypot analysis on results
+        # Honeypot analysis
         if hp_engine and profile and profile.auto_skip_honeypots and result.open_ports:
             port_dicts = [{
                 "port": p.port, "banner": p.banner, "state": p.state,
@@ -706,9 +852,9 @@ async def scan_network(
                 result.honeypot_indicators.extend(hp_result.indicators)
                 honeypots_skipped += 1
                 logger.warning(f"🛡️ HONEYPOT SKIPPED: {host} (score={hp_result.score:.2f})")
-                continue  # Skip honeypot targets entirely
+                return None  # Skip honeypot targets entirely
 
-        # Extract CTF flags from banners
+        # CTF flag extraction from banners
         if ctf and result.open_ports:
             port_dicts = [{
                 "port": p.port, "banner": p.banner, "state": p.state,
@@ -717,13 +863,51 @@ async def scan_network(
             if flags:
                 logger.info(f"🚩 {len(flags)} CTF flags captured from {host}")
 
-        host_results.append(result)
-        total_open += len(result.open_ports)
         if result.open_ports:
             logger.info(
                 f"  {result.host}: {len(result.open_ports)} open ports "
                 f"(OS: {result.os_guess}, {result.scan_time_ms:.0f}ms)"
             )
+        return result
+
+    # Deep-scan every host CONCURRENTLY, bounded by the stealth profile's
+    # concurrency (via the shared semaphore inside scan_host). The previous
+    # sequential loop scanned one host at a time regardless of that limit, so a
+    # multi-host range crawled and blew past the task deadline. When a
+    # ``time_budget`` is set, hosts still running when it elapses are stopped and
+    # the finished ones are still returned — partial results beat none.
+    host_results: list[HostResult] = []
+    timed_out = 0
+    scan_futures = [asyncio.ensure_future(_scan_and_analyze(h)) for h in expanded_targets]
+    if scan_futures:
+        if time_budget and time_budget > 0:
+            done, pending = await asyncio.wait(scan_futures, timeout=time_budget)
+            for fut in pending:
+                fut.cancel()
+            timed_out = len(pending)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+                logger.warning(
+                    f"Network deep-scan time budget ({time_budget:.0f}s) reached — "
+                    f"returning {len(done)} finished host(s); {len(pending)} still in "
+                    f"flight were stopped. Narrow the port range or target fewer hosts."
+                )
+            finished = done
+        else:
+            await asyncio.gather(*scan_futures, return_exceptions=True)
+            finished = set(scan_futures)
+        for fut in finished:
+            if fut.cancelled():
+                continue
+            exc = fut.exception()
+            if exc is not None:
+                logger.debug(f"host scan raised: {exc}")
+                continue
+            res = fut.result()
+            if isinstance(res, HostResult):
+                host_results.append(res)
+
+    total_open = sum(len(h.open_ports) for h in host_results)
 
     logger.info(
         f"Network scan complete: {total_open} open ports across {len(host_results)} hosts "
@@ -736,6 +920,8 @@ async def scan_network(
         "total_hosts": len(host_results),
         "alive_hosts": sum(1 for h in host_results if h.is_alive),
         "honeypots_skipped": honeypots_skipped,
+        "hosts_timed_out": timed_out,
+        "discovery": discovery,
         "platform": sys.platform,
         # Whether this run could do SYN/UDP/OS scans, and (if not) how to enable
         # them — so the CLI/report can be honest about scan depth on this host.

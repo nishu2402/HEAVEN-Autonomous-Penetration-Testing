@@ -90,6 +90,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Most findings showed blank CWE / OWASP / MITRE / CVSS-vector and a 0.00
+  confidence.** The AI attack-chain planner converts its *hypothetical* steps for
+  the kill-chain analyzer with `vuln_type` set to a bare MITRE technique id
+  (`T1190`, `T1059.001`). Those steps leaked into the collected findings and
+  persisted as pseudo-findings — and because their `vuln_type` matches no
+  knowledge-base entry, the detail view rendered every taxonomy field empty and
+  confidence as 0.00. They are plans, not observations: they are now recognised
+  as artifacts (`engagement.is_attack_plan_artifact`) and excluded from the
+  findings list, the report/coverage/kill-chain views, and every headline count
+  (dashboard chip, stats, per-scan counts) — no re-scan needed to clear the ones
+  older scans already stored. Genuine findings enrich correctly (e.g. a missing
+  CSP now shows CWE-693 · A05:2021 · T1185 · a full CVSS v3.1 vector).
+- **Host & Service Inventory looked empty even after a productive scan.** The
+  inventory defaulted to the *newest* scan that produced any host row — including
+  a dead/mistyped-host scan that recorded a host with **zero** open ports — so an
+  earlier scan with real services was hidden. The default (CLI, API and web) now
+  prefers the newest scan that actually found open ports, and the scan picker
+  annotates each scan with its port count so you can see at a glance which one has
+  data.
+- **Findings from an IP-range scan can now be grouped per host.** The Findings
+  page groups results under each host/IP ("_5 findings across 2 hosts_") with a
+  per-host severity breakdown, so a `/24` scan reads as "for this IP, these
+  findings; for that IP, those." A **Group by host** toggle appears whenever a
+  scan spanned more than one machine.
+- **Scanning a whole subnet (`192.168.1.0/24`) came back empty even with live,
+  vulnerable hosts on it.** A CIDR expands to hundreds of addresses, and the
+  network scanner had three compounding problems that made a range scan return
+  nothing:
+  - **Hosts were scanned one-at-a-time.** The 254 addresses of a /24 ran
+    strictly sequentially, ignoring the configured concurrency, so the scan
+    crawled and blew past its deadline. They are now deep-scanned **concurrently**
+    (bounded by the stealth profile), so a range finishes in a fraction of the
+    time.
+  - **Every dead address was full-scanned.** Under `-Pn` (needed so firewalled
+    hosts aren't skipped) nmap faithfully port-scanned all ~250 dead addresses of
+    a typical /24 — burning the entire budget on empty air. HEAVEN now runs a
+    fast **host-discovery sweep** first (nmap `-sn`, with a pure-Python
+    TCP-connect fallback) and only deep-scans the hosts that actually answered. A
+    single host or a small explicit list still skips discovery and is scanned
+    directly with `-Pn` (the operator named it, so it's trusted).
+  - **A too-tight deadline discarded everything.** The Network Recon task used a
+    fixed 300 s timeout regardless of range size; when it elapsed, the task was
+    hard-cancelled and returned **no data**, so every downstream scanner saw an
+    empty result. The deadline now **scales with the size of the range** (capped
+    at 30 min) and the scanner honours a time budget that returns whatever
+    finished so far — partial results beat none. Live-proven: a `/27` CIDR whose
+    only live host ran a weak web app went from *nothing* to 15 attributed
+    findings (a critical CVE-2021-41773 on the host:port, reflected input,
+    missing security headers), discovery correctly reporting "1/30 up".
+- **Subnet scope now covers the hosts inside it.** Under an engagement,
+  `is_in_scope()` matched targets by *exact string* only, so adding
+  `192.168.1.0/24` to scope didn't authorize `192.168.1.55` (or the /24 scanned
+  as individual IPs), and those targets were silently dropped. Scope is now
+  **CIDR-aware**: a target contained by an in-scope range passes (including a
+  URL whose host falls in the range). It only ever authorizes a target *inside*
+  an authorized range — a range broader than what was scoped still fails, so
+  scanning can never exceed authorization.
 - **Internal / IP-only targets came back empty even when riddled with holes.**
   Two engine gaps meant scanning a bare IP (the normal case for an internal
   network) could report *nothing*, and both are fixed:

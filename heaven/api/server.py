@@ -621,6 +621,27 @@ def create_app() -> FastAPI:
         from heaven.config import get_config
         return get_config().data_dir
 
+    def _clean_report_data(data: dict) -> dict:
+        """Drop leaked attack-chain planner steps from a report's finding lists.
+
+        Older reports persisted planner hypotheses (vuln_type = a bare MITRE
+        technique like ``T1190``) alongside real findings, so every
+        report-derived view (coverage, kill chain, risk scores) inherited the
+        blank rows. Strip them here — one choke point — so those views agree with
+        the cleaned findings list without needing a re-scan.
+        """
+        if not isinstance(data, dict):
+            return data
+        from heaven.engagement import is_attack_plan_artifact
+        for key in ("vulnerabilities", "findings"):
+            items = data.get(key)
+            if isinstance(items, list):
+                data[key] = [
+                    v for v in items
+                    if not (isinstance(v, dict) and is_attack_plan_artifact(v))
+                ]
+        return data
+
     def _get_latest_report_data(scan_id: Optional[str] = None) -> dict:
         d = _data_dir()
         if scan_id:
@@ -633,7 +654,7 @@ def create_app() -> FastAPI:
             file_path = d / f"report_{scan_id}.json"
             if file_path.exists():
                 try:
-                    return json.loads(file_path.read_text())
+                    return _clean_report_data(json.loads(file_path.read_text()))
                 except Exception as e:
                     logger.error(f"Failed to read report {scan_id}: {e}")
             return {}
@@ -644,7 +665,7 @@ def create_app() -> FastAPI:
         latest_file = max(files, key=os.path.getmtime)
         try:
             with open(latest_file, "r") as f:
-                return json.load(f)
+                return _clean_report_data(json.load(f))
         except Exception as e:
             logger.error(f"Failed to read latest report {latest_file}: {e}")
             return {}
@@ -711,6 +732,7 @@ def create_app() -> FastAPI:
         one table blends two unrelated engagements' targets together. This lets
         the UI/CLI offer one scan at a time and default to the most recent.
         """
+        from heaven.devsecops.inventory import inventory_totals, normalize_assets
         out: list[dict] = []
         try:
             store = _read_store(engagement)
@@ -725,15 +747,21 @@ def create_app() -> FastAPI:
                     summ = json.loads(blob)
                 except (ValueError, TypeError):
                     continue
-                n_hosts = len([a for a in (summ.get("assets") or [])
-                               if isinstance(a, dict)])
-                if n_hosts:
-                    out.append({
-                        "scan_id": sid,
-                        "label": s.get("name") or sid,
-                        "when": s.get("started_at") or s.get("completed_at") or "",
-                        "hosts": n_hosts,
-                    })
+                assets = [a for a in (summ.get("assets") or []) if isinstance(a, dict)]
+                if not assets:
+                    continue
+                # Count the open ports this scan actually discovered so the picker
+                # can default to a scan that has data — a scan of a dead/mistyped
+                # host records a host row with zero ports, and defaulting to it (as
+                # the newest) made the whole inventory look empty.
+                totals = inventory_totals(normalize_assets(assets))
+                out.append({
+                    "scan_id": sid,
+                    "label": s.get("name") or sid,
+                    "when": s.get("started_at") or s.get("completed_at") or "",
+                    "hosts": totals["hosts"],
+                    "ports": totals["open_ports"],
+                })
         except Exception:
             logger.debug("suppressed non-fatal exception building asset scan index",
                          exc_info=True)
@@ -1270,7 +1298,13 @@ def create_app() -> FastAPI:
         elif scan_id and _is_safe_scan_id(scan_id):
             selected = scan_id
         elif scans:
-            selected = scans[0]["scan_id"]
+            # Default to the newest scan that actually found open ports; only fall
+            # back to the newest asset-bearing scan when none did (so a dead-host
+            # scan doesn't hide an earlier scan that has real inventory).
+            selected = next(
+                (s["scan_id"] for s in scans if s.get("ports")),
+                scans[0]["scan_id"],
+            )
         else:
             selected = None
         # selected None → engagement-wide (either ?all=1, or no scan carries
@@ -1574,18 +1608,21 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("vuln.view")),
     ):
         """List findings from the active engagement (optionally one scan)."""
+        from heaven.engagement import is_attack_plan_artifact
         store = _read_store()
         results = store.list_findings(
             severity=severity, status=status, target=target,
             vuln_type=vuln_type, min_confidence=min_confidence, limit=limit,
             scan_id=scan_id,
         )
-        return {
-            "findings": [
-                {**f.__dict__} for f in results
-            ],
-            "count": len(results),
-        }
+        # Drop any attack-chain planner steps that older scans persisted as
+        # pseudo-findings (vuln_type is a bare MITRE technique like ``T1190`` with
+        # no taxonomy) so a re-scan isn't needed to clear the blank rows.
+        findings = [
+            {**f.__dict__} for f in results
+            if not is_attack_plan_artifact(f.__dict__)
+        ]
+        return {"findings": findings, "count": len(findings)}
 
     @app.post("/api/engagement/findings")
     async def create_manual_finding(

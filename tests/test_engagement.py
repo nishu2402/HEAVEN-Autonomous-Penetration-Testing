@@ -50,6 +50,32 @@ class TestScope:
         assert store.is_in_scope("10.0.0.1")
         assert not store.is_in_scope("10.0.0.99")
 
+    def test_ip_inside_scoped_cidr_is_in_scope(self, store):
+        """Adding a CIDR to scope authorizes every host inside it — so a
+        `scan -t 192.168.1.0/24` run under an engagement whose scope is that
+        /24 isn't silently dropped, and neither is a single host within it."""
+        store.add_scope("192.168.1.0/24", kind="cidr")
+        assert store.is_in_scope("192.168.1.0/24")   # exact
+        assert store.is_in_scope("192.168.1.55")      # host inside
+        assert store.is_in_scope("192.168.1.0/26")    # narrower subnet inside
+        assert store.is_in_scope("http://192.168.1.9/")  # URL host inside
+        assert not store.is_in_scope("192.168.2.10")  # different subnet
+
+    def test_cidr_containment_never_widens_scope(self, store):
+        """Range matching only ever authorizes a target CONTAINED by an
+        in-scope range. A target BROADER than what was authorized (a supernet)
+        must stay out of scope — scanning must never exceed authorization."""
+        store.add_scope("192.168.1.0/24", kind="cidr")
+        assert not store.is_in_scope("192.168.0.0/16")  # supernet — broader
+        assert not store.is_in_scope("10.0.0.0/8")       # unrelated range
+
+    def test_bare_ip_scope_does_not_authorize_whole_range(self, store):
+        """A single scoped IP must not pull its whole /24 into scope."""
+        store.add_scope("10.0.0.5", kind="ip")
+        assert store.is_in_scope("10.0.0.5")
+        assert not store.is_in_scope("10.0.0.0/24")
+        assert not store.is_in_scope("10.0.0.6")
+
     def test_out_of_scope_target_rejected(self, store):
         store.add_scope("10.0.0.1", in_scope=False)
         assert not store.is_in_scope("10.0.0.1")
@@ -185,6 +211,57 @@ class TestFindingDedup:
         assert c[("sqli", "id")] == 1, f"all id-payloads must collapse to 1, got {c}"
         assert c[("sqli", "name")] == 1, "a different param stays a separate finding"
         assert len(out) == 2
+
+    def test_attack_plan_steps_never_persist_as_findings(self):
+        """Regression: the AI attack-chain planner converts its hypothetical
+        steps for the kill-chain analyzer with ``vuln_type = <MITRE technique>``
+        (T1190, T1059.001). Those leaked into the collected findings and
+        persisted as pseudo-findings whose vuln_type misses every KB lookup — so
+        CWE / OWASP / MITRE / CVSS-vector rendered blank and confidence showed
+        0.00. They are plans, not observations, and must be dropped."""
+        from heaven.engagement import dedup_findings, is_attack_plan_artifact
+        # Fresh, in-memory: carries the explicit marker.
+        marked = {"target": "192.168.1.101", "vuln_type": "T1190",
+                  "title": "CSP Missing", "severity": "high",
+                  "_attack_plan_step": True, "_confidence": 0.7}
+        # After a DB round-trip the underscore marker is stripped but the bare
+        # MITRE technique id remains — still recognisable.
+        stripped = {"target": "10.0.0.5", "vuln_type": "T1059.001",
+                    "title": "Execute", "severity": "high", "confidence": 0.0}
+        real = {"target": "http://192.168.1.101/", "vuln_type": "csp_missing",
+                "title": "CSP Missing", "severity": "medium", "confidence": 0.98}
+        assert is_attack_plan_artifact(marked)
+        assert is_attack_plan_artifact(stripped)
+        assert not is_attack_plan_artifact(real)
+        out = dedup_findings([marked, stripped, real])
+        assert [f["vuln_type"] for f in out] == ["csp_missing"]
+
+    def test_real_types_are_not_mistaken_for_mitre_ids(self):
+        """The MITRE-technique guard must not swallow genuine vuln_types."""
+        from heaven.engagement import is_attack_plan_artifact
+        for vt in ("csp_missing", "sql_injection", "tls_weak_cipher",
+                   "xss", "idor", "vulnerable_service", "t", "telnet_exposed"):
+            assert not is_attack_plan_artifact({"vuln_type": vt}), vt
+
+    def test_stats_and_scan_counts_exclude_plan_artifacts(self, store):
+        """The dashboard chip / stats and per-scan finding counts must exclude
+        leaked planner artifacts, so every headline count agrees with the
+        (filtered) findings list — no more '6 findings' chip over a 5-row list."""
+        store.record_scan_start("s1", name="range", mode="network")
+        for f in [
+            {"target": "http://h/", "vuln_type": "csp_missing",
+             "severity": "medium", "confidence": 0.9},
+            {"target": "http://h/x", "vuln_type": "sql_injection", "param": "id",
+             "severity": "critical", "confidence": 0.9},
+            {"target": "h", "vuln_type": "T1190", "severity": "high", "confidence": 0.0},
+            {"target": "h2", "vuln_type": "T1059.001", "severity": "high", "confidence": 0.0},
+        ]:
+            store.upsert_finding("s1", f)
+        st = store.stats()
+        assert st["total_findings"] == 2                    # artifacts excluded
+        assert "high" not in st["by_severity"]              # both artifacts were 'high'
+        assert store.list_scans()[0]["findings_count"] == 2
+        assert store.get_scan("s1")["findings_count"] == 2
 
     def test_dedup_preserves_operator_status(self, store):
         finding = {"target": "x", "vuln_type": "sqli", "param": "id",

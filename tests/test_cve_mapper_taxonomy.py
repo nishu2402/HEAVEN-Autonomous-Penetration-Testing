@@ -33,6 +33,9 @@ async def test_inline_cve_findings_are_categorised_not_unknown():
         assert vt != "unknown", f"{v.get('cve')} persisted uncategorised"
         # And the type must resolve to a real KB taxonomy entry.
         assert lookup(vt), f"{vt} has no KB entry"
+        # Every CVE finding must name the host:port it came from — a CRITICAL
+        # with a blank Target reads as broken in the CLI table / kill chain.
+        assert v.get("target") == "10.0.0.5:80", f"{v.get('cve')} has no target: {v.get('target')!r}"
 
 
 def test_vulnerable_service_resolves_in_kb():

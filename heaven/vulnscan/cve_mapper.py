@@ -895,6 +895,20 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                     "source":     "heuristic",
                 })
 
+    # Attribute every CVE finding to the concrete host:port it came from. The
+    # persistence layer synthesises target=host, but the raw findings (rendered
+    # in the CLI end-of-scan table, the web progress feed and the kill chain)
+    # otherwise showed a blank Target for a CRITICAL CVE — which reads as broken.
+    # Use host:port when a real port is known, else the bare host.
+    for v in all_vulns:
+        if v.get("target"):
+            continue
+        host_str = str(v.get("host") or "").strip()
+        if not host_str:
+            continue
+        port_num = v.get("port") or 0
+        v["target"] = f"{host_str}:{port_num}" if port_num else host_str
+
     # Deduplicate by (host, port, cve)
     seen: set[tuple] = set()
     unique: list[dict] = []

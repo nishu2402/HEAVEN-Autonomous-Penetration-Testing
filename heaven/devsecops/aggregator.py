@@ -133,13 +133,20 @@ async def generate_report(scan_id: str = "", scan_data: Optional[dict[Any, Any]]
     scan_data["medium"] = sum(1 for v in vulns if v.get("severity") == "medium")
     scan_data["low"] = sum(1 for v in vulns if v.get("severity") == "low")
     
-    import os
-    os.makedirs("data", exist_ok=True)
-    
-    json_path = f"data/report_{scan_id}.json"
-    sarif_path = f"data/report_{scan_id}.sarif"
-    
+    # Write into the configured data dir so the writer stays consistent with the
+    # API report-download reader (which resolves paths via get_config().data_dir)
+    # and honours HEAVEN_DATA_DIR. Defaults to CWD-relative "data" — unchanged.
+    try:
+        from heaven.config import get_config
+        base = Path(get_config().data_dir)
+    except Exception:  # pragma: no cover - config is always importable in practice
+        base = Path("data")
+    base.mkdir(parents=True, exist_ok=True)
+
+    json_path = str(base / f"report_{scan_id}.json")
+    sarif_path = str(base / f"report_{scan_id}.sarif")
+
     compile_json_report(scan_data, json_path)
     export_sarif(scan_data, sarif_path)
-    
+
     return {"json_report": json_path, "sarif_report": sarif_path}

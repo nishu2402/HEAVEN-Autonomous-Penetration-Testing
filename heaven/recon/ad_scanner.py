@@ -19,10 +19,18 @@ logger = get_logger("recon.ad")
 # Graceful imports for AD libraries
 try:
     import ldap3  # noqa: F401
-    from ldap3 import Server, Connection, ALL, NTLM, SUBTREE
+    from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, BASE
     HAS_LDAP = True
 except ImportError:
     HAS_LDAP = False
+
+# AD domain/forest functional-level codes → human labels.
+_FUNCTIONAL_LEVELS = {
+    "0": "Windows 2000", "1": "Windows Server 2003 (interim)",
+    "2": "Windows Server 2003", "3": "Windows Server 2008",
+    "4": "Windows Server 2008 R2", "5": "Windows Server 2012",
+    "6": "Windows Server 2012 R2", "7": "Windows Server 2016+",
+}
 
 try:
     from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS  # noqa: F401
@@ -48,6 +56,21 @@ class ADAttackType(str, Enum):
     PASSWORD_SPRAY = "password_spray_risk"  # nosec B105 -- attack-technique enum / empty default
     ADMINSD_HOLDER = "adminsd_holder_abuse"
     GPP_PASSWORDS = "gpp_passwords"
+    # Network-layer (pre-auth) AD/SMB posture — what a scan of a DC by IP alone
+    # can determine without domain credentials.
+    SMB_SIGNING_DISABLED = "smb_signing_not_required"
+    SMBV1_ENABLED = "smbv1_enabled"
+    NULL_SESSION = "smb_null_session"
+    ANON_LDAP = "anonymous_ldap_bind"
+    MACHINE_ACCOUNT_QUOTA = "machine_account_quota"
+    DOMAIN_INFO = "domain_information"
+
+
+def derive_domain_from_dn(dn: str) -> str:
+    """`DC=corp,DC=example,DC=com` → `corp.example.com`. Empty string if not a DN."""
+    parts = [p.split("=", 1)[1] for p in (dn or "").split(",")
+             if p.strip().lower().startswith("dc=") and "=" in p]
+    return ".".join(parts)
 
 
 @dataclass
@@ -68,6 +91,10 @@ class ADFinding:
     def to_dict(self) -> dict:
         return {
             "target": self.target, "attack_type": self.attack_type.value,
+            # Mirror attack_type into vuln_type so the finding store, dedup and KB
+            # taxonomy enrichment (CWE/OWASP/CVSS-vector) key on it like any other
+            # finding — without this, AD findings showed blank taxonomy columns.
+            "vuln_type": self.attack_type.value,
             "severity": self.severity, "title": self.title,
             "description": self.description, "affected_objects": self.affected_objects,
             "attack_path": self.attack_path, "confidence": self.confidence,
@@ -140,7 +167,8 @@ class ADScanner:
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
-        self.domain_dn = ",".join(f"DC={part}" for part in domain.split("."))
+        # Base DN from the domain when known; RootDSE discovery fills it otherwise.
+        self.domain_dn = ",".join(f"DC={p}" for p in domain.split(".") if p) if domain else ""
         self._conn: Optional[Any] = None
         self._domain_info = ADDomainInfo(domain=domain, dc_hostname=dc_host, domain_dn=self.domain_dn)
         self._findings: list[ADFinding] = []
@@ -168,15 +196,259 @@ class ADScanner:
             logger.error(f"LDAP connection failed: {e}")
             return False
 
+    async def discover_via_rootdse(self) -> dict:
+        """Anonymously read the DC's RootDSE. This works even when full LDAP
+        binds are locked down, so it fills domain / forest / DC name / functional
+        level for a scan that only knows the DC's IP — and auto-derives the domain
+        name when the caller didn't supply one. Emits an anonymous-bind finding
+        when the DC answers an unauthenticated query."""
+        if not HAS_LDAP:
+            return {}
+        info: dict = {}
+        try:
+            server = Server(self.dc_host, port=(636 if self.use_ssl else 389),
+                            use_ssl=self.use_ssl, get_info=ALL, connect_timeout=6)
+            conn = Connection(server, auto_bind=True, receive_timeout=6)
+            anon = not (self.username and self.password)
+            attrs = ["defaultNamingContext", "rootDomainNamingContext",
+                     "dnsHostName", "domainFunctionality", "forestFunctionality",
+                     "ldapServiceName", "serverName"]
+            conn.search("", "(objectClass=*)", search_scope=BASE, attributes=attrs)
+
+            def _g(entry, a: str) -> str:
+                v = getattr(entry, a, None)
+                try:
+                    return str(v.value) if v is not None and v.value is not None else ""
+                except Exception:
+                    return ""
+
+            if conn.entries:
+                e = conn.entries[0]
+                info = {a: _g(e, a) for a in attrs}
+                dnc = info.get("defaultNamingContext", "")
+                if dnc:
+                    self.domain_dn = self.domain_dn or dnc
+                    self._domain_info.domain_dn = dnc
+                    if not self.domain:
+                        self.domain = derive_domain_from_dn(dnc)
+                        self._domain_info.domain = self.domain
+                if info.get("dnsHostName"):
+                    self._domain_info.dc_hostname = info["dnsHostName"]
+                fl = info.get("domainFunctionality", "")
+                if fl:
+                    self._domain_info.functional_level = _FUNCTIONAL_LEVELS.get(fl, fl)
+                rdnc = info.get("rootDomainNamingContext", "")
+                if rdnc:
+                    self._domain_info.forest = derive_domain_from_dn(rdnc)
+                if anon:
+                    self._findings.append(ADFinding(
+                        target=self.dc_host,
+                        attack_type=ADAttackType.ANON_LDAP,
+                        severity="medium",
+                        title="Anonymous LDAP Bind Permitted on Domain Controller",
+                        description=(
+                            "The Domain Controller answered an unauthenticated LDAP "
+                            "query and exposed its RootDSE (domain, forest, DC name, "
+                            "functional level). Anonymous LDAP eases pre-auth "
+                            "reconnaissance and, if the naming contexts allow it, "
+                            "user/attribute enumeration."
+                        ),
+                        confidence=0.9,
+                        remediation=(
+                            "Restrict anonymous LDAP: set dsHeuristics so "
+                            "anonymous operations are disabled, and require "
+                            "authentication for directory reads."
+                        ),
+                        mitre_technique="T1087.002",
+                        evidence={k: v for k, v in info.items() if v},
+                    ))
+            try:
+                conn.unbind()
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+        except Exception as e:
+            logger.debug(f"RootDSE discovery failed for {self.dc_host}: {e}")
+        return info
+
+    async def enumerate_smb(self) -> dict:
+        """Network-layer SMB assessment of the DC/host — signing, SMBv1, null
+        session, OS/domain fingerprint. Runs pre-auth (no domain creds needed)
+        and is what makes an AD scan of a bare DC IP produce findings. Uses
+        impacket in a worker thread so the sync client never blocks the loop."""
+        if not HAS_IMPACKET:
+            return {}
+        import asyncio
+        loop = asyncio.get_running_loop()
+        try:
+            smb = await asyncio.wait_for(
+                loop.run_in_executor(None, self._smb_enumerate_sync), timeout=25)
+        except Exception as e:
+            logger.debug(f"SMB enumeration failed for {self.dc_host}: {e}")
+            return {}
+        self._smb_findings(smb)
+        return smb
+
+    def _smb_enumerate_sync(self) -> dict:
+        out: dict = {}
+        try:
+            from impacket.smbconnection import SMBConnection
+        except Exception:
+            return out
+        host = self.dc_host
+        try:
+            conn = SMBConnection(host, host, sess_port=445, timeout=8)
+        except Exception as e:
+            logger.debug(f"SMB connect failed for {host}: {e}")
+            return out
+        try:
+            try:
+                conn.login("", "")            # null / anonymous session
+                out["null_session"] = True
+            except Exception:
+                out["null_session"] = False
+            for key, fn in (("signing_required", "isSigningRequired"),
+                            ("server_os", "getServerOS"),
+                            ("server_name", "getServerName"),
+                            ("server_domain", "getServerDNSDomainName"),
+                            ("server_domain_nb", "getServerDomain")):
+                try:
+                    out[key] = getattr(conn, fn)()
+                except Exception:
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
+            if out.get("null_session"):
+                try:
+                    shares = conn.listShares()
+                    out["shares"] = [str(s["shi1_netname"][:-1]) for s in shares]
+                except Exception:
+                    out["shares"] = None
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+        out["smbv1"] = self._detect_smbv1(host)
+        return out
+
+    @staticmethod
+    def _detect_smbv1(host: str) -> Optional[bool]:
+        """True if the host still negotiates the legacy SMBv1 dialect (MS17-010 /
+        EternalBlue exposure). None if it couldn't be determined."""
+        try:
+            from impacket.smbconnection import SMBConnection
+        except Exception:
+            return None
+        dialect = getattr(SMBConnection, "SMB_DIALECT", None)
+        if dialect is None:
+            return None
+        try:
+            c = SMBConnection(host, host, sess_port=445,
+                              preferredDialect=dialect, timeout=8)
+            try:
+                c.close()
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+            return True
+        except Exception:
+            return False
+
+    def _smb_findings(self, smb: dict) -> None:
+        if not smb:
+            return
+        target = self._domain_info.dc_hostname or self.dc_host
+        # Context: what SMB told us about the host (recorded, informational).
+        ctx = {k: smb[k] for k in ("server_os", "server_name", "server_domain",
+                                   "shares") if smb.get(k)}
+        if ctx:
+            self._findings.append(ADFinding(
+                target=target, attack_type=ADAttackType.DOMAIN_INFO,
+                severity="info",
+                title="SMB Host Information",
+                description="Host/domain details fingerprinted over SMB.",
+                confidence=0.9, mitre_technique="T1082",
+                evidence=ctx,
+            ))
+        # SMB signing not required → NTLM relay exposure (the *real* signal).
+        if smb.get("signing_required") is False:
+            self._findings.append(ADFinding(
+                target=target, attack_type=ADAttackType.SMB_SIGNING_DISABLED,
+                severity="high",
+                title="SMB Signing Not Required — NTLM Relay Exposure",
+                description=(
+                    "The host does not require SMB signing, so captured/coerced "
+                    "NTLM authentication can be relayed to it (e.g. ntlmrelayx). "
+                    "On a Domain Controller this is a direct path to privilege "
+                    "escalation."
+                ),
+                confidence=0.9,
+                remediation=(
+                    "Require SMB signing on all hosts (GPO: 'Microsoft network "
+                    "server: Digitally sign communications (always)') and enable "
+                    "LDAP signing + channel binding on DCs. Disable NTLM where "
+                    "possible."
+                ),
+                mitre_technique="T1557.001",
+                evidence={"smb_signing_required": False},
+            ))
+        # SMBv1 still enabled → EternalBlue / MS17-010 exposure.
+        if smb.get("smbv1") is True:
+            self._findings.append(ADFinding(
+                target=target, attack_type=ADAttackType.SMBV1_ENABLED,
+                severity="high",
+                title="Legacy SMBv1 Dialect Enabled",
+                description=(
+                    "The host negotiates SMBv1, the dialect exploited by "
+                    "EternalBlue (MS17-010) and used by WannaCry/NotPetya. SMBv1 "
+                    "is deprecated and should be disabled everywhere."
+                ),
+                confidence=0.9,
+                remediation=(
+                    "Disable SMBv1 (Remove-WindowsFeature FS-SMB1 / "
+                    "Set-SmbServerConfiguration -EnableSMB1Protocol $false) and "
+                    "patch MS17-010."
+                ),
+                mitre_technique="T1210",
+                evidence={"smbv1_enabled": True},
+            ))
+        # Null session that can list shares → anonymous enumeration.
+        if smb.get("null_session") and smb.get("shares"):
+            self._findings.append(ADFinding(
+                target=target, attack_type=ADAttackType.NULL_SESSION,
+                severity="medium",
+                title="SMB Null Session Allows Share Enumeration",
+                description=(
+                    "The host accepted an anonymous (null) SMB session and listed "
+                    "its shares without credentials, aiding reconnaissance and "
+                    "potential access to unprotected shares."
+                ),
+                affected_objects=list(smb.get("shares") or [])[:20],
+                confidence=0.85,
+                remediation=(
+                    "Restrict anonymous access: RestrictNullSessAccess=1, "
+                    "RestrictAnonymous=1, and remove NULL from "
+                    "NullSessionShares/NullSessionPipes."
+                ),
+                mitre_technique="T1135",
+                evidence={"shares": smb.get("shares")},
+            ))
+
     async def full_scan(self) -> dict:
         """Run comprehensive AD security assessment."""
-        logger.info(f"═══ Active Directory Scan: {self.domain} ═══")
+        logger.info(f"═══ Active Directory Scan: {self.domain or self.dc_host} ═══")
         self._findings = []
+
+        # Pre-auth, network-layer assessment first — these run whether or not we
+        # can obtain an authenticated LDAP bind, so a scan of a DC by IP alone
+        # still yields real findings (SMB signing/relay, SMBv1, null session,
+        # anonymous LDAP, domain/forest/functional-level context).
+        await self.discover_via_rootdse()
+        await self.enumerate_smb()
 
         if not self._conn:
             connected = await self.connect()
             if not connected:
-                return self._offline_analysis()
+                # No authenticated directory access — but keep whatever the
+                # pre-auth layer already found instead of discarding it.
+                return self._offline_summary()
 
         await self.enumerate_domain()
         await self.check_kerberoasting()
@@ -601,34 +873,51 @@ class ADScanner:
         return findings
 
     async def check_ntlm_relay(self) -> list[ADFinding]:
-        """Detect NTLM relay opportunities (LDAP signing, EPA)."""
-        logger.info("Checking NTLM relay opportunities...")
-        findings = []
+        """Check the domain machine-account quota (ms-DS-MachineAccountQuota).
 
-        # Check LDAP signing requirement
+        The default of 10 lets ANY authenticated user join computer accounts,
+        which enables resource-based constrained delegation (RBCD) and
+        noPac-style attacks. (NTLM-relay exposure itself is now determined
+        properly from SMB signing in the pre-auth SMB assessment, not from an
+        LDAP heuristic.)"""
+        logger.info("Checking machine account quota (RBCD prerequisite)...")
+        if not self._conn:
+            return []
+
+        findings: list[ADFinding] = []
         try:
-            if self._conn and self._conn.server.info:
-                server_info = str(self._conn.server.info)
-                if "LDAP_SERVER_NOTIFICATION" in server_info:
+            self._conn.search(
+                self.domain_dn, "(objectClass=domain)",
+                attributes=["ms-DS-MachineAccountQuota"],
+            )
+            if self._conn.entries:
+                raw = getattr(self._conn.entries[0], "ms-DS-MachineAccountQuota", None)
+                try:
+                    maq = int(str(raw.value)) if raw is not None and raw.value is not None else -1
+                except (TypeError, ValueError):
+                    maq = -1
+                if maq > 0:
                     findings.append(ADFinding(
-                        target=self.dc_host,
-                        attack_type=ADAttackType.NTLM_RELAY,
-                        severity="high",
-                        title="NTLM Relay: LDAP signing may not be enforced",
+                        target=self.domain,
+                        attack_type=ADAttackType.MACHINE_ACCOUNT_QUOTA,
+                        severity="medium",
+                        title=f"Machine Account Quota = {maq} (any user can join computers)",
                         description=(
-                            "Domain Controller may not enforce LDAP signing. "
-                            "NTLM authentication can be relayed to LDAP for privilege escalation."
+                            f"ms-DS-MachineAccountQuota is {maq}, so any authenticated "
+                            "user can create up to that many computer accounts. This is "
+                            "the prerequisite for resource-based constrained delegation "
+                            "(RBCD) abuse and noPac privilege-escalation chains."
                         ),
-                        confidence=0.60,
+                        confidence=0.9,
                         remediation=(
-                            "Enable LDAP signing: Set 'Domain controller: LDAP server signing requirements' to 'Require signing'. "
-                            "Enable Extended Protection for Authentication (EPA). "
-                            "Disable NTLM where possible."
+                            "Set ms-DS-MachineAccountQuota to 0 and delegate computer "
+                            "joins to a dedicated group instead."
                         ),
-                        mitre_technique="T1557.001",
+                        mitre_technique="T1078",
+                        evidence={"machine_account_quota": maq},
                     ))
         except Exception as e:
-            logger.debug(f"NTLM relay check: {e}")
+            logger.debug(f"Machine account quota check: {e}")
 
         self._findings.extend(findings)
         return findings
@@ -740,18 +1029,32 @@ class ADScanner:
 
         return paths
 
-    def _offline_analysis(self) -> dict:
-        """Perform offline analysis when LDAP is unavailable."""
-        logger.warning("Running in offline analysis mode (no LDAP connection)")
-        self._findings.append(ADFinding(
-            target=self.domain,
-            attack_type=ADAttackType.KERBEROASTING,
-            severity="info",
-            title="AD Scan: Offline Mode",
-            description="Could not connect to Domain Controller. Install ldap3 and impacket for full AD scanning.",
-            confidence=0.0,
-            remediation="pip install ldap3 impacket",
-        ))
+    def _offline_summary(self) -> dict:
+        """Summary when no authenticated LDAP bind was obtained. The pre-auth
+        network layer (RootDSE + SMB) may already have produced real findings, so
+        we keep them; only note the missing authenticated depth when nothing at
+        all was found."""
+        if not self._findings:
+            logger.warning("AD scan: no authenticated access and no pre-auth signal")
+            self._findings.append(ADFinding(
+                target=self.domain or self.dc_host,
+                attack_type=ADAttackType.DOMAIN_INFO,
+                severity="info",
+                title="AD Scan: No Authenticated Directory Access",
+                description=(
+                    "Could not obtain an authenticated LDAP bind and the pre-auth "
+                    "SMB/LDAP layer returned no signal. Provide domain credentials "
+                    "(--ad-user/--ad-pass) for full Kerberoasting/AS-REP/DCSync/"
+                    "delegation/ACL analysis."
+                ),
+                confidence=0.0,
+                remediation="Supply domain credentials to enable authenticated AD assessment.",
+            ))
+        else:
+            logger.info(
+                f"AD scan: pre-auth layer produced {len(self._findings)} finding(s) "
+                "(no authenticated bind — supply creds for full depth)"
+            )
         return self.summary()
 
     def summary(self) -> dict:
@@ -763,6 +1066,10 @@ class ADScanner:
             "domain": self.domain,
             "dc_host": self.dc_host,
             "domain_info": {
+                "domain": self._domain_info.domain,
+                "forest": self._domain_info.forest,
+                "dc_hostname": self._domain_info.dc_hostname,
+                "functional_level": self._domain_info.functional_level,
                 "users": self._domain_info.total_users,
                 "computers": self._domain_info.total_computers,
                 "groups": self._domain_info.total_groups,
@@ -780,14 +1087,24 @@ class ADScanner:
 async def scan_active_directory(domain: str = "", dc_host: str = "",
                                  username: str = "", password: str = "",
                                  **kwargs) -> dict:
-    """Entry point for AD scanning from the orchestrator."""
+    """Entry point for AD scanning from the orchestrator.
+
+    A Domain Controller IP alone is enough to run a real assessment: the domain
+    name is auto-derived from the DC's RootDSE and the pre-auth SMB layer
+    (signing/relay, SMBv1, null session) runs without credentials. Only when
+    there is neither a DC host nor a domain is the scan skipped.
+    """
     if not domain:
         domain = kwargs.get("ad_domain", "")
     if not dc_host:
-        dc_host = kwargs.get("ad_dc", "")
-    if not domain or not dc_host:
-        logger.info("No AD domain/DC specified — skipping AD scan")
-        return {"skipped": True, "reason": "No AD domain configured"}
+        dc_host = kwargs.get("ad_dc", "") or kwargs.get("dc_ip", "")
+    # A DC host is sufficient on its own — the domain is discovered from RootDSE.
+    if not dc_host:
+        if domain:
+            dc_host = domain  # try resolving the domain name as the DC endpoint
+        else:
+            logger.info("No AD domain/DC specified — skipping AD scan")
+            return {"skipped": True, "reason": "No AD domain or DC host configured"}
 
     scanner = ADScanner(domain, dc_host, username, password)
     return await scanner.full_scan()

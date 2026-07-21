@@ -1243,6 +1243,375 @@ _KB: dict[str, dict[str, Any]] = {
         "remediation": "Manually investigate the flagged behaviour and confirm or dismiss it.",
         "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
     },
+
+    # ── Session / CSRF / request-handling posture (real detector output) ──
+    "csrf": {
+        "title": "Cross-Site Request Forgery (Missing Anti-CSRF Token)",
+        "cwe": "CWE-352",
+        "owasp": "A01:2021 Broken Access Control",
+        "mitre": "T1189 — Drive-by Compromise",
+        "typical_cvss": 6.5,
+        "description": (
+            "A state-changing request is accepted without an unpredictable "
+            "anti-CSRF token (or equivalent SameSite/Origin check), so a malicious "
+            "site can force a logged-in victim's browser to submit it."
+        ),
+        "impact": "Attacker-forced actions in the victim's session — settings changes, "
+                  "fund transfers, account takeover.",
+        "remediation": (
+            "1. Require a per-session, per-request anti-CSRF token on every "
+            "state-changing endpoint and verify it server-side.\n"
+            "2. Set SameSite=Lax/Strict on session cookies as defence-in-depth.\n"
+            "3. Validate the Origin/Referer for sensitive POSTs."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+        ],
+    },
+    "session_fixation": {
+        "title": "Session Fixation",
+        "cwe": "CWE-384",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1539 — Steal Web Session Cookie",
+        "typical_cvss": 6.5,
+        "description": (
+            "The application keeps the same session identifier before and after "
+            "authentication, so an attacker who plants a known session ID can ride "
+            "the victim's authenticated session once they log in."
+        ),
+        "impact": "Session hijacking / account takeover.",
+        "remediation": (
+            "1. Regenerate the session identifier on every privilege change "
+            "(especially at login).\n"
+            "2. Never accept a session ID from a URL parameter.\n"
+            "3. Set HttpOnly, Secure and SameSite on the session cookie."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/Session_fixation"],
+    },
+    "weak_session_management": {
+        "title": "Weak Session Identifier",
+        "cwe": "CWE-331",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1539 — Steal Web Session Cookie",
+        "typical_cvss": 5.9,
+        "description": (
+            "The session token is short, predictable, or has insufficient entropy, "
+            "so it can be guessed or brute-forced to hijack a session."
+        ),
+        "impact": "Session prediction leading to account takeover.",
+        "remediation": (
+            "1. Generate session IDs with a CSPRNG and at least 128 bits of entropy.\n"
+            "2. Use the framework's vetted session manager; don't roll your own.\n"
+            "3. Rotate and expire sessions; bind them to client attributes."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"],
+    },
+    "host_header_injection": {
+        "title": "Host Header Injection",
+        "cwe": "CWE-644",
+        "owasp": "A03:2021 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 6.1,
+        "description": (
+            "The application trusts the client-supplied Host (or X-Forwarded-Host) "
+            "header when building absolute URLs, so an attacker can poison "
+            "password-reset links, caches, or route requests to their own host."
+        ),
+        "impact": "Password-reset poisoning, web-cache poisoning, and routing-based SSRF.",
+        "remediation": (
+            "1. Validate Host against an allowlist of expected virtual hosts; reject "
+            "anything else.\n"
+            "2. Build absolute URLs from a server-side configured base, never from "
+            "the request Host.\n"
+            "3. Ignore X-Forwarded-Host unless it comes from a trusted proxy."
+        ),
+        "references": ["https://portswigger.net/web-security/host-header"],
+    },
+    "http_parameter_pollution": {
+        "title": "HTTP Parameter Pollution",
+        "cwe": "CWE-235",
+        "owasp": "A03:2021 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 5.3,
+        "description": (
+            "Supplying a parameter multiple times produces inconsistent handling "
+            "between tiers (app vs proxy/WAF), which can bypass input validation or "
+            "access controls."
+        ),
+        "impact": "Validation/WAF bypass, logic manipulation, filter evasion.",
+        "remediation": (
+            "1. Canonicalise duplicated parameters consistently across every tier.\n"
+            "2. Reject unexpected duplicate parameters where feasible.\n"
+            "3. Validate on the exact value the application logic uses."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/HTTP_Parameter_Pollution"],
+    },
+    "web_cache_poisoning": {
+        "title": "Web Cache Poisoning (Unkeyed Input)",
+        "cwe": "CWE-444",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 7.4,
+        "description": (
+            "An unkeyed request input (e.g. an untrusted header) influences the "
+            "cached response, so an attacker can store a malicious response that is "
+            "then served to other users."
+        ),
+        "impact": "Mass delivery of attacker-controlled content (stored XSS, redirects) "
+                  "to every cache consumer.",
+        "remediation": (
+            "1. Include every request input that affects the response in the cache "
+            "key, or strip untrusted headers before caching.\n"
+            "2. Do not reflect untrusted headers into cacheable responses.\n"
+            "3. Set correct Cache-Control/Vary headers."
+        ),
+        "references": ["https://portswigger.net/web-security/web-cache-poisoning"],
+    },
+    "web_cache_deception": {
+        "title": "Web Cache Deception",
+        "cwe": "CWE-525",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 6.5,
+        "description": (
+            "A crafted path with a static-looking suffix tricks the cache into "
+            "storing an authenticated, sensitive response, which the attacker then "
+            "retrieves."
+        ),
+        "impact": "Disclosure of another user's authenticated content from the cache.",
+        "remediation": (
+            "1. Cache by content type / Cache-Control, not by URL suffix.\n"
+            "2. Never cache responses to authenticated requests.\n"
+            "3. Normalise paths and reject deceptive extensions at the edge."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/Web_Cache_Deception"],
+    },
+    "open_mail_relay": {
+        "title": "Open SMTP Mail Relay",
+        "cwe": "CWE-269",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1566 — Phishing",
+        "typical_cvss": 7.5,
+        "description": (
+            "The SMTP server relays mail from an unauthenticated external sender to "
+            "an external recipient, so anyone can send mail through it — spoofing "
+            "the domain and abusing its reputation for spam/phishing."
+        ),
+        "impact": "Domain-spoofed phishing/spam, blocklisting of the server's IP.",
+        "remediation": (
+            "1. Require authentication for submission; relay only for trusted "
+            "networks/authenticated users.\n"
+            "2. Disable open relaying; restrict RCPT to local domains for "
+            "unauthenticated senders.\n"
+            "3. Enforce SPF/DKIM/DMARC and monitor relay logs."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/"],
+    },
+    "mta_sts_missing": {
+        "title": "MTA-STS Not Configured",
+        "cwe": "CWE-319",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1557 — Adversary-in-the-Middle",
+        "typical_cvss": 4.6,
+        "description": (
+            "No MTA-STS policy is published, so a network attacker can strip "
+            "STARTTLS and force inbound mail to be delivered in cleartext "
+            "(downgrade attack)."
+        ),
+        "impact": "TLS-downgrade interception of inbound email.",
+        "remediation": (
+            "1. Publish an MTA-STS policy (_mta-sts TXT + policy file at "
+            "mta-sts.<domain>) in enforce mode.\n"
+            "2. Publish a TLS-RPT record to receive reporting.\n"
+            "3. Ensure all MX hosts present valid certificates."
+        ),
+        "references": ["https://datatracker.ietf.org/doc/html/rfc8461"],
+    },
+    "weak_password_policy": {
+        "title": "Weak Password Policy",
+        "cwe": "CWE-521",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1110 — Brute Force",
+        "typical_cvss": 5.3,
+        "description": (
+            "The application accepts weak passwords (too short, no complexity, or "
+            "common/breached values), easing credential guessing and stuffing."
+        ),
+        "impact": "Account takeover via brute-force / credential stuffing.",
+        "remediation": (
+            "1. Enforce a modern policy: length ≥ 12, block breached passwords, no "
+            "composition gimmicks (per NIST 800-63B).\n"
+            "2. Add MFA and rate-limiting on authentication.\n"
+            "3. Detect and block credential-stuffing patterns."
+        ),
+        "references": ["https://pages.nist.gov/800-63-3/sp800-63b.html"],
+    },
+    "missing_account_lockout": {
+        "title": "No Account Lockout / Anti-Automation on Login",
+        "cwe": "CWE-307",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1110 — Brute Force",
+        "typical_cvss": 5.3,
+        "description": (
+            "The login endpoint accepts unlimited failed attempts without lockout, "
+            "throttling or CAPTCHA, so passwords can be brute-forced or sprayed."
+        ),
+        "impact": "Credential brute-force / password spraying → account takeover.",
+        "remediation": (
+            "1. Add per-account and per-IP rate limiting with exponential backoff.\n"
+            "2. Lock or step-up (CAPTCHA/MFA) after repeated failures.\n"
+            "3. Alert on spray patterns (many accounts, few attempts each)."
+        ),
+        "references": ["https://owasp.org/www-community/controls/Blocking_Brute_Force_Attacks"],
+    },
+    "dns_zone_transfer": {
+        "title": "DNS Zone Transfer (AXFR) Allowed",
+        "cwe": "CWE-200",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1590.002 — Gather Victim Network Information: DNS",
+        "typical_cvss": 5.3,
+        "description": (
+            "A name server answers AXFR requests from an unauthorised client, "
+            "dumping the entire zone — every host, subdomain and record — which "
+            "hands an attacker a complete map of the network."
+        ),
+        "impact": "Full internal/external host enumeration that accelerates targeting.",
+        "remediation": (
+            "1. Restrict zone transfers to authorised secondary name servers only "
+            "(allow-transfer / TSIG).\n"
+            "2. Deny AXFR from the public internet at the DNS server and firewall.\n"
+            "3. Audit which hosts are exposed in public zones."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/200.html"],
+    },
+    # ── Network-device / host exposure (routers, switches, appliances) ──
+    "cleartext_service": {
+        "title": "Cleartext / Legacy Network Service Exposed",
+        "cwe": "CWE-319",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1040 — Network Sniffing",
+        "typical_cvss": 7.5,
+        "description": (
+            "A service that transmits credentials and data without encryption "
+            "(Telnet, FTP, the r-services, TFTP, Finger) is reachable. Anyone on "
+            "the network path can capture logins and session data, and several of "
+            "these protocols also allow trivial spoofing."
+        ),
+        "impact": "Credential capture and session interception on the local/adjacent "
+                  "network; a classic foothold on routers, switches and appliances.",
+        "remediation": (
+            "1. Disable the cleartext service and use an encrypted equivalent "
+            "(SSH instead of Telnet/rsh, SFTP/FTPS instead of FTP, HTTPS instead "
+            "of HTTP admin).\n"
+            "2. If the protocol is unavoidable, restrict it to an isolated "
+            "management VLAN reachable only over a VPN/bastion.\n"
+            "3. Rotate any credentials that may have traversed it."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1040/"],
+    },
+    "snmp_exposed": {
+        "title": "SNMP Service Exposed",
+        "cwe": "CWE-200",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1046 — Network Service Discovery",
+        "typical_cvss": 5.3,
+        "description": (
+            "An SNMP service is reachable from the scanning position. Exposed SNMP "
+            "is a reconnaissance and brute-force target and frequently leaks device "
+            "information even before a community string is guessed."
+        ),
+        "impact": "Device-information disclosure and a brute-force target for "
+                  "community strings.",
+        "remediation": (
+            "1. Restrict SNMP (UDP 161) to a management network with ACLs/firewall.\n"
+            "2. Move to SNMPv3 with authPriv (authentication + encryption).\n"
+            "3. Remove default/guessable community strings."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1046/"],
+    },
+    "snmp_default_community": {
+        "title": "SNMP Default/Guessable Community String Accepted",
+        "cwe": "CWE-1188",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1602.001 — Data from Configuration Repository: SNMP (MIB Dump)",
+        "typical_cvss": 8.6,
+        "description": (
+            "The device answered SNMP queries authenticated with a vendor-default "
+            "community string (e.g. 'public'/'private'). SNMP read access exposes "
+            "the full device configuration, interfaces, ARP/routing tables and "
+            "software versions; write access permits reconfiguration."
+        ),
+        "impact": "Full device-configuration disclosure and, with RW access, remote "
+                  "reconfiguration of the network device.",
+        "remediation": (
+            "1. Remove default community strings; set a strong, unique value.\n"
+            "2. Migrate to SNMPv3 with authPriv and disable v1/v2c.\n"
+            "3. Restrict SNMP to a management VLAN and set read-only where possible."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1602/001/",
+            "https://cwe.mitre.org/data/definitions/1188.html",
+        ],
+    },
+    "cisco_smart_install": {
+        "title": "Cisco Smart Install (SMI) Exposed",
+        "cwe": "CWE-284",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1210 — Exploitation of Remote Services",
+        "typical_cvss": 9.8,
+        "description": (
+            "The Cisco Smart Install client (TCP 4786) is reachable. SMI requires "
+            "no authentication and is widely abused to read or overwrite the device "
+            "configuration and to achieve remote code execution on Cisco IOS "
+            "switches (CVE-2018-0171; the SIET tooling)."
+        ),
+        "impact": "Remote configuration theft/overwrite and code execution on the "
+                  "switch — full device compromise.",
+        "remediation": (
+            "1. Disable Smart Install: 'no vstack' in global config.\n"
+            "2. If SMI is required, restrict TCP 4786 with an interface ACL.\n"
+            "3. Upgrade IOS to a release that addresses CVE-2018-0171."
+        ),
+        "references": ["https://tools.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-20180328-smi2"],
+    },
+    "ipmi_exposed": {
+        "title": "IPMI / BMC Management Interface Exposed",
+        "cwe": "CWE-284",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1210 — Exploitation of Remote Services",
+        "typical_cvss": 7.5,
+        "description": (
+            "An IPMI/BMC out-of-band management interface is reachable. IPMI is "
+            "affected by the cipher-zero authentication bypass and RAKP "
+            "password-hash retrieval, granting out-of-band control of the host."
+        ),
+        "impact": "Out-of-band takeover of the server (power, console, virtual media) "
+                  "independent of the OS.",
+        "remediation": (
+            "1. Place BMC/IPMI on a dedicated, isolated management network.\n"
+            "2. Disable cipher suite 0; enforce strong, unique BMC credentials.\n"
+            "3. Patch BMC firmware and disable unused management protocols."
+        ),
+        "references": ["https://www.us-cert.gov/ncas/alerts/TA13-207A"],
+    },
+    # Positive posture confirmations (a control is correctly configured). Not a
+    # weakness — no CWE/OWASP — but recorded as informational context so the
+    # report shows what's *right*, not just what's wrong.
+    "posture_ok": {
+        "title": "Security Control Correctly Configured",
+        "cwe": "",
+        "owasp": "",
+        "mitre": "",
+        "typical_cvss": 0.0,
+        "description": (
+            "A security control was verified present and correctly configured. "
+            "This is a positive finding — recorded for assurance/coverage, not a "
+            "vulnerability."
+        ),
+        "impact": "None — this is a confirmation that a protective control is in place.",
+        "remediation": "No action required; maintain the configuration and monitor for drift.",
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
 }
 
 # Severity → typical CVSS fallback when the class is unknown.
@@ -1406,6 +1775,70 @@ _ALIASES: dict[str, str] = {
     "anomalous_behavior": "anomaly_heuristic",
     "zero_day_heuristic": "anomaly_heuristic",
     "anomaly": "anomaly_heuristic",
+    # HTTP methods (web_fuzzer spellings) → dangerous-method KB entry
+    "dangerous_methods_allowed": "dangerous_http_method",
+    "method_override_accepted": "dangerous_http_method",
+    "xst_trace_enabled": "dangerous_http_method",
+    # Cookie flag spellings (auth_scanner) → insecure-cookie KB entry
+    "cookie_no_secure": "insecure_cookie",
+    "cookie_no_samesite": "insecure_cookie",
+    "cookie_missing_secure": "insecure_cookie",
+    "cookie_missing_samesite": "insecure_cookie",
+    # CSP weakening
+    "csp_unsafe_eval": "csp_unsafe_inline",
+    # XXE spellings
+    "xxe_entity_expansion": "xxe",
+    "xml_entity_expansion": "xxe",
+    # Weak/guessable login credentials → default-credentials KB entry
+    "weak_login_credentials": "default_credentials",
+    "weak_http_auth_credentials": "default_credentials",
+    "guessable_credentials": "default_credentials",
+    # Version / technology disclosure spellings
+    "technology_disclosure": "version_disclosure",
+    "dns_version_disclosure": "version_disclosure",
+    # Smuggling spellings
+    "http_smuggling_te_obfuscation": "request_smuggling",
+    # Request-handling / caching / CSRF / session (→ new KB entries above)
+    "csrf_missing_token": "csrf",
+    "csrf_token_missing": "csrf",
+    "oauth_state_reflected": "csrf",
+    "oauth_open_redirect": "open_redirect",
+    "session_fixation": "session_fixation",
+    "weak_session_id": "weak_session_management",
+    "predictable_session_id": "weak_session_management",
+    "host_header_injection": "host_header_injection",
+    "http_parameter_pollution": "http_parameter_pollution",
+    "cache_poisoning_unkeyed_header": "web_cache_poisoning",
+    "web_cache_poisoning": "web_cache_poisoning",
+    "web_cache_deception": "web_cache_deception",
+    "content_type_confusion": "x_content_type_missing",
+    "hidden_parameter_discovered": "info_disclosure",
+    # Auth anti-automation / password policy
+    "no_account_lockout": "missing_account_lockout",
+    "account_lockout_missing": "missing_account_lockout",
+    "weak_password_policy": "weak_password_policy",
+    # Email / SMTP posture (email_scanner + dns_recon spellings)
+    "smtp_open_relay": "open_mail_relay",
+    "spf_open_relay": "spf_missing",
+    "spf_soft_fail": "spf_missing",
+    "spf_too_many_lookups": "spf_missing",
+    "dmarc_policy_none": "dmarc_missing",
+    "dmarc_partial_rollout": "dmarc_missing",
+    "mta_sts_missing": "mta_sts_missing",
+    "no_mta_sts": "mta_sts_missing",
+    # DNS recon posture
+    "zone_transfer": "dns_zone_transfer",
+    "axfr_allowed": "dns_zone_transfer",
+    "dnssec_zone_walking": "dns_info",
+    "dns_wildcard": "dns_info",
+    "ptr_records_discovered": "dns_info",
+    "mx_dangling": "subdomain_takeover",
+    # Positive posture confirmations → informational "posture_ok" entry
+    "dnssec_enabled": "posture_ok",
+    "mta_sts_enabled": "posture_ok",
+    "tls_rpt_enabled": "posture_ok",
+    "account_lockout_detected": "posture_ok",
+    "lockout_inconclusive": "posture_ok",
 }
 
 # Representative CVSS v3.1 base vectors per canonical KB class. Kept as a single
@@ -1423,6 +1856,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "xss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
     "xss_stored": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:H/I:L/A:N",
     "idor": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    "broken_access_control": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
     "auth_bypass": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "default_credentials": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "exposed_database": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
@@ -1475,6 +1909,24 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "k8s_misconfiguration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:L",
     "k8s_secrets_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
     "privilege_escalation": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
+    "csrf": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:H/A:N",
+    "session_fixation": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N",
+    "weak_session_management": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "host_header_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "http_parameter_pollution": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "web_cache_poisoning": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:N",
+    "web_cache_deception": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N",
+    "open_mail_relay": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+    "mta_sts_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "weak_password_policy": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "missing_account_lockout": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "dns_zone_transfer": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "cleartext_service": "CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+    "snmp_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "snmp_default_community": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+    "cisco_smart_install": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "ipmi_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+    "posture_ok": "",
 }
 
 
@@ -1497,6 +1949,135 @@ def lookup(vuln_type: str) -> dict[str, Any]:
     if key in _KB:
         return _KB[key]
     return _KB.get(_ALIASES.get(key, ""), {})
+
+
+# ── Dynamic taxonomy fallback ───────────────────────────────────────────────
+#
+# Curated KB entries + aliases cover every class a HEAVEN detector currently
+# emits. But a report must never show blank CWE/OWASP/MITRE/CVSS-vector for a
+# *real* finding just because a class isn't individually curated (a new detector,
+# an imported third-party finding, an LLM-named type). This fallback derives the
+# standard taxonomy deterministically from keyword signals in the finding's
+# type/title — exactly the tagging a human analyst does when writing up a row.
+# It never invents a *finding*; it only labels one already detected. When no
+# keyword matches, CWE/OWASP are left blank (not guessed) and only a
+# severity-based CVSS vector is supplied.
+
+# Generic CVSS v3.1 vectors by severity band — the last-resort so the "CVSS
+# vector" column is populated even for an otherwise-unclassified finding.
+_GENERIC_CVSS_BY_SEVERITY: dict[str, str] = {
+    "critical": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "high":     "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "medium":   "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "low":      "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "info":     "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+}
+
+# Keyword → (CWE, OWASP, MITRE). First match wins, so ordered specific → generic.
+_KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
+    # Active Directory attack classes (attack_type mirrored into vuln_type).
+    (("kerberoast", "asrep", "as_rep", "dcsync", "kerberos", "golden_ticket",
+      "silver_ticket", "pass_the_hash"),
+     ("CWE-522", "A07:2021 Identification and Authentication Failures",
+      "T1558 — Steal or Forge Kerberos Tickets")),
+    (("smb_signing", "ntlm_relay", "smbv1", "null_session"),
+     ("CWE-522", "A05:2021 Security Misconfiguration",
+      "T1557 — Adversary-in-the-Middle")),
+    (("delegation", "rbcd", "machine_account", "adminsd", "acl_abuse"),
+     ("CWE-284", "A01:2021 Broken Access Control", "T1078 — Valid Accounts")),
+    (("anonymous_ldap", "domain_information"),
+     ("CWE-200", "A05:2021 Security Misconfiguration", "T1087 — Account Discovery")),
+    (("sql", "sqli"),
+     ("CWE-89", "A03:2021 Injection", "T1190 — Exploit Public-Facing Application")),
+    (("command_inj", "cmd_inj", "os_command", "rce", "remote_code", "code_exec", "code_inj"),
+     ("CWE-78", "A03:2021 Injection", "T1059 — Command and Scripting Interpreter")),
+    (("ssti", "template_inj"),
+     ("CWE-1336", "A03:2021 Injection", "T1059 — Command and Scripting Interpreter")),
+    (("xxe", "xml_ext", "xml_entity"),
+     ("CWE-611", "A05:2021 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
+    (("xss", "cross_site_script"),
+     ("CWE-79", "A03:2021 Injection", "T1059.007 — JavaScript")),
+    (("ssrf",),
+     ("CWE-918", "A10:2021 Server-Side Request Forgery", "T1190 — Exploit Public-Facing Application")),
+    (("csrf", "cross_site_request"),
+     ("CWE-352", "A01:2021 Broken Access Control", "T1189 — Drive-by Compromise")),
+    (("idor", "insecure_direct", "bola", "object_reference"),
+     ("CWE-639", "A01:2021 Broken Access Control", "T1190 — Exploit Public-Facing Application")),
+    (("access_control", "authz", "authorization", "forced_brows", "priv_esc",
+      "privilege_esc", "unauthenticated", "missing_auth"),
+     ("CWE-284", "A01:2021 Broken Access Control", "T1190 — Exploit Public-Facing Application")),
+    (("path_travers", "directory_travers", "lfi", "rfi", "file_inclusion"),
+     ("CWE-22", "A01:2021 Broken Access Control", "T1083 — File and Directory Discovery")),
+    (("open_redirect", "unvalidated_redirect"),
+     ("CWE-601", "A01:2021 Broken Access Control", "T1566 — Phishing")),
+    (("jwt", "token_forge", "alg_none", "alg_confusion"),
+     ("CWE-347", "A02:2021 Cryptographic Failures", "T1552 — Unsecured Credentials")),
+    (("session",),
+     ("CWE-384", "A07:2021 Identification and Authentication Failures", "T1539 — Steal Web Session Cookie")),
+    (("cookie",),
+     ("CWE-1004", "A05:2021 Security Misconfiguration", "T1539 — Steal Web Session Cookie")),
+    (("cache_poison", "cache_decept", "smuggl"),
+     ("CWE-444", "A05:2021 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
+    (("host_header", "parameter_pollution", "hpp", "header_inj", "crlf", "response_split"),
+     ("CWE-113", "A03:2021 Injection", "T1190 — Exploit Public-Facing Application")),
+    (("cors",),
+     ("CWE-942", "A05:2021 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
+    (("csp", "clickjack", "x_frame", "security_header", "hsts", "content_type",
+      "referrer_policy", "permissions_policy", "dangerous_method", "method_override",
+      "trace", "options"),
+     ("CWE-693", "A05:2021 Security Misconfiguration", "T1185 — Browser Session Hijacking")),
+    (("default_cred", "weak_cred", "default_password", "guessable"),
+     ("CWE-1392", "A07:2021 Identification and Authentication Failures", "T1078.001 — Default Accounts")),
+    (("password", "credential", "login", "brute", "lockout", "spray", "auth_bypass"),
+     ("CWE-307", "A07:2021 Identification and Authentication Failures", "T1110 — Brute Force")),
+    (("tls", "ssl", "cipher", "certificate", "cert_", "forward_secrecy", "starttls"),
+     ("CWE-326", "A02:2021 Cryptographic Failures", "T1040 — Network Sniffing")),
+    (("spf", "dmarc", "dkim", "mail_relay", "open_relay", "mta_sts", "spoof"),
+     ("CWE-16", "A05:2021 Security Misconfiguration", "T1566 — Phishing")),
+    (("dnssec", "zone_transfer", "axfr", "dns_"),
+     ("CWE-350", "A05:2021 Security Misconfiguration", "T1590 — Gather Victim Network Information")),
+    (("snmp", "community"),
+     ("CWE-1188", "A05:2021 Security Misconfiguration", "T1602 — Data from Configuration Repository")),
+    (("telnet", "cleartext", "plaintext", "unencrypted", "ftp", "rlogin", "rsh"),
+     ("CWE-319", "A02:2021 Cryptographic Failures", "T1040 — Network Sniffing")),
+    (("rate_limit", "resource_exhaust", "flood", "dos"),
+     ("CWE-770", "A04:2021 Insecure Design", "T1499 — Endpoint Denial of Service")),
+    (("mass_assign", "auto_bind"),
+     ("CWE-915", "A08:2021 Software and Data Integrity Failures", "T1190 — Exploit Public-Facing Application")),
+    (("deserial",),
+     ("CWE-502", "A08:2021 Software and Data Integrity Failures", "T1190 — Exploit Public-Facing Application")),
+    (("outdated", "vulnerable_comp", "known_vuln", "eol", "end_of_life", "cve"),
+     ("CWE-1104", "A06:2021 Vulnerable and Outdated Components", "T1190 — Exploit Public-Facing Application")),
+    (("docker", "container", "kubernetes", "k8s", "kubelet", "etcd"),
+     ("CWE-284", "A05:2021 Security Misconfiguration", "T1610 — Deploy Container")),
+    (("exposed", "public", "listing", "backup", "sensitive_file", "disclosure",
+      "version", "banner", "leak", "secret", "info"),
+     ("CWE-200", "A05:2021 Security Misconfiguration", "T1592 — Gather Victim Host Information")),
+    (("misconfig", "insecure_config", "debug", "verbose"),
+     ("CWE-16", "A05:2021 Security Misconfiguration", "T1592 — Gather Victim Host Information")),
+]
+
+
+def _dynamic_taxonomy(finding: dict) -> dict:
+    """Best-effort CWE/OWASP/MITRE for a finding whose exact class isn't curated,
+    derived from keyword signals in its type/title. ``{}`` when nothing matches
+    (so CWE/OWASP are left blank rather than guessed)."""
+    hay = normalize_key(
+        f"{finding.get('vuln_type', '') or finding.get('type', '')}_"
+        f"{finding.get('title', '')}"
+    )
+    if not hay:
+        return {}
+    for keywords, (cwe, owasp, mitre) in _KEYWORD_TAXONOMY:
+        if any(k in hay for k in keywords):
+            return {"cwe": cwe, "owasp": owasp, "mitre": mitre}
+    return {}
+
+
+def _generic_cvss_for_severity(severity: str) -> str:
+    """A conservative CVSS v3.1 vector for a severity band — last-resort so the
+    vector column is never blank for an unclassified finding."""
+    return _GENERIC_CVSS_BY_SEVERITY.get((severity or "").strip().lower(), "")
 
 
 # ── Dynamic, per-CVE remediation for known-vulnerable-component findings ──
@@ -1799,10 +2380,28 @@ def enrich_finding(finding: dict) -> dict:
     if not out.get("owasp") and entry.get("owasp"):
         out["owasp"] = entry["owasp"]
 
+    # Dynamic fallback: a real finding whose exact class isn't curated still gets
+    # the standard taxonomy for its class, derived from its type/title keywords —
+    # so the report is never blank. Only applied when the KB had NO entry at all;
+    # a curated entry with an intentionally-blank field (informational / positive
+    # posture) is left exactly as authored.
+    if not entry:
+        dyn = _dynamic_taxonomy(out)
+        if dyn:
+            if not out.get("cwe"):
+                out["cwe"] = dyn["cwe"]
+            if not out.get("owasp"):
+                out["owasp"] = dyn["owasp"]
+            if not out.get("mitre_technique"):
+                out["mitre_technique"] = dyn["mitre"]
+
     # A representative CVSS vector for the class so the report's "CVSS vector"
-    # column is populated for every known class, not just a handful.
+    # column is populated for every known class — and, for an uncurated class, a
+    # conservative severity-based vector rather than a blank cell.
     if not out.get("cvss_vector"):
         vec = cvss_vector_for(finding.get("vuln_type", ""))
+        if not vec and not entry:
+            vec = _generic_cvss_for_severity(out.get("severity", ""))
         if vec:
             out["cvss_vector"] = vec
 

@@ -1481,6 +1481,34 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="network", timeout=300,
     )
 
+    # ═══ Phase: NETWORK SERVICE EXPOSURE ═══
+    # Turn the discovered port/service inventory into real findings for network
+    # devices (routers/switches/firewalls) and hosts: cleartext management
+    # protocols (Telnet/FTP/r-services/TFTP), SNMP exposure with an active
+    # READ-ONLY default-community probe, and high-risk appliance planes
+    # (Cisco Smart Install, IPMI). Without this a scan of a Cisco router produced
+    # only an inventory and no findings. Runs wherever network recon runs.
+    async def _net_exposure_scan(**kw):
+        try:
+            from heaven.recon.network_exposure import analyze_network_exposure
+        except ImportError:
+            return {}
+        net_res = orch.results.get(orch.net_task_id or "")
+        if not (net_res and net_res.data and isinstance(net_res.data, dict)):
+            return {"skipped": True, "reason": "no network recon data"}
+        # Active SNMP default-community probe is a plain read; keep it on unless a
+        # very stealthy profile is selected (then passive detection only).
+        active = str(targets.get("stealth_level", "normal")).lower() not in (
+            "paranoid", "max", "maximum")
+        return await analyze_network_exposure(net_res.data, active_snmp=active)
+
+    orch.add_task(
+        "Network Service Exposure", _net_exposure_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id],
+        modes=NET_MODES,
+        concurrency_group="network", timeout=300,
+    )
+
     # ═══ Phase: AUTH SCANNER ═══
     async def _auth_scan(**kw):
         try:

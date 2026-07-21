@@ -262,6 +262,12 @@ class HeavenConfig:
         dd = _env("HEAVEN_DATA_DIR", None)
         if dd:
             self.data_dir = Path(dd)
+            # Keep the tamper-evident audit trail under the relocated data dir
+            # too, unless the operator pinned an explicit audit location. Without
+            # this, HEAVEN_DATA_DIR moved engagements/reports but left audit logs
+            # writing to the CWD-relative default.
+            if self.security.audit_log_dir == Path("data/audit"):
+                self.security.audit_log_dir = self.data_dir / "audit"
         sm = _env("HEAVEN_SCAN_MODE", None)
         if sm:
             try:

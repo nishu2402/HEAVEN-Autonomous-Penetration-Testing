@@ -159,13 +159,11 @@ class TestRenameAPI:
 
     @pytest.fixture
     def client(self, tmp_path, monkeypatch):
-        from heaven.config import get_config
-        # data_dir is a relative Path("data") by default, resolved against cwd on
-        # every fs op — so chdir isolates it. If an env override made it absolute,
-        # skip rather than write into a real data dir.
-        if get_config().data_dir.is_absolute():
-            pytest.skip("HEAVEN_DATA_DIR is absolute; skip to avoid polluting it")
-        monkeypatch.chdir(tmp_path)
+        # The suite-wide _isolate_data_dir fixture (tests/conftest.py) already
+        # points data_dir at an isolated per-test temp dir, so seeding + renaming
+        # here never touches the real ./data. (Previously this fixture relied on
+        # chdir, which only isolates a *relative* data_dir, and skipped when an
+        # absolute HEAVEN_DATA_DIR was set.)
         monkeypatch.setenv("HEAVEN_DISABLE_AUTH", "1")
         from fastapi.testclient import TestClient
 

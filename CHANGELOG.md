@@ -90,6 +90,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Internal / IP-only targets came back empty even when riddled with holes.**
+  Two engine gaps meant scanning a bare IP (the normal case for an internal
+  network) could report *nothing*, and both are fixed:
+  - **nmap now runs with `-Pn`** (assume the authorized host is online). Windows
+    boxes, firewalled hosts and hardened Linux routinely drop nmap's discovery
+    ping, so without `-Pn` nmap declared them "down" and scanned **zero** ports —
+    the exact "I know it's vulnerable but the scan found nothing" symptom.
+    Liveness is now inferred from a real probe reason or an actually-responding
+    port, so `-Pn` doesn't fake a dead address as alive.
+  - **Open web ports on a bare-IP target now flow into the web scanners.** The
+    crawler, injection (XSS/SQLi), auth, fuzzer, misconfig and exposure checks
+    only ran against URLs; a bare IP had none, so a discovered HTTP(S) service
+    was port-listed but never web-tested. After recon, HEAVEN now derives a URL
+    from each open web port (`http(s)://host:port`), crawls it, and feeds it to
+    the full web pipeline — deduped against URLs you already supplied, and only
+    in modes whose pipeline includes web scanners (FULL/WEB/API). Live-proven:
+    scanning a bare IP that hosts a weak web app went from a bare port list to
+    28 findings (confirmed reflected XSS, missing security headers, a
+    known-vulnerable Apache).
+  - **Scan-privilege transparency.** When nmap runs without raw sockets it can't
+    do SYN/UDP/OS scans (open ports are still found via TCP connect). HEAVEN now
+    says so plainly in the scan summary and prints the **exact, platform-correct**
+    one-time command to unlock full detection — macOS gets `sudo`/passwordless-sudo
+    guidance instead of the Linux-only `setcap` (which doesn't exist on macOS). A
+    new `scan_capability()` is the single source, also exposed on the network-scan
+    result (`scan_privilege`).
+- **CVE findings showed a blank Target in the CLI table and kill chain.** A
+  version-matched CVE carried `host`/`port` but no `target`, so a CRITICAL row
+  rendered with an empty target column (the persisted record was fine). Every
+  CVE finding is now attributed to its concrete `host:port`.
 - **Test suite polluted the operator's live engagement.** The `/api/sca`
   smoke-test did not isolate its data directory, so every full-suite run
   persisted a `SCA: test_…` junk scan into the real active engagement DB under

@@ -222,6 +222,52 @@ def _nmap_sudo_prefix() -> tuple[str, ...]:
         return ()
 
 
+@functools.lru_cache(maxsize=1)
+def scan_capability() -> dict:
+    """Report whether nmap can run *privileged* scans on this host, and — when it
+    can't — the exact, platform-correct one-time command to enable them.
+
+    SYN (``-sS``), UDP (``-sU``) and OS fingerprinting (``-O``) all need raw
+    sockets. When those are unavailable HEAVEN still finds open ports via a TCP
+    connect scan and infers the OS from TTL/service heuristics (always labelled
+    unconfirmed), so the scan degrades honestly rather than failing. This exposes
+    that state to the CLI/web/report so the operator sees *why* results are
+    limited and *how* to unlock the rest — instead of a silent quality drop.
+
+    ``remedy`` is empty when already privileged. Cached: the answer (root token /
+    passwordless-sudo availability / platform) can't change mid-process.
+    """
+    root = _have_admin_privileges()
+    via_sudo = bool(_nmap_sudo_prefix())
+    capable = root or via_sudo
+    if capable:
+        remedy = ""
+    elif sys.platform == "darwin":
+        # macOS has no `setcap`; raw sockets require root. Passwordless sudo for
+        # nmap + HEAVEN_NMAP_SUDO=always is the no-per-run-prompt path, and
+        # `sudo heaven …` is the zero-setup fallback.
+        remedy = (
+            "macOS needs root for raw sockets — run `sudo heaven scan …`, or set "
+            "up passwordless sudo for nmap and export HEAVEN_NMAP_SUDO=always"
+        )
+    elif sys.platform.startswith("win"):
+        remedy = "run your terminal as Administrator, then re-run the scan"
+    else:  # Linux / other *nix: grant nmap the capability once, no per-scan sudo.
+        remedy = (
+            "grant nmap raw-socket capability once (no sudo per scan): "
+            "sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip "
+            "$(command -v nmap)"
+        )
+    return {
+        "raw_capable": capable,
+        "method": "root" if root else ("sudo" if via_sudo else "unprivileged"),
+        "os_scan": capable,
+        "syn_scan": capable,
+        "udp_scan": capable,
+        "remedy": remedy,
+    }
+
+
 _PRIVILEGE_HINT_LOGGED = False
 
 
@@ -235,11 +281,8 @@ def _log_privilege_hint_once() -> None:
     logger.info(
         "nmap OS fingerprinting (-O) and SYN/UDP scans need raw-socket "
         "privileges; running unprivileged, so OS is inferred from service/TTL "
-        "heuristics and labelled 'unconfirmed'. For authoritative results: run "
-        "as root, enable passwordless sudo (HEAVEN_NMAP_SUDO=always), or grant "
-        "nmap capabilities — "
-        "sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip "
-        "$(command -v nmap)"
+        "heuristics and labelled 'unconfirmed'. To enable: %s",
+        scan_capability()["remedy"],
     )
 
 
@@ -364,6 +407,15 @@ async def scan_host(
     # ── nmap command ──────────────────────────────────────────────────────────
     # -sV  : service / version detection
     # -sC  : run default NSE scripts (banner grab, vuln checks, auth testing)
+    # -Pn  : treat the host as ONLINE — skip host discovery (ping). This is the
+    #        single most important flag for INTERNAL / enterprise targets: hosts
+    #        behind a firewall, Windows machines (ICMP echo blocked by default),
+    #        and hardened Linux boxes routinely drop nmap's discovery probes, so
+    #        without -Pn nmap declares them "down" and scans ZERO ports — the
+    #        classic "I know it's vulnerable but the scan found nothing" symptom.
+    #        The scan already required explicit authorization for these targets,
+    #        so we scan them directly. --host-timeout below bounds the worst case
+    #        (a genuinely dead address in a CIDR range) so this can't hang.
     # -O   : OS fingerprinting     (raw sockets — added only when raw_capable)
     # -sS/-sU : SYN + UDP scanning  (raw sockets — added only when raw_capable)
     # -oX  : XML output → stdout for parsing
@@ -384,7 +436,7 @@ async def scan_host(
         port_args = ["-p", port_str]
 
     cmd = [
-        *sudo_prefix, "nmap", "-sV", "-sC", *os_flag, *scan_flags, *port_args,
+        *sudo_prefix, "nmap", "-sV", "-sC", "-Pn", *os_flag, *scan_flags, *port_args,
         "-oX", "-", "--host-timeout", "30m", *timing, host,
     ]
 
@@ -403,8 +455,19 @@ async def scan_host(
                     xml_root = _safe_xml_fromstring(stdout)
 
                     # ── Host liveness ─────────────────────────────────────────
+                    # With -Pn nmap always reports state="up" reason="user-set"
+                    # (we told it to skip discovery), so "up" alone no longer
+                    # proves the host is reachable. Trust a real probe reason
+                    # (echo-reply / syn-ack / arp-response …); otherwise defer
+                    # liveness to "did any port actually respond?" — set below
+                    # once the open-port list is parsed. This keeps alive_hosts
+                    # honest instead of counting every scanned address as alive.
                     status = xml_root.find(".//status")
-                    if status is not None and status.get("state") == "up":
+                    _status_up = status is not None and status.get("state") == "up"
+                    _probe_confirmed = (
+                        _status_up and (status.get("reason") or "") not in ("", "user-set")
+                    )
+                    if _probe_confirmed:
                         host_result.is_alive = True
 
                     # ── Open ports + service info ─────────────────────────────
@@ -473,6 +536,12 @@ async def scan_host(
                             fingerprint=script_output,
                         )
                         host_result.open_ports.append(pr)
+
+                    # Any port that answered proves the host is genuinely
+                    # reachable — the honest liveness signal under -Pn, where the
+                    # "up" status itself is just our forced flag (see above).
+                    if host_result.open_ports:
+                        host_result.is_alive = True
 
                     # ── OS detection (three honestly-labelled tiers) ──────────
                     # 1. nmap -O TCP/IP stack fingerprint → authoritative, with
@@ -668,6 +737,9 @@ async def scan_network(
         "alive_hosts": sum(1 for h in host_results if h.is_alive),
         "honeypots_skipped": honeypots_skipped,
         "platform": sys.platform,
+        # Whether this run could do SYN/UDP/OS scans, and (if not) how to enable
+        # them — so the CLI/report can be honest about scan depth on this host.
+        "scan_privilege": scan_capability(),
     }
 
     if ctf:

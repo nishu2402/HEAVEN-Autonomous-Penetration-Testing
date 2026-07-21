@@ -90,6 +90,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scan reports and the audit trail now honour the configured data directory.**
+  The report writer hard-coded a current-directory-relative `data/` for
+  `report_<id>.json`/`.sarif`, while the API's report-download endpoint reads them
+  from `get_config().data_dir`. When `HEAVEN_DATA_DIR` was set — or the API server
+  ran from a different working directory than the CLI scan — the writer and reader
+  diverged and report download returned 404. Likewise the tamper-evident audit
+  logger always wrote to a CWD-relative `data/audit/`, ignoring `HEAVEN_DATA_DIR`.
+  All three now resolve the same configured data dir (default `data/`, unchanged),
+  so reports download regardless of where the scan ran and the audit trail follows
+  a relocated data directory. The test suite is also isolated to a temp data dir
+  so running the tests no longer appends test entries into a real audit log.
 - **Real findings *still* showed blank CWE / OWASP / MITRE / CVSS-vector.** The
   earlier fix only stopped attack-plan artifacts; genuine findings whose
   `vuln_type` was simply not in the knowledge base (e.g. the OPTIONS-methods

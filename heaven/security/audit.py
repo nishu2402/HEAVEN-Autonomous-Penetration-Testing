@@ -198,5 +198,14 @@ _audit_logger: Optional[AuditLogger] = None
 def get_audit_logger() -> AuditLogger:
     global _audit_logger
     if _audit_logger is None:
-        _audit_logger = AuditLogger()
+        # Resolve the audit directory from config so the trail honours
+        # HEAVEN_DATA_DIR / an operator-pinned audit dir instead of always
+        # writing to the CWD-relative default.
+        log_dir: Optional[Path] = None
+        try:
+            from heaven.config import get_config
+            log_dir = get_config().security.audit_log_dir
+        except Exception:  # pragma: no cover - config import is reliable in practice
+            log_dir = None
+        _audit_logger = AuditLogger(log_dir=log_dir)
     return _audit_logger

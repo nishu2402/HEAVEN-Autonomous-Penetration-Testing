@@ -303,3 +303,28 @@ def test_burp_export_via_cli_module(tmp_path):
     comment = item.find("comment").text
     assert "sqli" in comment
     assert "critical" in comment
+
+
+def test_generate_report_honors_configured_data_dir(tmp_path, monkeypatch):
+    """Reports must be written under get_config().data_dir so the writer stays
+    consistent with the API download reader (server.py resolves the same way)
+    and honours HEAVEN_DATA_DIR. Previously the path was a hardcoded CWD-relative
+    'data/', so a relocated data dir left the API unable to find the report."""
+    from pathlib import Path
+    from types import SimpleNamespace
+    import heaven.config as cfg
+    from heaven.devsecops.aggregator import generate_report
+
+    # generate_report imports get_config at call time, so patching the module
+    # attribute is sufficient and avoids mutating the real config singleton.
+    monkeypatch.setattr(cfg, "get_config",
+                        lambda: SimpleNamespace(data_dir=tmp_path))
+
+    result = asyncio.run(generate_report(
+        scan_id="rpt-path-1", scan_data={"vulnerabilities": []}))
+
+    jp = Path(result["json_report"])
+    sp = Path(result["sarif_report"])
+    assert jp == tmp_path / "report_rpt-path-1.json"
+    assert sp == tmp_path / "report_rpt-path-1.sarif"
+    assert jp.exists() and sp.exists()

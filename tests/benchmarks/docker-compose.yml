@@ -18,8 +18,14 @@ services:
       # internet if the host is exposed — could pop the machine running the
       # benchmark. The benchmark only ever reaches it via localhost:8080.
       - "127.0.0.1:8080:80"
+    # This image ships neither curl nor wget (it is a 2017-era Debian build), so
+    # the obvious `CMD curl -sf …` can never run: every probe dies with
+    # `exec: "curl": executable file not found` and pins the container at
+    # "unhealthy" forever while the app serves perfectly. bash *is* present, so
+    # probe over /dev/tcp. Not CMD-SHELL — /bin/sh here is dash, which has no
+    # /dev/tcp support.
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost/login.php"]
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/80; printf "GET /login.php HTTP/1.0\r\n\r\n" >&3; head -1 <&3 | grep -q "200 OK"']
       interval: 5s
       timeout: 3s
       retries: 12

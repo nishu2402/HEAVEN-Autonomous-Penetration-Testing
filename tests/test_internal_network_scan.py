@@ -63,6 +63,166 @@ class TestNmapAssumesHostOnline:
         assert h.is_alive is False
 
 
+# ── CIDR scanning: discover-first, scan concurrently, return partial ────────
+# A /24 expands to 254 addresses. The old code scanned them one-at-a-time and,
+# under -Pn, full-scanned every dead one — so a Network Recon task hit its 300s
+# deadline and returned NOTHING ("it's vulnerable but the scan shows nothing").
+
+class TestCidrDiscoveryAndConcurrency:
+    def test_broad_range_discovers_then_scans_only_live(self, monkeypatch):
+        """A CIDR wider than the discovery threshold must sweep for live hosts
+        and deep-scan ONLY the ones that answered — not all 254 dead addresses."""
+        import asyncio
+        from heaven.recon import network_scanner as ns
+
+        scanned: list[str] = []
+
+        async def fake_scan_host(host, ports, **kw):
+            scanned.append(host)
+            r = ns.HostResult(host=host)
+            r.is_alive = True
+            return r
+
+        async def fake_discover(raw, expanded, timeout=2.0):
+            assert len(expanded) > ns._DISCOVERY_THRESHOLD
+            return ["192.168.1.10", "192.168.1.20"]
+
+        monkeypatch.setattr(ns, "scan_host", fake_scan_host)
+        monkeypatch.setattr(ns, "_discover_live_hosts", fake_discover)
+
+        out = asyncio.run(ns.scan_network(["192.168.1.0/24"], port_range="80"))
+
+        assert set(scanned) == {"192.168.1.10", "192.168.1.20"}, scanned
+        assert out["discovery"] == {"range_size": 254, "hosts_up": 2}
+        assert out["total_hosts"] == 2
+
+    def test_small_explicit_list_skips_discovery(self, monkeypatch):
+        """A handful of explicitly-named hosts is scanned directly (with -Pn) —
+        discovery must NOT run, so a firewalled host the operator named isn't
+        pruned away by a liveness sweep."""
+        import asyncio
+        from heaven.recon import network_scanner as ns
+
+        scanned: list[str] = []
+        disco_calls = {"n": 0}
+
+        async def fake_scan_host(host, ports, **kw):
+            scanned.append(host)
+            r = ns.HostResult(host=host)
+            r.is_alive = True
+            return r
+
+        async def fake_discover(raw, expanded, timeout=2.0):
+            disco_calls["n"] += 1
+            return expanded
+
+        monkeypatch.setattr(ns, "scan_host", fake_scan_host)
+        monkeypatch.setattr(ns, "_discover_live_hosts", fake_discover)
+
+        asyncio.run(ns.scan_network(["10.0.0.1", "10.0.0.2", "10.0.0.3"], port_range="80"))
+
+        assert disco_calls["n"] == 0
+        assert set(scanned) == {"10.0.0.1", "10.0.0.2", "10.0.0.3"}
+
+    def test_hosts_are_scanned_concurrently(self, monkeypatch):
+        """Two hosts that each take ~0.2s must finish together (concurrent), not
+        serialized to ~0.4s — the old sequential loop was the CIDR bottleneck."""
+        import asyncio
+        import time
+        from heaven.recon import network_scanner as ns
+
+        async def slow_scan_host(host, ports, **kw):
+            await asyncio.sleep(0.2)
+            r = ns.HostResult(host=host)
+            r.is_alive = True
+            return r
+
+        monkeypatch.setattr(ns, "scan_host", slow_scan_host)
+
+        t0 = time.monotonic()
+        out = asyncio.run(ns.scan_network(["10.0.0.1", "10.0.0.2"], port_range="80"))
+        elapsed = time.monotonic() - t0
+
+        assert out["total_hosts"] == 2
+        assert elapsed < 0.35, f"hosts were not scanned concurrently ({elapsed:.2f}s)"
+
+    def test_time_budget_returns_partial_results(self, monkeypatch):
+        """When the deep-scan time budget elapses, hosts still running are
+        stopped and the finished ones are STILL returned — partial beats none."""
+        import asyncio
+        from heaven.recon import network_scanner as ns
+
+        async def uneven_scan_host(host, ports, **kw):
+            await asyncio.sleep(0.05 if host.endswith(".1") else 5.0)
+            r = ns.HostResult(host=host)
+            r.is_alive = True
+            return r
+
+        monkeypatch.setattr(ns, "scan_host", uneven_scan_host)
+
+        out = asyncio.run(ns.scan_network(
+            ["10.0.0.1", "10.0.0.2"], port_range="80", time_budget=0.5,
+        ))
+        assert out["total_hosts"] == 1
+        assert out["hosts_timed_out"] == 1
+
+
+class TestDiscoveryHelpers:
+    def test_tcp_ping_sweep_returns_only_responders(self, monkeypatch):
+        """The pure-Python liveness fallback marks a host live only if a TCP
+        connect on some common port actually succeeds."""
+        import asyncio
+        from heaven.recon import network_scanner as ns
+
+        live_host = "10.0.0.7"
+
+        async def fake_open_connection(host, port):
+            if host == live_host and port == 80:
+                class _W:
+                    def close(self):
+                        pass
+
+                    async def wait_closed(self):
+                        pass
+                return (object(), _W())
+            raise OSError("refused")
+
+        monkeypatch.setattr(ns.asyncio, "open_connection", fake_open_connection)
+        got = asyncio.run(ns._tcp_ping_sweep(["10.0.0.7", "10.0.0.8"], timeout=0.2))
+        assert got == ["10.0.0.7"]
+
+    def test_nmap_ping_sweep_absent_nmap_returns_none(self, monkeypatch):
+        """No nmap on PATH → the nmap sweep bows out (None) so the caller falls
+        back to the TCP probe."""
+        import asyncio
+        from heaven.recon import network_scanner as ns
+
+        monkeypatch.setattr(ns.shutil, "which", lambda _n: None)
+        got = asyncio.run(ns._nmap_ping_sweep(["192.168.1.0/24"], ["192.168.1.1"]))
+        assert got is None
+
+
+class TestNetworkTaskTimeoutScales:
+    def test_cidr_gets_a_larger_timeout_and_budget(self):
+        """build_full_scan must scale the Network Recon deadline to the size of
+        the range (a /24 needs far more than the 300s single-host default) and
+        pass a time_budget below that deadline so partial results survive."""
+        targets = {"ips": ["192.168.1.0/24"], "urls": [], "ports": "1-1000",
+                   "stealth_level": "normal"}
+        orch = build_full_scan(targets, scan_mode=ScanMode.NETWORK)
+        net = [t for t in orch.tasks.values() if t.name == "Network Reconnaissance"][0]
+        assert net.timeout > 300.0
+        budget = net.kwargs.get("time_budget")
+        assert budget and budget < net.timeout
+
+    def test_single_host_keeps_default_timeout(self):
+        targets = {"ips": ["10.0.0.9"], "urls": [], "ports": "1-1000",
+                   "stealth_level": "normal"}
+        orch = build_full_scan(targets, scan_mode=ScanMode.NETWORK)
+        net = [t for t in orch.tasks.values() if t.name == "Network Reconnaissance"][0]
+        assert net.timeout == 300.0
+
+
 # ── Privilege capability is reported honestly + actionably ──────────────────
 
 class TestScanCapability:

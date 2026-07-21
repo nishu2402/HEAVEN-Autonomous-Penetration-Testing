@@ -31,6 +31,7 @@ def _collect_engagement_assets(engagement: Optional[str],
     scans = ([store.get_scan(scan_id)] if scan_id
              else store.list_scans(limit=200))  # newest first
     raw: list[dict] = []
+    fallback: list[dict] = []  # newest asset-bearing scan, used only if none has ports
     for s in scans:
         if not s:
             continue
@@ -44,10 +45,18 @@ def _collect_engagement_assets(engagement: Optional[str],
         found = [a for a in (summ.get("assets") or []) if isinstance(a, dict)]
         if not found:
             continue
-        raw.extend(found)
-        if not all_scans and not scan_id:
-            break  # default: only the most recent scan that carries assets
-    return raw
+        if all_scans or scan_id:
+            raw.extend(found)
+            continue
+        # Default view: pick the most recent scan that actually found open ports.
+        # A dead/mistyped host records a host row with zero ports; defaulting to
+        # it made the inventory look empty even when an earlier scan had data.
+        has_ports = any(a.get("open_ports") or a.get("ports") for a in found)
+        if has_ports:
+            return found
+        if not fallback:
+            fallback = found
+    return raw if (all_scans or scan_id) else fallback
 
 
 @click.command()

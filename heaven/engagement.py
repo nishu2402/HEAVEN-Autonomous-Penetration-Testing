@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -506,6 +507,43 @@ def _confidence_bucket(conf: float) -> str:
     return "tentative"
 
 
+# A bare MITRE ATT&CK technique id (``T1190``, ``T1059.001``). No real detector
+# ever types a finding this way — descriptive types like ``csp_missing`` /
+# ``sql_injection`` are used instead. The only thing that does is the AI
+# attack-chain planner, whose *hypothetical* steps are converted for the
+# kill-chain analyzer with ``vuln_type = technique_id`` (see
+# ``attack_chain_planner.plan_to_killchain_findings``). When those steps leaked
+# into the collected findings they persisted as pseudo-findings whose vuln_type
+# misses every knowledge-base lookup, so CWE / OWASP / MITRE / CVSS-vector all
+# rendered blank and confidence showed 0.00 — exactly the "most findings are
+# empty" symptom. They are plans, not observations, and must never be stored,
+# reported or counted as findings.
+_MITRE_TECHNIQUE_RE = re.compile(r"^t\d{3,}(?:\.\d{1,3})?$", re.IGNORECASE)
+
+# SQL twin of :func:`is_attack_plan_artifact` for headline COUNT queries, so a
+# leaked planner step (vuln_type = a bare MITRE technique id) never inflates the
+# finding counts the dashboard chip, stats and scan cards show — keeping every
+# count in sync with the filtered findings list. GLOB is case-sensitive, so both
+# cases are covered; "T" + 3 digits mirrors the regex's ``\d{3,}``.
+_NOT_ARTIFACT_SQL = (
+    "vuln_type NOT GLOB 'T[0-9][0-9][0-9]*' "
+    "AND vuln_type NOT GLOB 't[0-9][0-9][0-9]*'"
+)
+
+
+def is_attack_plan_artifact(f: dict) -> bool:
+    """True when a finding dict is really a leaked attack-chain *planner step*.
+
+    Detected either by its explicit marker (fresh, in-memory) or by a vuln_type
+    that is a bare MITRE technique id (survives a DB round-trip that strips the
+    underscore-prefixed marker). Such entries are hypotheses, not detections.
+    """
+    if f.get("_attack_plan_step"):
+        return True
+    vt = (f.get("vuln_type") or f.get("type") or "").strip()
+    return bool(_MITRE_TECHNIQUE_RE.match(vt))
+
+
 def _is_junk_finding(f: dict) -> bool:
     """True for reportless noise: a finding carrying no usable type, no
     evidence, and no confidence signal — e.g. a stray log line or docstring that
@@ -514,6 +552,10 @@ def _is_junk_finding(f: dict) -> bool:
     genuine finding always has at least one of the three — so it never drops a
     real result.
     """
+    # An attack-chain planner step is a hypothesis, not an observation — never a
+    # persistable finding, regardless of the evidence/confidence it carries.
+    if is_attack_plan_artifact(f):
+        return True
     vt = (f.get("vuln_type") or f.get("type") or "").strip().lower()
     target = (f.get("target") or f.get("target_url") or f.get("host") or "").strip()
     # A CVE finding that names no host/target points a vulnerability at nothing —
@@ -872,12 +914,52 @@ class EngagementStore:
             return entries
 
     def is_in_scope(self, target: str) -> bool:
-        """Check if a target is explicitly authorized in this engagement."""
+        """Check if a target is explicitly authorized in this engagement.
+
+        Matches exactly first (covers URLs / hostnames / an exact IP or CIDR
+        entry). Then, for an IP or CIDR target, also authorizes it when it falls
+        *inside* an in-scope CIDR — so adding ``192.168.1.0/24`` to scope covers
+        every host in it, and a bare IP within a scoped range passes. This only
+        ever authorizes a target contained by an authorized range; it never
+        widens scope to something broader than what was authorized."""
+        import ipaddress
+        from urllib.parse import urlparse
+
         with self._conn() as c:
             row = c.execute(
                 "SELECT in_scope FROM scope WHERE target = ?", (target,)
             ).fetchone()
-            return bool(row and row["in_scope"])
+            if row is not None:
+                return bool(row["in_scope"])
+
+            # Range containment: derive an IP/CIDR from the target (a bare IP or
+            # CIDR, or the host of a URL). A non-IP hostname can't be
+            # range-matched, so it's out of scope unless matched exactly above.
+            probe = target
+            if "://" in probe:
+                probe = urlparse(probe).hostname or ""
+            try:
+                t_net = ipaddress.ip_network(probe, strict=False)
+            except ValueError:
+                return False
+
+            for r in c.execute(
+                "SELECT target FROM scope WHERE in_scope = 1"
+            ).fetchall():
+                cand = r["target"]
+                if "://" in cand:
+                    cand = urlparse(cand).hostname or ""
+                try:
+                    c_net = ipaddress.ip_network(cand, strict=False)
+                except ValueError:
+                    continue
+                try:
+                    # subnet_of raises TypeError across IPv4/IPv6 — caught below.
+                    if t_net.subnet_of(c_net):  # type: ignore[arg-type]
+                        return True
+                except TypeError:
+                    continue  # mixed IPv4 / IPv6 — not comparable
+            return False
 
     def criticality_for_target(self, target: str) -> str:
         """Look up the criticality tag for a target. Returns 'medium' (the
@@ -990,7 +1072,8 @@ class EngagementStore:
         with self._conn() as c:
             row = c.execute(
                 "SELECT *, "
-                "(SELECT COUNT(*) FROM findings WHERE findings.scan_id = scans.id) "
+                "(SELECT COUNT(*) FROM findings WHERE findings.scan_id = scans.id "
+                f"AND {_NOT_ARTIFACT_SQL}) "
                 "AS findings_count "
                 "FROM scans WHERE id = ?",
                 (scan_id,),
@@ -1002,7 +1085,8 @@ class EngagementStore:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT *, "
-                "(SELECT COUNT(*) FROM findings WHERE findings.scan_id = scans.id) "
+                "(SELECT COUNT(*) FROM findings WHERE findings.scan_id = scans.id "
+                f"AND {_NOT_ARTIFACT_SQL}) "
                 "AS findings_count "
                 "FROM scans ORDER BY started_at DESC LIMIT ?",
                 (limit,),
@@ -1071,8 +1155,9 @@ class EngagementStore:
     def list_all_scans(self, limit: int = 50) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT id, name, status, started_at, completed_at,
-                          (SELECT COUNT(*) FROM findings WHERE scan_id=scans.id) as n_findings
+                f"""SELECT id, name, status, started_at, completed_at,
+                          (SELECT COUNT(*) FROM findings WHERE scan_id=scans.id
+                           AND {_NOT_ARTIFACT_SQL}) as n_findings
                    FROM scans ORDER BY started_at DESC LIMIT ?""",
                 (limit,)
             ).fetchall()
@@ -1280,12 +1365,18 @@ class EngagementStore:
 
     def stats(self) -> dict:
         with self._conn() as c:
-            total = c.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
+            # Exclude leaked attack-plan artifacts so these headline counts match
+            # the (already-filtered) findings list.
+            total = c.execute(
+                f"SELECT COUNT(*) FROM findings WHERE {_NOT_ARTIFACT_SQL}"
+            ).fetchone()[0]
             by_sev = dict(c.execute(
-                "SELECT severity, COUNT(*) FROM findings GROUP BY severity"
+                f"SELECT severity, COUNT(*) FROM findings WHERE {_NOT_ARTIFACT_SQL} "
+                "GROUP BY severity"
             ).fetchall())
             by_status = dict(c.execute(
-                "SELECT status, COUNT(*) FROM findings GROUP BY status"
+                f"SELECT status, COUNT(*) FROM findings WHERE {_NOT_ARTIFACT_SQL} "
+                "GROUP BY status"
             ).fetchall())
             scans = c.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
             scope = c.execute("SELECT COUNT(*) FROM scope WHERE in_scope = 1").fetchone()[0]

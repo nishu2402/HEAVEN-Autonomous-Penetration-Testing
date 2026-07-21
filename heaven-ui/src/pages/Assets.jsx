@@ -18,13 +18,18 @@ function osStyle(host) {
   return { color: "var(--text-dim)", border: "var(--border)" };
 }
 
-// Short, human label for one scan in the picker: "target — 3 hosts · Jul 18 14:22".
+// Short, human label for one scan in the picker:
+// "target · 3 hosts · 7 ports · Jul 18 14:22". The port count lets an operator
+// tell at a glance which scan actually found services vs. a dead-host scan.
 function scanOptionLabel(s) {
   const when = s.when ? new Date(s.when).toLocaleString([], {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   }) : "";
   const hosts = `${s.hosts} host${s.hosts === 1 ? "" : "s"}`;
-  return [s.label, hosts, when].filter(Boolean).join("  ·  ");
+  const ports = s.ports != null
+    ? `${s.ports} port${s.ports === 1 ? "" : "s"}`
+    : "";
+  return [s.label, hosts, ports, when].filter(Boolean).join("  ·  ");
 }
 
 export default function AssetsPage() {

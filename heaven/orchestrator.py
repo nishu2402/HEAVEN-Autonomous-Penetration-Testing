@@ -948,13 +948,38 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             _seen_net.add(_t.lower())
             _net_targets.append(_t)
 
+    # Scale the network-recon deadline to the size of the range. The default
+    # 300s is fine for one host but far too tight for a CIDR: a /24 that
+    # discovers a handful of live hosts still needs headroom to full-port-scan
+    # them. Estimate the expanded host count, budget generously, and cap at
+    # 30 min. `time_budget` (below the task timeout) tells scan_network to
+    # return whatever finished before the orchestrator hard-cancels it, so a
+    # big sweep yields partial results instead of nothing.
+    import ipaddress as _ipaddress
+
+    def _estimate_hosts(net_targets: list[str]) -> int:
+        total = 0
+        for _t in net_targets:
+            try:
+                _net = _ipaddress.ip_network(_t, strict=False)
+                total += min(_net.num_addresses, 65536)
+            except ValueError:
+                total += 1
+        return total
+
+    _host_estimate = _estimate_hosts(_net_targets)
+    _net_timeout = float(min(1800, max(300, 90 + _host_estimate * 2)))
+    _net_budget = max(60.0, _net_timeout - 45)
+
     net_id = orch.add_task(
         "Network Reconnaissance", scan_network,
         phase=ScanPhase.RECON, concurrency_group="network",
         modes=NET_MODES,
+        timeout=_net_timeout,
         targets=_net_targets,
         port_range=targets.get("ports", "1-65535"),
         stealth_level=stealth,
+        time_budget=_net_budget,
     )
     orch.net_task_id = net_id
 

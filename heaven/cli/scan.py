@@ -53,6 +53,21 @@ def _print_inventory(assets: Optional[list]) -> None:
     _print("  [dim]View later:[/dim] [cyan]heaven assets[/cyan]  "
            "[dim](an OS marked 'heuristic — unconfirmed' is a TTL guess)[/dim]")
 
+    # If this run couldn't do SYN/UDP/OS scans (no raw sockets), say so plainly
+    # and give the exact platform-correct command to unlock them — instead of the
+    # operator wondering why OS is "not determined" or why UDP services are absent.
+    try:
+        from heaven.recon.network_scanner import scan_capability
+        cap = scan_capability()
+        if not cap.get("raw_capable"):
+            _print("  [yellow]⚠ Unprivileged scan[/yellow] [dim]— open ports found via TCP "
+                   "connect, but OS fingerprinting and SYN/UDP scanning were off "
+                   "(they need raw sockets).[/dim]")
+            if cap.get("remedy"):
+                _print(f"    [dim]Unlock full detection:[/dim] [cyan]{cap['remedy']}[/cyan]")
+    except Exception:  # noqa: BLE001 — a hint must never break the scan summary
+        pass
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # scan — the big one

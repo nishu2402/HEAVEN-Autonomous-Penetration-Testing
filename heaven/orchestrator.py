@@ -203,6 +203,13 @@ class ScanOrchestrator:
         self.priority_targets: list[str] = []
         self.net_task_id: Optional[str] = None
         self._injected_service_keys: set[str] = set()
+        # The shared targets dict (set by build_full_scan). After RECON the
+        # orchestrator appends web URLs it derives from discovered open HTTP(S)
+        # ports into this same dict, so the web vuln scanners run against a
+        # bare-IP target that turned out to host a web app. `_auth_cfg` carries
+        # any authenticated session so the derived-URL crawl stays logged in.
+        self.scan_targets: dict[str, Any] = {}
+        self._auth_cfg: Optional[dict] = None
 
         self._checkpoint_store = checkpoint_store
         self._resumed_checkpoints: dict[str, dict] = {}
@@ -501,8 +508,9 @@ class ScanOrchestrator:
     def _inject_service_tasks(self, net_data: dict) -> None:
         """Inject follow-on tasks based on services discovered during RECON."""
         hosts = net_data.get("hosts", [])
+        derived_web_urls: list[str] = []
         for host in hosts:
-            ip = host.get("ip", "")
+            ip = host.get("ip", "") or host.get("host", "")
             for port_info in host.get("open_ports", []):
                 port = port_info.get("port", 0)
                 service = (port_info.get("service") or "").lower()
@@ -571,10 +579,98 @@ class ScanOrchestrator:
                     self.add_task(f"Exposed DB {ip}:{port}", _db_check,
                                   phase=ScanPhase.VULN_SCAN, timeout=30)
 
+                # Web service (HTTP/HTTPS on any port) → remember its origin.
+                # Checked for EVERY open port, independently of the elif chain
+                # above, because web ports don't overlap ssh/smb/rdp/db. This is
+                # what lets a bare-IP target that turns out to host a web app get
+                # web-scanned instead of showing only its open ports.
+                _wurl = self._web_url_for(ip, port, service)
+                if _wurl:
+                    derived_web_urls.append(_wurl)
+
+        # Bridge discovered web origins into the shared targets + a crawl so the
+        # injection/auth/fuzzer/misconfig scanners receive a real attack surface.
+        self._bridge_derived_web_urls(derived_web_urls)
+
         injected = [t for t in self.tasks.values() if t.id.startswith("dynamic_") or
-                    any(x in t.name for x in ("SSH", "SMB", "RDP", "Exposed DB"))]
+                    any(x in t.name for x in ("SSH", "SMB", "RDP", "Exposed DB",
+                                              "Web Crawling (discovered"))]
         if injected:
             logger.info(f"Dynamic injection: {len(injected)} service-specific tasks added")
+
+    # Ports treated as web when nmap didn't label the service "http" (e.g. an
+    # unknown banner on 8080). Kept tight so a random high port never becomes a
+    # bogus URL — the service-name check catches "http"/"https"/"http-proxy"/…
+    _HTTP_PORTS = frozenset({80, 8080, 8000, 8008, 8081, 8090, 5000, 3000, 8888})
+    _TLS_PORTS = frozenset({443, 8443, 4443, 9443, 4433})
+
+    def _web_url_for(self, host: str, port: int, service: str) -> Optional[str]:
+        """Return a scannable URL for an open web port, or ``None`` if it isn't
+        web. This only decides "should the web scanners look at this origin?" —
+        it never fabricates a finding; the scanners confirm any vuln themselves."""
+        host = (host or "").strip()
+        if not host or not port:
+            return None
+        svc = (service or "").lower()
+        is_tls = "https" in svc or "ssl" in svc or "tls" in svc or port in self._TLS_PORTS
+        is_web = "http" in svc or port in self._HTTP_PORTS or is_tls
+        if not is_web:
+            return None
+        scheme = "https" if is_tls else "http"
+        is_default = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+        return f"{scheme}://{host}/" if is_default else f"{scheme}://{host}:{port}/"
+
+    def _bridge_derived_web_urls(self, urls: list[str]) -> None:
+        """Append newly-discovered web URLs to the shared targets dict and inject
+        a crawl of them, so a bare-IP target that turned out to host a web app is
+        actually web-scanned. Only runs in modes whose pipeline includes web
+        scanners (FULL/WEB/API); a no-op otherwise. Dedups by origin so a URL the
+        operator already supplied is never scanned twice."""
+        from urllib.parse import urlparse
+        if not urls or self.active_mode not in (ScanMode.FULL, ScanMode.WEB, ScanMode.API):
+            return
+        targets = self.scan_targets
+        if not isinstance(targets, dict):
+            return
+
+        def _origin(u: str) -> str:
+            p = urlparse(u)
+            return f"{p.scheme}://{p.netloc}".lower() if p.scheme and p.netloc else ""
+
+        existing = targets.setdefault("urls", [])
+        seen = {_origin(u) for u in existing if isinstance(u, str)}
+        seen.discard("")
+        new_urls: list[str] = []
+        for u in urls:
+            o = _origin(u)
+            if o and o not in seen:
+                seen.add(o)
+                existing.append(u)  # mutate the SHARED list the web scanners read
+                new_urls.append(u)
+        if not new_urls:
+            return
+        logger.info(
+            f"Derived {len(new_urls)} web URL(s) from open ports → web scanners: {new_urls[:5]}"
+        )
+
+        stealth = targets.get("stealth_level", "normal")
+        auth_cfg = self._auth_cfg
+
+        async def _derived_crawl(_urls=list(new_urls), **kw):
+            try:
+                from heaven.recon.web_crawler import crawl_targets
+                return await crawl_targets(
+                    urls=_urls, stealth_level=stealth, auth_config=auth_cfg)
+            except Exception:  # noqa: BLE001 — best-effort crawl, never fail the scan
+                logger.debug("derived-URL crawl failed", exc_info=True)
+                return {}
+
+        # AI_PARSE runs immediately after RECON and before VULN_SCAN, so the
+        # crawl's endpoints are in orch.results before the web scanners read them.
+        self.add_task(
+            "Web Crawling (discovered services)", _derived_crawl,
+            phase=ScanPhase.AI_PARSE, concurrency_group="web", timeout=600,
+        )
 
     async def _execute_phase(self, phase: ScanPhase) -> list[TaskResult]:
         """Execute all tasks for a given phase with dependency resolution."""
@@ -818,6 +914,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             logger.info(f"Authenticated crawl enabled ({len(_sess.cookies)} cookie(s))")
     except Exception as e:  # noqa: BLE001 — auth is optional, never block the scan
         logger.debug(f"no active auth session for crawl: {e}")
+
+    # Give the orchestrator the SAME targets dict + auth session so that, after
+    # RECON, it can append web URLs derived from discovered open HTTP(S) ports
+    # (see _bridge_derived_web_urls) into the very list the web scanners read.
+    orch.scan_targets = targets
+    orch._auth_cfg = _auth_cfg
 
     # ═══ Phase: RECON (parallel multi-vector) ═══
     # Network recon must scan every target host — whether the operator entered a

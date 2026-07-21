@@ -92,11 +92,15 @@ def dvwa_target() -> Iterator[GroundTruth]:
 
     gt = GroundTruth.load(_GT_DIR / "dvwa.yaml")
 
-    # Bring the stack up. We intentionally do NOT pass `--wait`: the DVWA image's
-    # in-container healthcheck is unreliable (its curl can report the container
-    # "unhealthy" even while the app serves fine), which made `up --wait` return
-    # non-zero and spuriously skip the whole benchmark. The authoritative
-    # readiness signal is the host-side HTTP probe below.
+    # Bring the stack up. We intentionally do NOT pass `--wait`. The original
+    # reason recorded here was that the image's healthcheck was "unreliable";
+    # the actual cause was that the image ships no curl, so the old `CMD curl`
+    # probe could never execute at all and the container sat at "unhealthy"
+    # forever, making `up --wait` return non-zero and skip the whole benchmark.
+    # The compose healthcheck is fixed now (it probes over bash /dev/tcp), but
+    # the authoritative readiness signal stays the host-side HTTP probe below:
+    # it also proves the published 127.0.0.1:8080 binding works, which an
+    # in-container check cannot tell us.
     up = subprocess.run(_compose_cmd("up", "-d"), capture_output=True, text=True)
     if up.returncode != 0:
         pytest.skip(f"docker compose up failed: {(up.stderr or up.stdout).strip()}")

@@ -1509,6 +1509,27 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="network", timeout=300,
     )
 
+    # ═══ Phase: UNSUPPORTED / END-OF-LIFE SOFTWARE ═══
+    # Turn the discovered product/version/OS inventory into CWE-1104 findings for
+    # software past its vendor end-of-life date. Deterministic and version-gated —
+    # a finding fires only on a confirmed EOL match, with the vendor date attached.
+    async def _eol_scan(**kw):
+        try:
+            from heaven.vulnscan.eol_scanner import scan_eol_from_net
+        except ImportError:
+            return {}
+        net_res = orch.results.get(orch.net_task_id or "")
+        if not (net_res and net_res.data and isinstance(net_res.data, dict)):
+            return {"skipped": True, "reason": "no network recon data"}
+        return await scan_eol_from_net(net_res.data)
+
+    orch.add_task(
+        "Unsupported Software Audit", _eol_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id],
+        modes=NET_MODES,
+        concurrency_group="network", timeout=120,
+    )
+
     # ═══ Phase: AUTH SCANNER ═══
     async def _auth_scan(**kw):
         try:
@@ -1619,6 +1640,36 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
         modes=WEBAPI_MODES,
         concurrency_group="web", timeout=600,
+    )
+
+    # ═══ Phase: CMS (WordPress) HARDENING ═══
+    # WordPress-specific hardening failures that generic web detectors miss:
+    # exposed admin panel, XML-RPC + pingback, version disclosure, username
+    # enumeration. Read-only and fingerprint-gated — it no-ops on non-WordPress
+    # sites, so it is safe to run for any web target.
+    async def _cms_scan(**kw):
+        try:
+            from heaven.vulnscan.cms_scanner import scan_cms
+        except ImportError:
+            return {}
+        urls = list(targets.get("urls", []))
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                if ep_url and ep_url not in urls:
+                    urls.append(ep_url)
+        if not urls:
+            return {"skipped": True, "reason": "no URLs for CMS scan"}
+        return await scan_cms(urls)
+
+    orch.add_task(
+        "CMS Security Scan", _cms_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, deep_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=300,
     )
 
     # ═══ Phase: INJECTION DISCOVERY (XSS + SQLi first-pass) ═══

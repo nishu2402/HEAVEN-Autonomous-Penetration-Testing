@@ -171,6 +171,25 @@ heaven = ["**/*.yml", "**/*.yaml", "**/*.sql"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Silence transitional deprecations that originate in third-party dependencies,
+# not in HEAVEN's own code. Python 3.14 pre-announces the removal of
+# asyncio.iscoroutinefunction in 3.16; the async ecosystem (asyncssh, aiohttp,
+# anyio) and CPython's own debug-mode run_in_executor still call it — HEAVEN
+# never calls it directly (verified). Starlette's TestClient (a test-only
+# dependency) still imports httpx. The equivalent uvloop / event-loop-policy and
+# rich-click transitional warnings ARE fixed at our source (see
+# heaven/utils/platform_detect.py and heaven/cli/_richconfig.py); only the
+# vendored-library noise is filtered here.
+filterwarnings = [
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
+    "ignore:Using .httpx. with .starlette.testclient. is deprecated",
+    # ldap3 imports pyasn1's renamed tagMap/typeMap at module load; google-genai
+    # references a typing internal slated for removal in 3.17. Both are import-time
+    # notices inside the vendored libraries — HEAVEN uses neither symbol directly.
+    "ignore:tagMap is deprecated:DeprecationWarning",
+    "ignore:typeMap is deprecated:DeprecationWarning",
+    "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100

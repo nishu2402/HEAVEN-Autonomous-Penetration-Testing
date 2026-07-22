@@ -1612,6 +1612,178 @@ _KB: dict[str, dict[str, Any]] = {
         "remediation": "No action required; maintain the configuration and monitor for drift.",
         "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
     },
+    # ── CMS / WordPress hardening ────────────────────────────────────────────
+    "admin_panel_exposed": {
+        "title": "Administrative Panel Exposed to the Internet",
+        "cwe": "CWE-307",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1110 — Brute Force",
+        "typical_cvss": 7.3,
+        "description": (
+            "An administrative login panel (e.g. WordPress /wp-login.php, /wp-admin) "
+            "is reachable from any network location with no IP/VPN restriction. An "
+            "exposed admin interface is a direct target for brute-force and "
+            "credential-stuffing attacks against privileged accounts."
+        ),
+        "impact": "Unauthorised administrative access via password guessing/stuffing, "
+                  "leading to full application compromise.",
+        "remediation": (
+            "1. Restrict the admin panel to trusted IP ranges or a VPN.\n"
+            "2. Enforce MFA and strong, rate-limited authentication.\n"
+            "3. Consider a WAF / reverse-proxy access rule (e.g. Cloudflare)."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/307.html"],
+    },
+    "xmlrpc_enabled": {
+        "title": "WordPress XML-RPC Interface Enabled",
+        "cwe": "CWE-918",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 7.3,
+        "description": (
+            "The WordPress XML-RPC endpoint (/xmlrpc.php) is enabled and answering "
+            "remote procedure calls. Its pingback.ping method is abused for SSRF and "
+            "internal port scanning, and system.multicall amplifies brute-force "
+            "attempts; the interface is also a reflective DoS vector."
+        ),
+        "impact": "SSRF/internal scanning, brute-force amplification and denial of "
+                  "service against the site.",
+        "remediation": (
+            "1. Disable XML-RPC entirely if unused (block /xmlrpc.php).\n"
+            "2. If required, disable the pingback methods specifically.\n"
+            "3. Rate-limit and monitor XML-RPC requests."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/Server_Side_Request_Forgery"],
+    },
+    "wordpress_user_enumeration": {
+        "title": "WordPress Username Enumeration",
+        "cwe": "CWE-200",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1589.001 — Gather Victim Identity Information: Credentials",
+        "typical_cvss": 5.3,
+        "description": (
+            "Valid WordPress login names are disclosed via the REST users route "
+            "(/wp-json/wp/v2/users) or the ?author= redirect. Knowing real usernames "
+            "reduces a login attack from guessing user+password to password-only."
+        ),
+        "impact": "Enables targeted password-guessing/spraying against confirmed "
+                  "accounts, especially paired with an exposed admin panel.",
+        "remediation": (
+            "1. Restrict or disable the REST users endpoint for anonymous callers.\n"
+            "2. Block ?author= enumeration at the web server / plugin level.\n"
+            "3. Avoid login names that match the public display name."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/200.html"],
+    },
+    # ── Unsupported / end-of-life software ───────────────────────────────────
+    "unsupported_software": {
+        "title": "Unsupported / End-of-Life Software",
+        "cwe": "CWE-1104",
+        "owasp": "A06:2021 Vulnerable and Outdated Components",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 7.4,
+        "description": (
+            "Software (an operating system or component) that has passed its vendor "
+            "end-of-life date is in use. End-of-life software receives no further "
+            "security patches, so any vulnerability disclosed after that date stays "
+            "permanently exploitable."
+        ),
+        "impact": "Permanent exposure to newly disclosed vulnerabilities with no "
+                  "vendor fix available.",
+        "remediation": (
+            "1. Decommission or upgrade the affected systems to a supported version.\n"
+            "2. Where unavoidable, purchase extended support (ESU) and isolate the "
+            "host on a segmented network.\n"
+            "3. Run a vulnerability-management process to catch recurrences."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/1104.html"],
+    },
+    # ── Infrastructure exposure (IPMI / SNMP / FTP / RDP) ────────────────────
+    "ipmi_hash_disclosure": {
+        "title": "Unauthenticated IPMI RAKP Password-Hash Disclosure",
+        "cwe": "CWE-522",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1552 — Unsecured Credentials",
+        "typical_cvss": 7.5,
+        "description": (
+            "The BMC completes the IPMI 2.0 RMCP+/RAKP exchange and returns a salted "
+            "hash of a user's password to any unauthenticated party (CVE-2013-4786). "
+            "This is a design flaw in the IPMI specification: the hash can be cracked "
+            "offline to gain out-of-band control of the host."
+        ),
+        "impact": "Offline password cracking and out-of-band (BMC) takeover of the "
+                  "underlying server.",
+        "remediation": (
+            "1. Isolate all BMC/IPMI interfaces on a dedicated management network.\n"
+            "2. Disable IPMI-over-LAN where not required.\n"
+            "3. Set long, random BMC passwords to resist offline cracking."
+        ),
+        "references": ["https://www.rapid7.com/blog/post/2013/07/02/a-penetration-testers-guide-to-ipmi-and-bmcs/"],
+    },
+    "snmp_amplification": {
+        "title": "SNMP GETBULK Amplification (Reflected DDoS Source)",
+        "cwe": "CWE-406",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1498.002 — Network Denial of Service: Reflection Amplification",
+        "typical_cvss": 5.3,
+        "description": (
+            "The SNMP agent answers a small GETBULK request with a much larger "
+            "response. Because SNMP is UDP and source addresses can be spoofed, the "
+            "host can be abused as a reflector to amplify a denial-of-service attack "
+            "against a third party."
+        ),
+        "impact": "The host can be weaponised as a DDoS amplifier against arbitrary "
+                  "victims.",
+        "remediation": (
+            "1. Restrict SNMP to a management network with ACLs.\n"
+            "2. Disable SNMP v1/v2c; require SNMPv3 authPriv.\n"
+            "3. Rate-limit UDP/161 at the network edge."
+        ),
+        "references": ["https://www.cisa.gov/news-events/alerts/2014/01/14/ntp-amplification-attacks-using-cve-2013-5211"],
+    },
+    "ftp_anonymous": {
+        "title": "Anonymous FTP Login Allowed",
+        "cwe": "CWE-1188",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1078.001 — Valid Accounts: Default Accounts",
+        "typical_cvss": 5.8,
+        "description": (
+            "The FTP service accepted an anonymous login. Anonymous access exposes "
+            "whatever the FTP root serves to any unauthenticated user and, where the "
+            "share is writable, offers a foothold to stage files."
+        ),
+        "impact": "Unauthenticated disclosure of served files and, if writable, a "
+                  "staging point for further attack.",
+        "remediation": (
+            "1. Disable anonymous FTP unless it is a deliberate public-download "
+            "service.\n"
+            "2. Never expose anonymous FTP with write access.\n"
+            "3. Prefer SFTP/FTPS with authenticated accounts."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/1188.html"],
+    },
+    "rdp_nla_disabled": {
+        "title": "RDP Network Level Authentication (NLA) Not Required",
+        "cwe": "CWE-300",
+        "owasp": "A02:2021 Cryptographic Failures",
+        "mitre": "T1557 — Adversary-in-the-Middle",
+        "typical_cvss": 5.4,
+        "description": (
+            "The Remote Desktop service accepts standard RDP security without "
+            "requiring Network Level Authentication. Without NLA, authentication "
+            "occurs after a full session is established, exposing the host to "
+            "pre-authentication man-in-the-middle attacks and lowering brute-force "
+            "cost."
+        ),
+        "impact": "Pre-auth MiTM/credential interception and cheaper brute-forcing of "
+                  "RDP logins.",
+        "remediation": (
+            "1. Require NLA (CredSSP) via Group Policy / System Properties.\n"
+            "2. Restrict RDP to a VPN / jump host and enforce MFA.\n"
+            "3. Ensure a valid TLS certificate is presented for RDP."
+        ),
+        "references": ["https://learn.microsoft.com/windows-server/remote/remote-desktop-services/clients/remote-desktop-allow-access"],
+    },
 }
 
 # Severity → typical CVSS fallback when the class is unknown.
@@ -1714,6 +1886,36 @@ _ALIASES: dict[str, str] = {
     "server_banner": "version_disclosure",
     "server_version": "version_disclosure",
     "powered_by_disclosure": "version_disclosure",
+    "wordpress_version_disclosure": "version_disclosure",
+    "cms_version_disclosure": "version_disclosure",
+    # CMS / WordPress hardening
+    "wordpress_admin_exposed": "admin_panel_exposed",
+    "wp_admin_exposed": "admin_panel_exposed",
+    "admin_exposed": "admin_panel_exposed",
+    "exposed_admin_panel": "admin_panel_exposed",
+    "wordpress_xmlrpc": "xmlrpc_enabled",
+    "wp_xmlrpc": "xmlrpc_enabled",
+    "xml_rpc_enabled": "xmlrpc_enabled",
+    "xmlrpc_pingback": "xmlrpc_enabled",
+    "wp_user_enumeration": "wordpress_user_enumeration",
+    "user_enumeration": "wordpress_user_enumeration",
+    "username_enumeration": "wordpress_user_enumeration",
+    # Unsupported / end-of-life software
+    "eol_software": "unsupported_software",
+    "end_of_life": "unsupported_software",
+    "end_of_life_software": "unsupported_software",
+    "unsupported_os": "unsupported_software",
+    "outdated_os": "unsupported_software",
+    "unmaintained_component": "unsupported_software",
+    # Infrastructure exposure
+    "ipmi_rakp": "ipmi_hash_disclosure",
+    "ipmi_hashdump": "ipmi_hash_disclosure",
+    "snmp_getbulk_amplification": "snmp_amplification",
+    "anonymous_ftp": "ftp_anonymous",
+    "ftp_anonymous_login": "ftp_anonymous",
+    "rdp_no_nla": "rdp_nla_disabled",
+    "terminal_services_nla": "rdp_nla_disabled",
+    "nla_not_required": "rdp_nla_disabled",
     "no_rate_limiting": "no_rate_limit",
     "rate_limit": "no_rate_limit",
     "api_no_rate_limit": "no_rate_limit",
@@ -1926,6 +2128,14 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "snmp_default_community": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
     "cisco_smart_install": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "ipmi_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+    "ipmi_hash_disclosure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "snmp_amplification": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:N/I:N/A:L",
+    "ftp_anonymous": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "rdp_nla_disabled": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "admin_panel_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "xmlrpc_enabled": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+    "wordpress_user_enumeration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "unsupported_software": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
     "posture_ok": "",
 }
 

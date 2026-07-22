@@ -11,6 +11,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Real-world report parity — new detectors closing the gaps against
+  professional pen-test/health-check deliverables.** A gap analysis against two
+  real Cyphere engagement reports (an internal IT security health check and a
+  black-box WordPress web-app test) surfaced high-signal findings HEAVEN wasn't
+  producing; every one is now a genuine, read-only, confirmation-based check:
+  - **CMS/WordPress hardening scanner** (`vulnscan/cms_scanner.py`, WEB/API scan
+    modes): flags an **admin panel exposed to the Internet** (`/wp-login.php`,
+    `/wp-admin`), an enabled **XML-RPC** endpoint (HIGH when it advertises the
+    SSRF/DoS-abused `pingback.ping`, confirmed by a read-only `system.listMethods`
+    — never an actual pingback), **WordPress version disclosure**, and **username
+    enumeration** (`/wp-json/wp/v2/users`, `?author=`). Fingerprint-gated, so it
+    no-ops on non-WordPress sites.
+  - **Server software-version banner exposure** (misconfig scanner): flags
+    `Server: nginx/1.22.1`, `X-Powered-By`, `X-AspNet-Version` etc. — only when a
+    concrete version is present (a bare product token isn't flagged).
+  - **Deeper network-service probes** (`recon/network_exposure.py`, all read-only):
+    an **IPMI RAKP password-hash disclosure** probe (RMCP+/RAKP-2 hash dump,
+    CVE-2013-4786) that upgrades a bare IPMI exposure to a proven HIGH; **SNMP
+    GETBULK amplification** measurement (reflected-DDoS source); an active
+    **anonymous-FTP login** test; and an **RDP Network Level Authentication (NLA)
+    not-required** negotiation probe. Each fires only on a proven, attacker-
+    favourable response — disabled under the stealthiest profiles.
+  - **Unsupported / end-of-life software detector** (`vulnscan/eol_scanner.py`,
+    CWE-1104): turns the discovered product/version/OS inventory into
+    unsupported-software findings (Windows 10 22H2, Silverlight, Apache httpd 2.2,
+    PHP < 8.1, OpenSSL < 3.0, …), version-gated against published vendor EOL dates
+    and carrying the EOL date as proof.
+  - Full CWE/OWASP/MITRE/CVSS taxonomy added for all new finding classes, so they
+    enrich cleanly into reports; wired mode-aware into the orchestrator (CLI +
+    web/API scan paths inherit them automatically).
+
 - **New "Ascendant Aegis" brand identity — one mark, synced everywhere.** HEAVEN
   now has a proper logo: a faceted violet→cyan→emerald hexagonal aegis (the app's
   own `#6D7CFF → #22D3EE → #34E5A3` ramp) enclosing an "H" whose crossbar rises to
@@ -90,6 +121,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Test suite runs clean — zero warnings on Python 3.14.** The suite emitted
+  249 warnings, all transitional `Deprecation`/`PendingDeprecation` notices about
+  APIs slated for removal in Python 3.16 / future library releases. The ones
+  rooted in HEAVEN's own code are fixed at source: `configure_event_loop()` now
+  scopes uvloop's `install()` / event-loop-policy deprecations to the single call
+  that knowingly uses them; the rich-click presentation layer prefers the modern
+  `TEXT_MARKUP` / options-table config attributes and only touches the legacy
+  `USE_RICH_MARKUP` / `SHOW_METAVARS_COLUMN` / `APPEND_METAVARS_HELP` toggles on
+  older rich-click; and the SSL scanner uses timezone-correct UTC instead of the
+  deprecated `datetime.utcnow()`. The remainder originate in third-party
+  dependencies we cannot edit (asyncssh, aiohttp, anyio still call the
+  soon-removed `asyncio.iscoroutinefunction`; Starlette's test-only `TestClient`
+  imports `httpx`) and are narrowly filtered by exact message in
+  `pyproject.toml` — HEAVEN never calls those deprecated APIs directly.
 - **Dashboard network topology reads cleanly instead of a jittery tangle.** The
   3D host map placed nodes with `Math.random()` height and wired random
   criss-cross edges, so even a dozen hosts looked like a cluttered mess that

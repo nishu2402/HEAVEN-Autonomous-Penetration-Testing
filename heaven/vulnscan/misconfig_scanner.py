@@ -28,6 +28,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 try:
@@ -285,6 +286,49 @@ async def _check_security_headers(session: "aiohttp.ClientSession", url: str) ->
         0.75, {"missing_headers": missing, "observed_on": url})]
 
 
+# Headers that leak a concrete software version. We flag only when a *version
+# number* is present — a bare "nginx"/"Apache" product token is not actionable
+# and would be noise, but "nginx/1.22.1" or "PHP/7.4.3" hands an attacker a CVE
+# shortlist. Anchored to the origin so it collapses to one finding per host.
+_VERSION_HEADER_RE = re.compile(r"/\s*\d+(?:\.\d+)+")
+_BANNER_HEADERS = ("Server", "X-Powered-By", "X-AspNet-Version",
+                   "X-AspNetMvc-Version", "X-Generator")
+
+
+async def _check_server_banner(session: "aiohttp.ClientSession", url: str) -> list[dict]:
+    try:
+        async with session.get(url, allow_redirects=True) as resp:
+            if resp.status >= 500:
+                return []
+            disclosed = {}
+            for hdr in _BANNER_HEADERS:
+                val = resp.headers.get(hdr, "")
+                if not val:
+                    continue
+                # Server/X-Powered-By need a version to be worth flagging; the
+                # ASP.NET version headers are a disclosed version by definition.
+                if hdr in ("X-AspNet-Version", "X-AspNetMvc-Version") or \
+                        _VERSION_HEADER_RE.search(val):
+                    disclosed[hdr] = val.strip()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("banner check failed for %s: %s", url, e)
+        return []
+    if not disclosed:
+        return []
+    p = urlparse(url)
+    origin = f"{p.scheme}://{p.netloc}"
+    primary = disclosed.get("Server") or next(iter(disclosed.values()))
+    return [_finding(
+        origin, "server_version_disclosure", "info",
+        f"Server Software Version Disclosed ({primary})",
+        "HTTP response headers reveal the exact server software and version. "
+        "Publishing precise version details lets an attacker map the host "
+        "directly to known vulnerabilities for that release and tailor exploits. "
+        "Suppress version banners (e.g. nginx 'server_tokens off;', Apache "
+        "'ServerTokens Prod', remove X-Powered-By / X-AspNet-Version).",
+        0.9, {"disclosed_headers": disclosed, "observed_on": url})]
+
+
 async def _check_open_redirect(session: "aiohttp.ClientSession", url: str) -> list[dict]:
     import asyncio
     parsed = urlparse(url)
@@ -391,6 +435,7 @@ async def scan_url_misconfig(session: "aiohttp.ClientSession", url: str) -> list
         _check_cors(session, url),
         _check_cookies_and_jwt(session, url),
         _check_security_headers(session, url),
+        _check_server_banner(session, url),
         _check_open_redirect(session, url),
         return_exceptions=True,
     )

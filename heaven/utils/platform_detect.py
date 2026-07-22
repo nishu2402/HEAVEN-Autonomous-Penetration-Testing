@@ -122,17 +122,27 @@ def detect_platform() -> PlatformInfo:
 
 
 def configure_event_loop() -> None:
-    """Configure the best available event loop for this platform."""
+    """Configure the best available event loop for this platform.
+
+    ``uvloop.install()`` and asyncio's policy setters remain the only supported
+    way to select a process-wide event-loop policy, yet they emit transitional
+    ``DeprecationWarning``s on Python 3.12+ (slated for removal in 3.16). We use
+    them deliberately and scope those transitional warnings to this one call so
+    they never leak into logs or the test run.
+    """
     import asyncio
-    if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-        return
-    try:
-        import uvloop
-        uvloop.install()
-        logger.info("uvloop installed")
-    except ImportError:
-        logger.debug("uvloop not available, using default event loop")
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            return
+        try:
+            import uvloop
+            uvloop.install()
+            logger.info("uvloop installed")
+        except ImportError:
+            logger.debug("uvloop not available, using default event loop")
 
 
 def ensure_directories(info: PlatformInfo) -> None:

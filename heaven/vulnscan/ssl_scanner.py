@@ -203,7 +203,8 @@ def _get_certificate(host: str, port: int, timeout: float = 8.0) -> Optional[Cer
             not_after = datetime.datetime.strptime(na_str, fmt)
             ci.not_after = na_str
             ci.not_before = nb_str
-            delta = not_after - datetime.datetime.utcnow()
+            now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+            delta = not_after - now_utc
             ci.days_until_expiry = delta.days
             ci.is_expired = delta.days < 0
         except ValueError:

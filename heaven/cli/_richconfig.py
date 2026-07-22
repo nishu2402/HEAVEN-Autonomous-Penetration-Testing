@@ -146,14 +146,25 @@ def apply_rich_click() -> bool:
         if hasattr(cfg, attr):
             setattr(cfg, attr, value)
 
-    # Markup + layout
-    _set("USE_RICH_MARKUP", True)
-    _set("TEXT_MARKUP", "rich")
-    _set("USE_MARKDOWN", False)
+    # Markup mode. Modern rich-click (>=1.9) uses the single TEXT_MARKUP knob;
+    # setting the pre-1.9 USE_RICH_MARKUP / USE_MARKDOWN pair on it emits a
+    # PendingDeprecationWarning. Prefer the modern attr, fall back to the legacy
+    # pair only when TEXT_MARKUP is unavailable (older rich-click).
+    if hasattr(cfg, "TEXT_MARKUP"):
+        _set("TEXT_MARKUP", "rich")
+    else:
+        _set("USE_RICH_MARKUP", True)
+        _set("USE_MARKDOWN", False)
+
+    # Layout
     _set("SHOW_ARGUMENTS", True)
     _set("GROUP_ARGUMENTS_OPTIONS", True)
-    _set("SHOW_METAVARS_COLUMN", True)
-    _set("APPEND_METAVARS_HELP", True)
+    # The metavar column is shown by default on rich-click >=1.9 (metavar is part
+    # of OPTIONS_TABLE_COLUMN_TYPES). Only nudge the legacy toggles — which are
+    # now deprecated — on older versions that still expose them as the API.
+    if not hasattr(cfg, "OPTIONS_TABLE_COLUMN_TYPES"):
+        _set("SHOW_METAVARS_COLUMN", True)
+        _set("APPEND_METAVARS_HELP", True)
     _set("COMMANDS_BEFORE_OPTIONS", True)
     _set("MAX_WIDTH", 100)
 

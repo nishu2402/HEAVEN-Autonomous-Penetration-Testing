@@ -499,6 +499,28 @@ class PDFReportGenerator:
         story.append(self._owasp_table(findings, cw, styles, table))
         story.append(PageBreak())
 
+        # ── 10b. IoT / OT framework coverage (only when relevant) ──
+        # IoT and industrial findings are scored against their own standards —
+        # the web OWASP Top 10 does not apply to a Modbus PLC or an RTSP camera.
+        from heaven.devsecops import frameworks as _fw
+        if any(f.get("owasp_iot") for f in findings):
+            story.append(heading("", "OWASP IoT Top 10 (2018) Coverage"))
+            story.append(Paragraph(
+                "Consumer / building-automation device findings mapped to the OWASP IoT "
+                "Top 10 (2018) — the IoT-specific companion to the web risks.", styles["body"]))
+            story.append(self._framework_table(
+                findings, _fw.OWASP_IOT_2018, _fw.iot_category_id, cw, styles, table))
+            story.append(PageBreak())
+        if any(f.get("iec62443") for f in findings):
+            story.append(heading("", "OT / ICS Security Coverage (IEC 62443)"))
+            story.append(Paragraph(
+                "Industrial-control findings mapped to the IEC 62443-3-3 foundational "
+                "requirements and MITRE ATT&amp;CK for ICS. A read-only external scan mainly "
+                "exercises FR1 (authentication) and FR5 (network segmentation).", styles["body"]))
+            story.append(self._framework_table(
+                findings, _fw.IEC_62443_FR, _fw.ot_category_id, cw, styles, table))
+            story.append(PageBreak())
+
         # ── 11. Roadmap ──
         story.append(heading("7.", "Remediation Roadmap"))
         story.append(Paragraph("Recommended remediation order, prioritised by severity. Address "
@@ -722,23 +744,44 @@ class PDFReportGenerator:
     def _owasp_table(self, findings, cw, styles, table):
         from reportlab.lib.units import mm
         from reportlab.platypus import Paragraph
+        from heaven.devsecops import frameworks as _fw
         coverage: dict[str, dict] = {}
         for f in findings:
-            vt = (f.get("vuln_type") or "").lower()
-            for key, (cid, cn) in _OWASP.OWASP_MAP.items():
-                if key in vt:
+            # IoT/OT findings are counted in their own frameworks below.
+            if _fw.has_iot_ot_tag(f):
+                continue
+            cid = _OWASP._owasp_category_id(f)
+            for _k, (mapped, cn) in _OWASP.OWASP_MAP.items():
+                if mapped == cid:
                     coverage.setdefault(cid, {"name": cn, "n": 0})
                     coverage[cid]["n"] += 1
+                    break
         rows = [[Paragraph(h, styles["th"]) for h in ("Control", "Category", "Status", "Findings")]]
-        seen = set()
-        for _k, (cid, cn) in _OWASP.OWASP_MAP.items():
-            if cid in seen:
-                continue
-            seen.add(cid)
+        for cid, cn in _OWASP.OWASP_2021:
             hit = cid in coverage
             n = coverage.get(cid, {}).get("n", 0)
             status = "Findings present" if hit else "No findings"
             color = "#b00020" if hit else "#1a7f37"
+            rows.append([Paragraph(cid, styles["cell"]), Paragraph(_esc(cn), styles["cell"]),
+                         Paragraph(f'<font color="{color}"><b>{status}</b></font>', styles["cell"]),
+                         Paragraph(str(n), styles["cell"])])
+        return table(rows, [28 * mm, cw - 86 * mm, 38 * mm, 20 * mm])
+
+    def _framework_table(self, findings, categories, bucket_fn, cw, styles, table):
+        """OWASP IoT Top 10 / IEC 62443 coverage table — same shape as the web
+        OWASP table but bucketed by the domain-framework id."""
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph
+        counts: dict[str, int] = {cid: 0 for cid, _ in categories}
+        for f in findings:
+            cid = bucket_fn(f)
+            if cid in counts:
+                counts[cid] += 1
+        rows = [[Paragraph(h, styles["th"]) for h in ("ID", "Category", "Status", "Findings")]]
+        for cid, cn in categories:
+            n = counts[cid]
+            status = "Findings present" if n else "Not observed"
+            color = "#b00020" if n else "#1a7f37"
             rows.append([Paragraph(cid, styles["cell"]), Paragraph(_esc(cn), styles["cell"]),
                          Paragraph(f'<font color="{color}"><b>{status}</b></font>', styles["cell"]),
                          Paragraph(str(n), styles["cell"])])

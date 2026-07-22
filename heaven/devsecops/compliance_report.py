@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from heaven.devsecops import frameworks as _fw
 from heaven.devsecops.inventory import inventory_totals as _inventory_totals
 from heaven.devsecops.inventory import normalize_assets as _normalize_assets
 
@@ -217,13 +218,15 @@ class ComplianceReportGenerator:
         assessor = meta.get("assessor") or "HEAVEN Autonomous Penetration-Testing Platform"
 
         inventory = _normalize_assets(assets) if assets else []
+        has_iot = self.has_iot_findings(findings)
+        has_ot = self.has_ot_findings(findings)
         sections = [
             self._styles(),
             self._toolbar(),
             self._cover(eng, overall, counts, len(findings), len(scope), generated, version),
             self._confidentiality(eng),
             self._doc_control(eng, assessor, version, generated, len(scope), len(findings), overall),
-            self._toc(bool(inventory)),
+            self._toc(bool(inventory), has_iot, has_ot),
             self._exec_summary(eng, counts, len(findings), overall, ordered, len(scope)),
             self._scope_methodology(scope),
             self._inventory(inventory),
@@ -231,6 +234,14 @@ class ComplianceReportGenerator:
             self._findings_summary(ordered),
             self._detailed_findings(ordered),
             self._owasp_coverage(findings),
+        ]
+        # IoT / OT engagements are scored against their own frameworks — shown
+        # only when the scan actually produced device / industrial findings.
+        if has_iot:
+            sections.append(self._owasp_iot_coverage(findings))
+        if has_ot:
+            sections.append(self._ot_ics_coverage(findings))
+        sections += [
             self._roadmap(ordered),
             self._appendix(),
             self._footer(),
@@ -384,7 +395,8 @@ class ComplianceReportGenerator:
         </div>"""
 
     @staticmethod
-    def _toc(has_inventory: bool = False) -> str:
+    def _toc(has_inventory: bool = False, has_iot: bool = False,
+             has_ot: bool = False) -> str:
         items = [
             ("exec", "Executive Summary"),
             ("scope", "Scope & Methodology"),
@@ -396,6 +408,12 @@ class ComplianceReportGenerator:
             ("summary", "Findings Summary"),
             ("details", "Detailed Findings"),
             ("owasp", "OWASP Top 10 Coverage"),
+        ]
+        if has_iot:
+            items.append(("owasp-iot", "OWASP IoT Top 10 (2018) Coverage"))
+        if has_ot:
+            items.append(("ot-ics", "OT / ICS Security Coverage (IEC 62443)"))
+        items += [
             ("roadmap", "Remediation Roadmap"),
             ("appendix", "Appendix"),
         ]
@@ -576,8 +594,15 @@ class ComplianceReportGenerator:
         title = f.get("title") or f.get("vuln_type") or "Finding"
         cvss = f.get("predicted_cvss_score") or f.get("typical_cvss") or "—"
 
-        # OWASP from finding or map
-        owasp = f.get("owasp") or self._owasp_for(f.get("vuln_type", ""))
+        # Classification: an IoT/OT finding is labelled against its own
+        # framework (OWASP IoT Top 10 / IEC 62443), a web finding against the
+        # OWASP Top 10 (2021).
+        if _fw.has_iot_ot_tag(f):
+            owasp_label, owasp = ("OWASP IoT Top 10" if f.get("owasp_iot")
+                                  else "IEC 62443"), _fw.framework_label(f)
+        else:
+            owasp_label = "OWASP"
+            owasp = f.get("owasp") or self._owasp_for(f.get("vuln_type", ""))
         meta_rows = [
             ("Target", f.get("target") or "—", False),
             ("Severity", m["label"], False),
@@ -585,7 +610,7 @@ class ComplianceReportGenerator:
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—", False),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—", False),
             ("CWE", f.get("cwe") or "—", False),
-            ("OWASP", owasp or "—", False),
+            (owasp_label, owasp or "—", False),
             # CVE links straight to the live NVD record — dynamic, not a bare string.
             ("CVE", self._cve_links(f), True),
             ("MITRE ATT&CK", f.get("mitre_technique") or "—", False),
@@ -684,6 +709,10 @@ class ComplianceReportGenerator:
         view. Falls back to a keyword match on vuln_type/title. '' if none.
         """
         import re
+        # IoT/OT findings are scored against their own frameworks (OWASP IoT Top
+        # 10 / IEC 62443) — never bucket them into the web OWASP-2021 matrix.
+        if _fw.has_iot_ot_tag(f):
+            return ""
         raw = str(f.get("owasp") or f.get("owasp_category") or "").strip()
         m = re.match(r"\s*(A\d{2}:2021)", raw)
         if m:
@@ -733,6 +762,84 @@ class ComplianceReportGenerator:
           <em>Not observed</em> had no matching finding (either tested-clean or out of this scan's scope).</p>
           <table>
             <tr><th style="width:90px">Control</th><th>Category &amp; findings</th><th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
+            {rows}
+          </table>
+        </div>"""
+
+    def _framework_rows(self, categories, bucket_fn, findings) -> tuple[str, int]:
+        """Shared matrix body: bucket findings by category id, render one row
+        each (present/not-observed + linked example findings). Returns
+        ``(rows_html, covered_count)``."""
+        buckets: dict[str, list[dict]] = {cid: [] for cid, _ in categories}
+        for f in findings:
+            cid = bucket_fn(f)
+            if cid in buckets:
+                buckets[cid].append(f)
+        covered = sum(1 for cid, _ in categories if buckets[cid])
+        rows = ""
+        for cid, cn in categories:
+            hits = buckets[cid]
+            n = len(hits)
+            status = "Findings present" if hits else "Not observed"
+            color = "#b00020" if hits else "#1a7f37"
+            examples = ""
+            if hits:
+                worst = sorted(hits, key=lambda x: SEVERITY_META.get(
+                    _sev_of(x), {}).get("order", 4))[:4]
+                items = "".join(
+                    f"<li>{_esc(h.get('title') or h.get('vuln_type') or 'Finding')}"
+                    f" <span class='small muted'>({_esc(_sev_of(h))}"
+                    f"{' · ' + _esc(str(h.get('target'))) if h.get('target') else ''})</span></li>"
+                    for h in worst)
+                more = f"<li class='small muted'>+{n - len(worst)} more…</li>" if n > len(worst) else ""
+                examples = f"<ul class='small' style='margin:4px 0 0 16px'>{items}{more}</ul>"
+            rows += (f'<tr><td class="small">{_esc(cid)}</td>'
+                     f'<td>{_esc(cn)}{examples}</td>'
+                     f'<td style="color:{color};font-weight:600">{status}</td>'
+                     f'<td class="small">{n}</td></tr>')
+        return rows, covered
+
+    @staticmethod
+    def has_iot_findings(findings: list[dict]) -> bool:
+        return any(f.get("owasp_iot") for f in findings)
+
+    @staticmethod
+    def has_ot_findings(findings: list[dict]) -> bool:
+        return any(f.get("iec62443") for f in findings)
+
+    def _owasp_iot_coverage(self, findings: list[dict]) -> str:
+        """OWASP IoT Top 10 (2018) matrix — the right standard for consumer /
+        building-automation device findings. Rendered only when the engagement
+        produced IoT findings."""
+        rows, covered = self._framework_rows(
+            _fw.OWASP_IOT_2018, _fw.iot_category_id, findings)
+        return f"""<div class="page section" id="owasp-iot"><h2>OWASP IoT Top 10 (2018) Coverage</h2>
+          <p class="small muted">Consumer and building-automation device findings mapped to the
+          <a href="{_fw.OWASP_IOT_REFERENCE}">OWASP IoT Top 10 (2018)</a> — {covered} of 10
+          categories have findings. This is the IoT-specific companion to the web OWASP Top 10:
+          device authentication, insecure network services and default settings are scored here,
+          not under the web risks.</p>
+          <table>
+            <tr><th style="width:90px">Category</th><th>Risk &amp; findings</th><th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
+            {rows}
+          </table>
+        </div>"""
+
+    def _ot_ics_coverage(self, findings: list[dict]) -> str:
+        """IEC 62443-3-3 foundational-requirement matrix (with MITRE ATT&CK for
+        ICS context) — the OT/ICS standard. Rendered only when the engagement
+        produced industrial-protocol findings."""
+        rows, covered = self._framework_rows(
+            _fw.IEC_62443_FR, _fw.ot_category_id, findings)
+        return f"""<div class="page section" id="ot-ics"><h2>OT / ICS Security Coverage (IEC 62443)</h2>
+          <p class="small muted">Industrial-control findings mapped to the
+          <a href="{_fw.IEC_62443_REFERENCE}">IEC 62443-3-3</a> foundational requirements and
+          cross-referenced to <a href="{_fw.ATTACK_ICS_REFERENCE}">MITRE ATT&amp;CK for ICS</a> —
+          {covered} of 7 requirements have findings. A read-only external scan primarily exercises
+          FR1 (authentication) and FR5 (network segmentation); the full list is shown so coverage is
+          an honest statement, not a cherry-picked subset.</p>
+          <table>
+            <tr><th style="width:90px">Requirement</th><th>Foundational requirement &amp; findings</th><th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
             {rows}
           </table>
         </div>"""

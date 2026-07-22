@@ -19,7 +19,6 @@ class ScanMode(str, Enum):
     NETWORK = "network"
     WEB = "web"
     CLOUD = "cloud"
-    WIRELESS = "wireless"
     DEVSECOPS = "devsecops"
     AD = "ad"
     IOT = "iot"
@@ -120,7 +119,6 @@ class ScannerConfig:
     web_max_pages: int = 500
     cloud_concurrency: int = 50
     cloud_timeout: float = 30.0
-    wireless_interface: str = "wlan0"
 
     def __post_init__(self):
         self.net_concurrency = _env("HEAVEN_NET_CONCURRENCY", self.net_concurrency, int)
@@ -131,7 +129,6 @@ class ScannerConfig:
         self.web_max_depth = _env("HEAVEN_WEB_DEPTH", self.web_max_depth, int)
         self.web_max_pages = _env("HEAVEN_WEB_MAX_PAGES", self.web_max_pages, int)
         self.cloud_concurrency = _env("HEAVEN_CLOUD_CONCURRENCY", self.cloud_concurrency, int)
-        self.wireless_interface = _env("HEAVEN_WLAN_IFACE", self.wireless_interface)
 
 
 @dataclass

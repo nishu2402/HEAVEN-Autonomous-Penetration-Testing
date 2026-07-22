@@ -781,11 +781,15 @@ async def scan_iot_targets(targets: Optional[list[str]] = None, **kwargs) -> dic
     hosts = targets or kwargs.get("iot_targets", [])
     if not hosts:
         return {"skipped": True, "reason": "No IoT targets specified"}
+    # Tag each finding against its domain framework (OWASP IoT Top 10 / IEC
+    # 62443) so the report scores an IoT/OT engagement against the right
+    # standard, not the web OWASP Top 10.
+    from heaven.devsecops.frameworks import tag_iot_ot_finding
     scanner = IoTScanner()
     all_findings: list[dict] = []
     for host in hosts:
         for f in await scanner.scan_host(host):
-            all_findings.append(f.to_dict())
+            all_findings.append(tag_iot_ot_finding(f.to_dict()))
     return {"total": len(all_findings), "findings": all_findings}
 
 
@@ -794,9 +798,12 @@ async def scan_ot_targets(targets: Optional[list[str]] = None, **kwargs) -> dict
     hosts = targets or kwargs.get("ot_targets", [])
     if not hosts:
         return {"skipped": True, "reason": "No OT targets specified"}
+    # Map each ICS finding to its IEC 62443 foundational requirement + MITRE
+    # ATT&CK for ICS technique (never the web OWASP Top 10).
+    from heaven.devsecops.frameworks import tag_iot_ot_finding
     scanner = OTScanner()
     all_findings: list[dict] = []
     for host in hosts:
         for f in await scanner.scan_host(host):
-            all_findings.append(f.to_dict())
+            all_findings.append(tag_iot_ot_finding(f.to_dict()))
     return {"total": len(all_findings), "findings": all_findings}

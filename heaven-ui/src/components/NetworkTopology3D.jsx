@@ -12,6 +12,16 @@ const SEV_COLORS = {
 const ACCENT = '#6D7CFF'
 const ACCENT_2 = '#A78BFA'
 
+// Highest-risk hosts win the limited node budget so a wide /24 sweep never
+// floods the view with dozens of low-signal spheres.
+const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4, unknown: 5 }
+const MAX_NODES = 24              // cap; larger scans show "+N more"
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))  // ~137.5° — even, no clumping
+
+function hostSeverity(h) {
+  return h.severity || h.max_severity || 'unknown'
+}
+
 function Edge({ start, end, color }) {
   const ref = useRef()
   const points = useMemo(() => [
@@ -22,28 +32,28 @@ function Edge({ start, end, color }) {
 
   useFrame(({ clock }) => {
     if (ref.current) {
-      ref.current.material.opacity = 0.12 + 0.06 * Math.sin(clock.elapsedTime * 2 + start[0])
+      ref.current.material.opacity = 0.09 + 0.05 * Math.sin(clock.elapsedTime * 1.5 + start[0])
     }
   })
 
   return (
     <line ref={ref} geometry={geo}>
-      <lineBasicMaterial color={color || ACCENT} transparent opacity={0.18} />
+      <lineBasicMaterial color={color || ACCENT} transparent opacity={0.14} />
     </line>
   )
 }
 
-function HostNode({ host, position, severity, portCount, onClick }) {
+function HostNode({ host, position, severity, portCount, sizeScale, onClick }) {
   const mesh = useRef()
   const ring = useRef()
   const [hovered, setHovered] = useState(false)
   const color = SEV_COLORS[severity] || SEV_COLORS.unknown
-  const radius = 0.12 + Math.min(portCount * 0.025, 0.35)
+  const radius = (0.12 + Math.min(portCount * 0.025, 0.35)) * sizeScale
 
   useFrame(({ clock }) => {
     if (!mesh.current) return
     const t = clock.elapsedTime
-    mesh.current.position.y = position[1] + Math.sin(t * 0.7 + position[0] * 2) * 0.06
+    mesh.current.position.y = position[1] + Math.sin(t * 0.7 + position[0] * 2) * 0.05
     mesh.current.rotation.y = t * 0.3
     if (ring.current) {
       ring.current.rotation.z = t * 0.5
@@ -110,31 +120,52 @@ function Scene({ hosts, onSelect }) {
   // to another engagement with the same number of hosts (but different IPs) must
   // still relayout so the topology reflects the engagement you're viewing.
   const hostKey = hosts.map((h) => h.ip || h.host || '?').join('|')
+
+  // Deterministic phyllotaxis (sunflower) spread: evenly area-filling, never
+  // overlapping, and — crucially — stable across re-renders. The previous layout
+  // used Math.random() for height + random cross-links, which read as a jittery,
+  // tangled mess. Height is a fixed 3-tier band by index for depth without chaos.
   const positions = useMemo(() => {
+    const n = hosts.length
+    const spacing = n > 12 ? 0.62 : 0.78   // spread out a touch more when denser
     return hosts.map((_, i) => {
-      const angle = (i / hosts.length) * Math.PI * 2
-      const r = 1.5 + (i % 3) * 1.2
-      return [
-        Math.cos(angle) * r,
-        (Math.random() - 0.5) * 1.5,
-        Math.sin(angle) * r,
-      ]
+      const r = spacing * Math.sqrt(i + 0.5)
+      const angle = i * GOLDEN_ANGLE
+      const tier = (i % 3) - 1              // -1, 0, +1
+      return [Math.cos(angle) * r, tier * 0.5, Math.sin(angle) * r]
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostKey])
 
+  // Clean edges: link each node only to its single nearest neighbour (deduped),
+  // yielding a sparse, readable web instead of the old random criss-cross.
   const edges = useMemo(() => {
     const out = []
+    const seen = new Set()
     for (let i = 0; i < positions.length; i++) {
-      const j = (i + 1) % positions.length
-      out.push({ start: positions[i], end: positions[j] })
-      if (i > 0 && i % 3 === 0) {
-        const k = Math.floor(Math.random() * i)
-        out.push({ start: positions[i], end: positions[k] })
+      let best = -1
+      let bestD = Infinity
+      for (let j = 0; j < positions.length; j++) {
+        if (i === j) continue
+        const dx = positions[i][0] - positions[j][0]
+        const dy = positions[i][1] - positions[j][1]
+        const dz = positions[i][2] - positions[j][2]
+        const d = dx * dx + dy * dy + dz * dz
+        if (d < bestD) { bestD = d; best = j }
+      }
+      if (best >= 0) {
+        const key = i < best ? `${i}-${best}` : `${best}-${i}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          out.push({ start: positions[i], end: positions[best] })
+        }
       }
     }
     return out
   }, [positions])
+
+  // Shrink nodes as the count climbs so a busy map stays legible.
+  const sizeScale = Math.max(0.55, Math.min(1, 1 - hosts.length / 60))
 
   return (
     <>
@@ -151,8 +182,9 @@ function Scene({ hosts, onSelect }) {
           key={host.ip || host.host || i}
           host={host}
           position={positions[i]}
-          severity={host.severity || host.max_severity || 'unknown'}
+          severity={hostSeverity(host)}
           portCount={host.open_ports?.length || 1}
+          sizeScale={sizeScale}
           onClick={onSelect}
         />
       ))}
@@ -168,17 +200,43 @@ function Scene({ hosts, onSelect }) {
 
 export default function NetworkTopology3D({ hosts = [] }) {
   const [selected, setSelected] = useState(null)
-  const hasHosts = hosts.length > 0
+
+  // Rank by severity (then port count) and cap so large scans stay readable.
+  const { shown, hiddenCount, total } = useMemo(() => {
+    const sorted = [...hosts].sort((a, b) => {
+      const sa = SEV_RANK[hostSeverity(a)] ?? 9
+      const sb = SEV_RANK[hostSeverity(b)] ?? 9
+      if (sa !== sb) return sa - sb
+      return (b.open_ports?.length || 0) - (a.open_ports?.length || 0)
+    })
+    return {
+      shown: sorted.slice(0, MAX_NODES),
+      hiddenCount: Math.max(0, sorted.length - MAX_NODES),
+      total: hosts.length,
+    }
+  }, [hosts])
+
+  const hasHosts = total > 0
+  const capped = hiddenCount > 0
 
   return (
     <div className="topology-container">
       <div style={{
-        position: 'absolute', top: 12, right: 14, zIndex: 10,
+        position: 'absolute', top: 12, right: 14, zIndex: 10, textAlign: 'right',
         fontSize: 11, color: 'var(--text-2)', letterSpacing: '0.06em',
       }}>
-        {hasHosts
-          ? <><span style={{ color: 'var(--brand)' }}>●</span> {hosts.length} host{hosts.length !== 1 ? 's' : ''} mapped</>
-          : <span style={{ textTransform: 'uppercase' }}>○ no hosts — run a scan</span>}
+        {!hasHosts && <span style={{ textTransform: 'uppercase' }}>○ no hosts — run a scan</span>}
+        {hasHosts && !capped && (
+          <><span style={{ color: 'var(--brand)' }}>●</span> {total} host{total !== 1 ? 's' : ''} mapped</>
+        )}
+        {hasHosts && capped && (
+          <>
+            <div><span style={{ color: 'var(--brand)' }}>●</span> top {shown.length} of {total} hosts</div>
+            <div style={{ fontSize: 10, color: 'var(--text-3, var(--text-2))', marginTop: 2 }}>
+              +{hiddenCount} more · ranked by severity
+            </div>
+          </>
+        )}
       </div>
 
       <Canvas
@@ -186,7 +244,7 @@ export default function NetworkTopology3D({ hosts = [] }) {
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
       >
-        <Scene hosts={hosts} onSelect={setSelected} />
+        <Scene hosts={shown} onSelect={setSelected} />
       </Canvas>
 
       {selected && (
@@ -197,7 +255,7 @@ export default function NetworkTopology3D({ hosts = [] }) {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span>
-            <span style={{ color: SEV_COLORS[selected.severity || 'unknown'] }}>●</span>
+            <span style={{ color: SEV_COLORS[hostSeverity(selected)] }}>●</span>
             {' '}{selected.ip || selected.host}
             {' · '}{selected.open_ports?.join(', ') || '—'}
           </span>

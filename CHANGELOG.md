@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **IoT and OT findings are now scored against their _own_ security frameworks,
+  not the web OWASP Top 10.** A Modbus PLC reachable on the LAN is not "A01
+  Broken Access Control", so device and industrial findings are mapped to the
+  standards the industry actually uses (`heaven/devsecops/frameworks.py`):
+  - **Consumer / building-automation IoT → OWASP IoT Top 10 (2018)** (I1–I10):
+    default credentials → I1, exposed MQTT/RTSP/UPnP → I2 Insecure Network
+    Services, device web panels → I3, cleartext CoAP → I7, default SNMP
+    community → I9.
+  - **Operational technology / ICS → IEC 62443-3-3 foundational requirements**
+    (FR1–FR7) cross-referenced to **MITRE ATT&CK for ICS**: an unauthenticated
+    Modbus/S7comm/DNP3/IEC-104/OPC-UA/EtherNet-IP/BACnet service → FR1
+    Identification & Authentication Control (Modbus, being writable, carries
+    T0855 Unauthorized Command Message); an open-but-unconfirmed ICS port →
+    FR5 Restricted Data Flow.
+  - The professional report (HTML **and** PDF) now renders **two new dynamic
+    coverage matrices** — "OWASP IoT Top 10 (2018) Coverage" and "OT / ICS
+    Security Coverage (IEC 62443)" — shown only when the engagement actually
+    produced device/industrial findings, and linked to the concrete findings
+    that landed in each category. The per-finding detail (report + web UI) shows
+    the correct framework row instead of a blank or wrong web-OWASP label.
+  - IoT/OT findings are explicitly **excluded from the web OWASP Top 10 (2021)
+    matrix** so a Modbus finding whose title contains "unauthenticated" can no
+    longer be mis-bucketed into A01 — the enrichment layer no longer forces a
+    web category onto a finding that carries an IoT/OT tag.
+
 - **Real-world report parity — new detectors closing the gaps against
   professional pen-test/health-check deliverables.** A gap analysis against two
   real Cyphere engagement reports (an internal IT security health check and a

@@ -163,7 +163,11 @@ export default function FindingDetail() {
             </td></tr>
             <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "—"}</td></tr>
             <tr><td>CWE</td><td>{f.cwe || ev.cwe || "—"}</td></tr>
-            <tr><td>OWASP</td><td>{f.owasp || ev.owasp || "—"}</td></tr>
+            {f.iec62443
+              ? <tr><td>IEC 62443</td><td>{f.iec62443}</td></tr>
+              : f.owasp_iot
+                ? <tr><td>OWASP IoT Top 10</td><td>{f.owasp_iot}</td></tr>
+                : <tr><td>OWASP</td><td>{f.owasp || ev.owasp || "—"}</td></tr>}
             <tr><td>MITRE ATT&CK</td><td>{f.mitre_technique || ev.mitre || "—"}</td></tr>
             <tr><td>CVSS vector</td><td className="mono" style={{ fontSize: 12 }}>{f.cvss_vector || ev.cvss_vector || "—"}</td></tr>
             <tr><td>Seen</td><td className="dim">

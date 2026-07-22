@@ -2594,8 +2594,10 @@ def enrich_finding(finding: dict) -> dict:
     # the standard taxonomy for its class, derived from its type/title keywords —
     # so the report is never blank. Only applied when the KB had NO entry at all;
     # a curated entry with an intentionally-blank field (informational / positive
-    # posture) is left exactly as authored.
-    if not entry:
+    # posture) is left exactly as authored. Skipped for IoT/OT findings: those
+    # carry their own framework tag (OWASP IoT Top 10 / IEC 62443) and must never
+    # be forced into a web OWASP-2021 category by a keyword match on their title.
+    if not entry and not (out.get("owasp_iot") or out.get("iec62443")):
         dyn = _dynamic_taxonomy(out)
         if dyn:
             if not out.get("cwe"):

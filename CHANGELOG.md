@@ -90,6 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dashboard network topology reads cleanly instead of a jittery tangle.** The
+  3D host map placed nodes with `Math.random()` height and wired random
+  criss-cross edges, so even a dozen hosts looked like a cluttered mess that
+  re-shuffled on every render. Nodes now use a deterministic phyllotaxis
+  (sunflower) spread — evenly spaced, never overlapping, stable across renders —
+  linked by sparse nearest-neighbour edges, and shrink slightly as the count
+  grows. Wide sweeps are capped to the top 24 hosts **ranked by severity** with a
+  "top N of M · +K more" indicator, so a `/24` scan no longer floods the view.
 - **Scan reports and the audit trail now honour the configured data directory.**
   The report writer hard-coded a current-directory-relative `data/` for
   `report_<id>.json`/`.sarif`, while the API's report-download endpoint reads them

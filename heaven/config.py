@@ -27,6 +27,10 @@ class ScanMode(str, Enum):
     CONTAINER = "container"
     EMAIL = "email"
     CI = "ci"
+    # Network-reachable wireless-infrastructure configuration review (exposed
+    # AP/router/WLAN-controller management interfaces). NOT RF/monitor-mode
+    # scanning — that needs local radio hardware a remote scanner cannot have.
+    WIRELESS = "wireless"
 
 
 class Platform(str, Enum):

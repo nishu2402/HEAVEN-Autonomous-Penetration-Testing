@@ -13,6 +13,8 @@ export const SCAN_MODES = [
     desc: "OWASP web-app assessment" },
   { value: "network",   icon: "🖧",  short: "Network",   title: "NETWORK — hosts & services",
     desc: "Hosts, ports & service CVEs" },
+  { value: "wireless",  icon: "📶", short: "Wireless",  title: "WIRELESS — AP / controller config review",
+    desc: "Exposed AP / router / WLAN admin panels" },
   { value: "api",       icon: "🔌", short: "API",       title: "API — REST / GraphQL security",
     desc: "REST & GraphQL endpoint testing" },
   { value: "cloud",     icon: "☁️", short: "Cloud",     title: "CLOUD — cloud assets & public buckets",

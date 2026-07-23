@@ -1033,6 +1033,108 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"],
     },
+    "api_docs_exposed": {
+        "title": "Exposed API documentation / specification",
+        "cwe": "CWE-200",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1526 — Cloud Service Discovery",
+        "typical_cvss": 5.3,
+        "description": (
+            "An OpenAPI/Swagger specification or interactive API explorer is reachable "
+            "without authentication. It enumerates every endpoint, parameter and schema, "
+            "mapping the API attack surface (including shadow/zombie routes)."
+        ),
+        "impact": "Full API surface disclosure accelerates targeted attacks on the API.",
+        "remediation": (
+            "1. Serve API docs only on internal networks or behind authentication.\n"
+            "2. Disable interactive explorers (Swagger UI / GraphQL Playground) in production.\n"
+            "3. Ensure the published spec does not leak internal/admin endpoints."
+        ),
+        "references": ["https://owasp.org/API-Security/editions/2023/en/0xa9-improper-inventory-management/"],
+    },
+    "api_actuator_exposed": {
+        "title": "Exposed framework management endpoint (Actuator)",
+        "cwe": "CWE-489",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1526 — Cloud Service Discovery",
+        "typical_cvss": 7.5,
+        "description": (
+            "A Spring Boot Actuator (or similar) management endpoint is reachable without "
+            "authentication. Endpoints such as /actuator/env, /heapdump and /mappings "
+            "disclose configuration, secrets and internal routes."
+        ),
+        "impact": "Configuration/secret disclosure; /heapdump can leak credentials from memory.",
+        "remediation": (
+            "1. Require authentication for all management endpoints.\n"
+            "2. Expose only /health and /info; disable env/heapdump/beans in production.\n"
+            "3. Bind the management port to an internal interface."
+        ),
+        "references": ["https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html"],
+    },
+    "api_broken_auth": {
+        "title": "Broken / Missing API Authentication",
+        "cwe": "CWE-306",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.2,
+        "description": (
+            "A conventionally-authenticated API endpoint returned a record collection or "
+            "sensitive object with no credentials supplied — the API does not enforce "
+            "authentication on data it should protect."
+        ),
+        "impact": "Unauthenticated data disclosure / takeover of protected resources.",
+        "remediation": (
+            "1. Enforce authentication on every non-public endpoint (deny-by-default).\n"
+            "2. Add object-level authorization so a caller only sees their own data.\n"
+            "3. Add automated tests that hit each endpoint unauthenticated and expect 401/403."
+        ),
+        "references": ["https://owasp.org/API-Security/editions/2023/en/0xa2-broken-authentication/"],
+    },
+    "wireless_mgmt_exposed": {
+        "title": "Wireless management interface exposed on the network",
+        "cwe": "CWE-284",
+        "owasp": "A05:2021 Security Misconfiguration",
+        "mitre": "T1133 — External Remote Services",
+        "typical_cvss": 6.5,
+        "description": (
+            "The web management interface of wireless infrastructure (access point, "
+            "home router or WLAN controller) is reachable over the IP network. Even "
+            "with authentication enforced, the wireless control plane should be "
+            "isolated — combined with weak/default credentials it is a full "
+            "wireless-network-takeover path."
+        ),
+        "impact": (
+            "An attacker who reaches (and authenticates to) the controller can "
+            "reconfigure SSIDs, disable encryption, add rogue APs or capture client "
+            "traffic across the entire wireless estate."
+        ),
+        "remediation": (
+            "1. Restrict the management interface to a dedicated management VLAN / VPN.\n"
+            "2. Change default credentials and enable MFA where supported.\n"
+            "3. Never expose the controller/AP admin panel to the WAN."
+        ),
+        "references": ["https://owasp.org/www-project-internet-of-things/"],
+    },
+    "wireless_mgmt_unauthenticated": {
+        "title": "Unauthenticated wireless management interface",
+        "cwe": "CWE-306",
+        "owasp": "A07:2021 Identification and Authentication Failures",
+        "mitre": "T1133 — External Remote Services",
+        "typical_cvss": 8.6,
+        "description": (
+            "The web management interface of wireless infrastructure returned its "
+            "admin UI with no authentication challenge. If configuration is reachable "
+            "without a login, any attacker on the network controls the wireless "
+            "infrastructure outright."
+        ),
+        "impact": "Immediate, credential-free takeover of the wireless control plane.",
+        "remediation": (
+            "1. Require authentication on the management interface immediately.\n"
+            "2. Restrict it to a management VLAN/VPN and change default credentials.\n"
+            "3. Patch the device — an unauthenticated admin UI is often a firmware bug."
+        ),
+        "references": ["https://owasp.org/www-project-internet-of-things/"],
+    },
     "race_condition": {
         "title": "Race Condition (TOCTOU)",
         "cwe": "CWE-362",
@@ -1971,6 +2073,9 @@ _ALIASES: dict[str, str] = {
     "k8s_rbac_overprivileged": "k8s_misconfiguration",
     "kubelet_exposed": "k8s_misconfiguration",
     "etcd_exposed": "k8s_misconfiguration",
+    "k8s_insecure_port": "k8s_misconfiguration",
+    "cadvisor_exposed": "k8s_misconfiguration",
+    "registry_exposed": "k8s_misconfiguration",
     "privesc": "privilege_escalation",
     "privilege_esc": "privilege_escalation",
     # Anomaly / heuristic
@@ -2136,6 +2241,13 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "xmlrpc_enabled": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
     "wordpress_user_enumeration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "unsupported_software": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
+    "api_docs_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "api_actuator_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "api_broken_auth": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "wireless_mgmt_exposed": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L",
+    "wireless_mgmt_unauthenticated": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "anonymous_ldap_enumeration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "azure_ad_tenant_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "posture_ok": "",
 }
 
@@ -2197,6 +2309,10 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
      ("CWE-284", "A01:2021 Broken Access Control", "T1078 — Valid Accounts")),
     (("anonymous_ldap", "domain_information"),
      ("CWE-200", "A05:2021 Security Misconfiguration", "T1087 — Account Discovery")),
+    (("azure_ad_tenant", "cloud_tenant", "tenant_disclosure", "federation_realm",
+      "m365_tenant"),
+     ("CWE-200", "A05:2021 Security Misconfiguration",
+      "T1590 — Gather Victim Network Information")),
     (("sql", "sqli"),
      ("CWE-89", "A03:2021 Injection", "T1190 — Exploit Public-Facing Application")),
     (("command_inj", "cmd_inj", "os_command", "rce", "remote_code", "code_exec", "code_inj"),

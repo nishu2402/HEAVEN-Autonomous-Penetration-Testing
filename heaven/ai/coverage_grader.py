@@ -102,6 +102,10 @@ class CoverageReport:
 
     owasp_top10: list[CategoryStatus] = field(default_factory=list)
     owasp_api_top10: list[CategoryStatus] = field(default_factory=list)
+    # Domain-specific frameworks — populated only when the engagement produced
+    # IoT / OT findings, so a web-only assessment isn't graded against them.
+    owasp_iot: list[CategoryStatus] = field(default_factory=list)
+    ot_ics: list[CategoryStatus] = field(default_factory=list)
 
     authenticated: bool = False
     auto_prove_run: bool = False
@@ -175,6 +179,16 @@ class CoverageReport:
                  "covered": c.covered}
                 for c in self.owasp_api_top10
             ],
+            "owasp_iot": [
+                {"code": c.code, "name": c.name, "findings": c.finding_count,
+                 "covered": c.covered}
+                for c in self.owasp_iot
+            ],
+            "ot_ics": [
+                {"code": c.code, "name": c.name, "findings": c.finding_count,
+                 "covered": c.covered}
+                for c in self.ot_ics
+            ],
             "untested_scope_targets": self.untested_scope_targets,
             "llm_gap_summary": self.llm_gap_summary,
             "recommendations": self.recommendations,
@@ -230,6 +244,12 @@ def _classify_finding(f: Any) -> Optional[str]:
     precedence the report's ``_owasp_category_id`` uses, so the Coverage matrix
     never disagrees with the HTML/PDF report.
     """
+    # API / IoT / OT findings are scored against their own frameworks below —
+    # keep them out of the web OWASP-2021 matrix exactly as the report does, so
+    # the self-grade and the HTML/PDF report never disagree.
+    tags = _finding_tags(f)
+    if tags["owasp_api"] or tags["owasp_iot"] or tags["iec62443"]:
+        return None
     ev = getattr(f, "evidence", None)
     if isinstance(ev, dict):
         code = _norm_owasp_code(str(ev.get("owasp") or ev.get("owasp_category") or ""))
@@ -237,6 +257,21 @@ def _classify_finding(f: Any) -> Optional[str]:
             return code
     hay = f"{getattr(f, 'vuln_type', '') or ''} {getattr(f, 'title', '') or ''}"
     return _classify(hay)
+
+
+def _finding_tags(f: Any) -> dict:
+    """A dict view of a stored Finding's domain-framework tags
+    (``owasp_iot`` / ``iec62443`` / ``owasp_api``), read from its evidence blob
+    where the scanners and ``vuln_kb`` persist them. Lets the very same
+    category-id helpers the HTML/PDF report uses drive the Coverage grader, so
+    the self-grade can never disagree with the report."""
+    ev = getattr(f, "evidence", None)
+    ev = ev if isinstance(ev, dict) else {}
+    return {
+        "owasp_iot": ev.get("owasp_iot") or getattr(f, "owasp_iot", "") or "",
+        "iec62443": ev.get("iec62443") or getattr(f, "iec62443", "") or "",
+        "owasp_api": ev.get("owasp_api") or getattr(f, "owasp_api", "") or "",
+    }
 
 
 def _target_host(target: str) -> str:
@@ -291,10 +326,43 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
                        finding_count=owasp_counts.get(code, 0), tested=True)
         for code in OWASP_2021
     ]
+
+    # Domain-framework buckets. The web OWASP matrix above deliberately does not
+    # count API/IoT/OT findings, so each is scored against the right standard.
+    import re as _re
+    from heaven.devsecops import frameworks as _fw
+    api_counts: dict[str, int] = {code: 0 for code in OWASP_API_2023}
+    iot_counts: dict[str, int] = {cid: 0 for cid, _ in _fw.OWASP_IOT_2018}
+    ot_counts: dict[str, int] = {cid: 0 for cid, _ in _fw.IEC_62443_FR}
+    for f in findings:
+        tags = _finding_tags(f)
+        am = _re.match(r"\s*(API\d{1,2})", str(tags["owasp_api"]))
+        if am and am.group(1) in api_counts:
+            api_counts[am.group(1)] += 1
+        icid = _fw.iot_category_id(tags)
+        if icid in iot_counts:
+            iot_counts[icid] += 1
+        ocid = _fw.ot_category_id(tags)
+        if ocid in ot_counts:
+            ot_counts[ocid] += 1
+
     owasp_api_status = [
-        CategoryStatus(code=code, name=OWASP_API_2023[code], tested=True)
+        CategoryStatus(code=code, name=OWASP_API_2023[code],
+                       finding_count=api_counts.get(code, 0), tested=True)
         for code in OWASP_API_2023
     ]
+    # IoT / OT lists are populated only when the engagement produced findings of
+    # that kind, so a web-only assessment isn't graded against device standards.
+    iot_status = (
+        [CategoryStatus(code=cid, name=cn, finding_count=iot_counts[cid], tested=True)
+         for cid, cn in _fw.OWASP_IOT_2018]
+        if any(iot_counts.values()) else []
+    )
+    ot_status = (
+        [CategoryStatus(code=cid, name=cn, finding_count=ot_counts[cid], tested=True)
+         for cid, cn in _fw.IEC_62443_FR]
+        if any(ot_counts.values()) else []
+    )
 
     # Scope coverage — a target counts as "scanned" if any finding's target's
     # hostname matches the scope entry. The previous version did
@@ -344,6 +412,8 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
         total_findings=len(findings),
         owasp_top10=owasp_status,
         owasp_api_top10=owasp_api_status,
+        owasp_iot=iot_status,
+        ot_ics=ot_status,
         authenticated=authed,
         auto_prove_run=auto_prove_run,
         postex_chained=postex_chained,

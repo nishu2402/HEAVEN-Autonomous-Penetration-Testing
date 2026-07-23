@@ -499,6 +499,18 @@ class PDFReportGenerator:
         story.append(self._owasp_table(findings, cw, styles, table))
         story.append(PageBreak())
 
+        # ── 10a. OWASP API Security Top 10 (only when API findings present) ──
+        # API-layer authorization / resource-consumption risks are scored against
+        # the OWASP API Top 10, kept out of the web matrix so neither double-counts.
+        if any(f.get("owasp_api") for f in findings):
+            story.append(heading("", "OWASP API Security Top 10 (2023) Coverage"))
+            story.append(Paragraph(
+                "API findings (REST / GraphQL / gRPC) mapped to the OWASP API Security "
+                "Top 10 (2023) — the API-specific companion to the web risks.", styles["body"]))
+            story.append(self._framework_table(
+                findings, _OWASP.OWASP_API_2023, _OWASP._api_category_id, cw, styles, table))
+            story.append(PageBreak())
+
         # ── 10b. IoT / OT framework coverage (only when relevant) ──
         # IoT and industrial findings are scored against their own standards —
         # the web OWASP Top 10 does not apply to a Modbus PLC or an RTSP camera.
@@ -747,8 +759,8 @@ class PDFReportGenerator:
         from heaven.devsecops import frameworks as _fw
         coverage: dict[str, dict] = {}
         for f in findings:
-            # IoT/OT findings are counted in their own frameworks below.
-            if _fw.has_iot_ot_tag(f):
+            # IoT/OT and API findings are counted in their own frameworks below.
+            if _fw.has_iot_ot_tag(f) or f.get("owasp_api"):
                 continue
             cid = _OWASP._owasp_category_id(f)
             for _k, (mapped, cn) in _OWASP.OWASP_MAP.items():

@@ -62,6 +62,7 @@ class ADAttackType(str, Enum):
     SMBV1_ENABLED = "smbv1_enabled"
     NULL_SESSION = "smb_null_session"
     ANON_LDAP = "anonymous_ldap_bind"
+    ANON_LDAP_ENUM = "anonymous_ldap_enumeration"
     MACHINE_ACCOUNT_QUOTA = "machine_account_quota"
     DOMAIN_INFO = "domain_information"
 
@@ -270,6 +271,85 @@ class ADScanner:
             logger.debug(f"RootDSE discovery failed for {self.dc_host}: {e}")
         return info
 
+    async def enumerate_anonymous(self) -> dict:
+        """Prove the *impact* of an anonymous LDAP bind by enumerating real
+        accounts without credentials.
+
+        :meth:`discover_via_rootdse` only shows the DC answers an unauthenticated
+        query (RootDSE). This goes one step further: it performs a bounded,
+        read-only subtree search for enabled **person user accounts** under the
+        naming context. If the DC returns actual ``sAMAccountName`` values to an
+        anonymous bind, the directory is exposing its user list pre-auth — the
+        raw material for password-spraying and AS-REP-roasting target lists. We
+        only raise the finding when concrete account names come back, so it can
+        never fire on a hardened DC that merely allows the RootDSE read.
+        """
+        # Only meaningful for a genuinely anonymous scan against a known NC.
+        if not HAS_LDAP or (self.username and self.password):
+            return {}
+        naming_context = self.domain_dn or self._domain_info.domain_dn
+        if not naming_context:
+            return {}
+        accounts: list[str] = []
+        try:
+            server = Server(self.dc_host, port=(636 if self.use_ssl else 389),
+                            use_ssl=self.use_ssl, get_info=ALL, connect_timeout=6)
+            conn = Connection(server, auto_bind=True, receive_timeout=8)
+            # Enabled, human user accounts only (sAMAccountType 805306368 =
+            # SAM_NORMAL_USER_ACCOUNT); excludes computer/trust accounts so a
+            # hit is unambiguously a leaked *user* directory.
+            conn.search(
+                naming_context,
+                "(&(objectClass=user)(objectCategory=person))",
+                search_scope=SUBTREE, attributes=["sAMAccountName"],
+                size_limit=50, time_limit=8,
+            )
+            for entry in (conn.entries or []):
+                v = getattr(entry, "sAMAccountName", None)
+                name = ""
+                try:
+                    name = str(v.value) if v is not None and v.value else ""
+                except Exception:
+                    name = ""
+                if name and name not in accounts:
+                    accounts.append(name)
+            try:
+                conn.unbind()
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+        except Exception as e:
+            logger.debug(f"Anonymous LDAP enumeration failed for {self.dc_host}: {e}")
+            return {}
+
+        if accounts:
+            self._findings.append(ADFinding(
+                target=self._domain_info.dc_hostname or self.dc_host,
+                attack_type=ADAttackType.ANON_LDAP_ENUM,
+                severity="high",
+                title=(f"Anonymous LDAP Exposes Domain User Accounts "
+                       f"({len(accounts)}+ enumerated)"),
+                description=(
+                    "The Domain Controller returned real user accounts to an "
+                    "unauthenticated LDAP bind. Pre-auth user enumeration hands "
+                    "an attacker a ready-made list for password spraying and "
+                    "AS-REP roasting, with no credentials required. This is a "
+                    "stronger exposure than an anonymous RootDSE read: the "
+                    "directory's user namespace itself is readable."
+                ),
+                affected_objects=accounts[:20],
+                confidence=0.92,
+                remediation=(
+                    "Disable anonymous directory reads: set dsHeuristics so "
+                    "anonymous LDAP operations are denied, and remove "
+                    "'Pre-Windows 2000 Compatible Access' membership that grants "
+                    "the Anonymous/Everyone principals read over the NC."
+                ),
+                mitre_technique="T1087.002",
+                evidence={"accounts_sample": accounts[:20],
+                          "accounts_returned": len(accounts)},
+            ))
+        return {"accounts_returned": len(accounts)}
+
     async def enumerate_smb(self) -> dict:
         """Network-layer SMB assessment of the DC/host — signing, SMBv1, null
         session, OS/domain fingerprint. Runs pre-auth (no domain creds needed)
@@ -441,6 +521,7 @@ class ADScanner:
         # still yields real findings (SMB signing/relay, SMBv1, null session,
         # anonymous LDAP, domain/forest/functional-level context).
         await self.discover_via_rootdse()
+        await self.enumerate_anonymous()
         await self.enumerate_smb()
 
         if not self._conn:

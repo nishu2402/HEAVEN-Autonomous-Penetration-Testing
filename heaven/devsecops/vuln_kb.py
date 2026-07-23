@@ -2248,6 +2248,8 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "wireless_mgmt_unauthenticated": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "anonymous_ldap_enumeration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "azure_ad_tenant_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "adfs_idp_signon_enabled": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "federation_sts_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "posture_ok": "",
 }
 
@@ -2311,6 +2313,15 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
      ("CWE-200", "A05:2021 Security Misconfiguration", "T1087 — Account Discovery")),
     (("azure_ad_tenant", "cloud_tenant", "tenant_disclosure", "federation_realm",
       "m365_tenant"),
+     ("CWE-200", "A05:2021 Security Misconfiguration",
+      "T1590 — Gather Victim Network Information")),
+    # ADFS IdP-initiated sign-on enabled — an internet-facing spray/enumeration
+    # surface (kept ahead of the generic exposure/auth groups so it wins).
+    (("idp_signon", "idpinitiated", "idp_initiated", "idpinit"),
+     ("CWE-284", "A05:2021 Security Misconfiguration", "T1110 — Brute Force")),
+    # Federation STS metadata disclosure — recon-grade identity-surface mapping.
+    (("federation_sts", "federation_metadata", "federation_endpoint",
+      "sts_exposed", "sts_disclos"),
      ("CWE-200", "A05:2021 Security Misconfiguration",
       "T1590 — Gather Victim Network Information")),
     (("sql", "sqli"),

@@ -59,6 +59,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not a flaw) and only when Microsoft positively confirms a tenant — so it can
   never false-positive on a non-Entra domain.
 
+- **Cloud identity recon — ADFS / federation endpoint reachability** (extends
+  `heaven/recon/azure_tenant.py`). When user-realm discovery reports a
+  **federated** domain it also discloses the target's Security Token Service
+  (`AuthURL`); HEAVEN now turns that into concrete posture with two further
+  read-only GETs against the disclosed STS: (1) if the WS-Fed/SAML
+  `FederationMetadata.xml` is reachable it raises an **informational**
+  `federation_sts_exposed` finding that maps the internet-facing on-prem/ADFS
+  identity component (STS host, endpoints, token-signing certificate) as a pivot
+  target; (2) if the ADFS **IdP-initiated sign-on page**
+  (`/adfs/ls/idpinitiatedsignon.aspx`) is served it raises a **medium**
+  `adfs_idp_signon_enabled` finding — Microsoft recommends disabling it because
+  it is an unauthenticated password-spray target and username-enumeration oracle.
+  Both fire only from positive evidence (metadata actually parsed / the sign-on
+  page actually served with ADFS markers), so a hardened or non-ADFS STS yields
+  nothing.
+
 - **Active Directory — anonymous LDAP _enumeration_ depth.** Previously the AD
   scanner detected an anonymous LDAP bind (RootDSE read) but never proved its
   impact. It now performs a bounded, read-only anonymous subtree search for

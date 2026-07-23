@@ -11,6 +11,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OWASP API Security Top 10 (2023) coverage matrix + full framework-coverage
+  parity across report, self-grade and web UI.** The API scanner already tagged
+  findings with `owasp_api` (API1–API10) but the professional report never
+  rendered an API matrix. Now the HTML **and** PDF report render an "OWASP API
+  Security Top 10 (2023) Coverage" matrix (shown only when the engagement has
+  API findings), and the **Coverage self-grade page** (`heaven coverage` /
+  `/api/coverage` / the web UI) now scores **all four** frameworks — web OWASP
+  2021, OWASP API 2023, OWASP IoT 2018 and IEC 62443 — instead of web-OWASP
+  only. API/IoT/OT findings are excluded from the web matrix everywhere so
+  nothing is double-counted, and the self-grade can never disagree with the
+  report. Fixed a latent bug where the grader built the API category list but
+  never populated its finding counts (always 0).
+
+- **New provable, read-only per-domain detectors.**
+  - **API:** `API9 Improper Inventory Management` — body-confirmed exposure of
+    OpenAPI/Swagger specs, Swagger UI / GraphQL Playground and Spring Boot
+    Actuator management endpoints; `API2 Broken Authentication` — a
+    conventionally-authenticated collection endpoint returning records/sensitive
+    objects with no credentials (conservative, needs-verify). A benign SPA that
+    returns 200-HTML on every path produces zero findings.
+  - **Containers / Kubernetes:** kube-apiserver legacy insecure port (8080),
+    exposed cAdvisor (4194), and open Docker registry v2 catalog (5000). Also
+    **fixed a real bug**: the read-only kubelet port (10255) was probed over
+    `https`, so that check never fired — it now uses `http` for 10255 and
+    `https` for 10250.
+
+- **Wireless configuration-review surrogate (`heaven scan --mode wireless`).**
+  RF/monitor-mode Wi-Fi scanning needs local radio hardware a remote scanner
+  cannot have and is never faked; instead a new `heaven/recon/wireless_posture.py`
+  reviews the **network-reachable** management plane of wireless infrastructure —
+  vendor-fingerprinted AP / router / WLAN-controller web admin panels — over
+  read-only GETs, flagging exposed (medium) or unauthenticated (high) interfaces.
+  The `wireless` scan mode is wired end-to-end (config → orchestrator → CLI → API
+  → web launcher) and the NIST 800-115 §4.4 mapping updated accordingly.
+
+- **Cloud identity recon — credential-free Azure AD / Microsoft 365 tenant
+  discovery (`heaven/recon/azure_tenant.py`, CLOUD mode).** The existing cloud
+  checks cover storage exposure and metadata SSRF but not the *identity* plane.
+  Using only Microsoft's own public, unauthenticated discovery endpoints
+  (`getuserrealm.srf` + the tenant OpenID-Connect metadata), HEAVEN now confirms
+  whether a target domain is backed by Entra ID, whether authentication is
+  **managed** (cloud-only — external sign-in/spray surface) or **federated**
+  (disclosing the on-prem/ADFS STS), and resolves the **tenant GUID** and region.
+  Read-only GETs against Microsoft, no target credentials used or guessed;
+  reported at **informational** severity (external attack-surface intelligence,
+  not a flaw) and only when Microsoft positively confirms a tenant — so it can
+  never false-positive on a non-Entra domain.
+
+- **Active Directory — anonymous LDAP _enumeration_ depth.** Previously the AD
+  scanner detected an anonymous LDAP bind (RootDSE read) but never proved its
+  impact. It now performs a bounded, read-only anonymous subtree search for
+  enabled user accounts; if the Domain Controller returns real `sAMAccountName`
+  values without credentials, it raises a **high**-severity
+  `anonymous_ldap_enumeration` finding (pre-auth user list → password-spray /
+  AS-REP-roast target material) with a sample of the exposed accounts as
+  evidence. It fires only when concrete accounts come back, so a hardened DC that
+  merely permits the RootDSE read is never flagged.
+
 - **IoT and OT findings are now scored against their _own_ security frameworks,
   not the web OWASP Top 10.** A Modbus PLC reachable on the LAN is not "A01
   Broken Access Control", so device and industrial findings are mapped to the

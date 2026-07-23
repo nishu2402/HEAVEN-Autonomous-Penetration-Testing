@@ -102,6 +102,24 @@ class ComplianceReportGenerator:
         ("A10:2021", "Server-Side Request Forgery (SSRF)"),
     ]
 
+    # Canonical OWASP API Security Top 10 (2023) — the API-specific companion to
+    # the web Top 10. API findings carry an ``owasp_api`` tag (set by the API
+    # scanner) and are scored here, never double-counted in the web matrix.
+    # Ids match ``coverage_grader.OWASP_API_2023`` so the report and the Coverage
+    # self-grade can never disagree.
+    OWASP_API_2023 = [
+        ("API1", "Broken Object Level Authorization"),
+        ("API2", "Broken Authentication"),
+        ("API3", "Broken Object Property Level Authorization"),
+        ("API4", "Unrestricted Resource Consumption"),
+        ("API5", "Broken Function Level Authorization"),
+        ("API6", "Unrestricted Access to Sensitive Business Flows"),
+        ("API7", "Server Side Request Forgery"),
+        ("API8", "Security Misconfiguration"),
+        ("API9", "Improper Inventory Management"),
+        ("API10", "Unsafe Consumption of APIs"),
+    ]
+
     # Fallback vuln_type → OWASP category, used only when a finding carries no
     # enriched ``owasp`` field. Broad keyword coverage so no real finding is
     # silently dropped from the matrix.
@@ -218,6 +236,7 @@ class ComplianceReportGenerator:
         assessor = meta.get("assessor") or "HEAVEN Autonomous Penetration-Testing Platform"
 
         inventory = _normalize_assets(assets) if assets else []
+        has_api = self.has_api_findings(findings)
         has_iot = self.has_iot_findings(findings)
         has_ot = self.has_ot_findings(findings)
         sections = [
@@ -226,7 +245,7 @@ class ComplianceReportGenerator:
             self._cover(eng, overall, counts, len(findings), len(scope), generated, version),
             self._confidentiality(eng),
             self._doc_control(eng, assessor, version, generated, len(scope), len(findings), overall),
-            self._toc(bool(inventory), has_iot, has_ot),
+            self._toc(bool(inventory), has_api, has_iot, has_ot),
             self._exec_summary(eng, counts, len(findings), overall, ordered, len(scope)),
             self._scope_methodology(scope),
             self._inventory(inventory),
@@ -235,8 +254,10 @@ class ComplianceReportGenerator:
             self._detailed_findings(ordered),
             self._owasp_coverage(findings),
         ]
-        # IoT / OT engagements are scored against their own frameworks — shown
-        # only when the scan actually produced device / industrial findings.
+        # API / IoT / OT engagements are scored against their own frameworks —
+        # each shown only when the scan actually produced findings of that kind.
+        if has_api:
+            sections.append(self._owasp_api_coverage(findings))
         if has_iot:
             sections.append(self._owasp_iot_coverage(findings))
         if has_ot:
@@ -395,8 +416,8 @@ class ComplianceReportGenerator:
         </div>"""
 
     @staticmethod
-    def _toc(has_inventory: bool = False, has_iot: bool = False,
-             has_ot: bool = False) -> str:
+    def _toc(has_inventory: bool = False, has_api: bool = False,
+             has_iot: bool = False, has_ot: bool = False) -> str:
         items = [
             ("exec", "Executive Summary"),
             ("scope", "Scope & Methodology"),
@@ -409,6 +430,8 @@ class ComplianceReportGenerator:
             ("details", "Detailed Findings"),
             ("owasp", "OWASP Top 10 Coverage"),
         ]
+        if has_api:
+            items.append(("owasp-api", "OWASP API Security Top 10 (2023) Coverage"))
         if has_iot:
             items.append(("owasp-iot", "OWASP IoT Top 10 (2018) Coverage"))
         if has_ot:
@@ -713,6 +736,10 @@ class ComplianceReportGenerator:
         # 10 / IEC 62443) — never bucket them into the web OWASP-2021 matrix.
         if _fw.has_iot_ot_tag(f):
             return ""
+        # API findings are scored against the OWASP API Security Top 10 (2023);
+        # keep them out of the web (2021) matrix so nothing is double-counted.
+        if f.get("owasp_api"):
+            return ""
         raw = str(f.get("owasp") or f.get("owasp_category") or "").strip()
         m = re.match(r"\s*(A\d{2}:2021)", raw)
         if m:
@@ -806,6 +833,34 @@ class ComplianceReportGenerator:
     @staticmethod
     def has_ot_findings(findings: list[dict]) -> bool:
         return any(f.get("iec62443") for f in findings)
+
+    @staticmethod
+    def has_api_findings(findings: list[dict]) -> bool:
+        return any(f.get("owasp_api") for f in findings)
+
+    @staticmethod
+    def _api_category_id(f: dict) -> str:
+        """The OWASP API Top 10 (2023) id for a finding (e.g. ``API1``), or ''."""
+        import re
+        m = re.match(r"\s*(API\d{1,2})", str(f.get("owasp_api") or ""))
+        return m.group(1) if m else ""
+
+    def _owasp_api_coverage(self, findings: list[dict]) -> str:
+        """OWASP API Security Top 10 (2023) matrix — the API-specific companion
+        to the web OWASP Top 10. Rendered only when the engagement produced API
+        findings (REST / GraphQL / gRPC)."""
+        rows, covered = self._framework_rows(
+            self.OWASP_API_2023, self._api_category_id, findings)
+        return f"""<div class="page section" id="owasp-api"><h2>OWASP API Security Top 10 (2023) Coverage</h2>
+          <p class="small muted">API findings (REST / GraphQL / gRPC) mapped to the
+          <a href="https://owasp.org/API-Security/editions/2023/en/0x11-t10/">OWASP API Security Top 10 (2023)</a>
+          — {covered} of 10 categories have findings. API-layer authorization and resource-consumption
+          risks are scored here, not under the web OWASP Top 10, so neither matrix double-counts.</p>
+          <table>
+            <tr><th style="width:90px">Category</th><th>Risk &amp; findings</th><th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
+            {rows}
+          </table>
+        </div>"""
 
     def _owasp_iot_coverage(self, findings: list[dict]) -> str:
         """OWASP IoT Top 10 (2018) matrix — the right standard for consumer /

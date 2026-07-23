@@ -238,11 +238,13 @@ class KubernetesScanner:
                 except Exception:
                     logger.debug("suppressed non-fatal exception", exc_info=True)
 
-            # Check kubelet API
-            for kubelet_port in [10250, 10255]:
+            # Check kubelet API. 10250 is HTTPS (authenticated in a hardened
+            # cluster); 10255 is the plain-HTTP read-only port — using https on
+            # it never connected, so that check silently never fired.
+            for kubelet_port, kscheme in [(10250, "https"), (10255, "http")]:
                 try:
                     async with session.get(
-                        f"https://{host}:{kubelet_port}/pods",
+                        f"{kscheme}://{host}:{kubelet_port}/pods",
                         timeout=aiohttp.ClientTimeout(total=3), ssl=False,
                     ) as resp:
                         if resp.status == 200:
@@ -254,10 +256,86 @@ class KubernetesScanner:
                                 title=f"Kubelet API Exposed on {host}:{kubelet_port}",
                                 description=f"Kubelet API accessible — {pod_count} pods visible.",
                                 confidence=0.90,
-                                evidence={"pods": pod_count},
-                                remediation="Disable anonymous kubelet access. Enable webhook auth.",
+                                evidence={"pods": pod_count, "scheme": kscheme},
+                                remediation="Disable anonymous kubelet access. Enable webhook auth. "
+                                            "Set --read-only-port=0 to close 10255.",
                                 cwe="CWE-306", mitre="T1609",
                             ))
+                except Exception:
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
+
+            # Legacy insecure API port (--insecure-port 8080): serves the API with
+            # NO authentication or authorization. Removed in k8s >=1.20 but still
+            # seen on older/self-managed clusters.
+            try:
+                async with session.get(
+                    f"http://{host}:8080/api/v1/namespaces",
+                    timeout=aiohttp.ClientTimeout(total=4),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        ns = len(data.get("items", []))
+                        findings.append(ContainerFinding(
+                            target=host, vuln_type="k8s_insecure_port",
+                            severity="critical",
+                            title=f"K8s API insecure port open on {host}:8080",
+                            description=("The legacy kube-apiserver insecure port (8080) serves the "
+                                         f"API with no authentication or authorization — {ns} "
+                                         "namespaces readable."),
+                            confidence=0.95, evidence={"namespaces": ns},
+                            remediation="Set --insecure-port=0 (default on modern k8s). Never expose 8080.",
+                            cwe="CWE-306", mitre="T1610",
+                        ))
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+
+            # cAdvisor container-metrics API (port 4194) — discloses running
+            # containers, images and host resource layout.
+            try:
+                async with session.get(
+                    f"http://{host}:4194/api/v1.3/subcontainers",
+                    timeout=aiohttp.ClientTimeout(total=3),
+                ) as resp:
+                    ctype = (resp.headers.get("Content-Type") or "").lower()
+                    if resp.status == 200 and "json" in ctype:
+                        findings.append(ContainerFinding(
+                            target=host, vuln_type="cadvisor_exposed",
+                            severity="medium",
+                            title=f"cAdvisor Exposed on {host}:4194",
+                            description=("cAdvisor metrics API is publicly reachable — discloses "
+                                         "running containers, images and host resource layout."),
+                            confidence=0.85,
+                            remediation="Bind cAdvisor to localhost or require auth; do not expose 4194.",
+                            cwe="CWE-200", mitre="T1526",
+                        ))
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+
+            # Open Docker registry (v2 API) — anonymous catalog read / image pull
+            # (image poisoning + source-code leakage risk).
+            for reg_scheme in ("https", "http"):
+                try:
+                    async with session.get(
+                        f"{reg_scheme}://{host}:5000/v2/_catalog",
+                        timeout=aiohttp.ClientTimeout(total=4), ssl=False,
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            repos = data.get("repositories")
+                            if isinstance(repos, list):
+                                findings.append(ContainerFinding(
+                                    target=host, vuln_type="registry_exposed",
+                                    severity="high",
+                                    title=f"Open Container Registry on {host}:5000",
+                                    description=("Docker Registry v2 catalog is readable without "
+                                                 f"authentication — {len(repos)} repositories exposed "
+                                                 "(image pull / poisoning risk)."),
+                                    confidence=0.9, evidence={"repositories": repos[:20]},
+                                    remediation="Require registry authentication (htpasswd/token); "
+                                                "restrict network access.",
+                                    cwe="CWE-306", mitre="T1525",
+                                ))
+                                break
                 except Exception:
                     logger.debug("suppressed non-fatal exception", exc_info=True)
 

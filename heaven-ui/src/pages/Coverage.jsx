@@ -10,6 +10,30 @@ import { SkeletonCard } from "../components/Skeleton.jsx";
 import Markdown from "../components/Markdown.jsx";
 import { GRADE_COLOR } from "../theme";
 
+// Per-category coverage matrix for a domain framework (OWASP API / IoT / IEC 62443).
+// Same shape as the web OWASP Top 10 table so the page reads consistently.
+function FrameworkCard({ title, rows }) {
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div className="card-title">{title}</div>
+      <table className="data-table">
+        <tbody>
+          {(rows || []).map((c) => (
+            <tr key={c.code}>
+              <td style={{ width: 80 }}><code>{c.code}</code></td>
+              <td>{c.name}</td>
+              <td className="num" style={{ width: 60 }}>{c.findings}</td>
+              <td style={{ width: 30, color: c.covered ? "var(--brand)" : "var(--crit)" }}>
+                {c.covered ? "✓" : "✗"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function CoveragePage() {
   const [engagement, setEngagement] = useState("");
   const [useLLM, setUseLLM] = useState(true);
@@ -131,6 +155,21 @@ export default function CoveragePage() {
               </tbody>
             </table>
           </div>
+
+          {/* Domain-specific frameworks — scored against the right standard, shown
+              only when the engagement produced findings of that kind. */}
+          {(report.owasp_api_top10 || []).some((c) => c.findings > 0) && (
+            <FrameworkCard title="OWASP API Security Top 10 (2023) — API findings"
+                           rows={report.owasp_api_top10} />
+          )}
+          {(report.owasp_iot || []).length > 0 && (
+            <FrameworkCard title="OWASP IoT Top 10 (2018) — device findings"
+                           rows={report.owasp_iot} />
+          )}
+          {(report.ot_ics || []).length > 0 && (
+            <FrameworkCard title="OT / ICS Security (IEC 62443) — industrial findings"
+                           rows={report.ot_ics} />
+          )}
 
           {(report.recommendations || []).length > 0 && (
             <div className="card" style={{ marginTop: 12 }}>

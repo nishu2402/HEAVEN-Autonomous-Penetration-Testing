@@ -500,6 +500,148 @@ class RESTAPIScanner:
                 return findings
         return findings
 
+    # OpenAPI/Swagger docs + framework management surfaces that should not be
+    # publicly reachable in production (API9 Improper Inventory Management).
+    _INVENTORY_PATHS = [
+        ("/swagger.json", "OpenAPI/Swagger specification"),
+        ("/openapi.json", "OpenAPI specification"),
+        ("/swagger-ui.html", "Swagger UI"),
+        ("/api-docs", "API documentation"),
+        ("/v2/api-docs", "Springfox API docs"),
+        ("/v3/api-docs", "SpringDoc API docs"),
+        ("/actuator", "Spring Boot Actuator index"),
+        ("/actuator/env", "Spring Boot Actuator environment"),
+        ("/graphql-playground", "GraphQL Playground"),
+    ]
+
+    @classmethod
+    async def test_api_inventory(cls, session: aiohttp.ClientSession,
+                                 url: str) -> list[APIFinding]:
+        """API9: exposed API documentation / management surface (unauthenticated).
+
+        Body-confirmed — a generic 200/HTML SPA catch-all is NOT evidence; the
+        response must actually look like the advertised OpenAPI / actuator /
+        playground surface, so this stays low-false-positive."""
+        findings = []
+        for path, label in cls._INVENTORY_PATHS:
+            endpoint = f"{url}{path}"
+            try:
+                async with session.get(
+                    endpoint, timeout=aiohttp.ClientTimeout(total=6),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    ctype = (resp.headers.get("Content-Type") or "").lower()
+                    body = (await resp.text())[:20000]
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+                continue
+            low = body.lower()
+            is_doc = (("swagger" in path or "api-docs" in path or "openapi" in path)
+                      and ('"swagger"' in low or '"openapi"' in low
+                           or "swagger-ui" in low or "swaggerui" in low))
+            is_actuator = (path.startswith("/actuator") and "json" in ctype
+                           and "{" in body and ("_links" in low or "activeprofiles" in low
+                                                or "\"status\"" in low or "propertysources" in low))
+            is_gql = "graphql-playground" in path and "playground" in low
+            if not (is_doc or is_actuator or is_gql):
+                continue
+            sev = "high" if "env" in path else "medium"
+            findings.append(APIFinding(
+                target=url,
+                vuln_type="api_actuator_exposed" if is_actuator else "api_docs_exposed",
+                severity=sev, endpoint=endpoint,
+                title=f"Exposed API surface: {label}",
+                description=(f"{label} is reachable without authentication at {path}. "
+                             "Public API documentation / management endpoints expand the "
+                             "attack surface (shadow/zombie APIs, configuration disclosure)."),
+                confidence=0.8,
+                evidence={"status": 200, "content_type": ctype},
+                remediation=("Restrict documentation and management endpoints to internal "
+                             "networks or require authentication; disable Actuator env/heapdump "
+                             "in production."),
+                cwe="CWE-489" if is_actuator else "CWE-200",
+                owasp_api="API9:2023 Improper Inventory Management",
+            ))
+        return findings
+
+    # Conventionally-authenticated collection endpoints.
+    _PROTECTED_COLLECTIONS = [
+        "/api/users", "/api/v1/users", "/api/accounts", "/api/orders",
+        "/api/customers", "/api/admin/users", "/api/employees",
+    ]
+    _SENSITIVE_KEYS = frozenset({
+        "email", "password", "ssn", "token", "api_key", "apikey",
+        "credit_card", "phone", "salary", "role", "is_admin",
+    })
+
+    @classmethod
+    async def test_broken_authentication(cls, session: aiohttp.ClientSession,
+                                         url: str) -> list[APIFinding]:
+        """API2: a protected-looking collection reachable with NO credentials.
+
+        Conservative to avoid false positives: only flags a 200 JSON response
+        that is a collection of >=3 record objects (each with an id/email-like
+        key) or a single object carrying >=2 clearly-sensitive keys. Marked
+        needs-verification (confidence 0.55)."""
+        import json as _json
+        findings = []
+        for path in cls._PROTECTED_COLLECTIONS:
+            endpoint = f"{url}{path}"
+            try:
+                async with session.get(
+                    endpoint, timeout=aiohttp.ClientTimeout(total=6),
+                    headers={"Accept": "application/json"},
+                ) as resp:
+                    ctype = (resp.headers.get("Content-Type") or "").lower()
+                    if resp.status != 200 or "json" not in ctype:
+                        continue
+                    body = (await resp.text())[:100000]
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+                continue
+            try:
+                data = _json.loads(body)
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+                continue
+            records = None
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                for v in data.values():          # unwrap {"data":[...]} envelopes
+                    if isinstance(v, list) and v:
+                        records = v
+                        break
+            exposed = False
+            if isinstance(records, list):
+                objs = [r for r in records if isinstance(r, dict)]
+                if len(objs) >= 3 and all(
+                    any(k.lower() in ("id", "uuid", "_id", "email", "username")
+                        for k in o) for o in objs[:3]
+                ):
+                    exposed = True
+            elif isinstance(data, dict):
+                if len(cls._SENSITIVE_KEYS & {k.lower() for k in data}) >= 2:
+                    exposed = True
+            if exposed:
+                findings.append(APIFinding(
+                    target=url, vuln_type="api_broken_auth",
+                    severity="high", endpoint=endpoint,
+                    title=f"Unauthenticated access to protected collection: {path}",
+                    description=("A conventionally-authenticated endpoint returned a record "
+                                 "collection / sensitive object with no credentials supplied. "
+                                 "Confirm the data is genuinely meant to be access-controlled."),
+                    confidence=0.55,
+                    evidence={"status": 200, "content_type": ctype},
+                    remediation=("Enforce authentication and object-level authorization on all "
+                                 "data endpoints; never rely on obscurity of the URL."),
+                    cwe="CWE-306",
+                    owasp_api="API2:2023 Broken Authentication",
+                ))
+                break  # one solid signal is enough — don't flood the report
+        return findings
+
 
 class APISecurityScanner:
     """Master API security scanner combining GraphQL + REST + gRPC."""
@@ -528,6 +670,8 @@ class APISecurityScanner:
             self._findings.extend(await RESTAPIScanner.test_mass_assignment(session, url))
             self._findings.extend(await RESTAPIScanner.test_rate_limiting(session, url))
             self._findings.extend(await RESTAPIScanner.test_api_key_leakage(session, url))
+            self._findings.extend(await RESTAPIScanner.test_api_inventory(session, url))
+            self._findings.extend(await RESTAPIScanner.test_broken_authentication(session, url))
 
         logger.info(f"API scan complete: {len(self._findings)} findings on {url}")
         return self._findings

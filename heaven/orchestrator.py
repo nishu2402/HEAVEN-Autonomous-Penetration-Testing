@@ -1061,6 +1061,29 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         modes=frozenset({M.CLOUD}),
     )
 
+    # Credential-free Azure AD / Microsoft 365 tenant recon via Microsoft's own
+    # public discovery endpoints (getuserrealm + OpenID metadata). Maps the cloud
+    # *identity* surface — tenant existence, managed-vs-federated auth, tenant
+    # GUID — that the bucket/metadata checks don't touch. Read-only; CLOUD mode.
+    async def _azure_tenant_recon(**kw):
+        from urllib.parse import urlparse
+
+        from heaven.recon.azure_tenant import recon_azure_tenants
+        domains: list[str] = list(targets.get("domains", []))
+        for u in targets.get("urls", []):
+            d = _registered_domain(urlparse(u).hostname or "")
+            if d and d not in domains:
+                domains.append(d)
+        if not domains:
+            return {"skipped": True, "reason": "no domains for Azure tenant recon"}
+        return await recon_azure_tenants(domains)
+
+    orch.add_task(
+        "Azure AD / M365 Tenant Recon", _azure_tenant_recon,
+        phase=ScanPhase.RECON, concurrency_group="cloud",
+        modes=frozenset({M.CLOUD}),
+    )
+
     git_id = orch.add_task(
         "Git Secret Scanning", scan_repositories,
         phase=ScanPhase.RECON,
@@ -2335,6 +2358,24 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         phase=ScanPhase.CONTAINER_SCAN, depends_on=[net_id],
         modes=frozenset({M.CONTAINER}),
         timeout=600,
+    )
+
+    # ═══ Phase: WIRELESS POSTURE (network-reachable config review) ═══
+    # NOT RF scanning (needs local radio hardware) — reviews the exposed
+    # management plane of wireless infrastructure (AP/router/WLAN-controller
+    # web admin panels) using READ-ONLY GETs.
+    async def _wireless_scan(**kw):
+        try:
+            from heaven.recon.wireless_posture import scan_wireless_posture
+            return await scan_wireless_posture(targets=targets.get("ips", []))
+        except ImportError:
+            return {}
+
+    orch.add_task(
+        "Wireless Posture Review", _wireless_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id],
+        modes=frozenset({M.WIRELESS}),
+        timeout=300,
     )
 
     # ═══ Phase: EMAIL SCAN ═══

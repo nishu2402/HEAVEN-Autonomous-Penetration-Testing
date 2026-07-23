@@ -120,7 +120,8 @@ def test_new_vuln_types_have_complete_taxonomy():
     for vt in ("api_docs_exposed", "api_actuator_exposed", "api_broken_auth",
                "k8s_insecure_port", "cadvisor_exposed", "registry_exposed",
                "wireless_mgmt_exposed", "wireless_mgmt_unauthenticated",
-               "anonymous_ldap_enumeration", "azure_ad_tenant_exposed"):
+               "anonymous_ldap_enumeration", "azure_ad_tenant_exposed",
+               "adfs_idp_signon_enabled", "federation_sts_exposed"):
         e = enrich_finding({"vuln_type": vt, "title": vt, "severity": "high", "target": "x"})
         assert e.get("cwe"), vt
         assert e.get("owasp"), vt
@@ -203,6 +204,68 @@ def test_azure_recon_skips_non_domains_offline():
     # No queryable domains → clean empty summary, no network, never raises.
     out = asyncio.run(az.recon_azure_tenants(["127.0.0.1", "localhost", ""]))
     assert out == {"domains_checked": 0, "tenants_found": 0, "findings": []}
+
+
+# ── ADFS / federation reachability (built on the tenant recon) ───────────────
+
+_ADFS_METADATA = (
+    '<?xml version="1.0"?>'
+    '<EntityDescriptor entityID="http://sts.corp.example.com/adfs/services/trust" '
+    'xmlns="urn:oasis:names:tc:SAML:2.0:metadata">'
+    '<RoleDescriptor xmlns:fed="http://docs.oasis-open.org/wsfed/federation/200706"/>'
+    '<IDPSSODescriptor><KeyDescriptor use="signing"><KeyInfo>'
+    '<X509Data><X509Certificate>MIICabc</X509Certificate></X509Data>'
+    '</KeyInfo></KeyDescriptor></IDPSSODescriptor>'
+    '</EntityDescriptor>')
+_ADFS_IDPINIT_PAGE = (
+    '<html><body><form id="loginForm" method="post">'
+    '<input id="userNameInput" name="UserName"/>'
+    '<input id="passwordInput" name="Password" type="password"/>'
+    '</form><script>var MSISConfig={};</script></body></html>')
+_GENERIC_LOGIN = ('<html><form><input name="user"/>'
+                  '<input name="pass" type="password"/></form></html>')
+_FED_AUTH_URL = "https://sts.corp.example.com/adfs/ls/"
+_FED_REALM = {"is_tenant": True, "namespace_type": "Federated",
+              "is_federated": True, "federation_auth_url": _FED_AUTH_URL}
+
+
+def test_azure_federation_metadata_parse():
+    m = az.parse_federation_metadata(_ADFS_METADATA)
+    assert m["is_adfs"] and m["token_signing_cert"]
+    assert m["sts_host"] == "sts.corp.example.com"
+    assert "IDPSSODescriptor" in m["roles"]
+    assert az.parse_federation_metadata("<html>not metadata</html>") == {}
+    assert az.parse_federation_metadata("") == {}
+
+
+def test_azure_federation_urls_reject_non_hosts():
+    assert az.federation_metadata_url(_FED_AUTH_URL).endswith(
+        "/FederationMetadata/2007-06/FederationMetadata.xml")
+    assert az.idpinit_signon_url(_FED_AUTH_URL).endswith(
+        "/adfs/ls/idpinitiatedsignon.aspx")
+    # An IP literal or a single-label host is never a federation STS to probe.
+    assert az.federation_metadata_url("https://10.0.0.1/adfs/ls/") == ""
+    assert az.idpinit_signon_url("https://intranet/adfs/ls/") == ""
+
+
+def test_azure_idpinit_detection_is_conservative():
+    assert az.detect_idpinit_signon(200, _ADFS_IDPINIT_PAGE)      # 2+ ADFS markers
+    assert not az.detect_idpinit_signon(200, _GENERIC_LOGIN)      # generic form
+    assert not az.detect_idpinit_signon(404, _ADFS_IDPINIT_PAGE)  # not served
+    assert not az.detect_idpinit_signon(200, "")                  # empty body
+
+
+def test_azure_federation_findings_only_from_evidence():
+    meta = az.parse_federation_metadata(_ADFS_METADATA)
+    both = az.federation_findings("corp.example.com", _FED_REALM, meta, True)
+    kinds = {f["vuln_type"]: f["severity"] for f in both}
+    assert kinds == {"adfs_idp_signon_enabled": "medium",
+                     "federation_sts_exposed": "info"}
+    # Metadata parsed but sign-on page not reachable → only the recon finding.
+    only_meta = az.federation_findings("corp.example.com", _FED_REALM, meta, False)
+    assert [f["vuln_type"] for f in only_meta] == ["federation_sts_exposed"]
+    # No evidence at all → nothing fabricated.
+    assert az.federation_findings("corp.example.com", _FED_REALM, {}, False) == []
 
 
 # ── AD anonymous-enumeration surrogate ───────────────────────────────────────

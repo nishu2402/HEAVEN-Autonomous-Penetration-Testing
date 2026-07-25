@@ -56,7 +56,7 @@ def test_module_map_resolves_common_vuln_types() -> None:
 
 def test_overlay_lights_only_rows_whose_detector_fired() -> None:
     findings = [
-        {"vuln_type": "sql_injection", "owasp": "A03:2021 Injection"},
+        {"vuln_type": "sql_injection", "owasp": "A05:2025 Injection"},
         {"vuln_type": "idor"},
         {"vuln_type": "weak_tls"},
     ]

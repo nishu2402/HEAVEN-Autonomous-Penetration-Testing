@@ -15,7 +15,7 @@ vulnerabilities:
     parameter: id
     category: sqli
     subtypes_ok: [sqli_error, sqli_boolean]
-    owasp: "A03:2021-Injection"
+    owasp: "A05:2025-Injection"
     cwe: CWE-89
     severity: critical
     difficulty: low
@@ -28,7 +28,7 @@ vulnerabilities:
     parameter: id
     category: sqli
     subtypes_ok: [sqli_boolean]
-    owasp: "A03:2021-Injection"
+    owasp: "A05:2025-Injection"
     cwe: CWE-89
     severity: critical
     difficulty: medium
@@ -41,7 +41,7 @@ vulnerabilities:
     parameter: page
     category: lfi
     subtypes_ok: [path_traversal]
-    owasp: "A03:2021-Injection"
+    owasp: "A05:2025-Injection"
     cwe: CWE-98
     severity: high
     difficulty: low
@@ -54,7 +54,7 @@ vulnerabilities:
     parameter: ip
     category: cmdi
     subtypes_ok: [os_command_injection]
-    owasp: "A03:2021-Injection"
+    owasp: "A05:2025-Injection"
     cwe: CWE-78
     severity: critical
     difficulty: low
@@ -67,7 +67,7 @@ vulnerabilities:
     parameter: name
     category: xss
     subtypes_ok: [reflected_xss]
-    owasp: "A03:2021-Injection"
+    owasp: "A05:2025-Injection"
     cwe: CWE-79
     severity: high
     difficulty: low
@@ -83,7 +83,7 @@ vulnerabilities:
     parameter: id
     category: xss
     subtypes_ok: [reflected_xss]
-    owasp: "A03:2021-Injection"
+    owasp: "A05:2025-Injection"
     cwe: CWE-79
     severity: high
     difficulty: low
@@ -101,7 +101,7 @@ vulnerabilities:
     parameter: url
     category: ssrf
     subtypes_ok: [server_side_request_forgery]
-    owasp: "A10:2021-Server-Side Request Forgery"
+    owasp: "A01:2025-Broken Access Control"
     cwe: CWE-918
     severity: high
     difficulty: medium
@@ -114,7 +114,7 @@ vulnerabilities:
     parameter: null
     category: xxe
     subtypes_ok: [xml_external_entity]
-    owasp: "A05:2021-Security Misconfiguration"
+    owasp: "A02:2025-Security Misconfiguration"
     cwe: CWE-611
     severity: high
     difficulty: medium
@@ -127,7 +127,7 @@ vulnerabilities:
     parameter: url
     category: open_redirect
     subtypes_ok: [unvalidated_redirect]
-    owasp: "A01:2021-Broken Access Control"
+    owasp: "A01:2025-Broken Access Control"
     cwe: CWE-601
     severity: medium
     difficulty: low
@@ -140,7 +140,7 @@ vulnerabilities:
     parameter: null
     category: cors
     subtypes_ok: [cors_misconfig]
-    owasp: "A05:2021-Security Misconfiguration"
+    owasp: "A02:2025-Security Misconfiguration"
     cwe: CWE-942
     severity: high
     difficulty: low
@@ -153,7 +153,7 @@ vulnerabilities:
     parameter: null
     category: jwt
     subtypes_ok: [jwt_weak_secret]
-    owasp: "A02:2021-Cryptographic Failures"
+    owasp: "A04:2025-Cryptographic Failures"
     cwe: CWE-1391
     severity: critical
     difficulty: low
@@ -166,7 +166,7 @@ vulnerabilities:
     parameter: null
     category: insecure_cookie
     subtypes_ok: [cookie_no_httponly]
-    owasp: "A05:2021-Security Misconfiguration"
+    owasp: "A02:2025-Security Misconfiguration"
     cwe: CWE-1004
     severity: medium
     difficulty: low
@@ -184,7 +184,7 @@ vulnerabilities:
     parameter: null
     category: security_misconfig
     subtypes_ok: [missing_security_headers]
-    owasp: "A05:2021-Security Misconfiguration"
+    owasp: "A02:2025-Security Misconfiguration"
     cwe: CWE-693
     severity: low
     difficulty: low

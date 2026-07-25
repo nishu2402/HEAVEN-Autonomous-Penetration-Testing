@@ -139,12 +139,12 @@ export default function CoveragePage() {
           </div>
 
           <div className="card" style={{ marginTop: 12 }}>
-            <div className="card-title">OWASP Top 10 — per-category coverage</div>
+            <div className="card-title">OWASP Top 10 (2025) — per-category coverage</div>
             <table className="data-table">
               <tbody>
                 {(report.owasp_top10 || []).map((c) => (
                   <tr key={c.code}>
-                    <td style={{ width: 80 }}><code>{c.code}</code></td>
+                    <td style={{ width: 80 }}><code>{String(c.code).replace("_", ":")}</code></td>
                     <td>{c.name}</td>
                     <td className="num" style={{ width: 60 }}>{c.findings}</td>
                     <td style={{ width: 30, color: c.covered ? "var(--brand)" : "var(--crit)" }}>

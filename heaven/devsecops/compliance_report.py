@@ -86,21 +86,12 @@ def _sev_of(f: dict) -> str:
 
 class ComplianceReportGenerator:
 
-    # vuln_type substring → (OWASP 2021 control id, name)
-    # Canonical OWASP Top 10 (2021) — always rendered in full so the report is
+    # vuln_type substring → (OWASP 2025 control id, name)
+    # Canonical OWASP Top 10 (2025) — always rendered in full so the report is
     # a genuine coverage matrix (present vs not-observed), not just a list of hits.
-    OWASP_2021 = [
-        ("A01:2021", "Broken Access Control"),
-        ("A02:2021", "Cryptographic Failures"),
-        ("A03:2021", "Injection"),
-        ("A04:2021", "Insecure Design"),
-        ("A05:2021", "Security Misconfiguration"),
-        ("A06:2021", "Vulnerable and Outdated Components"),
-        ("A07:2021", "Identification and Authentication Failures"),
-        ("A08:2021", "Software and Data Integrity Failures"),
-        ("A09:2021", "Security Logging and Monitoring Failures"),
-        ("A10:2021", "Server-Side Request Forgery (SSRF)"),
-    ]
+    # Sourced from the single canon in ``frameworks.OWASP_2025`` so the report,
+    # the coverage self-grade, the methodology page and the UI never diverge.
+    OWASP_2025 = list(_fw.OWASP_2025)
 
     # Canonical OWASP API Security Top 10 (2023) — the API-specific companion to
     # the web Top 10. API findings carry an ``owasp_api`` tag (set by the API
@@ -123,77 +114,88 @@ class ComplianceReportGenerator:
     # Fallback vuln_type → OWASP category, used only when a finding carries no
     # enriched ``owasp`` field. Broad keyword coverage so no real finding is
     # silently dropped from the matrix.
+    # Fallback vuln_type substring → (OWASP 2025 id, name). Ordered: the first
+    # key that is a substring of the vuln_type/title wins, so more-specific keys
+    # (e.g. error-handling) precede broad ones. Values use the 2025 taxonomy —
+    # SSRF now lives under A01, component/supply-chain risk under A03, and
+    # error-mishandling under the new A10.
     OWASP_MAP = {
-        # A01 Broken Access Control
-        "access_control": ("A01:2021", "Broken Access Control"),
-        "idor": ("A01:2021", "Broken Access Control"),
-        "bola": ("A01:2021", "Broken Access Control"),
-        "lfi": ("A01:2021", "Broken Access Control"),
-        "path_traversal": ("A01:2021", "Broken Access Control"),
-        "directory_traversal": ("A01:2021", "Broken Access Control"),
-        "unauthorized": ("A01:2021", "Broken Access Control"),
-        "cors": ("A01:2021", "Broken Access Control"),
-        "csrf": ("A01:2021", "Broken Access Control"),
-        # A02 Cryptographic Failures
-        "sensitive_data": ("A02:2021", "Cryptographic Failures"),
-        "crypto": ("A02:2021", "Cryptographic Failures"),
-        "ssl": ("A02:2021", "Cryptographic Failures"),
-        "tls": ("A02:2021", "Cryptographic Failures"),
-        "cipher": ("A02:2021", "Cryptographic Failures"),
-        "certificate": ("A02:2021", "Cryptographic Failures"),
-        "cleartext": ("A02:2021", "Cryptographic Failures"),
-        # A03 Injection
-        "sqli": ("A03:2021", "Injection"),
-        "sql_injection": ("A03:2021", "Injection"),
-        "xss": ("A03:2021", "Injection"),
-        "command_injection": ("A03:2021", "Injection"),
-        "code_injection": ("A03:2021", "Injection"),
-        "rce": ("A03:2021", "Injection"),
-        "rfi": ("A03:2021", "Injection"),
-        "template_injection": ("A03:2021", "Injection"),
-        "ssti": ("A03:2021", "Injection"),
-        "ldap_injection": ("A03:2021", "Injection"),
-        "header_injection": ("A03:2021", "Injection"),
-        # A04 Insecure Design
-        "insecure_design": ("A04:2021", "Insecure Design"),
-        "open_redirect": ("A04:2021", "Insecure Design"),
-        "business_logic": ("A04:2021", "Insecure Design"),
-        # A05 Security Misconfiguration
-        "xxe": ("A05:2021", "Security Misconfiguration"),
-        "misconfig": ("A05:2021", "Security Misconfiguration"),
-        "security_header": ("A05:2021", "Security Misconfiguration"),
-        "missing_header": ("A05:2021", "Security Misconfiguration"),
-        "clickjack": ("A05:2021", "Security Misconfiguration"),
-        "directory_listing": ("A05:2021", "Security Misconfiguration"),
-        "default_page": ("A05:2021", "Security Misconfiguration"),
-        "exposed_admin": ("A05:2021", "Security Misconfiguration"),
-        "verbose_error": ("A05:2021", "Security Misconfiguration"),
-        "cookie": ("A05:2021", "Security Misconfiguration"),
-        # A06 Vulnerable and Outdated Components
-        "vulnerable_component": ("A06:2021", "Vulnerable and Outdated Components"),
-        "vulnerable_dependency": ("A06:2021", "Vulnerable and Outdated Components"),
-        "vulnerable_service": ("A06:2021", "Vulnerable and Outdated Components"),
-        "outdated": ("A06:2021", "Vulnerable and Outdated Components"),
-        "known_vuln": ("A06:2021", "Vulnerable and Outdated Components"),
-        "cve": ("A06:2021", "Vulnerable and Outdated Components"),
-        # A07 Identification and Authentication Failures
-        "broken_auth": ("A07:2021", "Identification and Authentication Failures"),
-        "auth": ("A07:2021", "Identification and Authentication Failures"),
-        "default_cred": ("A07:2021", "Identification and Authentication Failures"),
-        "weak_cred": ("A07:2021", "Identification and Authentication Failures"),
-        "weak_password": ("A07:2021", "Identification and Authentication Failures"),
-        "session": ("A07:2021", "Identification and Authentication Failures"),
-        "jwt": ("A07:2021", "Identification and Authentication Failures"),
-        # A08 Software and Data Integrity Failures
-        "deserial": ("A08:2021", "Software and Data Integrity Failures"),
-        "integrity": ("A08:2021", "Software and Data Integrity Failures"),
-        "unsigned": ("A08:2021", "Software and Data Integrity Failures"),
-        "supply_chain": ("A08:2021", "Software and Data Integrity Failures"),
-        # A09 Security Logging and Monitoring Failures
-        "logging": ("A09:2021", "Security Logging and Monitoring Failures"),
-        "monitoring": ("A09:2021", "Security Logging and Monitoring Failures"),
-        # A10 SSRF
-        "ssrf": ("A10:2021", "Server-Side Request Forgery (SSRF)"),
+        # A10 Mishandling of Exceptional Conditions (new in 2025) — checked first
+        # so a verbose-error / stack-trace leak isn't swallowed by A02.
+        "verbose_error": ("A10:2025", "Mishandling of Exceptional Conditions"),
+        "stack_trace": ("A10:2025", "Mishandling of Exceptional Conditions"),
+        "error_message": ("A10:2025", "Mishandling of Exceptional Conditions"),
+        "unhandled_exception": ("A10:2025", "Mishandling of Exceptional Conditions"),
+        "fail_open": ("A10:2025", "Mishandling of Exceptional Conditions"),
+        # A01 Broken Access Control (now also absorbs SSRF, A10:2021)
+        "access_control": ("A01:2025", "Broken Access Control"),
+        "idor": ("A01:2025", "Broken Access Control"),
+        "bola": ("A01:2025", "Broken Access Control"),
+        "lfi": ("A01:2025", "Broken Access Control"),
+        "path_traversal": ("A01:2025", "Broken Access Control"),
+        "directory_traversal": ("A01:2025", "Broken Access Control"),
+        "unauthorized": ("A01:2025", "Broken Access Control"),
+        "cors": ("A01:2025", "Broken Access Control"),
+        "csrf": ("A01:2025", "Broken Access Control"),
+        "ssrf": ("A01:2025", "Broken Access Control"),
+        # A02 Security Misconfiguration (was A05:2021 — moved up to #2)
+        "xxe": ("A02:2025", "Security Misconfiguration"),
+        "misconfig": ("A02:2025", "Security Misconfiguration"),
+        "security_header": ("A02:2025", "Security Misconfiguration"),
+        "missing_header": ("A02:2025", "Security Misconfiguration"),
+        "clickjack": ("A02:2025", "Security Misconfiguration"),
+        "directory_listing": ("A02:2025", "Security Misconfiguration"),
+        "default_page": ("A02:2025", "Security Misconfiguration"),
+        "exposed_admin": ("A02:2025", "Security Misconfiguration"),
+        "cookie": ("A02:2025", "Security Misconfiguration"),
+        # A03 Software Supply Chain Failures (was A06:2021 Vulnerable & Outdated
+        # Components, broadened; supply-chain integrity findings land here too)
+        "vulnerable_component": ("A03:2025", "Software Supply Chain Failures"),
+        "vulnerable_dependency": ("A03:2025", "Software Supply Chain Failures"),
+        "vulnerable_service": ("A03:2025", "Software Supply Chain Failures"),
+        "outdated": ("A03:2025", "Software Supply Chain Failures"),
+        "known_vuln": ("A03:2025", "Software Supply Chain Failures"),
+        "cve": ("A03:2025", "Software Supply Chain Failures"),
+        "supply_chain": ("A03:2025", "Software Supply Chain Failures"),
+        # A04 Cryptographic Failures (was A02:2021)
+        "sensitive_data": ("A04:2025", "Cryptographic Failures"),
+        "crypto": ("A04:2025", "Cryptographic Failures"),
+        "ssl": ("A04:2025", "Cryptographic Failures"),
+        "tls": ("A04:2025", "Cryptographic Failures"),
+        "cipher": ("A04:2025", "Cryptographic Failures"),
+        "certificate": ("A04:2025", "Cryptographic Failures"),
+        "cleartext": ("A04:2025", "Cryptographic Failures"),
+        # A05 Injection (was A03:2021)
+        "sqli": ("A05:2025", "Injection"),
+        "sql_injection": ("A05:2025", "Injection"),
+        "xss": ("A05:2025", "Injection"),
+        "command_injection": ("A05:2025", "Injection"),
+        "code_injection": ("A05:2025", "Injection"),
+        "rce": ("A05:2025", "Injection"),
+        "rfi": ("A05:2025", "Injection"),
+        "template_injection": ("A05:2025", "Injection"),
+        "ssti": ("A05:2025", "Injection"),
+        "ldap_injection": ("A05:2025", "Injection"),
+        "header_injection": ("A05:2025", "Injection"),
+        # A06 Insecure Design (was A04:2021)
+        "insecure_design": ("A06:2025", "Insecure Design"),
+        "open_redirect": ("A06:2025", "Insecure Design"),
+        "business_logic": ("A06:2025", "Insecure Design"),
+        # A07 Authentication Failures (was A07:2021, renamed)
+        "broken_auth": ("A07:2025", "Authentication Failures"),
+        "auth": ("A07:2025", "Authentication Failures"),
+        "default_cred": ("A07:2025", "Authentication Failures"),
+        "weak_cred": ("A07:2025", "Authentication Failures"),
+        "weak_password": ("A07:2025", "Authentication Failures"),
+        "session": ("A07:2025", "Authentication Failures"),
+        "jwt": ("A07:2025", "Authentication Failures"),
+        # A08 Software or Data Integrity Failures (was A08:2021, renamed)
+        "deserial": ("A08:2025", "Software or Data Integrity Failures"),
+        "integrity": ("A08:2025", "Software or Data Integrity Failures"),
+        "unsigned": ("A08:2025", "Software or Data Integrity Failures"),
+        # A09 Security Logging and Alerting Failures (was A09:2021, renamed)
+        "logging": ("A09:2025", "Security Logging and Alerting Failures"),
+        "monitoring": ("A09:2025", "Security Logging and Alerting Failures"),
     }
 
     SEV_ORDER = {k: v["order"] for k, v in SEVERITY_META.items()}
@@ -513,7 +515,7 @@ class ComplianceReportGenerator:
           <h3>Standards &amp; Frameworks Referenced</h3>
           <table>
             <tr><th style="width:230px">Framework</th><th>Use</th></tr>
-            <tr><td>OWASP Top 10 (2021)</td><td>Web application risk categorisation</td></tr>
+            <tr><td>OWASP Top 10 (2025)</td><td>Web application risk categorisation</td></tr>
             <tr><td>PTES</td><td>Penetration Testing Execution Standard phases</td></tr>
             <tr><td>NIST SP 800-115</td><td>Technical assessment methodology</td></tr>
             <tr><td>MITRE ATT&amp;CK</td><td>Adversary technique mapping (where applicable)</td></tr>
@@ -587,7 +589,7 @@ class ComplianceReportGenerator:
         for i, f in enumerate(ordered, 1):
             sev = _sev_of(f)
             m = SEVERITY_META[sev]
-            cvss = f.get("predicted_cvss_score") or f.get("typical_cvss") or "—"
+            cvss = self._finding_cvss(f)
             rows += (f'<tr><td class="small">{i}</td>'
                      f'<td><a href="#f{i}">{_esc(f.get("title") or f.get("vuln_type") or "Finding")}</a></td>'
                      f'<td><span class="pill" style="background:{m["color"]}">{m["label"]}</span></td>'
@@ -615,17 +617,18 @@ class ComplianceReportGenerator:
         m = SEVERITY_META[sev]
         ev = f.get("evidence") or {}
         title = f.get("title") or f.get("vuln_type") or "Finding"
-        cvss = f.get("predicted_cvss_score") or f.get("typical_cvss") or "—"
+        cvss = self._finding_cvss(f)
 
         # Classification: an IoT/OT finding is labelled against its own
         # framework (OWASP IoT Top 10 / IEC 62443), a web finding against the
-        # OWASP Top 10 (2021).
+        # OWASP Top 10 (2025).
         if _fw.has_iot_ot_tag(f):
             owasp_label, owasp = ("OWASP IoT Top 10" if f.get("owasp_iot")
                                   else "IEC 62443"), _fw.framework_label(f)
         else:
             owasp_label = "OWASP"
-            owasp = f.get("owasp") or self._owasp_for(f.get("vuln_type", ""))
+            # Upgrade a legacy 2021 tag stored on the finding to its 2025 label.
+            owasp = _fw.normalize_owasp(f.get("owasp") or "") or self._owasp_for(f.get("vuln_type", ""))
         meta_rows = [
             ("Target", f.get("target") or "—", False),
             ("Severity", m["label"], False),
@@ -653,6 +656,9 @@ class ComplianceReportGenerator:
         description = ev.get("description") or f.get("description") or ""
         impact = ev.get("impact") or ""
         remediation = ev.get("remediation") or f.get("remediation") or ""
+        # Numbered remediation steps render one-per-line (not one run-on paragraph).
+        rem_html = (f'<div class="block-label">Remediation</div>'
+                    f'<p>{self._steps_html(remediation)}</p>') if remediation else ""
 
         # Evidence / PoC — show whichever technical artefacts exist
         poc_parts = []
@@ -687,11 +693,93 @@ class ComplianceReportGenerator:
             {block("Description", description)}
             {block("Impact", impact)}
             {poc_html}
-            {block("Remediation", remediation)}
+            {rem_html}
             {refs_html}
             {block("Assessor Notes", notes)}
           </div>
         </div>"""
+
+    def _finding_cvss(self, f: dict) -> str:
+        """Best per-finding CVSS base score to display (1-dp string), or '—'.
+
+        Genuinely per-finding — not a flat severity default. Precedence, most
+        authoritative first:
+          1. a real published base score carried on the finding (NVD / OSV / CVE);
+          2. the KB 'typical' base score curated for the finding's class;
+          3. the CVSS v3.1 base score computed from the class's curated vector;
+          4. the base score computed from the finding's own vector;
+          5. the ML-predicted score (severity-anchored — last numeric resort);
+          6. '—' when nothing scoreable exists.
+        This means a CVE finding shows its true NVD score, and two different
+        vulnerability classes no longer collapse to the same severity constant.
+        """
+        from heaven.utils import cvss as _cvss
+        ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+
+        def _num(*keys: str) -> Optional[float]:
+            for src in (f, ev):
+                for k in keys:
+                    try:
+                        v = float(src.get(k))  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        continue
+                    if 0.0 < v <= 10.0:
+                        return v
+            return None
+
+        # 1. a real, published base score (CVE / NVD / OSV ground truth)
+        v = _num("cvss_base", "cvss_base_score", "cvss_score", "cvss")
+        if v is not None:
+            return f"{v:.1f}"
+        vt = str(f.get("vuln_type") or f.get("type") or "")
+        # 2. the KB 'typical' base score curated for this class (per-class, varied)
+        v = _num("typical_cvss")
+        if v is None:
+            try:
+                from heaven.devsecops.vuln_kb import lookup as _lookup
+                tv = (_lookup(vt) or {}).get("typical_cvss")
+                v = float(tv) if tv else None
+                if v is not None and not (0.0 < v <= 10.0):
+                    v = None
+            except Exception:
+                v = None
+        if v is not None:
+            return f"{v:.1f}"
+        # 3. compute from the class's curated vector (never a generic-flat one)
+        import contextlib
+        with contextlib.suppress(Exception):
+            from heaven.devsecops.vuln_kb import cvss_vector_for as _vec_for
+            s = _cvss.base_score_from_vector(_vec_for(vt))
+            if s > 0:
+                return f"{s:.1f}"
+        # 4. compute from the finding's own vector (may be a severity fallback)
+        vec = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
+        s = _cvss.base_score_from_vector(vec)
+        if s > 0:
+            return f"{s:.1f}"
+        # 5. the ML-predicted score (severity-anchored) — a number beats nothing
+        v = _num("predicted_cvss_score")
+        return f"{v:.1f}" if v is not None else "—"
+
+    @staticmethod
+    def _steps_html(text: Any) -> str:
+        """Render a numbered / multi-step remediation with each step on its own
+        line. Handles both newline-separated strings (already the format
+        ``component_remediation`` emits) and legacy inline ``1. … 2. …`` text, so
+        the fix reads as a checklist rather than one confusing paragraph."""
+        import re
+        s = str(text or "").strip()
+        if not s:
+            return ""
+        # Inline-numbered text → break before each 'N. ' step marker. The
+        # look-ahead won't fire on version numbers like '9.9' (no space after
+        # the dot) or 'CVE-2024-6387'.
+        if "\n" not in s:
+            s = re.sub(r"\s+(?=\d{1,2}\.\s)", "\n", s)
+        # Break before trailing verify / reference / exploit-warning markers too.
+        s = re.sub(r"\s+(?=(?:Verify:|Reference:|⚠|■))", "\n", s)
+        lines = [ln.strip() for ln in s.split("\n") if ln.strip()]
+        return "<br>".join(_esc(ln) for ln in lines)
 
     def _owasp_for(self, vuln_type: str) -> str:
         vt = (vuln_type or "").lower()
@@ -725,25 +813,25 @@ class ComplianceReportGenerator:
         )
 
     def _owasp_category_id(self, f: dict) -> str:
-        """The OWASP-2021 control id for one finding, e.g. ``A03:2021``.
+        """The OWASP-2025 control id for one finding, e.g. ``A05:2025``.
 
         Prefers the category ``vuln_kb`` already enriched onto the finding
-        (``owasp`` field), so the report agrees with the per-finding detail
-        view. Falls back to a keyword match on vuln_type/title. '' if none.
+        (``owasp`` field) — upgrading any legacy 2021 tag to its 2025 id via the
+        crosswalk — so the report agrees with the per-finding detail view. Falls
+        back to a keyword match on vuln_type/title. '' if none.
         """
-        import re
         # IoT/OT findings are scored against their own frameworks (OWASP IoT Top
-        # 10 / IEC 62443) — never bucket them into the web OWASP-2021 matrix.
+        # 10 / IEC 62443) — never bucket them into the web OWASP-2025 matrix.
         if _fw.has_iot_ot_tag(f):
             return ""
         # API findings are scored against the OWASP API Security Top 10 (2023);
-        # keep them out of the web (2021) matrix so nothing is double-counted.
+        # keep them out of the web (2025) matrix so nothing is double-counted.
         if f.get("owasp_api"):
             return ""
         raw = str(f.get("owasp") or f.get("owasp_category") or "").strip()
-        m = re.match(r"\s*(A\d{2}:2021)", raw)
-        if m:
-            return m.group(1)
+        cid = _fw.owasp_2025_id(raw)  # upgrades a legacy 2021 tag to its 2025 id
+        if cid:
+            return cid
         hay = f"{f.get('vuln_type', '')} {f.get('type', '')} {f.get('title', '')}".lower()
         for key, (cid, _cn) in self.OWASP_MAP.items():
             if key in hay:
@@ -754,15 +842,15 @@ class ComplianceReportGenerator:
         # Bucket each finding under its OWASP category — dynamically, from the
         # actual finding set (its enriched category first, keyword fallback
         # second) so every real finding lands in the matrix.
-        buckets: dict[str, list[dict]] = {cid: [] for cid, _ in self.OWASP_2021}
+        buckets: dict[str, list[dict]] = {cid: [] for cid, _ in self.OWASP_2025}
         for f in findings:
             cid = self._owasp_category_id(f)
             if cid in buckets:
                 buckets[cid].append(f)
 
-        covered = sum(1 for cid, _ in self.OWASP_2021 if buckets[cid])
+        covered = sum(1 for cid, _ in self.OWASP_2025 if buckets[cid])
         rows = ""
-        for cid, cn in self.OWASP_2021:
+        for cid, cn in self.OWASP_2025:
             hits = buckets[cid]
             n = len(hits)
             status = "Findings present" if hits else "Not observed"
@@ -783,8 +871,8 @@ class ComplianceReportGenerator:
                      f'<td>{_esc(cn)}{examples}</td>'
                      f'<td style="color:{color};font-weight:600">{status}</td>'
                      f'<td class="small">{n}</td></tr>')
-        return f"""<div class="page section" id="owasp"><h2>OWASP Top 10 (2021) Coverage</h2>
-          <p class="small muted">Every identified finding mapped to its OWASP Top 10 (2021) risk
+        return f"""<div class="page section" id="owasp"><h2>OWASP Top 10 (2025) Coverage</h2>
+          <p class="small muted">Every identified finding mapped to its OWASP Top 10 (2025) risk
           category — {covered} of 10 categories have findings in this engagement. Categories marked
           <em>Not observed</em> had no matching finding (either tested-clean or out of this scan's scope).</p>
           <table>

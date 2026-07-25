@@ -58,6 +58,83 @@ OWASP_IOT_REFERENCE = "https://owasp.org/www-project-internet-of-things/"
 IEC_62443_REFERENCE = "https://www.isa.org/standards-and-publications/isa-standards/isa-iec-62443-series-of-standards"
 ATTACK_ICS_REFERENCE = "https://attack.mitre.org/matrices/ics/"
 
+# ── Web OWASP Top 10 (2025) — the single source of truth ─────────────────────
+#
+# The 2025 edition (https://owasp.org/Top10/2025/) is a re-ranking of 2021 with
+# two structural changes every consumer of this data must respect:
+#   • SSRF (A10:2021) is no longer a standalone risk — it folds into A01.
+#   • "Vulnerable & Outdated Components" (A06:2021) broadened into
+#     A03:2025 "Software Supply Chain Failures".
+#   • A10:2025 "Mishandling of Exceptional Conditions" is brand-new (CWE-209/
+#     703/755/248/390 …): verbose errors, unhandled exceptions, fail-open logic.
+# Keeping the canon + the 2021→2025 crosswalk here (dependency-free) means the
+# report, the coverage self-grade, the methodology page and the UI all speak one
+# vocabulary, and any legacy finding stored with a 2021 tag upgrades on read.
+OWASP_2025: list[tuple[str, str]] = [
+    ("A01:2025", "Broken Access Control"),
+    ("A02:2025", "Security Misconfiguration"),
+    ("A03:2025", "Software Supply Chain Failures"),
+    ("A04:2025", "Cryptographic Failures"),
+    ("A05:2025", "Injection"),
+    ("A06:2025", "Insecure Design"),
+    ("A07:2025", "Authentication Failures"),
+    ("A08:2025", "Software or Data Integrity Failures"),
+    ("A09:2025", "Security Logging and Alerting Failures"),
+    ("A10:2025", "Mishandling of Exceptional Conditions"),
+]
+OWASP_2025_REFERENCE = "https://owasp.org/Top10/2025/"
+
+# 2021 → 2025 ordinal remap (a permutation with two merges). Keyed on the bare
+# ``Ann`` id; the year is handled separately in ``owasp_2025_id``.
+_OWASP_2021_TO_2025_ID: dict[str, str] = {
+    "A01": "A01",  # Broken Access Control (now also absorbs SSRF)
+    "A02": "A04",  # Cryptographic Failures  #2 → #4
+    "A03": "A05",  # Injection               #3 → #5
+    "A04": "A06",  # Insecure Design         #4 → #6
+    "A05": "A02",  # Security Misconfiguration #5 → #2
+    "A06": "A03",  # Vulnerable & Outdated Components → Software Supply Chain
+    "A07": "A07",  # (Identification &) Authentication Failures
+    "A08": "A08",  # Software or Data Integrity Failures
+    "A09": "A09",  # Security Logging & Alerting Failures
+    "A10": "A01",  # SSRF → merged into Broken Access Control
+}
+_OWASP_2025_NAMES: dict[str, str] = {cid.split(":")[0]: name for cid, name in OWASP_2025}
+_OWASP_ID_RE = re.compile(r"A(\d{2})[:_](20\d{2})")
+
+
+def owasp_2025_id(value: str) -> str:
+    """The canonical 2025 control id for any OWASP-Top-10 string (``A04:2025``).
+
+    Accepts every shape seen in the wild — ``A05:2021``, ``A05_2021``,
+    ``A03:2021-Injection``, ``A02:2025 Security Misconfiguration`` — and returns
+    the correctly-remapped 2025 id, or ``""`` when the string carries no
+    recognisable web-OWASP id. 2021 ids are crosswalked; 2025 ids pass through;
+    an unknown edition is accepted only if the ordinal is a valid 2025 id.
+    """
+    m = _OWASP_ID_RE.search(str(value or ""))
+    if not m:
+        return ""
+    aid, year = f"A{m.group(1)}", m.group(2)
+    if year == "2021":
+        aid = _OWASP_2021_TO_2025_ID.get(aid, "")
+    if aid not in _OWASP_2025_NAMES:
+        return ""
+    return f"{aid}:2025"
+
+
+def normalize_owasp(value: str) -> str:
+    """Any OWASP-Top-10 string → the canonical 2025 label
+    (``A04:2025 Cryptographic Failures``), or ``""`` if unrecognised.
+
+    This is the upgrade path for legacy findings: a value stored years ago as
+    ``A02:2021 Cryptographic Failures`` renders today as its 2025 equivalent, so
+    the report / coverage / UI never show a stale edition for old data.
+    """
+    cid = owasp_2025_id(value)
+    if not cid:
+        return ""
+    return f"{cid} {_OWASP_2025_NAMES[cid.split(':')[0]]}"
+
 # Industrial-protocol tokens. A finding whose protocol/title matches one of
 # these is OT/ICS; everything else in the IoT/OT scanners is consumer IoT.
 _ICS_PROTOCOLS: tuple[str, ...] = (

@@ -19,6 +19,15 @@ param()
 
 $ErrorActionPreference = 'Continue'   # run every cleanup step even if one fails
 
+# Windows uninstaller — refuse to run on macOS / Linux (PowerShell 7+ is cross-platform),
+# where it would delete the Unix venv/ and can't touch the user PATH anyway. Use the shell
+# script. (On Windows PowerShell 5.1 $IsWindows is undefined and Major is 5, so this never
+# fires there.)
+if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+    Write-Host "[x] This is the Windows uninstaller. On macOS / Linux run:  ./scripts/uninstall.sh" -ForegroundColor Red
+    exit 1
+}
+
 function Write-Ok   { param($m) Write-Host "[+] $m" -ForegroundColor Green }
 function Write-Info { param($m) Write-Host "[*] $m" -ForegroundColor Cyan }
 function Write-Warn { param($m) Write-Host "[!] $m" -ForegroundColor Yellow }

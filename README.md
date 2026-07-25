@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%201206%20Tests%20%C2%B7%20148%20Modules%20%C2%B7%2050%20CLI%20Commands%20%C2%B7%2064%20API%20Routes&descAlignY=65&descSize=18"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=320&color=0:05070F,15:0A0210,30:150020,45:2A0040,60:550080,75:FF36AB,90:B8FF00,100:05070F&text=HEAVEN%20PENTEST%20FRAMEWORK&fontSize=40&fontAlignY=38&fontColor=ffffff&animation=twinkling&desc=Find%20It.%20Confirm%20It.%20Report%20It.%20%7C%201230%20Tests%20%C2%B7%20148%20Modules%20%C2%B7%2050%20CLI%20Commands%20%C2%B7%2064%20API%20Routes&descAlignY=65&descSize=18"/>
 </p>
 
 <p align="center">
-<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;1206+Tests+%C2%B7+148+Modules+%C2%B7+24+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
+<img src="https://readme-typing-svg.herokuapp.com?font=Orbitron&weight=700&size=26&duration=2500&pause=700&color=FF36AB&center=true&vCenter=true&width=1200&lines=Recon+%E2%86%92+ML+Risk+Scoring+%E2%86%92+Verified+Exploitation+%E2%86%92+Reporting;LLM+Observe%E2%86%92Plan%E2%86%92Act+%7C+Deterministic+Fallback+(No+API+Key);CVSS+Predictor+R%C2%B2%3D0.9925+%7C+EPSS+%7C+CISA+KEV;1230+Tests+%C2%B7+148+Modules+%C2%B7+24+UI+Pages+%C2%B7+PostgreSQL%2BSQLite;OWASP+API+Top+10+%C2%B7+Post-Exploitation+%C2%B7+Lateral+Movement"/>
 </p>
 
 <p align="center">
@@ -118,7 +118,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 1206 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 1230 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 148 |
 | ⌨️ **CLI Commands** | 50 |
@@ -156,7 +156,7 @@ It runs three ways from the **same engagement dataset**:
 | 🧾 **CVE Intelligence** | Curated **offline** inline CVE DB (~150 CVEs, version-range matched) **+ dynamic live fallback** — any product/version *not* in the local DB is looked up in real time against **NVD + CIRCL**, merged/de-duped, version-confirmed, **KEV-flagged, EPSS-scored (real-world exploitation probability) and Exploit-DB-correlated (public PoC link)**, and disk-cached (7-day TTL) · degrades gracefully offline · `heaven cve <product> [version] [--engagement]` |
 | 💥 **Verified Exploitation** | Active proof, not guesses — sqlmap SQLi dump · RCE canary file drop/read · **in-house OAST collaborator** proving SSRF **and** XXE out-of-band (no Burp Collaborator / interactsh dependency) |
 | 🔓 **Post-Exploitation** | **self-contained privesc engines for Linux _and_ Windows** — Linux: GTFOBins-scored SUID/sudo/caps · docker/lxd escape · writable `/etc/passwd` · cron/PATH hijack; Windows: unquoted service paths · writable service binaries · `SeImpersonate`/`SeBackup` token privileges · AlwaysInstallElevated · autologon/registry creds · UAC posture — no linPEAS/WinPEAS download · **loot harvester** (SSH keys · AWS/GCP/Azure creds · kubeconfig · `.env`/`.netrc`/`.pgpass`/history — secrets redacted, plaintext never persisted) · **credential-reuse loop** feeding SSH/SMB/PsExec lateral movement + pass-the-hash · **ATT&CK-tagged kill-chain** · optional LLM path prioritisation · BloodHound AD collection — `heaven postex {enum,loot,full}` (`--os windows` / auto-detected) |
-| ☁️ **Cloud Misconfiguration** | **credential-free** public storage-bucket exposure (S3 / GCS / Azure Blob — listable vs private proven from the provider's own response, not guessed) · cloud-metadata SSRF catalog (AWS IMDS / GCP / Azure) that turns an SSRF into confirmed credential theft · plus **authenticated** account audit (EC2/S3 public ACL & policy & encryption · security-group `0.0.0.0/0` on sensitive ports · public RDS · IAM admin policies) — `heaven cloud storage <target>` |
+| ☁️ **Cloud Misconfiguration** | **credential-free** public storage-bucket exposure (S3 / GCS / Azure Blob — listable vs private proven from the provider's own response, not guessed) · cloud-metadata SSRF catalog (AWS IMDS / GCP / Azure) that turns an SSRF into confirmed credential theft · plus **authenticated** account audit (EC2/S3 public ACL & policy & encryption · security-group `0.0.0.0/0` on sensitive ports · public RDS · IAM admin policies) · read-only **IAM privilege audit** of the *authenticated identity* — over-privileged principals (`*`/`*`) · console users without MFA · stale/unrotated & root access keys · weak password policy (`heaven cloud iam`, secret never read/logged) — `heaven cloud storage <target>` |
 | 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini) · **deterministic fallback needs no API key** |
 | 📊 **Risk Scoring** | CVSS-v3 ML predictor (R²=0.9925, 13-feature ExtraTrees) · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
@@ -429,6 +429,7 @@ deterministic heuristic (or pass `--no-llm`).
 | `cve <product> [version]` | **Dynamic live CVE lookup** — query NVD + CIRCL for any product/version *not* in the local DB (merged, de-duped, version-confirmed, EPSS-scored, Exploit-DB-correlated; `--engagement` persists them) |
 | `postex enum/loot/full` | Post-exploitation — privesc enumeration (Linux + Windows via `--os`) · loot harvest · full playbook (kill-chain + AI) |
 | `cloud storage` | Credential-free public S3/GCS/Azure bucket-exposure scan derived from a target domain |
+| `cloud iam` | Read-only IAM privilege audit of the authenticated AWS identity (over-privileged principals · missing MFA · stale/root keys · weak password policy) |
 | `lateral` · `knowledge` | Lateral movement · cross-engagement knowledge graph |
 | `exploitdb` · `mitre-report` | Exploit-DB lookup · ATT&CK Navigator layer |
 | `tickets` | Push findings to Jira / Linear |
@@ -590,7 +591,7 @@ Generate from the **CLI** or the **web UI** (Findings → *Download report*) —
 | Format | Use Case |
 |---|---|
 | **PDF** | Client / executive deliverable (requires `reportlab`) |
-| **HTML** | Self-contained · compliance-mapped (OWASP Top 10 / NIST CSF) |
+| **HTML** | Self-contained · compliance-mapped (OWASP Top 10:2025 / NIST CSF) |
 | **Markdown** | Wiki / Git |
 | **CSV** | Spreadsheet / bulk triage |
 | **JSON** | Automation / re-import |
@@ -694,7 +695,7 @@ heaven/                   ← Python package (150 modules)
 └── cli/                  Click CLI — one module per command group (50 commands)
 
 heaven-ui/                React + Vite web console (24 pages)
-tests/                    1206 pytest tests + native & DVWA benchmark suites
+tests/                    1230 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -780,7 +781,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>1206 tests · 150 modules · 50 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>1230 tests · 150 modules · 50 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
 python scripts/sync_test_count.py</p>
 
 <p align="center">

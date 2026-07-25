@@ -27,7 +27,7 @@ _KB: dict[str, dict[str, Any]] = {
     "docker_socket_exposed": {
         "title": "Exposed Docker daemon socket",
         "cwe": "CWE-284",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1610 — Deploy Container",
         "typical_cvss": 9.8,
         "description": (
@@ -57,7 +57,7 @@ _KB: dict[str, dict[str, Any]] = {
     "sql_injection": {
         "title": "SQL Injection",
         "cwe": "CWE-89",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 9.8,
         "description": (
@@ -80,7 +80,7 @@ _KB: dict[str, dict[str, Any]] = {
     "rce": {
         "title": "Remote Code Execution",
         "cwe": "CWE-94",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 9.9,
         "description": (
@@ -102,7 +102,7 @@ _KB: dict[str, dict[str, Any]] = {
     "ssrf": {
         "title": "Server-Side Request Forgery",
         "cwe": "CWE-918",
-        "owasp": "A10:2021 Server-Side Request Forgery",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 8.6,
         "description": (
@@ -124,7 +124,7 @@ _KB: dict[str, dict[str, Any]] = {
     "ssrf_cloud_metadata": {
         "title": "SSRF to Cloud Instance Metadata (credential theft)",
         "cwe": "CWE-918",
-        "owasp": "A10:2021 Server-Side Request Forgery",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1552.005 — Unsecured Credentials: Cloud Instance Metadata API",
         "typical_cvss": 9.1,
         "description": (
@@ -151,7 +151,7 @@ _KB: dict[str, dict[str, Any]] = {
     "exposed_storage_bucket": {
         "title": "Publicly Exposed Cloud Storage Bucket",
         "cwe": "CWE-284",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1530 — Data from Cloud Storage Object",
         "typical_cvss": 7.5,
         "description": (
@@ -176,7 +176,7 @@ _KB: dict[str, dict[str, Any]] = {
     "xss_stored": {
         "title": "Stored Cross-Site Scripting",
         "cwe": "CWE-79",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1059.007 — JavaScript",
         "typical_cvss": 7.2,
         "description": (
@@ -197,7 +197,7 @@ _KB: dict[str, dict[str, Any]] = {
     "xss": {
         "title": "Cross-Site Scripting",
         "cwe": "CWE-79",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1059.007 — JavaScript",
         "typical_cvss": 6.1,
         "description": "User input is reflected into a page without encoding, executing script in the victim's browser.",
@@ -208,7 +208,7 @@ _KB: dict[str, dict[str, Any]] = {
     "idor": {
         "title": "Insecure Direct Object Reference",
         "cwe": "CWE-639",
-        "owasp": "A01:2021 Broken Access Control",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 8.1,
         "description": (
@@ -228,7 +228,7 @@ _KB: dict[str, dict[str, Any]] = {
     "broken_access_control": {
         "title": "Broken Access Control",
         "cwe": "CWE-284",
-        "owasp": "A01:2021 Broken Access Control",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 8.2,
         "description": (
@@ -246,13 +246,13 @@ _KB: dict[str, dict[str, Any]] = {
             "access-control tests to CI so regressions are caught."
         ),
         "references": [
-            "https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+            "https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/",
         ],
     },
     "auth_bypass": {
         "title": "Authentication Bypass",
         "cwe": "CWE-287",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1078 — Valid Accounts",
         "typical_cvss": 9.1,
         "description": "A flaw in the auth flow lets an attacker access protected functionality without valid credentials.",
@@ -262,12 +262,12 @@ _KB: dict[str, dict[str, Any]] = {
             "2. Use a vetted identity library; never roll your own session logic.\n"
             "3. Enforce MFA for privileged roles."
         ),
-        "references": ["https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/"],
+        "references": ["https://owasp.org/Top10/2025/A07_2025-Authentication_Failures/"],
     },
     "exposed_rdp": {
         "title": "Internet-Exposed RDP",
         "cwe": "CWE-284",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1021.001 — Remote Desktop Protocol",
         "typical_cvss": 8.8,
         "description": "Remote Desktop (TCP 3389) is reachable from untrusted networks, a primary ransomware entry vector.",
@@ -282,7 +282,7 @@ _KB: dict[str, dict[str, Any]] = {
     "weak_tls": {
         "title": "Weak TLS Configuration",
         "cwe": "CWE-326",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1040 — Network Sniffing",
         "typical_cvss": 5.9,
         "description": "The endpoint supports deprecated protocols (SSLv3/TLS 1.0/1.1) or weak ciphers vulnerable to interception.",
@@ -297,7 +297,7 @@ _KB: dict[str, dict[str, Any]] = {
     "certificate_issue": {
         "title": "TLS Certificate Issue",
         "cwe": "CWE-295",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1557 — Adversary-in-the-Middle",
         "typical_cvss": 5.9,
         "description": "The server's X.509 certificate is expired, near expiry, self-signed, or signed with a weak algorithm (e.g. SHA-1), so clients cannot reliably establish trust.",
@@ -312,7 +312,7 @@ _KB: dict[str, dict[str, Any]] = {
     "missing_security_headers": {
         "title": "Missing Security Headers",
         "cwe": "CWE-693",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1185 — Browser Session Hijacking",
         "typical_cvss": 4.3,
         "description": "Response lacks protective headers (CSP, HSTS, X-Content-Type-Options, X-Frame-Options).",
@@ -327,7 +327,7 @@ _KB: dict[str, dict[str, Any]] = {
     "open_redirect": {
         "title": "Open Redirect",
         "cwe": "CWE-601",
-        "owasp": "A01:2021 Broken Access Control",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1566 — Phishing",
         "typical_cvss": 4.7,
         "description": "A redirect target is taken from user input without validation, enabling convincing phishing.",
@@ -338,7 +338,7 @@ _KB: dict[str, dict[str, Any]] = {
     "cookie_no_httponly": {
         "title": "Session Cookie Without HttpOnly",
         "cwe": "CWE-1004",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1539 — Steal Web Session Cookie",
         "typical_cvss": 4.0,
         "description": "A session cookie lacks the HttpOnly flag, so client-side script can read it.",
@@ -349,7 +349,7 @@ _KB: dict[str, dict[str, Any]] = {
     "verbose_errors": {
         "title": "Verbose Error Messages",
         "cwe": "CWE-209",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1592 — Gather Victim Host Information",
         "typical_cvss": 3.7,
         "description": "Stack traces or debug output leak framework versions, file paths or SQL, aiding attackers.",
@@ -360,7 +360,7 @@ _KB: dict[str, dict[str, Any]] = {
     "info_disclosure": {
         "title": "Information Disclosure",
         "cwe": "CWE-200",
-        "owasp": "A01:2021 Broken Access Control",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1592 — Gather Victim Host Information",
         "typical_cvss": 5.3,
         "description": "Sensitive technical information (server-status, version banners, internal paths) is exposed.",
@@ -371,7 +371,7 @@ _KB: dict[str, dict[str, Any]] = {
     "default_credentials": {
         "title": "Default / Weak Credentials",
         "cwe": "CWE-1392",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1078.001 — Default Accounts",
         "typical_cvss": 9.8,
         "description": "A service accepts vendor-default or trivially guessable credentials.",
@@ -382,7 +382,7 @@ _KB: dict[str, dict[str, Any]] = {
     "exposed_database": {
         "title": "Exposed Database Service",
         "cwe": "CWE-668",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1210 — Exploitation of Remote Services",
         "typical_cvss": 8.6,
         "description": (
@@ -402,12 +402,12 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": [
             "https://cwe.mitre.org/data/definitions/668.html",
-            "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/",
+            "https://owasp.org/Top10/2025/A02_2025-Security_Misconfiguration/",
         ],
     },
     "nuclei": {
         "title": "Nuclei Template Match",
-        "owasp": "A06:2021 Vulnerable and Outdated Components",
+        "owasp": "A03:2025 Software Supply Chain Failures",
         "mitre": "T1595 — Active Scanning",
         "typical_cvss": 5.0,
         "description": (
@@ -428,13 +428,13 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": [
             "https://github.com/projectdiscovery/nuclei-templates",
-            "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/",
+            "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/",
         ],
     },
     "command_injection": {
         "title": "OS Command Injection",
         "cwe": "CWE-78",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1059 — Command and Scripting Interpreter",
         "typical_cvss": 9.8,
         "description": (
@@ -457,7 +457,7 @@ _KB: dict[str, dict[str, Any]] = {
     "file_inclusion": {
         "title": "File Inclusion (LFI/RFI)",
         "cwe": "CWE-98",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 8.1,
         "description": (
@@ -481,7 +481,7 @@ _KB: dict[str, dict[str, Any]] = {
     "path_traversal": {
         "title": "Path Traversal",
         "cwe": "CWE-22",
-        "owasp": "A01:2021 Broken Access Control",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1006 — Direct Volume Access",
         "typical_cvss": 7.5,
         "description": (
@@ -503,7 +503,7 @@ _KB: dict[str, dict[str, Any]] = {
     "ssti": {
         "title": "Server-Side Template Injection",
         "cwe": "CWE-1336",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1059 — Command and Scripting Interpreter",
         "typical_cvss": 9.0,
         "description": (
@@ -523,7 +523,7 @@ _KB: dict[str, dict[str, Any]] = {
     "xxe": {
         "title": "XML External Entity (XXE) Injection",
         "cwe": "CWE-611",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 8.2,
         "description": (
@@ -545,7 +545,7 @@ _KB: dict[str, dict[str, Any]] = {
     "cors_misconfig": {
         "title": "CORS Misconfiguration",
         "cwe": "CWE-942",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 7.5,
         "description": (
@@ -568,7 +568,7 @@ _KB: dict[str, dict[str, Any]] = {
     "insecure_cookie": {
         "title": "Insecure Session Cookie",
         "cwe": "CWE-1004",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1539 — Steal Web Session Cookie",
         "typical_cvss": 5.0,
         "description": (
@@ -587,7 +587,7 @@ _KB: dict[str, dict[str, Any]] = {
     "jwt_weak_secret": {
         "title": "JWT Signed With a Weak Secret",
         "cwe": "CWE-326",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1552 — Unsecured Credentials",
         "typical_cvss": 9.1,
         "description": (
@@ -609,7 +609,7 @@ _KB: dict[str, dict[str, Any]] = {
     "jwt_none_algorithm": {
         "title": "JWT Accepts alg:none",
         "cwe": "CWE-347",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1552 — Unsecured Credentials",
         "typical_cvss": 9.8,
         "description": (
@@ -629,7 +629,7 @@ _KB: dict[str, dict[str, Any]] = {
     "crlf_injection": {
         "title": "CRLF / HTTP Response Splitting",
         "cwe": "CWE-113",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 6.1,
         "description": (
@@ -647,7 +647,7 @@ _KB: dict[str, dict[str, Any]] = {
     "request_smuggling": {
         "title": "HTTP Request Smuggling",
         "cwe": "CWE-444",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 8.1,
         "description": (
@@ -666,7 +666,7 @@ _KB: dict[str, dict[str, Any]] = {
     "subdomain_takeover": {
         "title": "Subdomain Takeover",
         "cwe": "CWE-350",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1584 — Compromise Infrastructure",
         "typical_cvss": 7.4,
         "description": (
@@ -689,7 +689,7 @@ _KB: dict[str, dict[str, Any]] = {
     "csp_missing": {
         "title": "Content-Security-Policy Not Set",
         "cwe": "CWE-693",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1185 — Browser Session Hijacking",
         "typical_cvss": 4.6,
         "description": (
@@ -711,7 +711,7 @@ _KB: dict[str, dict[str, Any]] = {
     "clickjacking": {
         "title": "Clickjacking — X-Frame-Options Not Set",
         "cwe": "CWE-1021",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1185 — Browser Session Hijacking",
         "typical_cvss": 4.6,
         "description": (
@@ -732,7 +732,7 @@ _KB: dict[str, dict[str, Any]] = {
     "hsts_missing": {
         "title": "HTTP Strict Transport Security Not Configured",
         "cwe": "CWE-319",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1557 — Adversary-in-the-Middle",
         "typical_cvss": 4.6,
         "description": (
@@ -751,7 +751,7 @@ _KB: dict[str, dict[str, Any]] = {
     "x_content_type_missing": {
         "title": "X-Content-Type-Options Not Set",
         "cwe": "CWE-693",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1185 — Browser Session Hijacking",
         "typical_cvss": 3.5,
         "description": (
@@ -765,7 +765,7 @@ _KB: dict[str, dict[str, Any]] = {
     "referrer_policy_missing": {
         "title": "Referrer-Policy Not Set",
         "cwe": "CWE-200",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1592 — Gather Victim Host Information",
         "typical_cvss": 3.5,
         "description": (
@@ -779,7 +779,7 @@ _KB: dict[str, dict[str, Any]] = {
     "permissions_policy_missing": {
         "title": "Permissions-Policy Not Set",
         "cwe": "CWE-693",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1185 — Browser Session Hijacking",
         "typical_cvss": 3.5,
         "description": (
@@ -794,7 +794,7 @@ _KB: dict[str, dict[str, Any]] = {
     "dangerous_http_method": {
         "title": "Dangerous HTTP Method Enabled",
         "cwe": "CWE-650",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 6.2,
         "description": (
@@ -813,7 +813,7 @@ _KB: dict[str, dict[str, Any]] = {
     "version_disclosure": {
         "title": "Server / Software Version Disclosure",
         "cwe": "CWE-200",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1592.002 — Software",
         "typical_cvss": 3.5,
         "description": (
@@ -827,7 +827,7 @@ _KB: dict[str, dict[str, Any]] = {
     "no_rate_limit": {
         "title": "No Rate Limiting Detected",
         "cwe": "CWE-770",
-        "owasp": "A04:2021 Insecure Design",
+        "owasp": "A06:2025 Insecure Design",
         "mitre": "T1110 — Brute Force",
         "typical_cvss": 4.6,
         "description": (
@@ -845,7 +845,7 @@ _KB: dict[str, dict[str, Any]] = {
     "no_forward_secrecy": {
         "title": "No Forward Secrecy",
         "cwe": "CWE-310",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1040 — Network Sniffing",
         "typical_cvss": 4.6,
         "description": (
@@ -862,7 +862,7 @@ _KB: dict[str, dict[str, Any]] = {
     "spf_missing": {
         "title": "SPF Record Missing or Weak",
         "cwe": "CWE-16",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1566 — Phishing",
         "typical_cvss": 6.2,
         "description": (
@@ -881,7 +881,7 @@ _KB: dict[str, dict[str, Any]] = {
     "dmarc_missing": {
         "title": "DMARC Record Missing or Weak",
         "cwe": "CWE-16",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1566 — Phishing",
         "typical_cvss": 6.2,
         "description": (
@@ -900,7 +900,7 @@ _KB: dict[str, dict[str, Any]] = {
     "dkim_missing": {
         "title": "DKIM Not Configured",
         "cwe": "CWE-16",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1566 — Phishing",
         "typical_cvss": 4.6,
         "description": (
@@ -914,7 +914,7 @@ _KB: dict[str, dict[str, Any]] = {
     "dnssec_missing": {
         "title": "DNSSEC Not Configured",
         "cwe": "CWE-350",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1557 — Adversary-in-the-Middle",
         "typical_cvss": 4.6,
         "description": (
@@ -945,7 +945,7 @@ _KB: dict[str, dict[str, Any]] = {
     "csp_unsafe_inline": {
         "title": "Content-Security-Policy Allows unsafe-inline",
         "cwe": "CWE-693",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1185 — Browser Session Hijacking",
         "typical_cvss": 4.6,
         "description": (
@@ -965,7 +965,7 @@ _KB: dict[str, dict[str, Any]] = {
     "oauth_pkce_missing": {
         "title": "OAuth Authorization Code Without PKCE",
         "cwe": "CWE-287",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1550.001 — Application Access Token",
         "typical_cvss": 5.4,
         "description": (
@@ -984,7 +984,7 @@ _KB: dict[str, dict[str, Any]] = {
     "sensitive_file_exposure": {
         "title": "Sensitive File Exposed",
         "cwe": "CWE-538",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1083 — File and Directory Discovery",
         "typical_cvss": 5.3,
         "description": (
@@ -1003,7 +1003,7 @@ _KB: dict[str, dict[str, Any]] = {
     "directory_listing": {
         "title": "Directory Listing Enabled",
         "cwe": "CWE-548",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1083 — File and Directory Discovery",
         "typical_cvss": 5.3,
         "description": (
@@ -1017,7 +1017,7 @@ _KB: dict[str, dict[str, Any]] = {
     "mass_assignment": {
         "title": "Mass Assignment / Auto-Binding",
         "cwe": "CWE-915",
-        "owasp": "A08:2021 Software and Data Integrity Failures",
+        "owasp": "A08:2025 Software or Data Integrity Failures",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 7.1,
         "description": (
@@ -1036,7 +1036,7 @@ _KB: dict[str, dict[str, Any]] = {
     "api_docs_exposed": {
         "title": "Exposed API documentation / specification",
         "cwe": "CWE-200",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1526 — Cloud Service Discovery",
         "typical_cvss": 5.3,
         "description": (
@@ -1055,7 +1055,7 @@ _KB: dict[str, dict[str, Any]] = {
     "api_actuator_exposed": {
         "title": "Exposed framework management endpoint (Actuator)",
         "cwe": "CWE-489",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1526 — Cloud Service Discovery",
         "typical_cvss": 7.5,
         "description": (
@@ -1074,7 +1074,7 @@ _KB: dict[str, dict[str, Any]] = {
     "api_broken_auth": {
         "title": "Broken / Missing API Authentication",
         "cwe": "CWE-306",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 8.2,
         "description": (
@@ -1093,7 +1093,7 @@ _KB: dict[str, dict[str, Any]] = {
     "wireless_mgmt_exposed": {
         "title": "Wireless management interface exposed on the network",
         "cwe": "CWE-284",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1133 — External Remote Services",
         "typical_cvss": 6.5,
         "description": (
@@ -1118,7 +1118,7 @@ _KB: dict[str, dict[str, Any]] = {
     "wireless_mgmt_unauthenticated": {
         "title": "Unauthenticated wireless management interface",
         "cwe": "CWE-306",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1133 — External Remote Services",
         "typical_cvss": 8.6,
         "description": (
@@ -1138,7 +1138,7 @@ _KB: dict[str, dict[str, Any]] = {
     "race_condition": {
         "title": "Race Condition (TOCTOU)",
         "cwe": "CWE-362",
-        "owasp": "A04:2021 Insecure Design",
+        "owasp": "A06:2025 Insecure Design",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 6.5,
         "description": (
@@ -1157,7 +1157,7 @@ _KB: dict[str, dict[str, Any]] = {
     "vulnerable_component": {
         "title": "Known-Vulnerable Component / Version",
         "cwe": "CWE-1104",
-        "owasp": "A06:2021 Vulnerable and Outdated Components",
+        "owasp": "A03:2025 Software Supply Chain Failures",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 7.5,
         "description": (
@@ -1170,12 +1170,12 @@ _KB: dict[str, dict[str, Any]] = {
             "2. Track dependencies with an SBOM and monitor advisories.\n"
             "3. Apply virtual patching/WAF rules as an interim control."
         ),
-        "references": ["https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/"],
+        "references": ["https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"],
     },
     "graphql_introspection": {
         "title": "GraphQL Introspection Enabled",
         "cwe": "CWE-200",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1592 — Gather Victim Host Information",
         "typical_cvss": 5.3,
         "description": (
@@ -1189,7 +1189,7 @@ _KB: dict[str, dict[str, Any]] = {
     "graphql_dos": {
         "title": "GraphQL Resource Exhaustion",
         "cwe": "CWE-770",
-        "owasp": "A04:2021 Insecure Design",
+        "owasp": "A06:2025 Insecure Design",
         "mitre": "T1499 — Endpoint Denial of Service",
         "typical_cvss": 5.3,
         "description": (
@@ -1208,7 +1208,7 @@ _KB: dict[str, dict[str, Any]] = {
     "secret_exposure": {
         "title": "Exposed Secret / API Key",
         "cwe": "CWE-312",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1552 — Unsecured Credentials",
         "typical_cvss": 7.5,
         "description": (
@@ -1226,7 +1226,7 @@ _KB: dict[str, dict[str, Any]] = {
     "smtp_no_starttls": {
         "title": "SMTP Without STARTTLS",
         "cwe": "CWE-319",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1040 — Network Sniffing",
         "typical_cvss": 5.9,
         "description": (
@@ -1240,7 +1240,7 @@ _KB: dict[str, dict[str, Any]] = {
     "ssh_hardening": {
         "title": "Weak SSH Configuration",
         "cwe": "CWE-326",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1021.004 — Remote Services: SSH",
         "typical_cvss": 5.3,
         "description": (
@@ -1258,7 +1258,7 @@ _KB: dict[str, dict[str, Any]] = {
     "container_escape_risk": {
         "title": "Container Escape Risk (Privileged / Dangerous Mount)",
         "cwe": "CWE-269",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1611 — Escape to Host",
         "typical_cvss": 8.8,
         "description": (
@@ -1277,7 +1277,7 @@ _KB: dict[str, dict[str, Any]] = {
     "k8s_misconfiguration": {
         "title": "Kubernetes Misconfiguration",
         "cwe": "CWE-284",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1610 — Deploy Container",
         "typical_cvss": 8.2,
         "description": (
@@ -1296,7 +1296,7 @@ _KB: dict[str, dict[str, Any]] = {
     "k8s_secrets_exposed": {
         "title": "Kubernetes Secrets Exposed",
         "cwe": "CWE-522",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1552.007 — Container API",
         "typical_cvss": 8.6,
         "description": (
@@ -1314,7 +1314,7 @@ _KB: dict[str, dict[str, Any]] = {
     "privilege_escalation": {
         "title": "Privilege Escalation Vector",
         "cwe": "CWE-269",
-        "owasp": "A04:2021 Insecure Design",
+        "owasp": "A06:2025 Insecure Design",
         "mitre": "T1068 — Exploitation for Privilege Escalation",
         "typical_cvss": 8.4,
         "description": (
@@ -1350,7 +1350,7 @@ _KB: dict[str, dict[str, Any]] = {
     "csrf": {
         "title": "Cross-Site Request Forgery (Missing Anti-CSRF Token)",
         "cwe": "CWE-352",
-        "owasp": "A01:2021 Broken Access Control",
+        "owasp": "A01:2025 Broken Access Control",
         "mitre": "T1189 — Drive-by Compromise",
         "typical_cvss": 6.5,
         "description": (
@@ -1373,7 +1373,7 @@ _KB: dict[str, dict[str, Any]] = {
     "session_fixation": {
         "title": "Session Fixation",
         "cwe": "CWE-384",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1539 — Steal Web Session Cookie",
         "typical_cvss": 6.5,
         "description": (
@@ -1393,7 +1393,7 @@ _KB: dict[str, dict[str, Any]] = {
     "weak_session_management": {
         "title": "Weak Session Identifier",
         "cwe": "CWE-331",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1539 — Steal Web Session Cookie",
         "typical_cvss": 5.9,
         "description": (
@@ -1411,7 +1411,7 @@ _KB: dict[str, dict[str, Any]] = {
     "host_header_injection": {
         "title": "Host Header Injection",
         "cwe": "CWE-644",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 6.1,
         "description": (
@@ -1432,7 +1432,7 @@ _KB: dict[str, dict[str, Any]] = {
     "http_parameter_pollution": {
         "title": "HTTP Parameter Pollution",
         "cwe": "CWE-235",
-        "owasp": "A03:2021 Injection",
+        "owasp": "A05:2025 Injection",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 5.3,
         "description": (
@@ -1451,7 +1451,7 @@ _KB: dict[str, dict[str, Any]] = {
     "web_cache_poisoning": {
         "title": "Web Cache Poisoning (Unkeyed Input)",
         "cwe": "CWE-444",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 7.4,
         "description": (
@@ -1472,7 +1472,7 @@ _KB: dict[str, dict[str, Any]] = {
     "web_cache_deception": {
         "title": "Web Cache Deception",
         "cwe": "CWE-525",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 6.5,
         "description": (
@@ -1491,7 +1491,7 @@ _KB: dict[str, dict[str, Any]] = {
     "open_mail_relay": {
         "title": "Open SMTP Mail Relay",
         "cwe": "CWE-269",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1566 — Phishing",
         "typical_cvss": 7.5,
         "description": (
@@ -1512,7 +1512,7 @@ _KB: dict[str, dict[str, Any]] = {
     "mta_sts_missing": {
         "title": "MTA-STS Not Configured",
         "cwe": "CWE-319",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1557 — Adversary-in-the-Middle",
         "typical_cvss": 4.6,
         "description": (
@@ -1532,7 +1532,7 @@ _KB: dict[str, dict[str, Any]] = {
     "weak_password_policy": {
         "title": "Weak Password Policy",
         "cwe": "CWE-521",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1110 — Brute Force",
         "typical_cvss": 5.3,
         "description": (
@@ -1551,7 +1551,7 @@ _KB: dict[str, dict[str, Any]] = {
     "missing_account_lockout": {
         "title": "No Account Lockout / Anti-Automation on Login",
         "cwe": "CWE-307",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1110 — Brute Force",
         "typical_cvss": 5.3,
         "description": (
@@ -1569,7 +1569,7 @@ _KB: dict[str, dict[str, Any]] = {
     "dns_zone_transfer": {
         "title": "DNS Zone Transfer (AXFR) Allowed",
         "cwe": "CWE-200",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1590.002 — Gather Victim Network Information: DNS",
         "typical_cvss": 5.3,
         "description": (
@@ -1590,7 +1590,7 @@ _KB: dict[str, dict[str, Any]] = {
     "cleartext_service": {
         "title": "Cleartext / Legacy Network Service Exposed",
         "cwe": "CWE-319",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1040 — Network Sniffing",
         "typical_cvss": 7.5,
         "description": (
@@ -1614,7 +1614,7 @@ _KB: dict[str, dict[str, Any]] = {
     "snmp_exposed": {
         "title": "SNMP Service Exposed",
         "cwe": "CWE-200",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1046 — Network Service Discovery",
         "typical_cvss": 5.3,
         "description": (
@@ -1634,7 +1634,7 @@ _KB: dict[str, dict[str, Any]] = {
     "snmp_default_community": {
         "title": "SNMP Default/Guessable Community String Accepted",
         "cwe": "CWE-1188",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1602.001 — Data from Configuration Repository: SNMP (MIB Dump)",
         "typical_cvss": 8.6,
         "description": (
@@ -1658,7 +1658,7 @@ _KB: dict[str, dict[str, Any]] = {
     "cisco_smart_install": {
         "title": "Cisco Smart Install (SMI) Exposed",
         "cwe": "CWE-284",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1210 — Exploitation of Remote Services",
         "typical_cvss": 9.8,
         "description": (
@@ -1679,7 +1679,7 @@ _KB: dict[str, dict[str, Any]] = {
     "ipmi_exposed": {
         "title": "IPMI / BMC Management Interface Exposed",
         "cwe": "CWE-284",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1210 — Exploitation of Remote Services",
         "typical_cvss": 7.5,
         "description": (
@@ -1718,7 +1718,7 @@ _KB: dict[str, dict[str, Any]] = {
     "admin_panel_exposed": {
         "title": "Administrative Panel Exposed to the Internet",
         "cwe": "CWE-307",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1110 — Brute Force",
         "typical_cvss": 7.3,
         "description": (
@@ -1739,7 +1739,7 @@ _KB: dict[str, dict[str, Any]] = {
     "xmlrpc_enabled": {
         "title": "WordPress XML-RPC Interface Enabled",
         "cwe": "CWE-918",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 7.3,
         "description": (
@@ -1760,7 +1760,7 @@ _KB: dict[str, dict[str, Any]] = {
     "wordpress_user_enumeration": {
         "title": "WordPress Username Enumeration",
         "cwe": "CWE-200",
-        "owasp": "A07:2021 Identification and Authentication Failures",
+        "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1589.001 — Gather Victim Identity Information: Credentials",
         "typical_cvss": 5.3,
         "description": (
@@ -1781,7 +1781,7 @@ _KB: dict[str, dict[str, Any]] = {
     "unsupported_software": {
         "title": "Unsupported / End-of-Life Software",
         "cwe": "CWE-1104",
-        "owasp": "A06:2021 Vulnerable and Outdated Components",
+        "owasp": "A03:2025 Software Supply Chain Failures",
         "mitre": "T1190 — Exploit Public-Facing Application",
         "typical_cvss": 7.4,
         "description": (
@@ -1804,7 +1804,7 @@ _KB: dict[str, dict[str, Any]] = {
     "ipmi_hash_disclosure": {
         "title": "Unauthenticated IPMI RAKP Password-Hash Disclosure",
         "cwe": "CWE-522",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1552 — Unsecured Credentials",
         "typical_cvss": 7.5,
         "description": (
@@ -1825,7 +1825,7 @@ _KB: dict[str, dict[str, Any]] = {
     "snmp_amplification": {
         "title": "SNMP GETBULK Amplification (Reflected DDoS Source)",
         "cwe": "CWE-406",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1498.002 — Network Denial of Service: Reflection Amplification",
         "typical_cvss": 5.3,
         "description": (
@@ -1846,7 +1846,7 @@ _KB: dict[str, dict[str, Any]] = {
     "ftp_anonymous": {
         "title": "Anonymous FTP Login Allowed",
         "cwe": "CWE-1188",
-        "owasp": "A05:2021 Security Misconfiguration",
+        "owasp": "A02:2025 Security Misconfiguration",
         "mitre": "T1078.001 — Valid Accounts: Default Accounts",
         "typical_cvss": 5.8,
         "description": (
@@ -1867,7 +1867,7 @@ _KB: dict[str, dict[str, Any]] = {
     "rdp_nla_disabled": {
         "title": "RDP Network Level Authentication (NLA) Not Required",
         "cwe": "CWE-300",
-        "owasp": "A02:2021 Cryptographic Failures",
+        "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1557 — Adversary-in-the-Middle",
         "typical_cvss": 5.4,
         "description": (
@@ -2250,6 +2250,13 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "azure_ad_tenant_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "adfs_idp_signon_enabled": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "federation_sts_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    # Authenticated AWS IAM audit (cloud_iam.py) — privilege + hygiene posture.
+    "cloud_iam_overprivileged": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H",
+    "cloud_iam_root_access_keys": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H",
+    "cloud_iam_no_mfa": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "cloud_iam_stale_access_key": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "cloud_iam_weak_password_policy": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "cloud_iam_authenticated": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
     "posture_ok": "",
 }
 
@@ -2302,96 +2309,121 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
     # Active Directory attack classes (attack_type mirrored into vuln_type).
     (("kerberoast", "asrep", "as_rep", "dcsync", "kerberos", "golden_ticket",
       "silver_ticket", "pass_the_hash"),
-     ("CWE-522", "A07:2021 Identification and Authentication Failures",
+     ("CWE-522", "A07:2025 Authentication Failures",
       "T1558 — Steal or Forge Kerberos Tickets")),
     (("smb_signing", "ntlm_relay", "smbv1", "null_session"),
-     ("CWE-522", "A05:2021 Security Misconfiguration",
+     ("CWE-522", "A02:2025 Security Misconfiguration",
       "T1557 — Adversary-in-the-Middle")),
     (("delegation", "rbcd", "machine_account", "adminsd", "acl_abuse"),
-     ("CWE-284", "A01:2021 Broken Access Control", "T1078 — Valid Accounts")),
+     ("CWE-284", "A01:2025 Broken Access Control", "T1078 — Valid Accounts")),
     (("anonymous_ldap", "domain_information"),
-     ("CWE-200", "A05:2021 Security Misconfiguration", "T1087 — Account Discovery")),
+     ("CWE-200", "A02:2025 Security Misconfiguration", "T1087 — Account Discovery")),
     (("azure_ad_tenant", "cloud_tenant", "tenant_disclosure", "federation_realm",
       "m365_tenant"),
-     ("CWE-200", "A05:2021 Security Misconfiguration",
+     ("CWE-200", "A02:2025 Security Misconfiguration",
       "T1590 — Gather Victim Network Information")),
     # ADFS IdP-initiated sign-on enabled — an internet-facing spray/enumeration
     # surface (kept ahead of the generic exposure/auth groups so it wins).
     (("idp_signon", "idpinitiated", "idp_initiated", "idpinit"),
-     ("CWE-284", "A05:2021 Security Misconfiguration", "T1110 — Brute Force")),
+     ("CWE-284", "A02:2025 Security Misconfiguration", "T1110 — Brute Force")),
     # Federation STS metadata disclosure — recon-grade identity-surface mapping.
     (("federation_sts", "federation_metadata", "federation_endpoint",
       "sts_exposed", "sts_disclos"),
-     ("CWE-200", "A05:2021 Security Misconfiguration",
+     ("CWE-200", "A02:2025 Security Misconfiguration",
       "T1590 — Gather Victim Network Information")),
+    # Authenticated AWS IAM audit (cloud_iam.py). Specific privilege / hygiene
+    # classes first; a catch-all cloud_iam group (recon-info) trails so nothing
+    # is left blank. Kept ahead of the generic exposure / misconfig buckets.
+    (("cloud_iam_overprivileged", "iam_overprivileged", "admin_equivalent",
+      "cloud_iam_root_access_key", "root_access_key"),
+     ("CWE-269", "A01:2025 Broken Access Control", "T1078 — Valid Accounts")),
+    (("cloud_iam_no_mfa", "without_mfa", "no_mfa"),
+     ("CWE-308", "A07:2025 Authentication Failures", "T1078 — Valid Accounts")),
+    (("cloud_iam_stale_access_key", "stale_access_key", "unrotated_key"),
+     ("CWE-324", "A07:2025 Authentication Failures",
+      "T1552.001 — Unsecured Credentials: Credentials In Files")),
+    (("cloud_iam_weak_password_policy", "weak_password_policy"),
+     ("CWE-521", "A07:2025 Authentication Failures", "T1110 — Brute Force")),
+    (("cloud_iam", "iam_audit", "caller_identity"),
+     ("CWE-16", "A02:2025 Security Misconfiguration", "T1087 — Account Discovery")),
     (("sql", "sqli"),
-     ("CWE-89", "A03:2021 Injection", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-89", "A05:2025 Injection", "T1190 — Exploit Public-Facing Application")),
     (("command_inj", "cmd_inj", "os_command", "rce", "remote_code", "code_exec", "code_inj"),
-     ("CWE-78", "A03:2021 Injection", "T1059 — Command and Scripting Interpreter")),
+     ("CWE-78", "A05:2025 Injection", "T1059 — Command and Scripting Interpreter")),
     (("ssti", "template_inj"),
-     ("CWE-1336", "A03:2021 Injection", "T1059 — Command and Scripting Interpreter")),
+     ("CWE-1336", "A05:2025 Injection", "T1059 — Command and Scripting Interpreter")),
     (("xxe", "xml_ext", "xml_entity"),
-     ("CWE-611", "A05:2021 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-611", "A02:2025 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
     (("xss", "cross_site_script"),
-     ("CWE-79", "A03:2021 Injection", "T1059.007 — JavaScript")),
+     ("CWE-79", "A05:2025 Injection", "T1059.007 — JavaScript")),
     (("ssrf",),
-     ("CWE-918", "A10:2021 Server-Side Request Forgery", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-918", "A01:2025 Broken Access Control", "T1190 — Exploit Public-Facing Application")),
     (("csrf", "cross_site_request"),
-     ("CWE-352", "A01:2021 Broken Access Control", "T1189 — Drive-by Compromise")),
+     ("CWE-352", "A01:2025 Broken Access Control", "T1189 — Drive-by Compromise")),
     (("idor", "insecure_direct", "bola", "object_reference"),
-     ("CWE-639", "A01:2021 Broken Access Control", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-639", "A01:2025 Broken Access Control", "T1190 — Exploit Public-Facing Application")),
     (("access_control", "authz", "authorization", "forced_brows", "priv_esc",
       "privilege_esc", "unauthenticated", "missing_auth"),
-     ("CWE-284", "A01:2021 Broken Access Control", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-284", "A01:2025 Broken Access Control", "T1190 — Exploit Public-Facing Application")),
     (("path_travers", "directory_travers", "lfi", "rfi", "file_inclusion"),
-     ("CWE-22", "A01:2021 Broken Access Control", "T1083 — File and Directory Discovery")),
+     ("CWE-22", "A01:2025 Broken Access Control", "T1083 — File and Directory Discovery")),
     (("open_redirect", "unvalidated_redirect"),
-     ("CWE-601", "A01:2021 Broken Access Control", "T1566 — Phishing")),
+     ("CWE-601", "A01:2025 Broken Access Control", "T1566 — Phishing")),
     (("jwt", "token_forge", "alg_none", "alg_confusion"),
-     ("CWE-347", "A02:2021 Cryptographic Failures", "T1552 — Unsecured Credentials")),
+     ("CWE-347", "A04:2025 Cryptographic Failures", "T1552 — Unsecured Credentials")),
     (("session",),
-     ("CWE-384", "A07:2021 Identification and Authentication Failures", "T1539 — Steal Web Session Cookie")),
+     ("CWE-384", "A07:2025 Authentication Failures", "T1539 — Steal Web Session Cookie")),
     (("cookie",),
-     ("CWE-1004", "A05:2021 Security Misconfiguration", "T1539 — Steal Web Session Cookie")),
+     ("CWE-1004", "A02:2025 Security Misconfiguration", "T1539 — Steal Web Session Cookie")),
     (("cache_poison", "cache_decept", "smuggl"),
-     ("CWE-444", "A05:2021 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-444", "A02:2025 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
     (("host_header", "parameter_pollution", "hpp", "header_inj", "crlf", "response_split"),
-     ("CWE-113", "A03:2021 Injection", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-113", "A05:2025 Injection", "T1190 — Exploit Public-Facing Application")),
     (("cors",),
-     ("CWE-942", "A05:2021 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-942", "A02:2025 Security Misconfiguration", "T1190 — Exploit Public-Facing Application")),
     (("csp", "clickjack", "x_frame", "security_header", "hsts", "content_type",
       "referrer_policy", "permissions_policy", "dangerous_method", "method_override",
       "trace", "options"),
-     ("CWE-693", "A05:2021 Security Misconfiguration", "T1185 — Browser Session Hijacking")),
+     ("CWE-693", "A02:2025 Security Misconfiguration", "T1185 — Browser Session Hijacking")),
     (("default_cred", "weak_cred", "default_password", "guessable"),
-     ("CWE-1392", "A07:2021 Identification and Authentication Failures", "T1078.001 — Default Accounts")),
+     ("CWE-1392", "A07:2025 Authentication Failures", "T1078.001 — Default Accounts")),
     (("password", "credential", "login", "brute", "lockout", "spray", "auth_bypass"),
-     ("CWE-307", "A07:2021 Identification and Authentication Failures", "T1110 — Brute Force")),
+     ("CWE-307", "A07:2025 Authentication Failures", "T1110 — Brute Force")),
     (("tls", "ssl", "cipher", "certificate", "cert_", "forward_secrecy", "starttls"),
-     ("CWE-326", "A02:2021 Cryptographic Failures", "T1040 — Network Sniffing")),
+     ("CWE-326", "A04:2025 Cryptographic Failures", "T1040 — Network Sniffing")),
     (("spf", "dmarc", "dkim", "mail_relay", "open_relay", "mta_sts", "spoof"),
-     ("CWE-16", "A05:2021 Security Misconfiguration", "T1566 — Phishing")),
+     ("CWE-16", "A02:2025 Security Misconfiguration", "T1566 — Phishing")),
     (("dnssec", "zone_transfer", "axfr", "dns_"),
-     ("CWE-350", "A05:2021 Security Misconfiguration", "T1590 — Gather Victim Network Information")),
+     ("CWE-350", "A02:2025 Security Misconfiguration", "T1590 — Gather Victim Network Information")),
     (("snmp", "community"),
-     ("CWE-1188", "A05:2021 Security Misconfiguration", "T1602 — Data from Configuration Repository")),
+     ("CWE-1188", "A02:2025 Security Misconfiguration", "T1602 — Data from Configuration Repository")),
     (("telnet", "cleartext", "plaintext", "unencrypted", "ftp", "rlogin", "rsh"),
-     ("CWE-319", "A02:2021 Cryptographic Failures", "T1040 — Network Sniffing")),
+     ("CWE-319", "A04:2025 Cryptographic Failures", "T1040 — Network Sniffing")),
     (("rate_limit", "resource_exhaust", "flood", "dos"),
-     ("CWE-770", "A04:2021 Insecure Design", "T1499 — Endpoint Denial of Service")),
+     ("CWE-770", "A06:2025 Insecure Design", "T1499 — Endpoint Denial of Service")),
     (("mass_assign", "auto_bind"),
-     ("CWE-915", "A08:2021 Software and Data Integrity Failures", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-915", "A08:2025 Software or Data Integrity Failures", "T1190 — Exploit Public-Facing Application")),
     (("deserial",),
-     ("CWE-502", "A08:2021 Software and Data Integrity Failures", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-502", "A08:2025 Software or Data Integrity Failures", "T1190 — Exploit Public-Facing Application")),
     (("outdated", "vulnerable_comp", "known_vuln", "eol", "end_of_life", "cve"),
-     ("CWE-1104", "A06:2021 Vulnerable and Outdated Components", "T1190 — Exploit Public-Facing Application")),
+     ("CWE-1104", "A03:2025 Software Supply Chain Failures", "T1190 — Exploit Public-Facing Application")),
     (("docker", "container", "kubernetes", "k8s", "kubelet", "etcd"),
-     ("CWE-284", "A05:2021 Security Misconfiguration", "T1610 — Deploy Container")),
+     ("CWE-284", "A02:2025 Security Misconfiguration", "T1610 — Deploy Container")),
+    # A10:2025 Mishandling of Exceptional Conditions (new in 2025) — verbose
+    # errors, stack traces and unhandled / fail-open exception paths
+    # (CWE-209/703/755/248). Kept ahead of the generic disclosure and
+    # misconfiguration buckets so an error-message leak scores against the right
+    # 2025 category instead of falling through to Security Misconfiguration.
+    (("verbose_error", "stack_trace", "stacktrace", "error_message",
+      "error_disclos", "exception_disclos", "unhandled_exception",
+      "improper_error", "error_handling", "fail_open", "detailed_error"),
+     ("CWE-209", "A10:2025 Mishandling of Exceptional Conditions",
+      "T1592 — Gather Victim Host Information")),
     (("exposed", "public", "listing", "backup", "sensitive_file", "disclosure",
       "version", "banner", "leak", "secret", "info"),
-     ("CWE-200", "A05:2021 Security Misconfiguration", "T1592 — Gather Victim Host Information")),
+     ("CWE-200", "A02:2025 Security Misconfiguration", "T1592 — Gather Victim Host Information")),
     (("misconfig", "insecure_config", "debug", "verbose"),
-     ("CWE-16", "A05:2021 Security Misconfiguration", "T1592 — Gather Victim Host Information")),
+     ("CWE-16", "A02:2025 Security Misconfiguration", "T1592 — Gather Victim Host Information")),
 ]
 
 

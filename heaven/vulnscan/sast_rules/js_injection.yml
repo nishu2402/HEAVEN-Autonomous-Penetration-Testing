@@ -11,7 +11,7 @@ rules:
     languages: [javascript, typescript]
     metadata:
       cwe: CWE-89
-      owasp: A03:2021 - Injection
+      owasp: A05:2025 - Injection
       confidence: HIGH
     patterns:
       - pattern-either:
@@ -31,7 +31,7 @@ rules:
     languages: [javascript, typescript]
     metadata:
       cwe: CWE-78
-      owasp: A03:2021 - Injection
+      owasp: A05:2025 - Injection
       confidence: HIGH
     patterns:
       - pattern-either:
@@ -50,7 +50,7 @@ rules:
     languages: [javascript, typescript]
     metadata:
       cwe: CWE-79
-      owasp: A03:2021 - Injection
+      owasp: A05:2025 - Injection
       confidence: HIGH
     patterns:
       - pattern: |
@@ -64,7 +64,7 @@ rules:
     languages: [javascript, typescript]
     metadata:
       cwe: CWE-95
-      owasp: A03:2021 - Injection
+      owasp: A05:2025 - Injection
       confidence: HIGH
     patterns:
       - pattern-either:
@@ -83,7 +83,7 @@ rules:
     languages: [javascript, typescript]
     metadata:
       cwe: CWE-327
-      owasp: A02:2021 - Cryptographic Failures
+      owasp: A04:2025 - Cryptographic Failures
       confidence: MEDIUM
     patterns:
       - pattern-either:
@@ -99,7 +99,7 @@ rules:
     languages: [javascript, typescript]
     metadata:
       cwe: CWE-614
-      owasp: A05:2021 - Security Misconfiguration
+      owasp: A02:2025 - Security Misconfiguration
       confidence: MEDIUM
     patterns:
       - pattern-either:

@@ -19,7 +19,7 @@ _GEN = ComplianceReportGenerator()
 
 _MIXED = [
     {"title": "SQL Injection", "vuln_type": "sqli", "severity": "high",
-     "target": "http://app/login", "owasp": "A03:2021 Injection"},
+     "target": "http://app/login", "owasp": "A05:2025 Injection"},
     {"title": "BOLA", "vuln_type": "bola", "severity": "high", "target": "http://app/api",
      "owasp_api": "API1:2023 Broken Object Level Authorization"},
     {"title": "Swagger exposed", "vuln_type": "api_docs_exposed", "severity": "medium",
@@ -35,7 +35,7 @@ _MIXED = [
 
 def test_report_renders_all_four_matrices():
     html = _GEN.generate_html_report(_MIXED, engagement_name="Parity")
-    for needle in ("OWASP Top 10 (2021) Coverage",
+    for needle in ("OWASP Top 10 (2025) Coverage",
                    "OWASP API Security Top 10 (2023) Coverage",
                    "OWASP IoT Top 10 (2018) Coverage",
                    "OT / ICS Security Coverage (IEC 62443)"):
@@ -53,12 +53,12 @@ def test_report_hides_api_matrix_when_no_api_findings():
 def test_web_matrix_excludes_api_iot_ot():
     """The web OWASP-2021 matrix must count only the SQLi — API/IoT/OT findings
     are scored in their own matrices, never double-counted here."""
-    web = {cid: 0 for cid, _ in _GEN.OWASP_2021}
+    web = {cid: 0 for cid, _ in _GEN.OWASP_2025}
     for f in _MIXED:
         cid = _GEN._owasp_category_id(f)
         if cid in web:
             web[cid] += 1
-    assert web["A03:2021"] == 1
+    assert web["A05:2025"] == 1
     assert sum(web.values()) == 1  # nothing else leaked into the web matrix
 
 
@@ -101,7 +101,7 @@ def test_coverage_grader_scores_domain_frameworks():
     iot = {c["code"]: c["findings"] for c in rep["owasp_iot"] if c["findings"]}
     ot = {c["code"]: c["findings"] for c in rep["ot_ics"] if c["findings"]}
     # web matrix must exclude API/IoT/OT — only the SQLi remains
-    assert web == {"A03_2021": 1}
+    assert web == {"A05_2025": 1}
     assert api == {"API1": 1, "API9": 1}
     assert iot == {"I1": 1}
     assert ot == {"FR1": 1}
@@ -121,7 +121,10 @@ def test_new_vuln_types_have_complete_taxonomy():
                "k8s_insecure_port", "cadvisor_exposed", "registry_exposed",
                "wireless_mgmt_exposed", "wireless_mgmt_unauthenticated",
                "anonymous_ldap_enumeration", "azure_ad_tenant_exposed",
-               "adfs_idp_signon_enabled", "federation_sts_exposed"):
+               "adfs_idp_signon_enabled", "federation_sts_exposed",
+               "cloud_iam_overprivileged", "cloud_iam_no_mfa",
+               "cloud_iam_stale_access_key", "cloud_iam_weak_password_policy",
+               "cloud_iam_root_access_keys", "cloud_iam_authenticated"):
         e = enrich_finding({"vuln_type": vt, "title": vt, "severity": "high", "target": "x"})
         assert e.get("cwe"), vt
         assert e.get("owasp"), vt

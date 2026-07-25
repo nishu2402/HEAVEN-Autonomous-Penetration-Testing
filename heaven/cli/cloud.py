@@ -72,7 +72,53 @@ def storage_cmd(target: str, names: tuple[str, ...], providers: tuple[str, ...],
         _print(f"[green]JSON written:[/green] {output}")
 
 
-def _persist(engagement: Optional[str], findings: list[dict]) -> int:
+@cloud.command(name="iam")
+@click.option("--profile", default=None,
+              help="AWS named profile to use (else the default credential chain).")
+@click.option("--region", default=None, help="AWS region (default: us-east-1).")
+@click.option("--engagement", default=None, help="Persist findings to this engagement.")
+@click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
+def iam_cmd(profile: Optional[str], region: Optional[str],
+            engagement: Optional[str], output: Optional[str]) -> None:
+    """Read-only IAM privilege audit of the authenticated AWS identity.
+
+    Supply credentials the standard AWS way (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+    env vars, or a shared profile via --profile). HEAVEN never reads or logs the
+    secret — boto3 resolves it — and every call is read-only (STS GetCallerIdentity
+    + IAM List*/Get*). Reports over-privileged principals, missing MFA, stale
+    access keys, root access keys and weak password policy.
+    """
+    from heaven.recon.cloud_iam import audit_aws_iam
+
+    _print("[cyan]Auditing authenticated AWS IAM identity (read-only)…[/cyan]")
+    result = audit_aws_iam(profile=profile, region=region)
+    if not result.get("authenticated"):
+        _print(f"[yellow]Not authenticated to AWS:[/yellow] "
+               f"{result.get('skipped_reason', 'no valid credentials')}. "
+               f"Set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or --profile) and retry.")
+        raise SystemExit(1)
+
+    _print(f"[green]Authenticated[/green] to account [bold]{result['account']}[/bold] "
+           f"as {result['arn']} ([dim]{result['principal_type']}[/dim])")
+    findings = result.get("findings", [])
+    issues = [f for f in findings if f.get("vuln_type") != "cloud_iam_authenticated"]
+    if not issues:
+        _print("[green]No IAM privilege or hygiene issues found for this identity.[/green]")
+    _sev_color = {"critical": "red", "high": "red", "medium": "yellow", "low": "cyan", "info": "dim"}
+    for f in issues:
+        c = _sev_color.get(f.get("severity", "info"), "dim")
+        _print(f"  [{c}]{f.get('severity', 'info').upper():8}[/{c}] {f.get('title', '')}")
+
+    stored = _persist(engagement, findings, name="cloud/iam")
+    if stored:
+        _print(f"\n[green]{stored} finding(s) stored in engagement '{engagement}'[/green]")
+    if output:
+        Path(output).write_text(json.dumps(result, indent=2, default=str))
+        _print(f"[green]JSON written:[/green] {output}")
+
+
+def _persist(engagement: Optional[str], findings: list[dict],
+             name: str = "cloud/storage") -> int:
     if not engagement or not findings:
         return 0
     try:
@@ -82,7 +128,7 @@ def _persist(engagement: Optional[str], findings: list[dict]) -> int:
         from heaven.engagement import EngagementStore
         store = EngagementStore(_engagement_db_path(engagement))
         scan_id = f"cloud-{uuid.uuid4().hex[:12]}"
-        store.record_scan_start(scan_id, name="cloud/storage", mode="cloud")
+        store.record_scan_start(scan_id, name=name, mode="cloud")
         stored = 0
         for f in findings:
             try:

@@ -9,7 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Upgraded the web OWASP mapping to the OWASP Top 10:2025 across the whole
+  platform.** The report coverage matrix (HTML + PDF), the Coverage self-grade
+  (`heaven coverage` / `/api/coverage` / web UI), the vulnerability knowledge
+  base, every scanner/demo tag, the SAST rule pack and the methodology page now
+  speak the 2025 taxonomy. The 2025 edition is a re-ranking with two structural
+  changes that are respected everywhere: **SSRF** (A10:2021) folds into **A01
+  Broken Access Control**, and **Vulnerable & Outdated Components** (A06:2021)
+  broadens into **A03 Software Supply Chain Failures**; the brand-new **A10
+  Mishandling of Exceptional Conditions** now receives verbose-error / stack-
+  trace findings. A single canon + a 2021→2025 crosswalk live in
+  `frameworks.py` (`OWASP_2025`, `normalize_owasp`, `owasp_2025_id`), so any
+  finding stored under a legacy 2021 tag is **upgraded on read** — old
+  engagement data renders as 2025 without a migration.
+
 ### Added
+
+- **Report Findings Summary now shows a genuine, per-finding CVSS score** instead
+  of a value that tracked severity (e.g. every High reading 6.2). A single
+  resolver prefers, most-authoritative-first: a real published base score
+  (NVD/OSV/CVE), the KB's per-class score, the CVSS v3.1 base score computed from
+  the class's curated vector, then — last — the severity-anchored ML prediction.
+  A CVE finding now shows its true NVD score and two different vulnerability
+  classes no longer collapse to the same number.
+- **Multi-step remediations render one step per line** in the HTML and PDF
+  reports (numbered steps and Verify/Reference markers each start a new line)
+  rather than one run-on paragraph — both newline-separated and legacy inline
+  `1. … 2. …` text are handled, and version numbers like `9.9` are never split.
+- **Authenticated AWS IAM privilege audit** (`heaven/recon/cloud_iam.py`,
+  `heaven cloud iam`, and a CLOUD-mode orchestrator task). When AWS credentials
+  are supplied via the standard chain (env vars / `--profile` / instance role),
+  it audits the identity you are authenticated as — **read-only** (STS
+  `GetCallerIdentity` + IAM `List*`/`Get*`), and HEAVEN never reads or logs the
+  secret (boto3 resolves it). Reports over-privileged principals (a policy that
+  literally grants `*`/`*`), console users without MFA, stale/unrotated access
+  keys, root access keys and a weak/absent password policy. Fires only on
+  positive evidence — a least-privileged key yields no issue findings — and
+  no-ops gracefully when no credentials are present.
 
 - **OWASP API Security Top 10 (2023) coverage matrix + full framework-coverage
   parity across report, self-grade and web UI.** The API scanner already tagged

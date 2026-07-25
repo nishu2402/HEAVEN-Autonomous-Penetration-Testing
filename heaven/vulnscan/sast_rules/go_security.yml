@@ -10,7 +10,7 @@ rules:
     languages: [go]
     metadata:
       cwe: CWE-89
-      owasp: A03:2021 - Injection
+      owasp: A05:2025 - Injection
       confidence: HIGH
     patterns:
       - pattern-either:
@@ -30,7 +30,7 @@ rules:
     languages: [go]
     metadata:
       cwe: CWE-78
-      owasp: A03:2021 - Injection
+      owasp: A05:2025 - Injection
       confidence: MEDIUM
     patterns:
       - pattern: exec.Command($CMD, ...)
@@ -44,7 +44,7 @@ rules:
     languages: [go]
     metadata:
       cwe: CWE-330
-      owasp: A02:2021 - Cryptographic Failures
+      owasp: A04:2025 - Cryptographic Failures
       confidence: MEDIUM
     patterns:
       - pattern-either:

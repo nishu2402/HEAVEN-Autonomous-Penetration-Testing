@@ -111,7 +111,8 @@ class TestSastNormaliser:
         assert f.line == 42
         assert f.column == 8
         assert f.cwe == "CWE-89"
-        assert f.owasp == "A03:2021 - Injection"
+        # A legacy 2021 semgrep tag is upgraded to the canonical 2025 label.
+        assert f.owasp == "A05:2025 Injection"
         assert f.confidence == 0.9
 
     def test_severity_mapping(self):
@@ -132,7 +133,7 @@ class TestSastNormaliser:
             severity="critical",
             title="SQL injection",
             file_path="/src/app.py", line=42,
-            cwe="CWE-89", owasp="A03:2021",
+            cwe="CWE-89", owasp="A05:2025",
         )
         d = f.to_heaven_finding()
         assert d["target"] == "file:///src/app.py"

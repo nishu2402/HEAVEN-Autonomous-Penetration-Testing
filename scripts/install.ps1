@@ -33,6 +33,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# This is the WINDOWS installer. PowerShell 7+ is cross-platform, so a stray run on
+# macOS / Linux would look for a Windows venv layout (venv\Scripts\), reach for
+# winget/choco/scoop and cmd.exe, and otherwise misbehave. Stop early and point to the
+# shell installer. (On Windows PowerShell 5.1 $IsWindows is undefined and Major is 5, so
+# this never fires there; it only guards the cross-platform pwsh 7+ case.)
+if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+    Write-Host "[x] This is the Windows installer. On macOS / Linux run:  ./scripts/install.sh" -ForegroundColor Red
+    exit 1
+}
+
+# Keep the $LASTEXITCODE-based flow below authoritative on every PowerShell edition.
+# PowerShell 7.4+ makes a native command's non-zero exit throw a terminating error under
+# ErrorActionPreference 'Stop', which would turn the intentionally non-fatal steps
+# (optional feature packs, external tools) into hard aborts before their own
+# $LASTEXITCODE check runs. Opting out makes Windows PowerShell 5.1 and pwsh 7 behave
+# identically (harmless no-op on 5.1, which lacks this preference variable).
+$PSNativeCommandUseErrorActionPreference = $false
+
 # -- Pretty output ------------------------------------------------------------
 function Write-Ok   { param($m) Write-Host "[+] $m" -ForegroundColor Green }
 function Write-Info { param($m) Write-Host "[*] $m" -ForegroundColor Cyan }

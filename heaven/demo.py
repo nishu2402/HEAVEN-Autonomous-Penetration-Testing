@@ -49,7 +49,7 @@ def _f(severity: str, vuln_type: str, title: str, *, target: str, risk: float,
 _FINDINGS: list[dict] = [
     _f("critical", "sqli", "SQL injection (error-based) in 'id'",
        target=WEB, endpoint=f"{WEB}/vulnerabilities/sqli/", param="id", risk=96.0,
-       confidence=0.98, cwe="CWE-89", owasp="A03:2021",
+       confidence=0.98, cwe="CWE-89", owasp="A05:2025",
        payload="id=1' AND 1=CONVERT(int,@@version)--",
        description="The 'id' parameter is concatenated into a SQL query. A single "
                    "quote triggers a database error disclosing the query.",
@@ -58,7 +58,7 @@ _FINDINGS: list[dict] = [
                    "SQL by string concatenation."),
     _f("critical", "cmdi", "OS command injection in 'ip'",
        target=WEB, endpoint=f"{WEB}/vulnerabilities/exec/", param="ip", risk=95.0,
-       confidence=0.97, cwe="CWE-78", owasp="A03:2021", method="POST",
+       confidence=0.97, cwe="CWE-78", owasp="A05:2025", method="POST",
        payload="ip=127.0.0.1;id",
        description="The 'ip' field is passed to a shell. Appending ';id' returns "
                    "the output of the injected command (uid=33(www-data)).",
@@ -75,13 +75,13 @@ _FINDINGS: list[dict] = [
 
     _f("high", "xss", "Reflected XSS in 'q'",
        target=WEB, endpoint=f"{WEB}/search", param="q", risk=78.0, confidence=0.9,
-       cwe="CWE-79", owasp="A03:2021", payload="q=<script>alert(document.domain)</script>",
+       cwe="CWE-79", owasp="A05:2025", payload="q=<script>alert(document.domain)</script>",
        description="The search term is reflected into the page unencoded.",
        impact="Session theft / account takeover via crafted links.",
        remediation="Context-aware output encoding; a strict Content-Security-Policy."),
     _f("high", "idor", "IDOR — other users' records via 'user_id'",
        target=WEB, endpoint=f"{WEB}/api/account", param="user_id", risk=82.0,
-       confidence=0.88, cwe="CWE-639", owasp="A01:2021", method="GET",
+       confidence=0.88, cwe="CWE-639", owasp="A01:2025", method="GET",
        payload="user_id=1002",
        description="Changing user_id returns another user's account object; no "
                    "ownership check is performed.",
@@ -96,13 +96,13 @@ _FINDINGS: list[dict] = [
 
     _f("medium", "open_redirect", "Open redirect in 'next'",
        target=WEB, endpoint=f"{WEB}/login", param="next", risk=56.0, confidence=0.8,
-       cwe="CWE-601", owasp="A01:2021", payload="next=https://evil.example",
+       cwe="CWE-601", owasp="A06:2025", payload="next=https://evil.example",
        description="The 'next' parameter is used as a redirect target without "
                    "validation.",
        impact="Phishing / OAuth token theft via trusted-domain redirects.",
        remediation="Allow only relative paths or an explicit host allowlist."),
     _f("medium", "security_misconfig", "Missing security headers",
-       target=WEB, risk=52.0, confidence=0.9, cwe="CWE-693", owasp="A05:2021",
+       target=WEB, risk=52.0, confidence=0.9, cwe="CWE-693", owasp="A02:2025",
        description="Responses lack Content-Security-Policy, X-Content-Type-Options, "
                    "and Strict-Transport-Security.",
        impact="Increases the blast radius of XSS / MIME-sniffing / SSL-strip.",
@@ -114,7 +114,7 @@ _FINDINGS: list[dict] = [
        remediation="Disable TLS < 1.2; prefer AEAD cipher suites."),
     _f("medium", "csrf", "Cross-site request forgery on profile update",
        target=WEB, endpoint=f"{WEB}/profile/update", risk=53.0, confidence=0.78,
-       cwe="CWE-352", owasp="A01:2021", method="POST",
+       cwe="CWE-352", owasp="A01:2025", method="POST",
        description="The profile-update form has no anti-CSRF token.",
        impact="Attacker can change a victim's email/password via a crafted page.",
        remediation="Add per-session CSRF tokens; set SameSite=Lax/Strict cookies."),
@@ -126,7 +126,7 @@ _FINDINGS: list[dict] = [
        remediation="Suppress version banners (ServerTokens Prod)."),
     _f("low", "info_disclosure", "Verbose error leaks a stack trace",
        target=WEB, endpoint=f"{WEB}/api/orders", risk=28.0, confidence=0.82,
-       cwe="CWE-209", owasp="A05:2021",
+       cwe="CWE-209", owasp="A10:2025",
        description="A malformed request returns a full framework stack trace.",
        impact="Discloses file paths, library versions and internal logic.",
        remediation="Return generic error pages; log details server-side only."),

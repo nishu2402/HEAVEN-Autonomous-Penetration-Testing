@@ -252,6 +252,11 @@ def _parse_semgrep_result(entry: dict[str, Any]) -> SastFinding:
         owasp = str(owasps[0])
     elif isinstance(owasps, str):
         owasp = owasps
+    # Semgrep rules tag OWASP in mixed editions/formats ("A03:2021 - Injection").
+    # Upgrade to the canonical 2025 label so SAST findings stay in sync with the
+    # rest of the platform.
+    from heaven.devsecops.frameworks import normalize_owasp
+    owasp = normalize_owasp(owasp) or owasp
 
     # Confidence — use metadata.confidence if present, else heuristic
     confidence_raw = (metadata.get("confidence") or "").upper()

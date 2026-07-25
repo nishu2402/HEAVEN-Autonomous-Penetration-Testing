@@ -285,7 +285,7 @@ def _finding(url: str, *, severity: str, confidence: float, proven: bool,
         "proved": proven,
         "target": url,
         "cwe": "CWE-284",
-        "owasp": "A01:2021 Broken Access Control",
+        "owasp": "A01:2025 Broken Access Control",
         "description": detail,
         "evidence": ev,
     }

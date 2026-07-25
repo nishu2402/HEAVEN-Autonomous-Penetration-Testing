@@ -142,7 +142,7 @@ async def _probe_host(session, host: str) -> list[dict[str, Any]]:
                     "management VLAN / VPN. Change default credentials and enforce "
                     "MFA where supported. Never expose the controller to the WAN."),
                 cwe="CWE-284",
-                owasp="A05:2021 Security Misconfiguration",
+                owasp="A02:2025 Security Misconfiguration",
                 mitre="T1133 — External Remote Services",
             ))
         elif status == 200:
@@ -164,7 +164,7 @@ async def _probe_host(session, host: str) -> list[dict[str, Any]]:
                     "Require authentication on the management interface, restrict it to "
                     "a management VLAN/VPN, and change any default credentials."),
                 cwe="CWE-306",
-                owasp="A07:2021 Identification and Authentication Failures",
+                owasp="A07:2025 Authentication Failures",
                 mitre="T1133 — External Remote Services",
             ))
     return findings

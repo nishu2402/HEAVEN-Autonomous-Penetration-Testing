@@ -106,14 +106,16 @@ def test_owasp_coverage_maps_findings_dynamically():
     gen = ComplianceReportGenerator()
     findings = [
         {"vuln_type": "sql_injection", "title": "SQLi", "severity": "critical",
-         "owasp": "A03:2021 Injection"},
+         "owasp": "A05:2025 Injection"},
         {"vuln_type": "missing_security_headers", "title": "No CSP", "severity": "low"},
         {"vuln_type": "ssl_weak_cipher", "title": "Weak TLS", "severity": "medium"},
         {"vuln_type": "ssrf", "title": "SSRF", "severity": "high"},
     ]
     html = gen._owasp_coverage(findings)
-    # A03 (from enriched field), A05 (headers), A02 (tls), A10 (ssrf) all present.
-    for cid in ("A03:2021", "A05:2021", "A02:2021", "A10:2021"):
+    # 2025 taxonomy: A05 Injection (enriched field), A02 Security Misconfiguration
+    # (headers), A04 Cryptographic Failures (tls), A01 Broken Access Control (ssrf,
+    # SSRF now folds into A01) all present.
+    for cid in ("A05:2025", "A02:2025", "A04:2025", "A01:2025"):
         assert cid in html
     assert "Findings present" in html
 

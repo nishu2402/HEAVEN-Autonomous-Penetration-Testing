@@ -301,7 +301,7 @@ SUPPORTED_MANIFEST_NAMES: tuple[str, ...] = tuple(_MANIFEST_PARSERS.keys())
 
 # ── OSV vuln → normalized HEAVEN finding ──
 
-_A06 = "A06:2021 Vulnerable and Outdated Components"
+_OWASP_SUPPLY_CHAIN = "A03:2025 Software Supply Chain Failures"
 
 
 def _vuln_to_finding(v: OSVVuln, target: str) -> dict[str, Any]:
@@ -319,7 +319,7 @@ def _vuln_to_finding(v: OSVVuln, target: str) -> dict[str, Any]:
         "cvss": v.cvss_score,
         "cvss_vector": v.cvss_vector,
         "cwe": v.cwe_ids[0] if v.cwe_ids else "CWE-1104",
-        "owasp": _A06,
+        "owasp": _OWASP_SUPPLY_CHAIN,
         "source": "osv",
         "remediation": (
             f"Update {v.package} from {v.version} to a fixed release."

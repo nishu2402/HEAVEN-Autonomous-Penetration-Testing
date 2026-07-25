@@ -180,7 +180,8 @@ async def test_scan_packages_finding_shape():
     assert f["severity"] == "high"
     assert f["cve_id"] == "CVE-2018-1000656"
     assert f["cvss"] == 7.5
-    assert f["owasp"].startswith("A06")
+    # OWASP 2025: Vulnerable & Outdated Components → A03 Software Supply Chain Failures
+    assert f["owasp"].startswith("A03")
     assert "0.12.3" in f["remediation"]
     assert f["evidence"]["signals"] == ["osv_advisory_version_match"]
     assert "proof" in f["evidence"]
@@ -227,5 +228,5 @@ async def test_scan_path_walks_and_skips_vendor_dirs(tmp_path):
 def test_vuln_kb_alias_resolves():
     from heaven.devsecops.vuln_kb import cvss_vector_for, lookup
     kb = lookup("vulnerable_dependency")
-    assert kb.get("owasp", "").startswith("A06")
+    assert kb.get("owasp", "").startswith("A03")  # 2025 Software Supply Chain Failures
     assert cvss_vector_for("vulnerable_dependency").startswith("CVSS:3.1")

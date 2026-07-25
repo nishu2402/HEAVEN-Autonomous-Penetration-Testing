@@ -413,7 +413,7 @@ class PDFReportGenerator:
             "positives and rated using the CVSS-based scale in the next section.", styles["body"]))
         story.append(Paragraph("Standards & Frameworks Referenced", styles["h3"]))
         std = [[Paragraph("Framework", styles["th"]), Paragraph("Use", styles["th"])]]
-        for fw, use in [("OWASP Top 10 (2021)", "Web application risk categorisation"),
+        for fw, use in [("OWASP Top 10 (2025)", "Web application risk categorisation"),
                         ("PTES", "Penetration Testing Execution Standard phases"),
                         ("NIST SP 800-115", "Technical assessment methodology"),
                         ("MITRE ATT&CK", "Adversary technique mapping (where applicable)"),
@@ -475,7 +475,7 @@ class PDFReportGenerator:
             fs = [[Paragraph(h, styles["th"]) for h in
                    ("#", "Finding", "Severity", "CVSS", "Target", "Status")]]
             for i, f in enumerate(findings, 1):
-                cvss = f.get("predicted_cvss_score") or f.get("typical_cvss") or "—"
+                cvss = _OWASP._finding_cvss(f)
                 fs.append([Paragraph(str(i), styles["cell"]),
                            Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
                            pill(_sev_of(f)), Paragraph(_esc(cvss), styles["small"]),
@@ -495,7 +495,7 @@ class PDFReportGenerator:
         story.append(PageBreak())
 
         # ── 10. OWASP coverage ──
-        story.append(heading("6.", "OWASP Top 10 (2021) Coverage"))
+        story.append(heading("6.", "OWASP Top 10 (2025) Coverage"))
         story.append(self._owasp_table(findings, cw, styles, table))
         story.append(PageBreak())
 
@@ -674,13 +674,15 @@ class PDFReportGenerator:
         from reportlab.lib import colors
         from reportlab.lib.units import mm
         from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
+        from heaven.devsecops import frameworks as _fw
         line = colors.HexColor("#d7dde7")
         sev = _sev_of(f)
         m = SEVERITY_META[sev]
         ev = f.get("evidence") or {}
         title = f.get("title") or f.get("vuln_type") or "Finding"
-        cvss = f.get("predicted_cvss_score") or f.get("typical_cvss") or "—"
-        owasp = f.get("owasp") or _OWASP._owasp_for(f.get("vuln_type", "")) or "—"
+        cvss = _OWASP._finding_cvss(f)
+        # Upgrade any legacy 2021 tag stored on the finding to its 2025 label.
+        owasp = _fw.normalize_owasp(f.get("owasp") or "") or _OWASP._owasp_for(f.get("vuln_type", "")) or "—"
 
         hdr = Table([[Paragraph(f'<font color="white" size="10"><b>{m["label"]} &nbsp; '
                                 f'#{idx} &nbsp; {_esc(title)}</b></font>', styles["cell"])]],
@@ -741,7 +743,12 @@ class PDFReportGenerator:
             out.append(Paragraph(label, styles["label"]))
             out.append(box)
 
-        section("REMEDIATION", ev.get("remediation") or f.get("remediation"))
+        # Remediation renders each numbered step on its own line, not one run-on
+        # paragraph — reportlab wants <br/>, so translate the shared <br> markup.
+        rem = ev.get("remediation") or f.get("remediation")
+        if rem:
+            out.append(Paragraph("REMEDIATION", styles["label"]))
+            out.append(Paragraph(_OWASP._steps_html(rem).replace("<br>", "<br/>"), styles["body"]))
 
         refs = ev.get("references") or f.get("references") or []
         if refs:
@@ -769,7 +776,7 @@ class PDFReportGenerator:
                     coverage[cid]["n"] += 1
                     break
         rows = [[Paragraph(h, styles["th"]) for h in ("Control", "Category", "Status", "Findings")]]
-        for cid, cn in _OWASP.OWASP_2021:
+        for cid, cn in _OWASP.OWASP_2025:
             hit = cid in coverage
             n = coverage.get(cid, {}).get("n", 0)
             status = "Findings present" if hit else "No findings"

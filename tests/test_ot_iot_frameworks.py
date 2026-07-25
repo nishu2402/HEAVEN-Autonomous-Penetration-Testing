@@ -2,7 +2,7 @@
 
 Verifies that consumer-IoT and industrial-OT findings are scored against the
 *right* standard (OWASP IoT Top 10 (2018) / IEC 62443) rather than the web
-OWASP Top 10 (2021), and that the professional report renders the matching
+OWASP Top 10 (2025), and that the professional report renders the matching
 coverage matrices without polluting the web matrix.
 """
 
@@ -108,14 +108,14 @@ def _mixed_findings():
     iot_ot = [fw.tag_iot_ot_finding(f) for f in raw]
     web = [{"target": "app", "protocol": "HTTP", "severity": "high",
             "vuln_type": "xss", "title": "Reflected XSS", "cwe": "CWE-79",
-            "owasp": "A03:2021 Injection"}]
+            "owasp": "A05:2025 Injection"}]
     return iot_ot + web
 
 
 def test_report_renders_all_three_matrices():
     html = ComplianceReportGenerator().generate_html_report(
         _mixed_findings(), engagement_name="Mixed")
-    assert "OWASP Top 10 (2021) Coverage" in html
+    assert "OWASP Top 10 (2025) Coverage" in html
     assert "OWASP IoT Top 10 (2018) Coverage" in html
     assert "OT / ICS Security Coverage (IEC 62443)" in html
     # IoT + OT categories that should be present
@@ -126,10 +126,10 @@ def test_report_renders_all_three_matrices():
 
 def test_iot_ot_matrices_hidden_for_pure_web_scan():
     web_only = [{"target": "app", "severity": "high", "vuln_type": "xss",
-                 "title": "Reflected XSS", "owasp": "A03:2021 Injection"}]
+                 "title": "Reflected XSS", "owasp": "A05:2025 Injection"}]
     html = ComplianceReportGenerator().generate_html_report(
         web_only, engagement_name="Web")
-    assert "OWASP Top 10 (2021) Coverage" in html
+    assert "OWASP Top 10 (2025) Coverage" in html
     assert "OWASP IoT Top 10 (2018)" not in html
     assert "OT / ICS Security Coverage" not in html
 

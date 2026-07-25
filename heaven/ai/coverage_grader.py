@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from heaven.devsecops import frameworks as _fw
 from heaven.utils.logger import get_logger
 
 logger = get_logger("ai.coverage_grader")
@@ -37,23 +38,13 @@ logger = get_logger("ai.coverage_grader")
 
 # ═══════════════════════════════════════════
 # OWASP CATEGORY MAPPING
-# Maps observed vuln_type → OWASP Top 10 category. Mirrors what's already
-# in tests/benchmarks/metrics.py::_TYPE_TO_CATEGORY but at the higher
-# OWASP-bucket level.
+# Maps observed vuln_type → OWASP Top 10 (2025) category. The canonical list
+# lives once in ``frameworks.OWASP_2025``; the grader keys its buckets on the
+# underscore form (``A05_2025``) that ``_norm_owasp_code`` produces, so the
+# self-grade can never drift from the report.
 # ═══════════════════════════════════════════
 
-OWASP_2021 = {
-    "A01_2021": "Broken Access Control",
-    "A02_2021": "Cryptographic Failures",
-    "A03_2021": "Injection",
-    "A04_2021": "Insecure Design",
-    "A05_2021": "Security Misconfiguration",
-    "A06_2021": "Vulnerable and Outdated Components",
-    "A07_2021": "Identification and Authentication Failures",
-    "A08_2021": "Software and Data Integrity Failures",
-    "A09_2021": "Security Logging and Monitoring Failures",
-    "A10_2021": "Server-Side Request Forgery",
-}
+OWASP_2025 = {cid.replace(":", "_"): name for cid, name in _fw.OWASP_2025}
 
 OWASP_API_2023 = {
     "API1": "Broken Object Level Authorization",
@@ -201,14 +192,15 @@ class CoverageReport:
 
 
 def _norm_owasp_code(raw: str) -> Optional[str]:
-    """``A03:2021`` / ``A03_2021`` (with or without a trailing name) → ``A03_2021``.
+    """Any OWASP-Top-10 string (2021 or 2025, ``:`` or ``_``, with or without a
+    trailing name) → the canonical 2025 underscore code ``A05_2025``, or ``None``.
 
-    The report layer speaks ``A03:2021``; the grader keys its buckets on
-    ``A03_2021``. Normalising here lets both formats feed the same counters.
+    The report layer speaks ``A05:2025``; the grader keys its buckets on
+    ``A05_2025``. Legacy 2021 tags are crosswalked to 2025 (via the single canon
+    in ``frameworks``) so findings stored years ago still bucket correctly.
     """
-    import re
-    m = re.match(r"\s*A(\d{2})[:_]2021", raw or "")
-    return f"A{m.group(1)}_2021" if m else None
+    cid = _fw.owasp_2025_id(raw or "")
+    return cid.replace(":", "_") if cid else None
 
 
 def _owasp_map() -> dict[str, tuple[str, str]]:
@@ -220,7 +212,7 @@ def _owasp_map() -> dict[str, tuple[str, str]]:
 
 
 def _classify(vuln_type: str) -> Optional[str]:
-    """Map a vuln_type to its OWASP-2021 code (e.g. ``A03_2021``), or ``None``.
+    """Map a vuln_type to its OWASP-2025 code (e.g. ``A05_2025``), or ``None``.
 
     Substring match against the canonical report map — so ``sqli_boolean``,
     ``vulnerable_service``, ``ssl_weak_cipher`` and friends all classify. The
@@ -237,7 +229,7 @@ def _classify(vuln_type: str) -> Optional[str]:
 
 
 def _classify_finding(f: Any) -> Optional[str]:
-    """OWASP-2021 code for one stored ``Finding``.
+    """OWASP-2025 code for one stored ``Finding``.
 
     Prefers an enriched ``owasp`` field (persisted onto the finding's evidence by
     ``vuln_kb``), then a keyword match over ``vuln_type + title`` — the same
@@ -315,16 +307,16 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
     scans = engagement_store.list_all_scans()
 
     # OWASP buckets
-    owasp_counts: dict[str, int] = {code: 0 for code in OWASP_2021}
+    owasp_counts: dict[str, int] = {code: 0 for code in OWASP_2025}
     for f in findings:
         owasp_code = _classify_finding(f)
         if owasp_code and owasp_code in owasp_counts:
             owasp_counts[owasp_code] += 1
 
     owasp_status = [
-        CategoryStatus(code=code, name=OWASP_2021[code],
+        CategoryStatus(code=code, name=OWASP_2025[code],
                        finding_count=owasp_counts.get(code, 0), tested=True)
-        for code in OWASP_2021
+        for code in OWASP_2025
     ]
 
     # Domain-framework buckets. The web OWASP matrix above deliberately does not

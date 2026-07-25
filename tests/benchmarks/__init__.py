@@ -43,7 +43,7 @@ Each vulnerability entry:
   parameter         : str | null — the vulnerable input
   category          : str        — canonical: sqli, xss, cmdi, lfi, csrf, ...
   subtypes_ok       : list[str]  — optional finer-grained types that count
-  owasp             : str        — OWASP Top 10 ID (e.g., A03_2021)
+  owasp             : str        — OWASP Top 10 ID (e.g., A05_2025)
   cwe               : str        — CWE ID (e.g., CWE-89)
   severity          : str        — critical / high / medium / low
   difficulty        : str        — low / medium / high / impossible

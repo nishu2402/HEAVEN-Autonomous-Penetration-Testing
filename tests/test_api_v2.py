@@ -412,5 +412,5 @@ def test_sca_endpoint_returns_shape(api_client, monkeypatch, tmp_path):
     body = r.json()
     assert body["packages"] == 1
     assert body["findings"][0]["vuln_type"] == "vulnerable_dependency"
-    # enrichment ran → OWASP A06 filled in from the KB
-    assert body["findings"][0].get("owasp", "").startswith("A06")
+    # enrichment ran → OWASP A03 (Software Supply Chain Failures) filled in from the KB
+    assert body["findings"][0].get("owasp", "").startswith("A03")

@@ -311,17 +311,20 @@ def _finding_vuln_type(f: Any) -> str:
 
 
 def _finding_owasp(f: Any) -> str:
+    from heaven.devsecops import frameworks as _fw
     if isinstance(f, dict):
         given = str(f.get("owasp") or "")
     else:
         given = str(getattr(f, "owasp", "") or "")
     if given:
-        return given
+        # Upgrade any legacy 2021 tag to its canonical 2025 label.
+        return _fw.normalize_owasp(given) or given
     # Fall back to the KB taxonomy so the OWASP-category stat is populated even
     # when a stored finding didn't persist its own owasp string.
     try:
         from heaven.devsecops.vuln_kb import lookup
-        return str((lookup(_finding_vuln_type(f)) or {}).get("owasp", ""))
+        kb = str((lookup(_finding_vuln_type(f)) or {}).get("owasp", ""))
+        return _fw.normalize_owasp(kb) or kb
     except Exception:
         return ""
 

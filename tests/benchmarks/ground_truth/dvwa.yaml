@@ -34,7 +34,7 @@ vulnerabilities:
     parameter: id
     category: sqli
     subtypes_ok: [sqli_error, sqli_union, sqli_boolean, sqli_time]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-89
     severity: critical
     difficulty: low
@@ -47,7 +47,7 @@ vulnerabilities:
     parameter: id
     category: sqli
     subtypes_ok: [sqli_error, sqli_union, sqli_boolean, sqli_time]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-89
     severity: critical
     difficulty: medium
@@ -60,7 +60,7 @@ vulnerabilities:
     parameter: id
     category: sqli
     subtypes_ok: [sqli_blind, sqli_boolean, sqli_time]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-89
     severity: critical
     difficulty: low
@@ -75,7 +75,7 @@ vulnerabilities:
     parameter: name
     category: xss
     subtypes_ok: [xss_reflected]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-79
     severity: high
     difficulty: low
@@ -88,7 +88,7 @@ vulnerabilities:
     parameter: name
     category: xss
     subtypes_ok: [xss_reflected]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-79
     severity: high
     difficulty: medium
@@ -101,7 +101,7 @@ vulnerabilities:
     parameter: mtxMessage
     category: xss
     subtypes_ok: [xss_stored]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-79
     severity: high
     difficulty: low
@@ -117,7 +117,7 @@ vulnerabilities:
     parameter: ip
     category: cmdi
     subtypes_ok: [command_injection, rce]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-78
     severity: critical
     difficulty: low
@@ -130,7 +130,7 @@ vulnerabilities:
     parameter: ip
     category: cmdi
     subtypes_ok: [command_injection, rce]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-78
     severity: critical
     difficulty: medium
@@ -145,7 +145,7 @@ vulnerabilities:
     parameter: page
     category: lfi
     subtypes_ok: [local_file_inclusion, path_traversal]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-22
     severity: high
     difficulty: low
@@ -158,7 +158,7 @@ vulnerabilities:
     parameter: page
     category: lfi
     subtypes_ok: [local_file_inclusion, path_traversal]
-    owasp: A03_2021
+    owasp: A05_2025
     cwe: CWE-22
     severity: high
     difficulty: medium
@@ -173,7 +173,7 @@ vulnerabilities:
     parameter: uploaded
     category: file_upload
     subtypes_ok: [unrestricted_file_upload]
-    owasp: A04_2021
+    owasp: A06_2025
     cwe: CWE-434
     severity: critical
     difficulty: low
@@ -189,7 +189,7 @@ vulnerabilities:
     parameter: password_new
     category: csrf
     subtypes_ok: [csrf]
-    owasp: A01_2021
+    owasp: A01_2025
     cwe: CWE-352
     severity: high
     difficulty: low
@@ -204,7 +204,7 @@ vulnerabilities:
     parameter: redirect
     category: open_redirect
     subtypes_ok: [open_redirect, unvalidated_redirect]
-    owasp: A01_2021
+    owasp: A01_2025
     cwe: CWE-601
     severity: medium
     difficulty: low
@@ -220,7 +220,7 @@ vulnerabilities:
     parameter: password
     category: weak_auth
     subtypes_ok: [weak_credentials, default_credentials, no_rate_limit]
-    owasp: A07_2021
+    owasp: A07_2025
     cwe: CWE-307
     severity: high
     difficulty: low

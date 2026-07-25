@@ -1084,6 +1084,25 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         modes=frozenset({M.CLOUD}),
     )
 
+    # Authenticated AWS IAM privilege audit — the "keys supplied" counterpart to
+    # the credential-free identity recon above. Runs only when valid AWS
+    # credentials are present (standard AWS credential chain); read-only (STS
+    # GetCallerIdentity + IAM List*/Get*). No-ops gracefully with no key, so a
+    # credential-free CLOUD scan is unaffected.
+    async def _aws_iam_audit(**kw):
+        from heaven.recon.cloud_iam import recon_aws_iam
+        res = await recon_aws_iam()
+        if not res.get("authenticated"):
+            return {"skipped": True,
+                    "reason": res.get("skipped_reason", "no AWS credentials")}
+        return res
+
+    orch.add_task(
+        "Authenticated AWS IAM Audit", _aws_iam_audit,
+        phase=ScanPhase.RECON, concurrency_group="cloud",
+        modes=frozenset({M.CLOUD}),
+    )
+
     git_id = orch.add_task(
         "Git Secret Scanning", scan_repositories,
         phase=ScanPhase.RECON,

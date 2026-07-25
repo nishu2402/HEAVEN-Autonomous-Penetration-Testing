@@ -120,7 +120,7 @@ def _gt(**kw) -> GroundTruthEntry:
         parameter="id",
         category="sqli",
         subtypes_ok=[],
-        owasp="A03_2021",
+        owasp="A05_2025",
         cwe="CWE-89",
         severity="critical",
         difficulty="low",
@@ -362,7 +362,7 @@ class TestGroundTruthLoader:
             "    parameter: id\n"
             "    category: nonsense_not_canonical\n"
             "    subtypes_ok: []\n"
-            "    owasp: A01_2021\n"
+            "    owasp: A01_2025\n"
             "    cwe: CWE-0\n"
             "    severity: low\n"
             "    difficulty: low\n"

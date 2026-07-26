@@ -162,9 +162,21 @@ async def crawl_url(
 
 
 async def extract_js_endpoints(js_urls: list[str], timeout: float = 10.0) -> list[str]:
-    """Fetch and analyze JS files to discover API endpoints."""
+    """Fetch and analyse JS bundles to discover API endpoints.
+
+    Each match is resolved to an **absolute, same-origin URL** against the
+    bundle it was found in (see :func:`heaven.feedback.resolve_js_endpoint`):
+    a route named in ``https://app.tld/static/main.js`` becomes
+    ``https://app.tld/api/...``. Third-party and noise matches (event names,
+    MIME types, template placeholders, CDN assets) are dropped, so what comes
+    back is a clean set of in-scope endpoints the injection / API scanners can
+    consume directly.
+    """
     import aiohttp
-    discovered = []
+
+    from heaven.feedback import resolve_js_endpoint
+
+    discovered: set[str] = set()
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=timeout),
         connector=aiohttp.TCPConnector(ssl=False),
@@ -172,15 +184,18 @@ async def extract_js_endpoints(js_urls: list[str], timeout: float = 10.0) -> lis
         for js_url in js_urls[:50]:
             try:
                 async with session.get(js_url) as resp:
-                    if resp.status == 200:
-                        content = await resp.text(errors="replace")
-                        for pattern in JS_ENDPOINT_PATTERNS:
-                            matches = re.findall(pattern, content)
-                            discovered.extend(matches)
+                    if resp.status != 200:
+                        continue
+                    content = await resp.text(errors="replace")
+                    for pattern in JS_ENDPOINT_PATTERNS:
+                        for raw in re.findall(pattern, content):
+                            resolved = resolve_js_endpoint(raw, js_url)
+                            if resolved:
+                                discovered.add(resolved)
             except Exception as e:
                 logger.debug(f"JS endpoint extraction error for {js_url}: {e}")
                 continue
-    return list(set(discovered))
+    return sorted(discovered)
 
 
 async def discover_apis(base_url: str, timeout: float = 10.0, evasion_headers: Optional[dict] = None) -> list[WebEndpoint]:
@@ -319,7 +334,9 @@ async def crawl_url_js(
                     {"name": k, "value": v, "domain": base_domain, "path": "/"}
                     for k, v in auth_config["cookies"].items()
                 ]
-                await context.add_cookies(cookie_list)
+                # These dicts carry exactly Playwright's cookie fields; cast to
+                # satisfy the SetCookieParam TypedDict (not publicly importable).
+                await context.add_cookies(cast("list[Any]", cookie_list))
 
             queue = [(url, 0)]
             while queue and len(visited) < max_pages:

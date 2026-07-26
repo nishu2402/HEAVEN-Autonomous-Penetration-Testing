@@ -7,6 +7,8 @@ content-type confusion, and method override attacks.
 from __future__ import annotations
 
 import asyncio
+import base64
+import re
 import secrets
 import string
 import urllib.parse
@@ -294,6 +296,38 @@ _CACHE_HEADERS = [
     "X-Host", "X-Original-URL", "X-Rewrite-URL",
 ]
 
+async def _confirm_cache_poisoning(session: "aiohttp.ClientSession", url: str,
+                                   hdr: str) -> Optional[dict]:
+    """Safely confirm unkeyed-header cache poisoning without touching a shared
+    cache. A random ``cb=`` token isolates a throwaway cache entry; we poison it
+    with a unique canary via ``hdr`` then fetch the SAME URL with no header — if
+    the canary is served back, the cache stored our poisoned response."""
+    token = secrets.token_hex(8)
+    sep = "&" if urllib.parse.urlparse(url).query else "?"
+    busted = f"{url}{sep}cb={token}"
+    canary = f"heaven{secrets.token_hex(6)}.invalid"
+    try:
+        async with session.get(busted, headers={hdr: canary},
+                               allow_redirects=False,
+                               timeout=aiohttp.ClientTimeout(total=10)) as r1:
+            body1 = await r1.text()
+            loc1 = r1.headers.get("Location", "")
+        if canary not in body1 and canary not in loc1:
+            return None  # not reflected on the cache-busted path either
+        async with session.get(busted, allow_redirects=False,
+                               timeout=aiohttp.ClientTimeout(total=10)) as r2:
+            body2 = await r2.text()
+            loc2 = r2.headers.get("Location", "")
+    except Exception:
+        logger.debug("cache-poison confirmation error", exc_info=True)
+        return None
+    if canary in body2:
+        return {"canary": canary, "reflected_in": "response body"}
+    if canary in loc2:
+        return {"canary": canary, "reflected_in": "Location header"}
+    return None
+
+
 async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
                                  url: str) -> list[dict]:
     """
@@ -315,20 +349,48 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
 
                 if canary in body:
                     cacheable = "no-store" not in cache_control and "private" not in cache_control
-                    severity = "high" if cacheable else "medium"
-                    findings.append(_finding(
-                        url, "cache_poisoning_unkeyed_header", severity,
-                        f"Cache Poisoning via Unkeyed Header ({hdr})",
-                        f"Header '{hdr}' value reflected in response body. "
-                        f"{'Response appears cacheable (no no-store/private). ' if cacheable else ''}"
-                        f"An attacker can poison the cache to serve malicious content to all users.",
-                        confidence=0.85,
-                        evidence={
-                            "header": hdr, "canary": canary,
-                            "cache_control": cache_control,
-                            "x_cache": x_cache, "age": age,
-                        },
-                    ))
+                    # Precision upgrade: prove the poisoning safely. A per-test
+                    # cache-buster query isolates a throwaway cache entry only we
+                    # touch (never a shared production one); if a CLEAN follow-up
+                    # request — no attacker header — is then served our canary,
+                    # the cache stored the poisoned response. That is airtight.
+                    confirmed = await _confirm_cache_poisoning(session, url, hdr)
+                    if confirmed:
+                        findings.append(_finding(
+                            url, "cache_poisoning_unkeyed_header", "high",
+                            f"Web Cache Poisoning via Unkeyed Header ({hdr}) — confirmed",
+                            f"Header '{hdr}' is unkeyed and cached: a clean follow-up "
+                            f"request with no attacker header was served the injected "
+                            f"canary from cache. An attacker can poison the cache to "
+                            f"serve malicious content to every user of the resource.",
+                            confidence=0.9,
+                            evidence={
+                                "header": hdr, "canary": confirmed["canary"],
+                                "cache_control": cache_control, "x_cache": x_cache,
+                                "age": age, "reflected_in": confirmed["reflected_in"],
+                                "verification": "cache-served-canary-on-clean-request",
+                                "proved": True,
+                            },
+                        ))
+                    else:
+                        # Reflection without a confirmed cache hit — a weaker
+                        # indicator, not proof. Kept low so it never masquerades
+                        # as a confirmed poisoning.
+                        findings.append(_finding(
+                            url, "cache_poisoning_unkeyed_header",
+                            "medium" if cacheable else "low",
+                            f"Unkeyed Header Reflection ({hdr}) — potential cache poisoning",
+                            f"Header '{hdr}' value is reflected in the response"
+                            f"{' and the response appears cacheable' if cacheable else ''}. "
+                            f"A clean cache-busted request did not return the canary, so "
+                            f"cache poisoning is unconfirmed — verify the cache key manually.",
+                            confidence=0.5,
+                            evidence={
+                                "header": hdr, "canary": canary,
+                                "cache_control": cache_control, "x_cache": x_cache,
+                                "age": age, "verification": "reflection-only-unconfirmed",
+                            },
+                        ))
                     break
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -437,6 +499,74 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
     except Exception:
         logger.debug("suppressed non-fatal exception", exc_info=True)
 
+    return findings
+
+
+# ── 5b. Insecure Deserialization Surface ───────────────────────────────────────
+# Java serialized stream magic 0xACED0005 → base64 begins "rO0AB".
+_JAVA_B64 = "rO0AB"
+_JAVA_RAW = b"\xac\xed\x00"
+# A PHP serialized object string, e.g. O:8:"stdClass":1:{...}
+_PHP_OBJECT_RE = re.compile(r'O:\d+:"[A-Za-z_\\][A-Za-z0-9_\\]*":\d+:\{')
+
+
+def _looks_java_serialized(value: str) -> bool:
+    v = (value or "").strip()
+    if _JAVA_B64 in v:
+        return True
+    try:
+        return base64.b64decode(v[:64] + "==", validate=False).startswith(_JAVA_RAW)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _fuzz_deserialization(session: "aiohttp.ClientSession",
+                                url: str) -> list[dict]:
+    """Detect unsafe-deserialization *surface* in HTTP traffic by signature.
+
+    Only fires on a concrete artefact actually present — a Java serialized
+    object (content-type or 0xACED magic) or a PHP serialized object string in a
+    cookie — so a benign app stays silent. This is an object-injection / RCE
+    surface indicator; exploitation needs a gadget chain and is out of scope."""
+    findings: list[dict] = []
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            ctype = resp.headers.get("Content-Type", "").lower()
+            body = await resp.text(errors="replace")
+            set_cookie = "; ".join(v for k, v in resp.headers.items()
+                                   if k.lower() == "set-cookie")
+    except Exception:
+        logger.debug("suppressed non-fatal exception", exc_info=True)
+        return findings
+
+    if "java-serialized-object" in ctype or _JAVA_B64 in body \
+            or _looks_java_serialized(set_cookie):
+        where = ("Content-Type header" if "java-serialized-object" in ctype
+                 else "cookie" if _looks_java_serialized(set_cookie)
+                 else "response body")
+        findings.append(_finding(
+            url, "insecure_deserialization", "high",
+            "Java Serialized Object Exposed in HTTP Traffic",
+            f"A Java serialized object (magic bytes 0xACED) is present in the "
+            f"{where}. If any such value is accepted back from the client and "
+            f"deserialized, a gadget chain can achieve remote code execution.",
+            confidence=0.75,
+            evidence={"indicator": "java_serialized_object", "location": where,
+                      "content_type": ctype,
+                      "verification": "java-serialization-signature"},
+        ))
+
+    if _PHP_OBJECT_RE.search(set_cookie):
+        findings.append(_finding(
+            url, "insecure_deserialization", "medium",
+            "PHP Serialized Object in Cookie (object-injection surface)",
+            "A PHP serialized object string is stored in a cookie. If it is "
+            "unserialize()'d server-side without integrity protection, an attacker "
+            "can tamper with object properties or trigger PHP object injection.",
+            confidence=0.6,
+            evidence={"indicator": "php_serialized_object", "location": "cookie",
+                      "verification": "php-serialization-signature"},
+        ))
     return findings
 
 
@@ -699,6 +829,7 @@ async def fuzz_url(url: str, aggressive: bool = False) -> dict:
             _fuzz_403_bypass(session, url),
             _fuzz_cache_poisoning(session, url),
             _fuzz_request_smuggling(session, url),
+            _fuzz_deserialization(session, url),
             _fuzz_method_override(session, url),
             _fuzz_content_type(session, url),
         ]

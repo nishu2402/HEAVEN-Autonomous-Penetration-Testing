@@ -1,9 +1,14 @@
-"""HEAVEN — Authenticated AWS IAM privilege audit (read-only).
+"""HEAVEN — Authenticated cloud IAM / RBAC privilege audit (read-only).
 
-When valid AWS credentials are supplied (via the **standard AWS credential
-chain** — ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` env vars, a shared
-``~/.aws/credentials`` profile, or an instance/role), this audits the *identity*
-you are authenticated as, from the inside:
+Multi-cloud, credential-in / read-only-out: point it at whichever cloud you hold
+keys for (``audit_cloud_iam(provider=…)`` dispatches to AWS / GCP / Azure) and it
+audits the *identity* you are authenticated as, from the inside — over-broad
+grants and public / primitive role bindings — never touching the secret itself.
+
+**AWS** (this file's original and deepest audit): when valid AWS credentials are
+supplied (via the **standard AWS credential chain** — ``AWS_ACCESS_KEY_ID`` /
+``AWS_SECRET_ACCESS_KEY`` env vars, a shared ``~/.aws/credentials`` profile, or
+an instance/role), this audits the *identity* you are authenticated as:
 
   • Who am I?         — STS ``GetCallerIdentity`` (account, ARN, principal type)
   • What can I do?    — the caller's attached / inline IAM policy documents,
@@ -472,7 +477,318 @@ async def recon_aws_iam(profile: Optional[str] = None,
     return await asyncio.to_thread(audit_aws_iam, profile, region)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# GCP IAM audit (read-only) — google-api-python-client + Application Default Creds
+# ═══════════════════════════════════════════════════════════════════════════
+# Primitive roles grant coarse, project-wide privilege across every service; the
+# ``allUsers`` / ``allAuthenticatedUsers`` members expose a binding to the public.
+_GCP_PRIMITIVE_ROLES = {"roles/owner": "Owner", "roles/editor": "Editor"}
+_GCP_PUBLIC_MEMBERS = {
+    "allUsers": "the public internet (unauthenticated)",
+    "allAuthenticatedUsers": "any authenticated Google account",
+}
+
+
+def _gcp_iam_policy_findings(policy: dict, proj: str) -> list[dict]:
+    """Turn a project ``getIamPolicy`` response into HEAVEN findings: public
+    bindings (allUsers/allAuthenticatedUsers) and primitive Owner/Editor grants.
+    Both fire only on positive evidence in the returned policy — no guessing."""
+    findings: list[dict] = []
+    for binding in policy.get("bindings", []):
+        role = str(binding.get("role", ""))
+        members = [str(m) for m in binding.get("members", [])]
+
+        public = [m for m in members if m in _GCP_PUBLIC_MEMBERS]
+        if public:
+            who = ", ".join(_GCP_PUBLIC_MEMBERS[m] for m in public)
+            findings.append(_finding(
+                "cloud_iam_public_access", "high",
+                f"Public IAM binding on GCP project ({role})",
+                f"gcp:{proj}:role/{role}",
+                f"Role '{role}' on project {proj} is granted to {who} "
+                f"({', '.join(public)}). Anyone in that set can exercise the "
+                f"role's permissions against the project.",
+                impact="Project-level privileges exposed to unauthenticated or "
+                       "arbitrary Google accounts.",
+                remediation=(
+                    "1. Remove allUsers / allAuthenticatedUsers from the binding. "
+                    "2. Grant the role only to specific, named principals. "
+                    "3. Add an organisation policy constraint "
+                    "(iam.allowedPolicyMemberDomains) to block public members."),
+                evidence_role=role, evidence_members=public))
+
+        if role in _GCP_PRIMITIVE_ROLES:
+            human = [m for m in members if m not in _GCP_PUBLIC_MEMBERS]
+            if human:
+                findings.append(_finding(
+                    "cloud_iam_overprivileged", "high",
+                    f"Primitive role {role} grants broad project access",
+                    f"gcp:{proj}:role/{role}",
+                    f"The primitive role '{role}' ({_GCP_PRIMITIVE_ROLES[role]}) is "
+                    f"assigned to {len(human)} member(s) on project {proj}. "
+                    f"Primitive roles grant coarse, project-wide privilege across "
+                    f"every service rather than least-privilege scoped access.",
+                    impact="A compromise of any of these identities yields broad "
+                           "control over the whole project.",
+                    remediation=(
+                        "1. Replace primitive Owner/Editor with predefined or "
+                        "custom roles scoped to the specific services/resources "
+                        "each principal needs. "
+                        "2. Reserve Owner for break-glass identities protected by "
+                        "MFA and monitoring."),
+                    evidence_role=role, evidence_member_count=len(human)))
+    return findings
+
+
+def audit_gcp_iam(project: Optional[str] = None, **_: Any) -> dict[str, Any]:
+    """Read-only IAM audit of the currently-authenticated GCP identity.
+
+    Credentials come from Application Default Credentials (the
+    ``GOOGLE_APPLICATION_CREDENTIALS`` service-account key, or ``gcloud`` ADC).
+    HEAVEN never reads or logs the key material — only the (non-secret) project
+    id / service-account email is surfaced. Never raises: an absent SDK or absent
+    credentials yields ``authenticated=False``."""
+    result: dict[str, Any] = {
+        "authenticated": False, "findings": [], "project": "",
+        "principal_type": "", "provider": "gcp",
+    }
+    try:
+        import google.auth  # optional runtime dependency
+        from googleapiclient import discovery
+    except Exception:  # noqa: BLE001
+        result["skipped_reason"] = "google-api-python-client / google-auth not installed"
+        return result
+
+    try:
+        creds, adc_project = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform.read-only"])
+    except Exception as e:  # noqa: BLE001
+        logger.debug("GCP ADC resolution failed: %s", e)
+        result["skipped_reason"] = "no valid GCP credentials (Application Default Credentials)"
+        return result
+
+    proj = project or adc_project or ""
+    if not proj:
+        result["skipped_reason"] = "no GCP project (set GOOGLE_CLOUD_PROJECT or pass --project)"
+        return result
+
+    sa_email = getattr(creds, "service_account_email", None)
+    principal = sa_email or "application-default-credentials"
+    ptype = "service_account" if sa_email else "adc"
+    result.update(authenticated=True, project=proj, principal_type=ptype)
+    logger.info("GCP IAM audit authenticated to project %s (%s)", proj, ptype)
+
+    findings: list[dict] = [_finding(
+        "cloud_iam_authenticated", "info",
+        f"Authenticated to GCP project {proj}", f"gcp:{proj}",
+        f"Valid GCP credentials authenticate as {principal} against project "
+        f"{proj}. The checks below assess the project's IAM policy for public "
+        f"and over-broad grants.",
+        impact="", remediation="",
+        cloud_account=proj, cloud_principal=principal)]
+
+    try:
+        crm = discovery.build("cloudresourcemanager", "v1",
+                              credentials=creds, cache_discovery=False)
+        policy = crm.projects().getIamPolicy(resource=proj, body={}).execute()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("GCP getIamPolicy failed: %s", e)
+        result["findings"] = findings
+        result["total"] = len(findings)
+        result["skipped_reason"] = "insufficient permission to read the project IAM policy"
+        return result
+
+    findings += _gcp_iam_policy_findings(policy, proj)
+    result["findings"] = findings
+    result["total"] = len(findings)
+    return result
+
+
+async def recon_gcp_iam(project: Optional[str] = None, **_: Any) -> dict[str, Any]:
+    import asyncio
+    return await asyncio.to_thread(audit_gcp_iam, project)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Azure RBAC audit (read-only) — azure-identity + azure-mgmt-authorization
+# ═══════════════════════════════════════════════════════════════════════════
+# Built-in roles that confer broad control at subscription scope.
+_AZURE_PRIVILEGED_ROLES = {"Owner", "Contributor", "User Access Administrator"}
+
+
+def _azure_rbac_findings(client: Any, sub: str) -> list[dict]:
+    """Flag privileged role assignments (Owner/Contributor/User Access
+    Administrator) at subscription scope, plus legacy classic administrators."""
+    findings: list[dict] = []
+    scope = f"/subscriptions/{sub}"
+
+    # Map role-definition GUID → human role name (built-in + custom).
+    role_names: dict[str, str] = {}
+    try:
+        for rd in client.role_definitions.list(scope):
+            guid = str(getattr(rd, "name", "")).lower()
+            role_names[guid] = str(getattr(rd, "role_name", "") or "")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("azure role_definitions.list failed: %s", e)
+
+    try:
+        assignments = list(client.role_assignments.list_for_subscription())
+    except Exception as e:  # noqa: BLE001
+        logger.debug("azure role_assignments.list failed: %s", e)
+        assignments = []
+
+    counts: dict[str, int] = {}
+    for a in assignments:
+        rd_id = str(getattr(a, "role_definition_id", ""))
+        guid = rd_id.rsplit("/", 1)[-1].lower()
+        name = role_names.get(guid, "")
+        a_scope = str(getattr(a, "scope", ""))
+        # Only escalate assignments that apply at (or above) the subscription.
+        if name in _AZURE_PRIVILEGED_ROLES and a_scope in (scope, "/"):
+            counts[name] = counts.get(name, 0) + 1
+
+    for name, n in counts.items():
+        sev = "high" if name in ("Owner", "User Access Administrator") else "medium"
+        findings.append(_finding(
+            "cloud_iam_overprivileged", sev,
+            f"{n} principal(s) hold '{name}' at Azure subscription scope",
+            f"azure:{sub}:role/{name}",
+            f"{n} role assignment(s) grant the built-in role '{name}' at the "
+            f"subscription scope of {sub}. This confers broad control over every "
+            f"resource in the subscription.",
+            impact="Compromise of any such identity yields subscription-wide "
+                   "control (and, for User Access Administrator, the ability to "
+                   "grant itself any further role).",
+            remediation=(
+                "1. Reduce subscription-scope Owner/Contributor assignments to the "
+                "minimum, preferring resource-group or resource scope. "
+                "2. Use Azure AD PIM for just-in-time, MFA-gated elevation. "
+                "3. Review and remove stale privileged principals."),
+            evidence_role=name, evidence_assignment_count=n))
+
+    # Legacy classic administrators (co-admins) — a long-standing over-grant.
+    try:
+        classic = list(client.classic_administrators.list())
+    except Exception as e:  # noqa: BLE001
+        logger.debug("azure classic_administrators.list failed: %s", e)
+        classic = []
+    if classic:
+        findings.append(_finding(
+            "cloud_iam_overprivileged", "medium",
+            f"{len(classic)} classic administrator(s) on the subscription",
+            f"azure:{sub}:classic-admin",
+            f"The subscription {sub} still has {len(classic)} classic "
+            f"administrator(s) (co-administrators). Classic admins hold full "
+            f"control and predate RBAC's least-privilege model.",
+            impact="Full, unscoped control of the subscription outside modern "
+                   "RBAC governance.",
+            remediation=(
+                "1. Migrate co-administrators to scoped RBAC role assignments. "
+                "2. Remove all classic administrators once migrated."),
+            evidence_classic_admin_count=len(classic)))
+    return findings
+
+
+def audit_azure_iam(subscription: Optional[str] = None, **_: Any) -> dict[str, Any]:
+    """Read-only RBAC audit of the currently-authenticated Azure identity.
+
+    Credentials come from ``DefaultAzureCredential`` (env service principal, az
+    CLI, or managed identity). HEAVEN never reads or logs the secret — only the
+    (non-secret) subscription id is surfaced. Never raises: an absent SDK or
+    absent credentials yields ``authenticated=False``."""
+    import os
+
+    result: dict[str, Any] = {
+        "authenticated": False, "findings": [], "subscription": "",
+        "principal_type": "", "provider": "azure",
+    }
+    try:
+        from azure.identity import DefaultAzureCredential  # optional runtime dep
+        from azure.mgmt.authorization import AuthorizationManagementClient
+    except Exception:  # noqa: BLE001
+        result["skipped_reason"] = (
+            "azure SDK not installed (azure-identity / azure-mgmt-authorization)")
+        return result
+
+    try:
+        cred = DefaultAzureCredential()
+        # Construction is lazy — a bad or absent credential only fails on first
+        # use. Force a real token acquisition here so we never *claim* an
+        # authenticated audit we cannot actually perform (never overclaim).
+        cred.get_token("https://management.azure.com/.default")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("azure credential init failed: %s", e)
+        result["skipped_reason"] = "no valid Azure credentials"
+        return result
+
+    sub = subscription or os.environ.get("AZURE_SUBSCRIPTION_ID", "")
+    if not sub:
+        try:
+            from azure.mgmt.resource import SubscriptionClient
+            subs = list(SubscriptionClient(cred).subscriptions.list())
+            sub = str(getattr(subs[0], "subscription_id", "")) if subs else ""
+        except Exception as e:  # noqa: BLE001
+            logger.debug("azure subscription resolution failed: %s", e)
+    if not sub:
+        result["skipped_reason"] = "no Azure subscription (set AZURE_SUBSCRIPTION_ID)"
+        return result
+
+    try:
+        client = AuthorizationManagementClient(cred, sub)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("azure authorization client init failed: %s", e)
+        result["skipped_reason"] = "could not initialise the Azure authorization client"
+        return result
+
+    result.update(authenticated=True, subscription=sub,
+                  principal_type="service_principal")
+    logger.info("Azure RBAC audit authenticated to subscription %s", sub)
+
+    findings: list[dict] = [_finding(
+        "cloud_iam_authenticated", "info",
+        f"Authenticated to Azure subscription {sub}", f"azure:{sub}",
+        f"Valid Azure credentials authenticate against subscription {sub}. The "
+        f"checks below assess subscription-scope RBAC for over-broad grants.",
+        impact="", remediation="",
+        cloud_account=sub, cloud_principal="(service principal)")]
+
+    findings += _azure_rbac_findings(client, sub)
+    result["findings"] = findings
+    result["total"] = len(findings)
+    return result
+
+
+async def recon_azure_iam(subscription: Optional[str] = None, **_: Any) -> dict[str, Any]:
+    import asyncio
+    return await asyncio.to_thread(audit_azure_iam, subscription)
+
+
+# ── Unified provider dispatcher ─────────────────────────────────────────────
+
+def audit_cloud_iam(provider: str = "aws", **kwargs: Any) -> dict[str, Any]:
+    """Dispatch an authenticated IAM/RBAC audit to the named cloud provider.
+
+    ``provider`` is one of ``aws`` / ``gcp`` / ``azure``. Provider-specific
+    kwargs: aws → ``profile``/``region``; gcp → ``project``; azure →
+    ``subscription``. Unknown providers return an ``authenticated=False`` result
+    with a ``skipped_reason`` rather than raising."""
+    p = (provider or "aws").lower()
+    if p == "aws":
+        return audit_aws_iam(profile=kwargs.get("profile"),
+                             region=kwargs.get("region"))
+    if p == "gcp":
+        return audit_gcp_iam(project=kwargs.get("project"))
+    if p == "azure":
+        return audit_azure_iam(subscription=kwargs.get("subscription"))
+    return {"authenticated": False, "findings": [], "provider": p,
+            "skipped_reason": f"unknown provider: {provider}"}
+
+
 __all__ = [
     "audit_aws_iam", "recon_aws_iam", "caller_identity",
+    "audit_gcp_iam", "recon_gcp_iam",
+    "audit_azure_iam", "recon_azure_iam",
+    "audit_cloud_iam",
     "_policy_doc_is_admin", "_statement_is_admin",
+    "_gcp_iam_policy_findings", "_azure_rbac_findings",
 ]

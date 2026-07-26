@@ -371,6 +371,11 @@ class WebAnomalyProbe:
             if ldap:
                 candidates.append(ldap)
 
+            # 5b. XPath injection
+            xpath = await self._test_xpath_injection(session, url, param, method)
+            if xpath:
+                candidates.append(xpath)
+
             # 6. NoSQL injection (MongoDB / Redis / Elasticsearch)
             nosql_vulns = await self._test_nosql_injection(session, url, param, method)
             candidates.extend(nosql_vulns)
@@ -388,6 +393,10 @@ class WebAnomalyProbe:
         xxe = await self._test_xxe(session, url)
         if xxe:
             candidates.append(xxe)
+
+        # 10. WebSocket security — cleartext ws:// + CSWSH (once per URL)
+        ws_vulns = await self._test_websocket(session, url)
+        candidates.extend(ws_vulns)
 
         return candidates
 
@@ -621,6 +630,87 @@ class WebAnomalyProbe:
                     evidence={"param": param, "wildcard_len": wild_len, "false_len": false_len},
                     remediation="Escape LDAP special chars. Use parameterised queries.",
                     cwe_id="CWE-90", technique="ldap_boolean_differential",
+                )
+        except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+        return None
+
+    async def _test_xpath_injection(self, session: Any, url: str,
+                                     param: str, method: str) -> Optional[AnomalyCandidate]:
+        """
+        Detect XPath Injection (error-based and boolean differential). CWE-643.
+
+        Error-based: XPath-engine error strings that appear for a broken
+        expression but are absent from the baseline. Boolean: a tautology
+        (' or '1'='1) must return materially MORE content than a contradiction
+        (' or '1'='2), and both must differ from the baseline — the same
+        confirmation shape used for boolean SQLi, so echo-only reflection can't
+        masquerade as evaluation.
+        """
+        xpath_errors = [
+            "XPathException", "javax.xml.xpath", "MS.Internal.Xml",
+            "System.Xml.XPath", "Expression must evaluate to a node-set",
+            "xmlXPathEval", "SyntaxError: unclosed", "Invalid expression",
+            "org.apache.xpath", "A closing quote", "Unexpected token in XPath",
+        ]
+        try:
+            async with session.request(method, url, params={param: "xtestx"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                base_body = await r.text()
+            base_stripped = _strip_reflection(base_body, "xtestx")
+
+            # ── Error-based: a broken XPath expression surfaces an engine error ──
+            for payload in ("'", "']", "' or '", "count(//*)", "']|//*|/x['"):
+                async with session.request(method, url, params={param: payload},
+                                            timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                    body = await r.text()
+                low = body.lower()
+                for err in xpath_errors:
+                    if err.lower() in low and err.lower() not in base_body.lower():
+                        return AnomalyCandidate(
+                            target=url, category="xpath_injection",
+                            confidence=0.86, severity="high",
+                            description=(
+                                f"XPath Injection on param '{param}' — engine error "
+                                f"'{err}' surfaced for a malformed XPath expression. "
+                                f"Enables authentication bypass and XML data extraction."
+                            ),
+                            evidence={"param": param, "payload": payload, "error": err},
+                            remediation=(
+                                "Use parameterised XPath (variable binding); escape "
+                                "XPath metacharacters ( ' \" [ ] ( ) = / )."
+                            ),
+                            cwe_id="CWE-643", technique="xpath_error_based",
+                        )
+
+            # ── Boolean differential: tautology vs contradiction ──
+            async with session.request(method, url, params={param: "x' or '1'='1"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                true_body = await r.text()
+            async with session.request(method, url, params={param: "x' or '1'='2"},
+                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                false_body = await r.text()
+            true_len = len(_strip_reflection(true_body, "x' or '1'='1"))
+            false_len = len(_strip_reflection(false_body, "x' or '1'='2"))
+
+            # The tautology must return materially more content than the
+            # contradiction AND both must differ from the baseline (so a static
+            # page that ignores the parameter can't false-positive).
+            if (true_len > false_len + 200
+                    and true_len > len(base_stripped)
+                    and false_len != len(base_stripped)):
+                return AnomalyCandidate(
+                    target=url, category="xpath_injection",
+                    confidence=0.74, severity="high",
+                    description=(
+                        f"Boolean XPath Injection on param '{param}': tautology "
+                        f"(' or '1'='1) returns {true_len - false_len} more bytes "
+                        f"than a contradiction — the query logic is attacker-controlled."
+                    ),
+                    evidence={"param": param, "true_len": true_len,
+                              "false_len": false_len, "baseline_len": len(base_stripped)},
+                    remediation="Use parameterised XPath; escape XPath metacharacters.",
+                    cwe_id="CWE-643", technique="xpath_boolean_differential",
                 )
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -885,6 +975,108 @@ class WebAnomalyProbe:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
                 continue
         return None
+
+    async def _test_websocket(self, session: Any, url: str) -> list[AnomalyCandidate]:
+        """
+        Detect network-reachable WebSocket security issues. CWE-1385 / CWE-319.
+
+        Discovers ws:// / wss:// endpoints referenced by the page or its inline
+        scripts, then flags two *provable* problems:
+
+        * **Cleartext transport (ws://)** — definitive from the URL scheme; any
+          session token on the socket travels unencrypted.
+        * **Missing Origin validation (CSWSH precondition)** — to stay near-zero
+          false-positive, the hijack finding is raised *only* when the app
+          actually uses cookie auth (the page set a cookie) AND the server
+          completes a handshake that carries a foreign Origin. A public,
+          cookieless socket that ignores Origin is not a vulnerability and is
+          not reported.
+
+        Only **same-host** endpoints are probed, so third-party sockets
+        referenced in bundled JS are never connected to (scope safety).
+        """
+        from urllib.parse import urlparse
+
+        candidates: list[AnomalyCandidate] = []
+        try:
+            async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
+                body = await resp.text()
+                has_cookie = bool(resp.headers.get("Set-Cookie"))
+        except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+            return candidates
+
+        target_host = (urlparse(url).hostname or "").lower()
+        page_is_tls = urlparse(url).scheme == "https"
+
+        # Collect candidate endpoints: absolute ws(s):// URLs + new WebSocket("…").
+        endpoints: set[str] = set()
+        for m in re.findall(r"wss?://[^\s\"'<>)]+", body):
+            endpoints.add(m.rstrip("\\"))
+        for raw in re.findall(r"""new\s+WebSocket\s*\(\s*["']([^"']+)["']""", body):
+            raw = raw.strip()
+            if raw.startswith(("ws://", "wss://")):
+                endpoints.add(raw)
+            elif raw.startswith("/"):
+                # root-relative path → same host; scheme mirrors the page's TLS.
+                scheme = "wss" if page_is_tls else "ws"
+                endpoints.add(f"{scheme}://{urlparse(url).netloc}{raw}")
+            # template-literal / variable targets can't be resolved — skip them.
+
+        for ws_url in sorted(endpoints):
+            pu = urlparse(ws_url)
+            if (pu.hostname or "").lower() != target_host:
+                continue  # scope safety: never touch third-party sockets
+
+            if pu.scheme == "ws":
+                candidates.append(AnomalyCandidate(
+                    target=ws_url, category="websocket_cleartext",
+                    confidence=0.9, severity="medium",
+                    description=(
+                        f"WebSocket endpoint '{ws_url}' is served over cleartext ws:// — "
+                        f"messages (including any session token) are transmitted "
+                        f"unencrypted and can be read or tampered with on-path."
+                    ),
+                    evidence={"endpoint": ws_url, "scheme": "ws"},
+                    remediation="Serve WebSockets over wss:// (TLS) only; upgrade ws:// to wss://.",
+                    cwe_id="CWE-319", technique="websocket_cleartext",
+                ))
+
+            # CSWSH is only meaningful when the socket authenticates via cookies.
+            if has_cookie and hasattr(session, "ws_connect"):
+                accepted = False
+                try:
+                    ws = await asyncio.wait_for(
+                        session.ws_connect(
+                            ws_url, headers={"Origin": "https://heaven-cswsh.invalid"}),
+                        timeout=self.timeout,
+                    )
+                    accepted = True
+                    await ws.close()
+                except Exception:
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
+                if accepted:
+                    candidates.append(AnomalyCandidate(
+                        target=ws_url, category="websocket_hijacking",
+                        confidence=0.6, severity="high",
+                        description=(
+                            f"Cross-Site WebSocket Hijacking on '{ws_url}': the handshake "
+                            f"completed while carrying a foreign Origin and the app uses "
+                            f"cookie authentication, so an attacker-controlled page can "
+                            f"open an authenticated socket cross-site."
+                        ),
+                        evidence={"endpoint": ws_url,
+                                  "spoofed_origin": "https://heaven-cswsh.invalid",
+                                  "cookie_auth": True,
+                                  "signals": ["origin_not_validated"]},
+                        remediation=(
+                            "Validate the Origin header on the WebSocket handshake against "
+                            "an allow-list and require a CSRF-style token, not just cookies."
+                        ),
+                        cwe_id="CWE-1385", technique="cswsh_origin_not_validated",
+                    ))
+        return candidates
 
     async def _test_path_traversal(self, session: Any, url: str,
                                     param: str, method: str) -> Optional[AnomalyCandidate]:

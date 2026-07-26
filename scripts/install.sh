@@ -115,6 +115,19 @@ else
     done
 fi
 
+# The `playwright` wheel ships in the core install; the Chromium bundle it drives
+# (DOM/stored-XSS execution proof + JS-rendered crawl) is a separate ~150 MB
+# download. Fetch it here so full power is on by default. Non-fatal — the browser
+# degrades gracefully when absent, and HEAVEN_CORE_ONLY / HEAVEN_SKIP_BROWSER=1
+# skip the download for a lean footprint.
+if [ "${HEAVEN_CORE_ONLY:-0}" = "1" ] || [ "${HEAVEN_SKIP_BROWSER:-0}" = "1" ]; then
+    info "Skipping Playwright browser download (lean footprint)"
+elif "$INSTALL_DIR/venv/bin/python" -m playwright install chromium >/dev/null 2>&1; then
+    ok "Playwright Chromium installed (headless DAST proof enabled)"
+else
+    warn "Playwright browser skipped  (enable later: playwright install chromium)"
+fi
+
 # ── 5. Install global 'heaven' command ────────────────────────────────────────
 step "Step 5/9 — Installing global 'heaven' command..."
 

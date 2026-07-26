@@ -27,6 +27,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Full-power runtime dependencies are now installed by default, so the proof
+  and credentialed-audit paths light up out of the box.** The `playwright` wheel
+  and `pywinrm` join the base install, and `scripts/install.sh` fetches the
+  headless-Chromium bundle automatically (skippable with `HEAVEN_CORE_ONLY=1` or
+  `HEAVEN_SKIP_BROWSER=1`). This turns on, with no extra steps: the **XSS
+  execution proof** and **JS-rendered crawl** (Playwright), and **WinRM**
+  credential-reuse validation (pywinrm) alongside the existing SMB/SSH. The
+  authenticated multi-cloud IAM audit now declares its real SDKs in the right
+  extras — `[cloud-azure]` gains `azure-identity` / `azure-mgmt-authorization` /
+  `azure-mgmt-resource` and `[cloud-gcp]` gains `google-api-python-client` /
+  `google-auth` — so `heaven cloud iam --provider azure|gcp` enables with a
+  single `pip install -e ".[cloud-azure]"` (or `[cloud-gcp]`). Every one of these
+  still degrades gracefully with an honest install hint when its dependency is
+  absent.
+
+- **Web-exploitation depth (P0): proven XSS + two new confirmation-based
+  detectors + a taxonomy gap-fill.** Reflected/DOM XSS is now *proven*, not just
+  detected — a new `XSSExecutionProver` loads the injected request in headless
+  Chromium (Playwright) and only confirms when the payload's JavaScript actually
+  executes (a `dialog` carrying a unique per-run token); it is authorization-
+  gated and degrades gracefully with an install hint when Playwright is absent.
+  A new **XPath-injection** detector (error-based + boolean-differential) and a
+  **WebSocket** detector (cleartext `ws://` plus Cross-Site WebSocket Hijacking,
+  raised only when the app uses cookie auth *and* the handshake ignores a foreign
+  `Origin`, so cookieless/origin-validated/third-party sockets stay silent) join
+  the anomaly probe. Finally, ten anomaly categories that previously rendered
+  with blank OWASP/MITRE/CVSS columns (NoSQL, LDAP, XPath, prototype-pollution,
+  integer-overflow, format-string, buffer-overflow, resource-exhaustion,
+  version-regression, IP-restriction-bypass) now carry curated
+  CWE/OWASP-2025/MITRE/CVSS-vector taxonomy, and the orchestrator tags each
+  anomaly finding with a real `vuln_type` so enrichment resolves it.
+
+- **Dynamic closed-loop scanning (P1): the scan now reacts to its own
+  discoveries.** A new feedback engine (`heaven/feedback.py`) watches every
+  finding and task result as it lands and distils fresh, in-scope scan inputs
+  from them — new hosts (from loot, redirects, findings), JS-bundle endpoints,
+  credentials and tokens. In-scope new hosts get a self-contained follow-up scan
+  (recon → web-derive → injection) injected into a new `DYNAMIC_FOLLOWUP` phase;
+  JS-derived endpoints are fed straight into the injection/API scanners. Scope is
+  never widened (a derived host is actioned only when it is already inside the
+  operator's targets), and dedup + generation/host caps guarantee the loop
+  terminates. JavaScript bundles are now mined for endpoints as a first-class
+  pipeline step (`JS Bundle Endpoint Mining`), resolving each route to an
+  absolute, same-origin URL and dropping third-party/noise matches.
+
+- **Insecure-deserialization detector + confirmed cache poisoning (P2).** A new
+  signature-verified detector flags unsafe-deserialization surface actually
+  present in HTTP traffic — Java serialized objects (`0xACED` magic / content-
+  type) and PHP serialized-object cookies — so a benign app stays silent. The
+  existing unkeyed-header cache-poisoning check is upgraded from reflection-only
+  to *confirmed*: a safe per-test cache-buster isolates a throwaway cache entry,
+  and a finding is raised `high` only when a clean follow-up request is served
+  the injected canary from cache (mere reflection is downgraded to a low
+  indicator).
+
+- **Authorized credentialed network testing — SMB + WinRM (P2).** The
+  credential-reuse validator now sprays *discovered* credentials over SMB
+  (impacket) and WinRM (pywinrm, optional) in addition to SSH/HTTP, and the
+  autonomous post-ex chain builds per-service reuse targets from the open ports
+  it actually found (SSH→22, SMB→445, WinRM→5985/5986). Authorization-gated;
+  tests known credentials, never guesses.
+
+- **Multi-cloud authenticated IAM/RBAC parity — GCP + Azure (P3).** The
+  read-only authenticated IAM audit now covers all three major clouds via a
+  single dispatcher (`audit_cloud_iam(provider=…)` / `heaven cloud iam
+  --provider aws|gcp|azure`). **GCP** reads the project IAM policy and flags
+  public bindings (`allUsers`/`allAuthenticatedUsers`) and primitive Owner/Editor
+  grants; **Azure** reads subscription-scope RBAC and flags Owner / Contributor /
+  User Access Administrator assignments and legacy classic administrators. Each
+  degrades gracefully when its SDK or credentials are absent, and the secret is
+  never read or logged.
+
 - **Report Findings Summary now shows a genuine, per-finding CVSS score** instead
   of a value that tracked severity (e.g. every High reading 6.2). A single
   resolver prefers, most-authoritative-first: a real published base score
@@ -257,6 +329,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   knowledge graph — previously nothing wrote to it, so it was permanently empty.
 
 ### Fixed
+
+- **The authenticated Azure IAM audit never claims authentication it doesn't
+  have.** `DefaultAzureCredential` and the management client both construct
+  lazily, so a bad or absent credential only failed on first use — meaning the
+  audit could emit an "Authenticated to Azure" finding when it actually had no
+  token (a false positive if `AZURE_SUBSCRIPTION_ID` was set with invalid creds).
+  The audit now forces a real token acquisition up front and degrades to an
+  honest `authenticated=False` (`"no valid Azure credentials"`) otherwise. A
+  latent Playwright cookie type-mismatch in the JS-rendered crawler — surfaced
+  once the real Playwright stubs were installed — was also corrected.
 
 - **Test suite runs clean — zero warnings on Python 3.14.** The suite emitted
   249 warnings, all transitional `Deprecation`/`PendingDeprecation` notices about

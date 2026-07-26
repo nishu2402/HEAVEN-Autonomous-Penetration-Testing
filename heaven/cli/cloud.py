@@ -73,33 +73,49 @@ def storage_cmd(target: str, names: tuple[str, ...], providers: tuple[str, ...],
 
 
 @cloud.command(name="iam")
+@click.option("--provider", type=click.Choice(["aws", "gcp", "azure"]),
+              default="aws", show_default=True,
+              help="Cloud provider to audit.")
 @click.option("--profile", default=None,
               help="AWS named profile to use (else the default credential chain).")
 @click.option("--region", default=None, help="AWS region (default: us-east-1).")
+@click.option("--project", default=None,
+              help="GCP project id (else GOOGLE_CLOUD_PROJECT / ADC project).")
+@click.option("--subscription", default=None,
+              help="Azure subscription id (else AZURE_SUBSCRIPTION_ID / first sub).")
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
-def iam_cmd(profile: Optional[str], region: Optional[str],
+def iam_cmd(provider: str, profile: Optional[str], region: Optional[str],
+            project: Optional[str], subscription: Optional[str],
             engagement: Optional[str], output: Optional[str]) -> None:
-    """Read-only IAM privilege audit of the authenticated AWS identity.
+    """Read-only IAM/RBAC privilege audit of the authenticated cloud identity.
 
-    Supply credentials the standard AWS way (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
-    env vars, or a shared profile via --profile). HEAVEN never reads or logs the
-    secret — boto3 resolves it — and every call is read-only (STS GetCallerIdentity
-    + IAM List*/Get*). Reports over-privileged principals, missing MFA, stale
-    access keys, root access keys and weak password policy.
+    Supply credentials the standard way for the chosen --provider (AWS env vars /
+    profile, GCP Application Default Credentials, Azure DefaultAzureCredential).
+    HEAVEN never reads or logs the secret — the SDK resolves it — and every call
+    is read-only. Reports over-privileged principals and public / broad IAM
+    grants (AWS also: MFA, stale keys, root keys, weak password policy).
     """
-    from heaven.recon.cloud_iam import audit_aws_iam
+    from heaven.recon.cloud_iam import audit_cloud_iam
 
-    _print("[cyan]Auditing authenticated AWS IAM identity (read-only)…[/cyan]")
-    result = audit_aws_iam(profile=profile, region=region)
+    _cred_hint = {
+        "aws": "Set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or --profile)",
+        "gcp": "Set GOOGLE_APPLICATION_CREDENTIALS or run `gcloud auth application-default login`",
+        "azure": "Sign in with `az login` or set AZURE_* service-principal env vars",
+    }
+    _print(f"[cyan]Auditing authenticated {provider.upper()} IAM identity (read-only)…[/cyan]")
+    result = audit_cloud_iam(provider=provider, profile=profile, region=region,
+                             project=project, subscription=subscription)
     if not result.get("authenticated"):
-        _print(f"[yellow]Not authenticated to AWS:[/yellow] "
+        _print(f"[yellow]Not authenticated to {provider.upper()}:[/yellow] "
                f"{result.get('skipped_reason', 'no valid credentials')}. "
-               f"Set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or --profile) and retry.")
+               f"{_cred_hint.get(provider, '')} and retry.")
         raise SystemExit(1)
 
-    _print(f"[green]Authenticated[/green] to account [bold]{result['account']}[/bold] "
-           f"as {result['arn']} ([dim]{result['principal_type']}[/dim])")
+    _acct = result.get("account") or result.get("project") or result.get("subscription", "")
+    _who = result.get("arn") or result.get("principal_type", "")
+    _print(f"[green]Authenticated[/green] to [bold]{_acct}[/bold] "
+           f"as {_who} ([dim]{result.get('principal_type', '')}[/dim])")
     findings = result.get("findings", [])
     issues = [f for f in findings if f.get("vuln_type") != "cloud_iam_authenticated"]
     if not issues:

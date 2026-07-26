@@ -6,7 +6,8 @@ against a list of target services to detect credential reuse — one of
 the highest-impact post-ex findings.
 
 Supported services: SSH (asyncssh), HTTP Basic/Digest (aiohttp),
-SMB (impacket), WinRM (pywinrm — optional). Add more by implementing
+SMB (impacket), WinRM (pywinrm), LDAP/LDAPS simple-bind (ldap3), and
+Kerberos AS-REQ pre-auth (impacket). Add more by implementing
 `async def _try_<service>(host, port, user, pwd)`.
 
 Bounded concurrency, gentle pacing, and explicit timeouts so we don't
@@ -73,7 +74,8 @@ class CredentialValidator:
             credentials: list of (username, password) tuples — must be
                 pre-discovered, not guessed.
             targets:     list of (host, port, service) tuples. service is
-                one of: 'ssh', 'http-basic', 'http-digest', 'smb', 'winrm'.
+                one of: 'ssh', 'http-basic', 'http-digest', 'smb', 'winrm',
+                'ldap', 'ldaps', 'kerberos'.
         """
         if not self.authorized:
             return ValidationSummary(
@@ -109,6 +111,10 @@ class CredentialValidator:
                     hit = await self._try_smb(host, port, user, pwd)
                 elif service == "winrm":
                     hit = await self._try_winrm(host, port, user, pwd)
+                elif service in ("ldap", "ldaps"):
+                    hit = await self._try_ldap(host, port, service, user, pwd)
+                elif service == "kerberos":
+                    hit = await self._try_kerberos(host, port, user, pwd)
                 else:
                     summary.errors.append(f"unsupported service: {service}")
                     return
@@ -275,4 +281,116 @@ class CredentialValidator:
             host=host, port=port, service="winrm", username=user,
             notes="WinRM login succeeded; `whoami` executed",
             evidence={"whoami": whoami[:200]},
+        )
+
+    async def _try_ldap(self, host: str, port: int, service: str,
+                        user: str, pwd: str) -> Optional[CredentialHit]:
+        """Validate a credential with an LDAP/LDAPS simple bind (ldap3).
+
+        A successful *authenticated* bind confirms the credential against the
+        directory (e.g. an AD domain controller). We refuse empty passwords:
+        RFC 4513 treats a simple bind with an empty password as an anonymous
+        "unauthenticated bind", which would falsely look like a success — so
+        skipping it keeps the validator from ever overclaiming."""
+        try:
+            import ldap3  # type: ignore[import-not-found]
+        except ImportError as e:
+            raise RuntimeError("ldap3 not installed") from e
+        if not pwd:
+            return None
+        use_ssl = service == "ldaps" or port == 636
+
+        def _blocking() -> Optional[str]:
+            server = ldap3.Server(host, port=port, use_ssl=use_ssl,
+                                  get_info=ldap3.NONE,
+                                  connect_timeout=int(self.timeout))
+            conn = ldap3.Connection(
+                server, user=user, password=pwd,
+                authentication=ldap3.SIMPLE, auto_bind=False,
+                receive_timeout=int(self.timeout))
+            try:
+                if not conn.bind():                            # False on bad creds
+                    return None
+                try:
+                    who = conn.extend.standard.who_am_i()
+                except Exception:  # noqa: BLE001 — bind already proven; whoami optional
+                    who = None
+                return who or user
+            finally:
+                with contextlib.suppress(Exception):
+                    conn.unbind()
+
+        loop = asyncio.get_event_loop()
+        try:
+            who = await asyncio.wait_for(
+                loop.run_in_executor(None, _blocking), timeout=self.timeout + 4)
+        except asyncio.TimeoutError:
+            return None
+        if who is None:
+            return None
+        return CredentialHit(
+            host=host, port=port, service=service, username=user,
+            notes="LDAP simple bind succeeded",
+            evidence={"bound_as": who},
+        )
+
+    async def _try_kerberos(self, host: str, port: int,
+                            user: str, pwd: str) -> Optional[CredentialHit]:
+        """Validate a credential via Kerberos AS-REQ pre-authentication (impacket).
+
+        Acquiring a TGT proves the password is valid against the domain WITHOUT
+        touching any application service — the cleanest possible cred check.
+        Needs the realm, so the username must carry a domain (``DOMAIN\\user``
+        or ``user@domain``); without one we raise a clear error rather than
+        guess. A wrong password surfaces as ``KDC_ERR_PREAUTH_FAILED`` → no
+        hit; genuine transport/KDC errors propagate so they're recorded, never
+        silently passed."""
+        try:
+            from impacket.krb5 import constants  # type: ignore[import-not-found]
+            from impacket.krb5.kerberosv5 import (  # type: ignore[import-not-found]
+                KerberosError,
+                getKerberosTGT,
+            )
+            from impacket.krb5.types import Principal  # type: ignore[import-not-found]
+        except ImportError as e:
+            raise RuntimeError("impacket not installed") from e
+
+        domain, u = self._split_domain(user)
+        if not domain:
+            raise RuntimeError(
+                "kerberos requires a realm — supply DOMAIN\\user or user@domain")
+        if not pwd:
+            return None  # empty password can't yield a valid AS-REP; never overclaim
+
+        # Error codes that mean "the credential is simply not valid" (as opposed
+        # to a network/KDC fault) — these are a clean no-hit, not an error.
+        no_hit = {
+            constants.ErrorCodes.KDC_ERR_PREAUTH_FAILED.value,       # bad password
+            constants.ErrorCodes.KDC_ERR_C_PRINCIPAL_UNKNOWN.value,  # no such user
+            constants.ErrorCodes.KDC_ERR_CLIENT_REVOKED.value,       # disabled/locked
+        }
+
+        def _blocking() -> Optional[bool]:
+            client = Principal(
+                u, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
+            try:
+                getKerberosTGT(client, pwd, domain, "", "", "", kdcHost=host)
+                return True
+            except KerberosError as ke:
+                if ke.getErrorCode() in no_hit:
+                    return None
+                raise
+
+        loop = asyncio.get_event_loop()
+        try:
+            ok = await asyncio.wait_for(
+                loop.run_in_executor(None, _blocking), timeout=self.timeout + 4)
+        except asyncio.TimeoutError:
+            return None
+        if not ok:
+            return None
+        return CredentialHit(
+            host=host, port=port, service="kerberos", username=user,
+            notes="Kerberos pre-authentication succeeded (TGT obtained)",
+            evidence={"realm": domain, "principal": u},
         )

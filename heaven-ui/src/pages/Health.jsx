@@ -44,6 +44,7 @@ export default function Health() {
 
   const tools = h.tools || [];
   const missing = tools.filter((t) => !t.present).length;
+  const caps = h.runtime_capabilities || [];
   const llm = h.llm || {};
   const settings = h.settings?.groups || [];
   const modules = h.modules || {};
@@ -124,6 +125,38 @@ export default function Health() {
           ))}
         </div>
       </Card>
+
+      {/* Runtime capabilities — optional feature-enablers that aren't PATH
+          binaries (e.g. the Playwright browser bundle that arms the headless
+          XSS execution proof). Shown so operators can see what's actually armed. */}
+      {caps.length > 0 && (
+        <Card title={`Runtime capabilities  ·  ${caps.filter((c) => c.present).length}/${caps.length} armed`}>
+          <div style={{ display: "grid", gap: 10 }}>
+            {caps.map((c) => (
+              <div key={c.name} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                <Dot ok={c.present} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <code style={{ fontSize: 13, color: "var(--text-0)" }}>{c.name}</code>
+                    <span className="dim" style={{ fontSize: 12 }}>{c.purpose}</span>
+                  </div>
+                  {c.detail && (
+                    <div className="dim" style={{ fontSize: 11.5, marginTop: 2 }}>{c.detail}</div>
+                  )}
+                  {!c.present && c.hint && (
+                    <div className="dim" style={{ fontSize: 11.5, marginTop: 2 }}>
+                      Enable: <code>{c.hint}</code>
+                    </div>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, color: c.present ? "var(--ok, #46d39a)" : "var(--text-2)" }}>
+                  {c.present ? "armed" : "not armed"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* API keys & integrations — which are configured (links to Settings) */}
       <Card title="API keys & integrations">

@@ -25,6 +25,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finding stored under a legacy 2021 tag is **upgraded on read** — old
   engagement data renders as 2025 without a migration.
 
+### Fixed
+
+- **Green CI, reproducibly.** Two jobs had begun failing on `main` from
+  environment drift rather than any code defect:
+  - *Lint (ruff).* CI installs ruff unpinned (`pip install ruff`), so when ruff
+    **0.16** shipped, its broadened *implicit* default rule set flagged 1800+
+    style items (import order, f-strings, annotation styles) on unchanged,
+    previously-clean code. The lint rule set is now declared **explicitly** in
+    `[tool.ruff.lint]` (`select = ["E4","E7","E9","F"]` — ruff's long-standing
+    default, exactly what the codebase was linted against), so any ruff version
+    enforces the same rules and a future release can't silently break the build.
+  - *Unit tests (3.11 / 3.12).* Three `test_p3_cloud_iam_parity.py` cases
+    imported the deliberately opt-in cloud SDKs (`googleapiclient`,
+    `azure.identity`) — present on dev machines but not in CI's lean
+    `pip install -e ".[dev]"`, so they raised `ModuleNotFoundError`. They now
+    `pytest.importorskip(...)` those SDKs: they **skip cleanly** where the
+    `[cloud-gcp]` / `[cloud-azure]` extras aren't installed and still **run
+    fully** wherever they are. Collected test count is unchanged (1319).
+
 ### Added
 
 - **Full-power runtime dependencies are now installed by default, so the proof

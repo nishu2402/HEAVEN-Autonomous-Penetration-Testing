@@ -18,6 +18,7 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
 
 from heaven.devsecops.vuln_kb import enrich_finding
 from heaven.recon.cloud_iam import (
@@ -70,7 +71,13 @@ def test_gcp_least_privilege_policy_is_silent():
 # ── GCP: full audit path with a monkeypatched google SDK ─────────────────────
 
 def _install_mock_google(monkeypatch, *, project, policy, sa_email=None):
-    import google.auth  # real module present in this env
+    # The GCP SDK stack lives in the opt-in [cloud-gcp] extra, so it isn't present
+    # in a plain `pip install -e ".[dev]"` (what CI does). Skip cleanly rather than
+    # erroring when it's absent — the test runs fully wherever the extra is
+    # installed (a dev box, or a cloud-extras CI matrix).
+    pytest.importorskip("google.auth")
+    pytest.importorskip("googleapiclient.discovery")
+    import google.auth
 
     class _Creds:
         service_account_email = sa_email
@@ -195,7 +202,10 @@ def test_dispatcher_azure_without_sdk_is_graceful(monkeypatch):
 def test_dispatcher_azure_without_credentials_is_graceful(monkeypatch):
     # SDK present but no usable credentials: the token probe fails, so the audit
     # degrades to authenticated=False with an honest reason — and never emits a
-    # false "authenticated to Azure" finding (no overclaim).
+    # false "authenticated to Azure" finding (no overclaim). The azure SDK is in
+    # the opt-in [cloud-azure] extra, so skip cleanly when it isn't installed
+    # (CI's [dev] env) rather than erroring at import.
+    pytest.importorskip("azure.identity")
     import azure.identity
 
     def _no_creds(*_a, **_k):

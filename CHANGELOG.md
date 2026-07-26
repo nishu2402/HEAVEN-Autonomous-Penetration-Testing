@@ -9,7 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Animated README hero poster** (`docs/assets/heaven-poster.svg`). A single,
+  self-contained SMIL-animated SVG — no third-party image services — carrying the
+  Ascendant Aegis mark, the violet→cyan→emerald brand ramp, a live-recon radar
+  with target-lock pings, the **Recon → ML Risk → Verified Exploit → Report**
+  pipeline (with a travelling packet), and a verified in-sync stat strip (1319
+  tests · 50 CLI · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML R²=0.9925).
+  Replaces the three external capsule-render / typing-SVG banners at the top of the
+  README with one brand-exact, offline-safe hero.
+
 ### Changed
+
+- **README module count is now a real, reproducible figure (157) and CI-guarded.**
+  The badge and metric table read 148 while the footer/structure line read 152 —
+  and neither matched the project's own counting method. It is now derived
+  mechanically as the number of substantive Python modules in the `heaven/`
+  package (`find heaven -name '*.py' ! -name __init__.py`) and synced across all
+  four README spots by `scripts/sync_test_count.py`, whose `--check` mode CI
+  already runs — so a reviewer who clones and counts gets exactly the printed
+  number, and it can never silently drift again.
 
 - **Upgraded the web OWASP mapping to the OWASP Top 10:2025 across the whole
   platform.** The report coverage matrix (HTML + PDF), the Coverage self-grade

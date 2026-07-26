@@ -2378,7 +2378,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         # (host, port, service) reuse targets built from the OPEN ports actually
         # found — so a Windows host gets SMB/WinRM cred-reuse, a Linux host SSH.
         svc_targets: list[tuple[str, int, str]] = []
-        _PORT_SVC = {22: "ssh", 445: "smb", 5985: "winrm", 5986: "winrm"}
+        # LDAP/LDAPS simple-bind proves a discovered credential against a
+        # directory (e.g. an AD DC). Kerberos (88) is deliberately excluded from
+        # the automatic path: it needs the realm, which discovered creds rarely
+        # carry — it stays available to explicit callers via service="kerberos".
+        _PORT_SVC = {22: "ssh", 445: "smb", 5985: "winrm", 5986: "winrm",
+                     389: "ldap", 636: "ldaps"}
 
         for tid, res in orch.results.items():
             if res.state != TaskState.COMPLETED or not res.data:

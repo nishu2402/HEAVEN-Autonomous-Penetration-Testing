@@ -42,6 +42,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still degrades gracefully with an honest install hint when its dependency is
   absent.
 
+- **`heaven doctor` and the web System-Health panel now report *runtime
+  capabilities* — optional feature-enablers that aren't PATH binaries.** The
+  first is the **Playwright browser bundle** that arms the headless-browser XSS
+  execution proof and JS-rendered crawl: the wheel ships in the base install but
+  the ~150 MB Chromium download is separate, so operators previously had no way
+  to see whether that capability was actually *armed*. It now shows as a clear
+  "armed / not armed" row (with the one-line `playwright install chromium` hint
+  and a next-step when missing), reported honestly — only present when
+  Playwright's own resolved Chromium executable exists on disk. The probe is
+  safe from both the sync CLI and the async web endpoint.
+
+- **Credential-reuse validation gained LDAP/LDAPS and Kerberos handlers**, so a
+  discovered credential is now validated against directory services too — not
+  just SSH/HTTP/SMB/WinRM. `ldap`/`ldaps` perform an authenticated simple bind
+  (ldap3), and `kerberos` proves the password via an AS-REQ pre-authentication
+  TGT request (impacket) without touching any application service. Both are
+  never-overclaim: LDAP refuses an empty password (RFC 4513 unauthenticated
+  bind), and Kerberos requires the realm (`DOMAIN\user` / `user@domain`) and
+  treats `KDC_ERR_PREAUTH_FAILED` as a clean no-hit. The orchestrator's
+  cred-reuse path auto-targets LDAP/LDAPS (389/636) on discovered hosts.
+
 - **Web-exploitation depth (P0): proven XSS + two new confirmation-based
   detectors + a taxonomy gap-fill.** Reflected/DOM XSS is now *proven*, not just
   detected — a new `XSSExecutionProver` loads the injected request in headless

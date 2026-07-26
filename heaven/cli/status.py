@@ -119,6 +119,17 @@ def _collect_status(engagement: Optional[str]) -> dict:
     report["external_tools"] = {name: shutil.which(name) is not None
                                 for name in tool_names()}
 
+    # Runtime capabilities — optional feature-enablers that aren't PATH binaries
+    # (e.g. the Playwright browser bundle that arms the headless-browser DAST
+    # proof). Same shape as the tool list so doctor + the web panel render them
+    # identically. Never raises — degrades to a single "not present" row.
+    try:
+        from heaven.utils.runtime_capabilities import runtime_capabilities
+        report["runtime_capabilities"] = runtime_capabilities()
+    except Exception as e:  # noqa: BLE001
+        report["runtime_capabilities"] = [{"name": "runtime", "present": False,
+                                           "purpose": "", "hint": "", "detail": str(e)}]
+
     # Active engagement (flag > HEAVEN_ENGAGEMENT env > `heaven use` context)
     eng_name = resolve_engagement_name(engagement)
     if eng_name:
@@ -198,6 +209,12 @@ def _next_steps(report: dict) -> list[str]:
     if missing:
         shown = ", ".join(missing[:3]) + ("…" if len(missing) > 3 else "")
         steps.append(f"[cyan]heaven install-tools[/cyan]  — install missing scanners ({shown})")
+    # The Playwright browser gates the headless-browser XSS execution proof; if
+    # it isn't downloaded, offer the one-liner that arms it.
+    caps = report.get("runtime_capabilities") or []
+    pw = next((c for c in caps if c.get("name") == "playwright-chromium"), None)
+    if pw and not pw.get("present"):
+        steps.append("[cyan]playwright install chromium[/cyan]  — arm the headless-browser XSS execution proof")
     if not admin_set:
         steps.append("[cyan]heaven init[/cyan]  — set the Web-UI admin password + optional API keys")
     if not eng.get("exists"):
@@ -253,6 +270,18 @@ def _render_pretty(report: dict) -> None:
         marker = "[green]✓[/green]" if present else "[yellow]·[/yellow]"
         status = "installed" if present else "not on PATH"
         _print(f"  {marker} {tool:10}  {status}")
+
+    # Runtime capabilities (Playwright browser, …) — feature-enablers that
+    # aren't PATH binaries; shown so operators can see what's actually armed.
+    caps = report.get("runtime_capabilities") or []
+    if caps:
+        _print("")
+        _print("[bold]Runtime capabilities[/bold]")
+        for cap in caps:
+            present = cap.get("present")
+            marker = "[green]✓[/green]" if present else "[yellow]·[/yellow]"
+            detail = cap.get("detail") or cap.get("purpose") or ""
+            _print(f"  {marker} {cap.get('name','?'):20}  {detail}")
 
     # Engagement
     _print("")

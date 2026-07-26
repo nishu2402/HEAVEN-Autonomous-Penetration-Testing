@@ -5,8 +5,9 @@ Takes a list of discovered (user, password) tuples and tries each one
 against a list of target services to detect credential reuse — one of
 the highest-impact post-ex findings.
 
-Supported services (v1): SSH (asyncssh), HTTP Basic/Digest (aiohttp).
-Add more by implementing `async def _try_<service>(host, port, user, pwd)`.
+Supported services: SSH (asyncssh), HTTP Basic/Digest (aiohttp),
+SMB (impacket), WinRM (pywinrm — optional). Add more by implementing
+`async def _try_<service>(host, port, user, pwd)`.
 
 Bounded concurrency, gentle pacing, and explicit timeouts so we don't
 turn the validator into a brute-force tool. The intent is to confirm
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -71,7 +73,7 @@ class CredentialValidator:
             credentials: list of (username, password) tuples — must be
                 pre-discovered, not guessed.
             targets:     list of (host, port, service) tuples. service is
-                one of: 'ssh', 'http-basic', 'http-digest'.
+                one of: 'ssh', 'http-basic', 'http-digest', 'smb', 'winrm'.
         """
         if not self.authorized:
             return ValidationSummary(
@@ -103,6 +105,10 @@ class CredentialValidator:
                     hit = await self._try_ssh(host, port, user, pwd)
                 elif service in ("http-basic", "http-digest"):
                     hit = await self._try_http(host, port, service, user, pwd)
+                elif service == "smb":
+                    hit = await self._try_smb(host, port, user, pwd)
+                elif service == "winrm":
+                    hit = await self._try_winrm(host, port, user, pwd)
                 else:
                     summary.errors.append(f"unsupported service: {service}")
                     return
@@ -172,3 +178,101 @@ class CredentialValidator:
                     return None
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 return None
+
+    @staticmethod
+    def _split_domain(user: str) -> tuple[str, str]:
+        """Split ``DOMAIN\\user`` (or ``user@domain``) into (domain, user)."""
+        if "\\" in user:
+            dom, _, u = user.partition("\\")
+            return dom, u
+        if "@" in user:
+            u, _, dom = user.partition("@")
+            return dom, u
+        return "", user
+
+    async def _try_smb(self, host: str, port: int,
+                       user: str, pwd: str) -> Optional[CredentialHit]:
+        """Validate SMB credentials with impacket (blocking → executor).
+
+        A successful ``login`` confirms the credential is valid on the host; we
+        then list shares as read-only evidence. Bad creds surface as an impacket
+        ``SessionError`` (logon failure) and return ``None`` — no guessing."""
+        try:
+            from impacket.smbconnection import SMBConnection, SessionError  # type: ignore[import-not-found]
+        except ImportError as e:
+            raise RuntimeError("impacket not installed") from e
+
+        domain, u = self._split_domain(user)
+
+        def _blocking() -> Optional[list[str]]:
+            conn = None
+            try:
+                conn = SMBConnection(host, host, sess_port=port,
+                                     timeout=int(self.timeout))
+                conn.login(u, pwd, domain)                     # raises SessionError on bad creds
+                try:
+                    shares = [s["shi1_netname"][:-1] for s in conn.listShares()]
+                except Exception:  # noqa: BLE001 — login already proven; shares optional
+                    shares = []
+                return shares
+            except SessionError:
+                return None
+            finally:
+                if conn is not None:
+                    with contextlib.suppress(Exception):
+                        conn.logoff()
+
+        loop = asyncio.get_event_loop()
+        try:
+            shares = await asyncio.wait_for(
+                loop.run_in_executor(None, _blocking), timeout=self.timeout + 4)
+        except asyncio.TimeoutError:
+            return None
+        if shares is None:
+            return None
+        return CredentialHit(
+            host=host, port=port, service="smb", username=user,
+            notes=f"SMB login succeeded ({len(shares)} share(s) visible)",
+            evidence={"shares": shares[:20], "domain": domain or "(local)"},
+        )
+
+    async def _try_winrm(self, host: str, port: int,
+                         user: str, pwd: str) -> Optional[CredentialHit]:
+        """Validate WinRM credentials with pywinrm (blocking → executor).
+
+        Optional dependency: if ``pywinrm`` is not installed this raises so the
+        caller records it as an unsupported-service note rather than a silent
+        pass — HEAVEN never fabricates a WinRM result it cannot verify."""
+        try:
+            import winrm  # type: ignore[import-not-found]
+        except ImportError as e:
+            raise RuntimeError("pywinrm not installed") from e
+
+        scheme = "https" if port == 5986 else "http"
+        endpoint = f"{scheme}://{host}:{port}/wsman"
+
+        def _blocking() -> Optional[str]:
+            try:
+                session = winrm.Session(
+                    endpoint, auth=(user, pwd), transport="ntlm",
+                    server_cert_validation="ignore")
+                res = session.run_cmd("whoami")
+                if res.status_code == 0:
+                    return (res.std_out or b"").decode(errors="replace").strip()
+                return None
+            except Exception:  # noqa: BLE001 — auth failure / transport error → not a hit
+                return None
+
+        loop = asyncio.get_event_loop()
+        try:
+            whoami = await asyncio.wait_for(
+                loop.run_in_executor(None, _blocking), timeout=self.timeout + 6)
+        except asyncio.TimeoutError:
+            return None
+        if whoami is None:
+            return None
+        return CredentialHit(
+            host=host, port=port, service="winrm", username=user,
+            notes="WinRM login succeeded; `whoami` executed",
+            evidence={"whoami": whoami[:200]},
+        )

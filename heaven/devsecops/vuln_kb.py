@@ -520,6 +520,297 @@ _KB: dict[str, dict[str, Any]] = {
             "https://portswigger.net/research/server-side-template-injection",
         ],
     },
+    "nosql_injection": {
+        "title": "NoSQL Injection",
+        "cwe": "CWE-943",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 9.1,
+        "description": (
+            "User input reaches a NoSQL query (MongoDB, Redis, Elasticsearch) as an "
+            "operator/object rather than a scalar, so query operators such as $ne, "
+            "$gt, $regex or $where alter the query logic."
+        ),
+        "impact": "Authentication bypass, data exfiltration, and (via $where) code execution.",
+        "remediation": (
+            "1. Enforce the expected scalar type; reject objects/arrays where a string "
+            "is expected.\n"
+            "2. Use schema validation (e.g. Mongoose types, JSON-schema) at the boundary.\n"
+            "3. Disable server-side JavaScript evaluation ($where, mapReduce)."
+        ),
+        "references": [
+            "https://owasp.org/www-community/Injection_Flaws",
+            "https://cwe.mitre.org/data/definitions/943.html",
+        ],
+    },
+    "ldap_injection": {
+        "title": "LDAP Injection",
+        "cwe": "CWE-90",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.6,
+        "description": (
+            "User input is concatenated into an LDAP search filter without escaping, "
+            "so filter metacharacters ( * ( ) \\ ) change the query — enabling "
+            "authentication bypass and directory enumeration."
+        ),
+        "impact": "Authentication bypass and disclosure of directory objects/attributes.",
+        "remediation": (
+            "1. Escape LDAP special characters ( * ( ) \\ NUL ) per RFC 4515.\n"
+            "2. Use parameterised LDAP APIs / bind with a fixed filter template.\n"
+            "3. Validate input against an allowlist before it reaches the filter."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html",
+            "https://cwe.mitre.org/data/definitions/90.html",
+        ],
+    },
+    "xpath_injection": {
+        "title": "XPath Injection",
+        "cwe": "CWE-643",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.2,
+        "description": (
+            "User input is concatenated into an XPath query over an XML document, so "
+            "boolean/quote metacharacters (' or 1=1 or ') subvert the query logic — "
+            "typically bypassing authentication or extracting the whole document."
+        ),
+        "impact": "Authentication bypass and blind extraction of the backing XML store.",
+        "remediation": (
+            "1. Use parameterised XPath (variable binding) instead of string "
+            "concatenation.\n"
+            "2. Escape or reject XPath metacharacters ( ' \" [ ] ( ) = / ).\n"
+            "3. Prefer a typed data store over free-form XML for auth/lookup data."
+        ),
+        "references": [
+            "https://owasp.org/www-community/attacks/XPATH_Injection",
+            "https://cwe.mitre.org/data/definitions/643.html",
+        ],
+    },
+    "prototype_pollution": {
+        "title": "Prototype Pollution",
+        "cwe": "CWE-1321",
+        "owasp": "A08:2025 Software or Data Integrity Failures",
+        "mitre": "T1059.007 — JavaScript",
+        "typical_cvss": 8.1,
+        "description": (
+            "Attacker-controlled keys such as __proto__ / constructor.prototype are "
+            "merged into a JavaScript object, mutating Object.prototype for the whole "
+            "process — which can escalate to denial of service, property injection or "
+            "remote code execution depending on downstream sinks."
+        ),
+        "impact": "Application-wide logic tampering, DoS, and potential RCE via gadget chains.",
+        "remediation": (
+            "1. Reject __proto__, constructor and prototype keys before merging.\n"
+            "2. Use Map/Object.create(null) for untrusted key/value data.\n"
+            "3. Freeze Object.prototype and use safe merge/clone utilities."
+        ),
+        "references": [
+            "https://portswigger.net/web-security/prototype-pollution",
+            "https://cwe.mitre.org/data/definitions/1321.html",
+        ],
+    },
+    "integer_overflow": {
+        "title": "Integer Overflow or Wraparound",
+        "cwe": "CWE-190",
+        "owasp": "A06:2025 Insecure Design",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 6.5,
+        "description": (
+            "A numeric parameter at or beyond an integer boundary changes application "
+            "behaviour (wraparound), indicating unchecked arithmetic that can corrupt "
+            "logic, allocation sizes or access decisions."
+        ),
+        "impact": "Logic corruption, memory-size miscalculation, and possible availability loss.",
+        "remediation": (
+            "1. Validate numeric inputs against explicit min/max bounds.\n"
+            "2. Use checked/arbitrary-precision arithmetic for size and index math.\n"
+            "3. Reject values outside the documented range at the boundary."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/190.html",
+        ],
+    },
+    "format_string": {
+        "title": "Externally-Controlled Format String",
+        "cwe": "CWE-134",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.6,
+        "description": (
+            "User input is used as a format string (printf-family / logging format), "
+            "so format specifiers are interpreted — leaking memory or, in native "
+            "code, corrupting it."
+        ),
+        "impact": "Memory disclosure and, in native components, memory corruption / RCE.",
+        "remediation": (
+            "1. Never pass user input as the format argument; use a constant format "
+            "with the input as a parameter.\n"
+            "2. Enable compiler format-string warnings (-Wformat-security).\n"
+            "3. Sanitise input used in logging templates."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/134.html",
+        ],
+    },
+    "buffer_overflow": {
+        "title": "Buffer Overflow",
+        "cwe": "CWE-120",
+        "owasp": "A06:2025 Insecure Design",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.1,
+        "description": (
+            "Oversized input triggers anomalous behaviour (crash, truncation, timing) "
+            "consistent with a copy into an undersized buffer in a native component."
+        ),
+        "impact": "Denial of service and, when exploitable, remote code execution.",
+        "remediation": (
+            "1. Bound-check all copies; use length-aware APIs (snprintf, strlcpy).\n"
+            "2. Compile native code with stack canaries, ASLR and DEP/NX.\n"
+            "3. Fuzz the affected parser and add explicit input-length limits."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/120.html",
+        ],
+    },
+    "resource_exhaustion": {
+        "title": "Uncontrolled Resource Consumption",
+        "cwe": "CWE-400",
+        "owasp": "A06:2025 Insecure Design",
+        "mitre": "T1499 — Endpoint Denial of Service",
+        "typical_cvss": 7.5,
+        "description": (
+            "A single request drives disproportionate CPU/memory/time (e.g. unbounded "
+            "expansion, algorithmic complexity), so a small number of requests can "
+            "exhaust server resources."
+        ),
+        "impact": "Denial of service from low-volume, low-cost requests.",
+        "remediation": (
+            "1. Impose size, depth, time and rate limits on request processing.\n"
+            "2. Replace super-linear algorithms on attacker-influenced input.\n"
+            "3. Add per-client quotas and circuit breakers."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/400.html",
+        ],
+    },
+    "version_regression": {
+        "title": "Vulnerable Version Regression",
+        "cwe": "CWE-1104",
+        "owasp": "A03:2025 Software Supply Chain Failures",
+        "mitre": "T1195 — Supply Chain Compromise",
+        "typical_cvss": 5.9,
+        "description": (
+            "A deployed component reports an older version than a previously observed "
+            "release, re-introducing already-patched vulnerabilities (a downgrade / "
+            "rollback regression)."
+        ),
+        "impact": "Re-exposure to known, already-fixed vulnerabilities in the component.",
+        "remediation": (
+            "1. Pin and monitor component versions; alert on downgrades.\n"
+            "2. Gate deploys on an SBOM/version check in CI.\n"
+            "3. Roll forward to the latest patched release."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/1104.html",
+        ],
+    },
+    "ip_restriction_bypass": {
+        "title": "IP-Based Access Restriction Bypass",
+        "cwe": "CWE-290",
+        "owasp": "A01:2025 Broken Access Control",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 7.5,
+        "description": (
+            "An IP allowlist is enforced from a client-controlled header "
+            "(X-Forwarded-For / X-Real-IP / X-Client-IP), so spoofing the header "
+            "reaches an endpoint that should be network-restricted."
+        ),
+        "impact": "Access to admin/internal endpoints that rely on IP restriction alone.",
+        "remediation": (
+            "1. Derive the client IP from the trusted edge only; ignore untrusted "
+            "forwarding headers.\n"
+            "2. Enforce access control with authentication, not IP allowlists.\n"
+            "3. Terminate spoofable headers at the reverse proxy."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/290.html",
+        ],
+    },
+    "websocket_hijacking": {
+        "title": "Cross-Site WebSocket Hijacking",
+        "cwe": "CWE-1385",
+        "owasp": "A01:2025 Broken Access Control",
+        "mitre": "T1185 — Browser Session Hijacking",
+        "typical_cvss": 7.4,
+        "description": (
+            "A WebSocket handshake authenticates from ambient cookies without "
+            "validating the Origin header, so an attacker page can open an "
+            "authenticated socket cross-site and read/drive the victim's session."
+        ),
+        "impact": "Cross-site read/write access to the victim's authenticated WebSocket channel.",
+        "remediation": (
+            "1. Validate the Origin header on the WebSocket handshake against an "
+            "allowlist.\n"
+            "2. Require a CSRF-style token in the handshake, not just cookies.\n"
+            "3. Scope session cookies with SameSite and re-authenticate the socket."
+        ),
+        "references": [
+            "https://portswigger.net/web-security/websockets/cross-site-websocket-hijacking",
+            "https://cwe.mitre.org/data/definitions/1385.html",
+        ],
+    },
+    "websocket_cleartext": {
+        "title": "Cleartext WebSocket (ws://)",
+        "cwe": "CWE-319",
+        "owasp": "A04:2025 Cryptographic Failures",
+        "mitre": "T1040 — Network Sniffing",
+        "typical_cvss": 5.9,
+        "description": (
+            "A WebSocket endpoint is served over unencrypted ws:// rather than wss://, "
+            "so messages (including session tokens) traverse the network in cleartext."
+        ),
+        "impact": "Interception and tampering of WebSocket traffic on the network path.",
+        "remediation": (
+            "1. Serve WebSockets over wss:// (TLS) only.\n"
+            "2. Redirect/upgrade ws:// to wss:// and set HSTS on the origin.\n"
+            "3. Never transmit session tokens over an unencrypted socket."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/319.html",
+        ],
+    },
+    "insecure_deserialization": {
+        "title": "Insecure Deserialization",
+        "cwe": "CWE-502",
+        "owasp": "A08:2025 Software or Data Integrity Failures",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 8.6,
+        "description": (
+            "The application deserializes attacker-controllable data with an "
+            "unsafe deserializer (Java native serialization, PHP object "
+            "injection, Python pickle, or an unsigned .NET ViewState). Crafted "
+            "serialized objects can tamper with application logic or achieve "
+            "remote code execution via gadget chains."
+        ),
+        "impact": (
+            "Object-injection tampering up to remote code execution on the "
+            "application server."
+        ),
+        "remediation": (
+            "1. Never deserialize untrusted data with a native/unsafe "
+            "deserializer; use a data-only format (JSON) with strict schemas.\n"
+            "2. Sign and integrity-check any serialized state that must round-trip "
+            "the client (e.g. enable ViewState MAC).\n"
+            "3. Apply allow-list type filtering and run deserialization with "
+            "least privilege."
+        ),
+        "references": [
+            "https://cwe.mitre.org/data/definitions/502.html",
+            "https://owasp.org/www-community/vulnerabilities/Deserialization_of_untrusted_data",
+        ],
+    },
     "xxe": {
         "title": "XML External Entity (XXE) Injection",
         "cwe": "CWE-611",
@@ -2169,6 +2460,19 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "exposed_database": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
     "file_inclusion": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
     "path_traversal": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "nosql_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "ldap_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+    "xpath_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "prototype_pollution": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "integer_overflow": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:H",
+    "format_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "buffer_overflow": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "resource_exhaustion": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+    "version_regression": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "ip_restriction_bypass": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+    "websocket_hijacking": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N",
+    "websocket_cleartext": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:L/A:N",
+    "insecure_deserialization": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "xxe": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:L",
     "open_redirect": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "cors_misconfig": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N",
@@ -2256,6 +2560,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "cloud_iam_no_mfa": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "cloud_iam_stale_access_key": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "cloud_iam_weak_password_policy": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "cloud_iam_public_access": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N",
     "cloud_iam_authenticated": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
     "posture_ok": "",
 }
@@ -2337,6 +2642,8 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
     (("cloud_iam_overprivileged", "iam_overprivileged", "admin_equivalent",
       "cloud_iam_root_access_key", "root_access_key"),
      ("CWE-269", "A01:2025 Broken Access Control", "T1078 — Valid Accounts")),
+    (("cloud_iam_public_access", "iam_public", "allusers", "public_binding"),
+     ("CWE-732", "A01:2025 Broken Access Control", "T1078 — Valid Accounts")),
     (("cloud_iam_no_mfa", "without_mfa", "no_mfa"),
      ("CWE-308", "A07:2025 Authentication Failures", "T1078 — Valid Accounts")),
     (("cloud_iam_stale_access_key", "stale_access_key", "unrotated_key"),

@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
 from heaven.config import HeavenConfig, ScanMode, get_config
+from heaven.feedback import HOST, URL, FeedbackEngine
 from heaven.ml.ai_brain import BayesianPrioritiser
 from heaven.utils.logger import get_logger
 
@@ -67,6 +68,7 @@ class ScanPhase(str, Enum):
     VULN_SCAN = "vuln_scan"
     API_SCAN = "api_scan"
     CONTAINER_SCAN = "container_scan"
+    DYNAMIC_FOLLOWUP = "dynamic_followup"  # Closed-loop: scan hosts the run itself surfaced
     VALIDATION = "validation"
     AI_TRIAGE = "ai_triage"             # Layer E: LLM borderline FP review
     AI_PLAN = "ai_plan"                 # Layer D: LLM proposes attack chains from confirmed findings
@@ -210,6 +212,12 @@ class ScanOrchestrator:
         # any authenticated session so the derived-URL crawl stays logged in.
         self.scan_targets: dict[str, Any] = {}
         self._auth_cfg: Optional[dict] = None
+        # Closed-loop feedback: as later phases surface fresh hosts / JS-derived
+        # endpoints / credentials, the engine distils them into new, in-scope
+        # scan inputs and the run acts on them in the DYNAMIC_FOLLOWUP phase.
+        # Initialised lazily from build_full_scan (needs the targets dict).
+        self.feedback: Optional[FeedbackEngine] = None
+        self._followup_hosts: set[str] = set()  # hosts already given a follow-on task
 
         self._checkpoint_store = checkpoint_store
         self._resumed_checkpoints: dict[str, dict] = {}
@@ -672,6 +680,132 @@ class ScanOrchestrator:
             phase=ScanPhase.AI_PARSE, concurrency_group="web", timeout=600,
         )
 
+    # ── Dynamic closed-loop feedback ──────────────────────────────────────────
+
+    def _feedback_cycle(self, completed_phase: "ScanPhase") -> None:
+        """Distil everything discovered so far into fresh, in-scope scan inputs
+        and act on the ones not seen before. Called after each main scan phase.
+
+        Two channels:
+
+        * **URL leads** (JS-bundle-derived endpoints, crawler links, finding
+          targets) are appended to the shared ``targets['urls']`` list so any
+          web scanner in a *still-pending* phase picks them up in-phase — no new
+          task needed.
+        * **HOST leads** (a new in-scope host named by loot / a redirect / a
+          finding) each get a self-contained ``_scan_new_host`` follow-on task
+          injected into the DYNAMIC_FOLLOWUP phase, which runs after the main
+          scan phases and before validation.
+
+        Idempotent and bounded: the FeedbackEngine dedupes leads, caps hosts,
+        and stops deriving past a generation limit, so the loop always
+        terminates."""
+        if self.feedback is None:
+            return
+        # Ingest every completed result once (engine dedupes internally).
+        for _tid, res in self.results.items():
+            if getattr(res, "state", None) == TaskState.COMPLETED and isinstance(res.data, dict):
+                self.feedback.ingest_result(res.data)
+
+        leads = self.feedback.drain()
+        if not leads:
+            return
+
+        # 1. URL leads → shared targets list (dedup by exact URL).
+        targets = self.scan_targets if isinstance(self.scan_targets, dict) else None
+        new_urls = [lead.value for lead in leads if lead.kind == URL]
+        if targets is not None and new_urls:
+            url_list = targets.setdefault("urls", [])
+            have = {u for u in url_list if isinstance(u, str)}
+            added = [u for u in new_urls if u not in have]
+            if added:
+                url_list.extend(added)
+                logger.info(
+                    f"Feedback loop: +{len(added)} URL(s) into web scanners "
+                    f"(from {completed_phase.value}): {added[:5]}"
+                )
+
+        # 2. HOST leads → a self-contained follow-on scan in DYNAMIC_FOLLOWUP.
+        for lead in leads:
+            if lead.kind != HOST:
+                continue
+            host = str(lead.value).strip().lower()
+            if host in self._followup_hosts:
+                continue
+            self._followup_hosts.add(host)
+
+            async def _followup(_host=host, **kw):
+                return await self._scan_new_host(_host)
+
+            self.add_task(
+                f"Dynamic Follow-up Scan {host}", _followup,
+                phase=ScanPhase.DYNAMIC_FOLLOWUP,
+                concurrency_group="web", timeout=600,
+            )
+            logger.info(
+                f"Feedback loop: queued follow-up scan of newly-discovered "
+                f"in-scope host {host} (source: {lead.source})"
+            )
+
+    async def _scan_new_host(self, host: str) -> dict[str, Any]:
+        """Self-contained follow-on assessment of a host the run itself
+        surfaced: quick network recon, then — for any open web port — a crawl
+        plus an injection pass. Returns findings/hosts/endpoints in the standard
+        keys the aggregator harvests, so a dynamically-found host is assessed and
+        reported exactly like a seed target. Read-only; scope was checked before
+        this host was ever queued."""
+        result: dict[str, Any] = {"followup_host": host, "hosts": [],
+                                  "endpoints": [], "findings": []}
+        stealth = self.scan_targets.get("stealth_level", "normal") if isinstance(self.scan_targets, dict) else "normal"
+        try:
+            from heaven.recon.network_scanner import scan_network
+            net = await scan_network([host], port_range="1-10000",
+                                     stealth_level=stealth, time_budget=90)
+        except Exception as e:  # noqa: BLE001 — best-effort follow-on
+            logger.debug(f"follow-up recon failed for {host}: {e}")
+            net = {}
+        hosts = net.get("hosts", []) if isinstance(net, dict) else []
+        result["hosts"] = hosts
+
+        # Derive web origins from open web ports.
+        web_urls: list[str] = []
+        for h in hosts:
+            ip = h.get("ip") or h.get("host") or host
+            for pinfo in h.get("open_ports", []):
+                wurl = self._web_url_for(ip, pinfo.get("port", 0),
+                                         pinfo.get("service", ""))
+                if wurl and wurl not in web_urls:
+                    web_urls.append(wurl)
+        if not web_urls:
+            return result
+
+        try:
+            from heaven.recon.web_crawler import crawl_targets
+            crawl = await crawl_targets(urls=web_urls, stealth_level=stealth,
+                                        auth_config=self._auth_cfg)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"follow-up crawl failed for {host}: {e}")
+            crawl = {}
+        endpoints = crawl.get("endpoints", []) if isinstance(crawl, dict) else []
+        result["endpoints"] = endpoints
+
+        # Injection pass on the discovered surface.
+        try:
+            from heaven.vulnscan.injection_scanner import (
+                build_injection_targets,
+                scan_for_injections,
+            )
+            urls, forms_by_url = build_injection_targets(endpoints, seed_urls=web_urls)
+            if urls or forms_by_url:
+                inj = await scan_for_injections(urls, forms_by_url=forms_by_url,
+                                                stealth_level=stealth)
+                if isinstance(inj, dict):
+                    result["findings"].extend(inj.get("findings", []))
+                    result["findings"].extend(inj.get("vulnerabilities", []))
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"follow-up injection scan failed for {host}: {e}")
+        return result
+
     async def _execute_phase(self, phase: ScanPhase) -> list[TaskResult]:
         """Execute all tasks for a given phase with dependency resolution."""
         phase_tasks = [t for t in self.tasks.values() if t.phase == phase and t.state == TaskState.PENDING]
@@ -743,6 +877,7 @@ class ScanOrchestrator:
             ScanPhase.VULN_SCAN,
             ScanPhase.API_SCAN,
             ScanPhase.CONTAINER_SCAN,
+            ScanPhase.DYNAMIC_FOLLOWUP,  # Closed-loop: scan hosts the run surfaced
             ScanPhase.VALIDATION,
             ScanPhase.AI_TRIAGE,        # Layer E: LLM second-opinion on borderline findings
             ScanPhase.AI_PLAN,          # Layer D: LLM proposes attack chains from confirmed findings
@@ -778,6 +913,15 @@ class ScanOrchestrator:
                     self._inject_service_tasks(net_result.data)
                 else:
                     self.priority_targets = []
+
+            # Closed-loop: after each main scan phase, feed newly-surfaced hosts /
+            # endpoints / creds back into the run. Ends at CONTAINER_SCAN — the
+            # last point before DYNAMIC_FOLLOWUP where a host follow-up task can
+            # still be scheduled to execute.
+            if phase in (ScanPhase.RECON, ScanPhase.AI_PARSE, ScanPhase.AD_RECON,
+                         ScanPhase.IOT_SCAN, ScanPhase.VULN_SCAN,
+                         ScanPhase.API_SCAN, ScanPhase.CONTAINER_SCAN):
+                self._feedback_cycle(phase)
 
         # Stop the progress heartbeat now that all phases are done.
         heartbeat.cancel()
@@ -920,6 +1064,9 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # (see _bridge_derived_web_urls) into the very list the web scanners read.
     orch.scan_targets = targets
     orch._auth_cfg = _auth_cfg
+    # Closed-loop feedback engine, scoped to exactly the operator's targets — it
+    # can only ever action a host already inside the authorised scope.
+    orch.feedback = FeedbackEngine(targets)
 
     # ═══ Phase: RECON (parallel multi-vector) ═══
     # Network recon must scan every target host — whether the operator entered a
@@ -1022,6 +1169,54 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="web", timeout=600,
     )
 
+    # ═══ Phase: JS BUNDLE ENDPOINT MINING ═══
+    # SPAs expose their real attack surface only in their JavaScript bundles —
+    # /api/* routes the crawler never sees a link to. Fetch every discovered .js
+    # file, extract + resolve the endpoints to absolute same-origin URLs, and
+    # feed them into the shared targets list so the injection / API / fuzz
+    # scanners (which read targets['urls']) actually test them. Runs in AI_PARSE,
+    # after the RECON crawl and before the VULN_SCAN/API_SCAN web scanners.
+    async def _js_endpoint_mining(**kw):
+        try:
+            from heaven.recon.web_crawler import extract_js_endpoints
+        except ImportError:
+            return {}
+        js_files: list[str] = []
+        already: list[str] = []
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not isinstance(res.data, dict):
+                continue
+            for ep in res.data.get("endpoints", []):
+                if isinstance(ep, dict):
+                    js_files.extend(ep.get("js_files", []) or [])
+            # Absolute endpoints the crawler already resolved from its own JS.
+            for u in res.data.get("js_endpoints", []) or []:
+                if isinstance(u, str) and u.startswith(("http://", "https://")):
+                    already.append(u)
+        js_files = list(dict.fromkeys(js_files))
+        mined = await extract_js_endpoints(js_files) if js_files else []
+        endpoints = list(dict.fromkeys([*already, *mined]))
+        if not endpoints:
+            return {"skipped": True, "reason": "no JS endpoints discovered"}
+        # Append into the shared targets list the web scanners read.
+        url_list = targets.setdefault("urls", [])
+        have = {u for u in url_list if isinstance(u, str)}
+        added = [u for u in endpoints if u not in have]
+        url_list.extend(added)
+        logger.info(f"JS bundle mining: {len(endpoints)} endpoint(s), {len(added)} new → web scanners")
+        return {
+            "endpoints": [{"url": u} for u in endpoints],
+            "js_endpoints": endpoints,
+            "new_url_count": len(added),
+        }
+
+    orch.add_task(
+        "JS Bundle Endpoint Mining", _js_endpoint_mining,
+        phase=ScanPhase.AI_PARSE, depends_on=[web_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=300,
+    )
+
     cloud_id = orch.add_task(
         "Cloud Asset Enumeration", enumerate_cloud,
         phase=ScanPhase.RECON, concurrency_group="cloud",
@@ -1099,6 +1294,37 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
 
     orch.add_task(
         "Authenticated AWS IAM Audit", _aws_iam_audit,
+        phase=ScanPhase.RECON, concurrency_group="cloud",
+        modes=frozenset({M.CLOUD}),
+    )
+
+    # GCP + Azure IAM/RBAC parity — same "keys supplied" audit for the other two
+    # major clouds. Each no-ops gracefully when its SDK or credentials are absent,
+    # so a scan with only AWS creds (or none) is unaffected.
+    async def _gcp_iam_audit(**kw):
+        from heaven.recon.cloud_iam import recon_gcp_iam
+        res = await recon_gcp_iam()
+        if not res.get("authenticated"):
+            return {"skipped": True,
+                    "reason": res.get("skipped_reason", "no GCP credentials")}
+        return res
+
+    orch.add_task(
+        "Authenticated GCP IAM Audit", _gcp_iam_audit,
+        phase=ScanPhase.RECON, concurrency_group="cloud",
+        modes=frozenset({M.CLOUD}),
+    )
+
+    async def _azure_iam_audit(**kw):
+        from heaven.recon.cloud_iam import recon_azure_iam
+        res = await recon_azure_iam()
+        if not res.get("authenticated"):
+            return {"skipped": True,
+                    "reason": res.get("skipped_reason", "no Azure credentials")}
+        return res
+
+    orch.add_task(
+        "Authenticated Azure RBAC Audit", _azure_iam_audit,
         phase=ScanPhase.RECON, concurrency_group="cloud",
         modes=frozenset({M.CLOUD}),
     )
@@ -1297,8 +1523,15 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     found = await scanner.scan_endpoint(session, url, ["id", "q", "page", "file", "url"])
                     candidates.extend([{
                         "target": c.target, "category": c.category,
+                        # vuln_type drives KB enrichment (CWE/OWASP/MITRE/CVSS-vector);
+                        # without it the anomaly category resolved to no KB entry and
+                        # the finding rendered with blank taxonomy columns.
+                        "vuln_type": c.category,
                         "severity": c.severity, "description": c.description,
                         "confidence": c.confidence, "cwe": c.cwe_id,
+                        "evidence": dict(c.evidence or {}),
+                        "remediation": c.remediation,
+                        "technique": c.technique,
                     } for c in found])
             return {"candidates": candidates, "total": len(candidates)}
         except ImportError:
@@ -2085,8 +2318,9 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # ═══ Phase: EXPLOIT PROOF (Gap 4 — auto-confirm high-confidence findings) ═══
     # Gated by targets["auto_prove"] flag (set by `heaven scan --auto-prove` or
     # implied by `--autonomous`). For each finding with confidence >= 0.8 and a
-    # provable category (sqli / cmdi / ssrf), automatically run the matching
-    # prover to capture proof artifacts in evidence.exploit_proof[].
+    # provable category (sqli / cmdi / ssrf / xss), automatically run the matching
+    # prover to capture proof artifacts in evidence.exploit_proof[]. XSS is proven
+    # by real JS execution in headless Chromium (Playwright), when available.
     async def _auto_exploit_proof(**kw):
         if not targets.get("auto_prove"):
             return {"skipped": True, "reason": "--auto-prove flag not set"}
@@ -2095,7 +2329,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         except Exception as e:
             return {"skipped": True, "reason": f"exploit_proof unimportable: {e}"}
 
-        provable_categories = ("sqli", "cmdi", "rce", "ssrf")
+        provable_categories = ("sqli", "cmdi", "rce", "ssrf", "xss")
         candidates = []
         for tid, res in orch.results.items():
             if res.state != TaskState.COMPLETED or not res.data:
@@ -2141,6 +2375,10 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         discovered_hosts: set[str] = set()
         discovered_creds: list[tuple[str, str]] = []
         ssh_targets: list[dict] = []
+        # (host, port, service) reuse targets built from the OPEN ports actually
+        # found — so a Windows host gets SMB/WinRM cred-reuse, a Linux host SSH.
+        svc_targets: list[tuple[str, int, str]] = []
+        _PORT_SVC = {22: "ssh", 445: "smb", 5985: "winrm", 5986: "winrm"}
 
         for tid, res in orch.results.items():
             if res.state != TaskState.COMPLETED or not res.data:
@@ -2153,8 +2391,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 if h:
                     discovered_hosts.add(h)
                 for port in host_data.get("open_ports", []):
-                    if int(port.get("port") or 0) == 22:
+                    pnum = int(port.get("port") or 0)
+                    if pnum == 22:
                         ssh_targets.append({"host": h, "port": 22})
+                    svc = _PORT_SVC.get(pnum)
+                    if h and svc and (h, pnum, svc) not in svc_targets:
+                        svc_targets.append((h, pnum, svc))
 
             # Collect credentials from credential-discovery scanners
             for cred in data.get("credentials", []):
@@ -2170,6 +2412,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             "hosts_in_scope": len(discovered_hosts),
             "creds_discovered": len(discovered_creds),
             "ssh_targets": len(ssh_targets),
+            "reuse_targets": len(svc_targets),
             "cred_reuse": None, "linpeas": [],
         }
 
@@ -2178,7 +2421,10 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             try:
                 from heaven.postex import CredentialValidator
                 v = CredentialValidator(authorized=True)
-                tgt_tuples = [(h, 22, "ssh") for h in discovered_hosts]
+                # Prefer the concrete (host,port,service) targets from open ports
+                # (SSH/SMB/WinRM); fall back to SSH-on-every-host if recon didn't
+                # attach ports.
+                tgt_tuples = svc_targets or [(h, 22, "ssh") for h in discovered_hosts]
                 reuse = await v.validate(discovered_creds, tgt_tuples)
                 summary["cred_reuse"] = {
                     "attempted": reuse.attempted,

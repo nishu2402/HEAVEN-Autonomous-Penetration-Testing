@@ -65,8 +65,9 @@ dependencies = [
     # [lateral]/[deploy]/[scheduling]/[cloud-aws]/[gemini] extras below are kept
     # as backward-compatible aliases (now already-satisfied subsets of the base).
     # Only dev/test tooling and the alternate LLM providers (anthropic/openai)
-    # and heavyweight GCP/Azure SDKs remain opt-in. All of the following are
-    # pure-Python wheels, so the base install stays wheel-only (no compilers).
+    # and heavyweight GCP/Azure SDKs remain opt-in. All of the following ship
+    # prebuilt wheels for every supported platform, so the base install stays
+    # wheel-only (no compilers).
     "dnspython>=2.6.0",           # DNS enumeration (recon)
     "scapy>=2.5.0",               # raw-packet probes (recon)
     "jinja2>=3.1.3",              # HTML report templating (reports)
@@ -75,6 +76,7 @@ dependencies = [
     "impacket>=0.11.0",           # SMB/Kerberos lateral movement (lateral)
     "asyncssh>=2.14.0",           # SSH credential testing (lateral)
     "ldap3>=2.9.1",               # LDAP/AD enumeration (lateral)
+    "pywinrm>=0.4.3",             # WinRM credential validation (lateral)
     "docker>=7.0.0",              # container recon (deploy)
     "kubernetes>=29.0.0",         # k8s recon (deploy)
     "apscheduler>=3.10.0",        # scheduled scans (scheduling)
@@ -82,6 +84,12 @@ dependencies = [
     "boto3>=1.34.0",              # AWS cloud recon (cloud-aws)
     "google-genai>=1.0.0",        # default AI provider SDK (Gemini) — AI works
                                   # as soon as a key is added; no extra install
+    "playwright>=1.40.0",         # headless-browser DAST: DOM/stored-XSS execution
+                                  # proof + JS-rendered crawl. The pip wheel ships
+                                  # the driver; the browser bundle is fetched with
+                                  # `playwright install chromium` (scripts/install.sh
+                                  # runs this automatically; the code degrades
+                                  # gracefully until it is present).
 ]
 
 [project.urls]
@@ -117,8 +125,21 @@ dev = [
     # belongs here, not in requirements.txt. Floor pinned for GHSA-jm82-fx9c-mx94.
     "pypdf>=6.13.3",
 ]
-cloud-gcp = ["google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0"]
-cloud-azure = ["azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0"]
+# Heavyweight cloud-provider SDKs (opt-in). Each extra carries both the resource
+# SDKs (compute/storage recon) and the identity/IAM SDKs the authenticated
+# `heaven cloud iam --provider {gcp,azure}` audit needs, so a single
+# `pip install -e ".[cloud-gcp]"` / ".[cloud-azure]" enables the whole provider.
+cloud-gcp = [
+    "google-cloud-compute>=1.17.0", "google-cloud-storage>=2.14.0",
+    "google-api-python-client>=2.100.0",  # getIamPolicy (authenticated IAM audit)
+    "google-auth>=2.28.0",                 # Application Default Credentials
+]
+cloud-azure = [
+    "azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0",
+    "azure-identity>=1.15.0",              # DefaultAzureCredential
+    "azure-mgmt-authorization>=4.0.0",     # subscription-scope RBAC audit
+    "azure-mgmt-resource>=23.0.0",         # subscription auto-resolution
+]
 
 # LLM provider SDKs. The default (Gemini / google-genai) now ships in the base
 # install, so the AI layer works as soon as a key is added. anthropic / openai
@@ -136,7 +157,7 @@ llm = ["google-genai>=1.0.0", "anthropic>=0.39.0", "openai>=1.40.0"]
 # left are dev tooling, the alternate LLM providers, and the heavy GCP/Azure SDKs.
 recon = ["dnspython>=2.6.0", "scapy>=2.5.0"]
 reports = ["jinja2>=3.1.3", "reportlab>=4.0.0", "tabulate>=0.9.0"]
-lateral = ["impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1"]
+lateral = ["impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1", "pywinrm>=0.4.3"]
 # MITRE ATT&CK mapping ships a bundled dataset and talks TAXII over plain HTTP,
 # so it needs no extra pip packages — hence there is no `mitre` extra.
 deploy = ["docker>=7.0.0", "kubernetes>=29.0.0"]
@@ -149,9 +170,10 @@ cloud-aws = ["boto3>=1.34.0"]
 all = [
     "dnspython>=2.6.0", "scapy>=2.5.0",
     "jinja2>=3.1.3", "reportlab>=4.0.0", "tabulate>=0.9.0",
-    "impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1",
+    "impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1", "pywinrm>=0.4.3",
     "docker>=7.0.0", "kubernetes>=29.0.0",
     "apscheduler>=3.10.0", "alembic>=1.13.0",
+    "playwright>=1.40.0",
     "google-genai>=1.0.0", "anthropic>=0.39.0", "openai>=1.40.0",
 ]
 

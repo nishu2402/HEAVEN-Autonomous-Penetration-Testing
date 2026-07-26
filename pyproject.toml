@@ -217,6 +217,17 @@ filterwarnings = [
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+# Pin the rule set EXPLICITLY so the lint is reproducible across ruff releases.
+# CI installs ruff unpinned (`pip install ruff`), and ruff 0.16 broadened its
+# *implicit* default selection (adding UP/I/BLE/SIM/etc.) — that alone turned a
+# clean tree into 1800+ findings on a linter upgrade, with no source change.
+# These four are ruff's long-standing default (pyflakes `F` + a curated
+# pycodestyle `E` subset) — exactly the rules this codebase has always been
+# linted against. Declaring them here makes any ruff version enforce the same
+# set, so a future release can't silently break CI again.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.bandit]
 # Reviewed test classes that recur intentionally in a network-pentest tool.
 # Everything else stays active. (B310/urlopen is deliberately NOT skipped — it is

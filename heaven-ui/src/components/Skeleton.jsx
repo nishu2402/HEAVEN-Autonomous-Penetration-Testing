@@ -5,7 +5,7 @@
 // empty-state component (icon + headline + body + optional CTA).
 
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 // ── Skeleton primitives ──────────────────────────────────────────
 

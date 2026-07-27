@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router";
 
 import { isAuthenticated, onAuthChange, needsPasswordChange, onSessionExpired } from "./api";
 

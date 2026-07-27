@@ -5,7 +5,7 @@
 // Engagement (workspace state) → Reporting (what you ship).
 
 import React, { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation } from "react-router";
 import Logo from "./Logo.jsx";
 
 const GROUPS = [

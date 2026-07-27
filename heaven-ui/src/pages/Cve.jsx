@@ -4,7 +4,7 @@
 // looked up live against NVD + CIRCL, merged/de-duped, and version-confirmed.
 
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Cve } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";

@@ -2,7 +2,7 @@
 // Mirrors `heaven diff <baseline> <current>` from the CLI.
 
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { Diff, Scans } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { EmptyState, SkeletonCard } from "../components/Skeleton.jsx";

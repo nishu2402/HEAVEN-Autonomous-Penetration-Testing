@@ -2,7 +2,7 @@
 // Mirrors `heaven coverage` from the CLI.
 
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Coverage, Engagement, Priors } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { useToast } from "../components/Toast.jsx";

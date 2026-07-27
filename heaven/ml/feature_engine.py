@@ -5,6 +5,7 @@ Constructs feature vectors from scan data for the risk prediction model.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -126,6 +127,14 @@ def _cvss_from_finding(vuln_data: dict) -> float:
     for key, score in _VULN_TYPE_CVSS.items():
         if key in vt or vt in key:
             return score
+    # Before falling back to a flat per-severity constant, compute the real base
+    # score from the class's curated CVSS vector — genuinely per-class, not flat.
+    with contextlib.suppress(Exception):  # KB optional; fall back to severity
+        from heaven.devsecops.vuln_kb import cvss_vector_for
+        from heaven.utils.cvss import base_score_from_vector
+        s = base_score_from_vector(cvss_vector_for(vuln_data.get("vuln_type") or ""))
+        if s > 0:
+            return s
     sev = (vuln_data.get("severity") or "info").lower()
     return _SEVERITY_CVSS.get(sev, 5.0)
 

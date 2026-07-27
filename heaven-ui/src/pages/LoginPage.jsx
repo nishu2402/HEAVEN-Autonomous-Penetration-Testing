@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router";
 import { motion } from "framer-motion";
 import { login } from "../api";
 import Logo from "../components/Logo.jsx";

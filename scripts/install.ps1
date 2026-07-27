@@ -193,7 +193,7 @@ if ($SkipUI) {
     Write-Warn "heaven-ui directory not found - skipping frontend build"
 } elseif (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     Write-Warn "npm not found - skipping frontend build"
-    Write-Host "    Install Node.js 20+ from https://nodejs.org, then:"
+    Write-Host "    Install Node.js 22.22+ from https://nodejs.org, then:"
     Write-Host "    cd heaven-ui; npm install --legacy-peer-deps; npm run build"
     Write-Host "    The CLI + API work fully without the UI; 'heaven serve' shows a placeholder until it's built."
 } else {
@@ -203,6 +203,13 @@ if ($SkipUI) {
     try {
         $nodeVer = (& node --version 2>$null)
         Write-Info "Node $nodeVer detected"
+        # react-router 8 requires Node >=22.22.0; warn early if the runtime is older.
+        $nodeParsed = $null
+        if ([version]::TryParse(($nodeVer -replace '[^0-9.]', ''), [ref]$nodeParsed)) {
+            if ($nodeParsed -lt [version]'22.22.0') {
+                Write-Warn "Node $nodeVer is too old - the web UI needs Node 22.22+ (react-router 8). Build may fail."
+            }
+        }
         $BuildLog = Join-Path $UiDir 'build.log'
         Push-Location $UiDir
         try {

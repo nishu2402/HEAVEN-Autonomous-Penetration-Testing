@@ -5,7 +5,7 @@
 // stack fingerprint, and is labelled so it's never read as a confirmed fact.
 
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Assets } from "../api";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
 

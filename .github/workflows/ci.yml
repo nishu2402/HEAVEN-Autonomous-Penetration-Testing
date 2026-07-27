@@ -157,8 +157,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
-          # Node 22 (active LTS): Vite 8 needs >=20.19/>=22.12; Node 20 is EOL.
-          node-version: "22"
+          # react-router 8 requires Node >=22.22.0 (also satisfies Vite 8's
+          # >=22.12); pinning the minor keeps CI from drifting below the floor.
+          node-version: "22.22"
           cache: npm
           cache-dependency-path: heaven-ui/package-lock.json
       - name: Install UI deps
@@ -228,7 +229,8 @@ jobs:
           python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # react-router 8 requires Node >=22.22.0 — pin the minor to match.
+          node-version: "22.22"
           cache: npm
           cache-dependency-path: heaven-ui/package-lock.json
       # Actually EXECUTE install.ps1 on real Windows — the one thing a macOS/Linux

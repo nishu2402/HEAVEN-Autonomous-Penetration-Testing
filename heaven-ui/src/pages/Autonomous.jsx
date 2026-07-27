@@ -10,7 +10,7 @@
 // navigating away and back — and a full page refresh.
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Autonomous, Engagement, openAutonomousStream } from "../api";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import TargetsInput from "../components/TargetsInput.jsx";

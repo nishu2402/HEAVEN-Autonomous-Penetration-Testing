@@ -5,7 +5,7 @@
 // API keys are configured, Python module health, and actionable next steps.
 
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { System } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";

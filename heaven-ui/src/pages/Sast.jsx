@@ -2,7 +2,7 @@
 // Mirrors `heaven sast scan` from the CLI.
 
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { SAST, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";

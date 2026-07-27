@@ -6,7 +6,7 @@ The `heaven-ui/` directory contains a React + Vite frontend. The shipped `dist/`
 
 ## What's there
 
-- `heaven-ui/src/` — React 18 source
+- `heaven-ui/src/` — React 19 source
 - `heaven-ui/dist/` — pre-built static bundle (mounted at `/` by FastAPI)
 - `heaven-ui/package.json` — dependency manifest
 - `heaven-ui/vite.config.js` — build config

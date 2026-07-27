@@ -7,7 +7,7 @@
 // piling into a single merged list.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { Scans as ScansApi, Replay } from "../api";
 import { useToast } from "./Toast.jsx";
 import { sevColor } from "../theme";

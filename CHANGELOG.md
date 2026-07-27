@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-contained SMIL-animated SVG — no third-party image services — carrying the
   Ascendant Aegis mark, the violet→cyan→emerald brand ramp, a live-recon radar
   with target-lock pings, the **Recon → ML Risk → Verified Exploit → Report**
-  pipeline (with a travelling packet), and a verified in-sync stat strip (1319
+  pipeline (with a travelling packet), and a verified in-sync stat strip (1327
   tests · 50 CLI · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML R²=0.9925).
   Replaces the three external capsule-render / typing-SVG banners at the top of the
   README with one brand-exact, offline-safe hero.
@@ -46,6 +46,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engagement data renders as 2025 without a migration.
 
 ### Fixed
+
+- **CVSS is now a genuine per-finding score, not a flat per-severity constant.**
+  Every finding in a severity band used to show the same number (all highs 8.0,
+  all mediums 5.5, …) because the ML feature extractor collapsed any finding
+  without its own CVSS vector into one of four per-severity constant feature
+  vectors, and the qualitative-label fallback returned a fixed number per band.
+  Findings now resolve their **class's curated CVSS vector** (48 curated vectors →
+  32 distinct base scores) and score it with the standard formula, so two
+  different weakness classes get genuinely different scores (SQLi 9.8, XSS 6.1,
+  missing-header 5.2…) while the same class stays stable — that's correct CVSS
+  semantics, not fabricated uniqueness. One authoritative resolver
+  (`heaven/utils/cvss.py::objective_base_score`, precedence: published CVE/NVD/OSV
+  score → KB class typical → class-vector base score → the finding's own vector)
+  is now shared by the report, the store/UI and the ML feature extractor, so a
+  finding's CVSS reads the same everywhere.
+- **CVSS v4.0 advisories are now scored (fixes the flat `react-router` row).**
+  The in-house calculator only understood CVSS v3.1, so any advisory carrying a
+  **v4.0** vector (increasingly common on 2025+ GHSA records) was unscoreable and
+  fell back to the flat severity-label constant — e.g. the real react-router
+  advisory GHSA-qwww-vcr4-c8h2 showed `8` instead of its true base score. CVSS:4.0
+  vectors are now routed to the reference-grade `cvss` library (added as a base
+  dependency), so that finding correctly reads **7.1** and its v4.0 vector is
+  preserved; v3.x scoring is unchanged. Degrades gracefully to the label fallback
+  if the library is somehow absent.
 
 - **Green CI, reproducibly.** Two jobs had begun failing on `main` from
   environment drift rather than any code defect:

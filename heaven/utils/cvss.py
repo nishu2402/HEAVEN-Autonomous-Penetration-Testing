@@ -1,17 +1,24 @@
 """
-HEAVEN — CVSS v3.1 base-score calculator.
+HEAVEN — CVSS base-score calculator (v3.1 in-house + v4.0 via the reference lib).
 
 A faithful implementation of the CVSS v3.1 specification's base-score formula
-(https://www.first.org/cvss/v3.1/specification-document, section 7.1). Used to
-turn a CVSS vector string (e.g. the ones OSV / GHSA advisories carry) into a
-numeric base score and a severity label, so dependency findings get a real,
-non-fabricated score instead of a hand-picked guess.
+(https://www.first.org/cvss/v3.1/specification-document, section 7.1), plus
+CVSS v4.0 base scoring delegated to the reference-grade ``cvss`` library (v4.0
+has no closed-form formula — it is a published MacroVector lookup, so we use the
+vetted implementation rather than re-deriving the table). Used to turn a CVSS
+vector string (e.g. the ones OSV / GHSA advisories carry) into a numeric base
+score and a severity label, so findings get a real, non-fabricated score
+instead of a hand-picked severity constant.
 
-This is a deterministic standard formula — not a model, not a heuristic.
+This is a deterministic standard — not a model, not a heuristic. Two *different*
+vulnerability classes get genuinely different scores; the same class scores the
+same (a CVSS base score is a property of the weakness, not the individual URL).
 """
 from __future__ import annotations
 
+import contextlib
 import math
+from typing import Any, Optional
 
 # ── Metric coefficients (CVSS v3.1 spec, section 7.4) ──
 
@@ -41,12 +48,33 @@ def parse_vector(vector: str) -> dict[str, str]:
     return out
 
 
-def base_score_from_vector(vector: str) -> float:
-    """Return the CVSS v3.1 base score (0.0–10.0) for a vector string.
+def _v4_base_score(vector: str) -> float:
+    """CVSS v4.0 base score via the reference ``cvss`` library.
 
-    Returns ``0.0`` when the vector is missing the base metrics needed to score
-    (so callers can fall back to a severity label instead).
+    CVSS v4.0 is scored from a published MacroVector lookup table (there is no
+    formula), so we defer to the vetted reference implementation rather than
+    re-deriving the table. Returns ``0.0`` when the library is unavailable or the
+    vector is unparseable, so callers fall back to a severity label as before.
     """
+    try:
+        from cvss import CVSS4  # type: ignore[import-untyped]
+    except Exception:  # noqa: BLE001 - lib optional; degrade to label fallback
+        return 0.0
+    try:
+        return float(CVSS4(vector).base_score)
+    except Exception:  # noqa: BLE001 - malformed vector must never break a scan
+        return 0.0
+
+
+def base_score_from_vector(vector: str) -> float:
+    """Return the CVSS base score (0.0–10.0) for a vector string.
+
+    Routes CVSS:4.0 vectors to the v4.0 scorer and everything else through the
+    in-house v3.x formula. Returns ``0.0`` when the vector is missing the base
+    metrics needed to score (so callers can fall back to a severity label).
+    """
+    if (vector or "").strip().upper().startswith("CVSS:4"):
+        return _v4_base_score(vector.strip())
     m = parse_vector(vector)
     required = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
     if not all(k in m for k in required):
@@ -104,3 +132,69 @@ _LABEL_SCORE = {
 def score_from_label(label: str) -> float:
     """Best-effort numeric score for a qualitative severity label."""
     return _LABEL_SCORE.get((label or "").strip().lower(), 0.0)
+
+
+def _finding_float(finding: dict, keys: tuple[str, ...]) -> Optional[float]:
+    """First in-range (0,10] float found under ``keys`` on the finding/evidence."""
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    for src in (finding, ev):
+        for k in keys:
+            try:
+                v = float(src.get(k))  # type: ignore[union-attr,arg-type]
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if 0.0 < v <= 10.0:
+                return v
+    return None
+
+
+def objective_base_score(finding: dict[str, Any]) -> float:
+    """Genuinely per-finding CVSS base score from *real* data — 0.0 if none.
+
+    This is the one authoritative resolver shared by the report, the UI/store
+    and the ML feature extractor so a finding's CVSS is the same everywhere and
+    is never a flat per-severity constant. Precedence, most authoritative first:
+
+      1. a real published base score carried on the finding (CVE / NVD / OSV);
+      2. the KB "typical" base score curated for the finding's class;
+      3. the base score computed from the class's curated CVSS vector;
+      4. the base score computed from the finding's own CVSS vector.
+
+    Because each vulnerability class carries its own curated vector, two
+    different classes yield different scores (SQLi ≠ XSS ≠ missing-header),
+    while the qualitative-label fallback (a flat constant) is deliberately *not*
+    used here — callers that need a last-resort number can add it themselves.
+    """
+    # 1. a real, published base score (CVE / NVD / OSV ground truth).
+    v = _finding_float(finding, ("cvss_base", "cvss_base_score", "cvss_score", "cvss"))
+    if v is not None:
+        return v
+
+    vt = str(finding.get("vuln_type") or finding.get("type") or "")
+
+    # 2. the KB "typical" base score curated for this class (per-class, varied).
+    v = _finding_float(finding, ("typical_cvss",))
+    if v is None:
+        try:
+            from heaven.devsecops.vuln_kb import lookup as _lookup
+            tv = (_lookup(vt) or {}).get("typical_cvss")
+            v = float(tv) if tv else None
+            if v is not None and not (0.0 < v <= 10.0):
+                v = None
+        except Exception:  # noqa: BLE001 - KB optional; fall through to vectors
+            v = None
+    if v is not None:
+        return v
+
+    # 3. compute from the class's curated vector (never a generic severity one).
+    with contextlib.suppress(Exception):  # KB optional
+        from heaven.devsecops.vuln_kb import cvss_vector_for as _vec_for
+        s = base_score_from_vector(_vec_for(vt))
+        if s > 0:
+            return s
+
+    # 4. compute from the finding's own vector (may itself be a severity fallback).
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    vec = str(finding.get("cvss_vector") or ev.get("cvss_vector") or "")
+    s = base_score_from_vector(vec)
+    return s if s > 0 else 0.0

@@ -3093,7 +3093,14 @@ def enrich_finding(finding: dict) -> dict:
     out["evidence"] = ev
 
     if not out.get("predicted_cvss_score"):
-        out["typical_cvss"] = entry.get("typical_cvss") or _SEV_FALLBACK_CVSS.get(
-            (finding.get("severity") or "").lower(), 0.0
-        )
+        typical = entry.get("typical_cvss")
+        if not typical:
+            # Prefer the real base score computed from the class's curated vector
+            # (genuinely per-class) over the flat per-severity constant.
+            from heaven.utils.cvss import base_score_from_vector
+            score = base_score_from_vector(out.get("cvss_vector") or "")
+            typical = score if score > 0 else _SEV_FALLBACK_CVSS.get(
+                (finding.get("severity") or "").lower(), 0.0
+            )
+        out["typical_cvss"] = typical
     return out

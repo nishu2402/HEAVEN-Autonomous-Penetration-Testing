@@ -32,6 +32,83 @@ def test_cvss_missing_metrics_returns_zero():
     assert base_score_from_vector("CVSS:3.1/AV:N") == 0.0
 
 
+# ── CVSS v4.0 base scoring (reference lib; routed by the CVSS:4.0 prefix) ─────
+
+@pytest.mark.parametrize("vector, expected", [
+    ("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H", 10.0),
+    ("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N", 9.3),
+    # The real react-router GHSA-qwww-vcr4-c8h2 vector (RSC CSRF, integrity-only).
+    ("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N", 7.1),
+    ("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N", 0.0),
+])
+def test_cvss_v4_reference_scores(vector, expected):
+    pytest.importorskip("cvss")  # reference-grade v4.0 scoring (base dependency)
+    assert base_score_from_vector(vector) == pytest.approx(expected, abs=0.1)
+
+
+def test_osv_parse_v4_vector_scores_real_not_flat_label():
+    """A CVSS v4.0 advisory must score its real base — not the flat label constant.
+
+    This is the react-router bug: the v3.1-only calculator couldn't parse the
+    v4.0 vector, so every such 'high' advisory fell back to score_from_label →
+    a flat 8.0. It must now compute the genuine v4.0 score (7.1 here).
+    """
+    pytest.importorskip("cvss")
+    from heaven.vulnscan.osv_client import _parse_severity
+    rec = {
+        "severity": [{
+            "type": "CVSS_V4",
+            "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N",
+        }],
+        "database_specific": {"severity": "HIGH"},
+    }
+    vector, score, label = _parse_severity(rec)
+    assert vector.startswith("CVSS:4.0")
+    assert score == pytest.approx(7.1, abs=0.1)
+    assert score != 8.0  # not the flat 'high' label constant
+    assert label == "high"
+
+
+# ── Per-finding CVSS resolver + no-flat-per-severity (the two reported bugs) ──
+
+def test_objective_base_score_precedence_and_per_class():
+    from heaven.utils.cvss import objective_base_score
+    # 1. a real published score always wins.
+    assert objective_base_score({"vuln_type": "sql_injection", "cvss_base": 6.4}) == 6.4
+    # 2/3. class vector → genuinely per-class scores; different classes differ.
+    sqli = objective_base_score({"vuln_type": "sql_injection"})
+    xss = objective_base_score({"vuln_type": "reflected_xss"})
+    assert sqli > 0 and xss > 0 and sqli != xss
+    # An unknown class with no vector yields 0.0 — never a fabricated constant.
+    assert objective_base_score({"vuln_type": "nonexistent_zzz_type"}) == 0.0
+
+
+def test_ml_features_vary_by_class_not_flat_per_severity():
+    """Two different classes at the *same* severity must no longer collapse to an
+    identical feature vector (which is what produced the flat per-severity CVSS)."""
+    from heaven.ml.risk_model import _extract_nvd_features
+    sqli = _extract_nvd_features({"vuln_type": "sql_injection", "severity": "high"})
+    xss = _extract_nvd_features({"vuln_type": "reflected_xss", "severity": "high"})
+    hdr = _extract_nvd_features({"vuln_type": "missing_security_headers", "severity": "high"})
+    assert sqli != xss != hdr
+    assert sqli["conf_impact"] >= xss["conf_impact"]  # sqli hits confidentiality harder
+
+
+def test_ml_predicted_cvss_spreads_within_a_severity_band():
+    """The reported bug: every 'high' finding predicted the same CVSS. They must
+    now span a genuine range driven by their real class vectors."""
+    from heaven.ml.risk_model import get_model, _extract_nvd_features
+    model = get_model()
+    classes = ["sql_injection", "reflected_xss", "ssrf", "open_redirect",
+               "idor", "clickjacking", "command_injection"]
+    preds = {
+        c: round(model.predict_cvss_score(
+            _extract_nvd_features({"vuln_type": c, "severity": "high"})), 1)
+        for c in classes
+    }
+    assert len(set(preds.values())) >= 3, preds  # not one flat number
+
+
 @pytest.mark.parametrize("score, sev", [
     (9.8, "critical"), (7.5, "high"), (5.5, "medium"), (2.0, "low"), (0.0, "info"),
 ])

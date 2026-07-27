@@ -6,7 +6,7 @@
 // itself once every step is done, or when dismissed (persisted in localStorage).
 
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Engagement } from "../api";
 
 const DISMISS_KEY = "heaven.firstrun.dismissed";

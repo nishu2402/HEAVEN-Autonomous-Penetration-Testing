@@ -8,7 +8,7 @@
 // Uses design tokens throughout, so it renders correctly in light and dark.
 
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { Demo } from "../api";
 import { useToast } from "./Toast.jsx";
 

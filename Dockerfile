@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1.6
 
 # ── Stage 1: Build the React UI ──────────────────────────────────────
-# Node 22 (active LTS): Vite 8 requires Node >=20.19/>=22.12, and Node 20 is EOL.
+# Node 22 (active LTS): react-router 8 requires Node >=22.22.0 (also satisfies
+# Vite 8's >=22.12). The `22-slim` tag always tracks the latest 22.x patch, so
+# it stays above the 22.22.0 floor while still receiving security updates.
 FROM node:22-slim AS ui-builder
 
 WORKDIR /ui

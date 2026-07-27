@@ -70,6 +70,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependency), so that finding correctly reads **7.1** and its v4.0 vector is
   preserved; v3.x scoring is unchanged. Degrades gracefully to the label fallback
   if the library is somehow absent.
+- **Cleared the `react-router` advisory at the source by migrating the web UI to
+  React 19.** The SCA self-scan flagged `react-router@7.18.1` for
+  GHSA-qwww-vcr4-c8h2 (RSC-mode CSRF, CWE-352, affected range `[7.12.0, 8.3.0)`) —
+  a real, correctly-matched advisory. The 7.x line has no backported fix and the
+  fixed release lives only on the consolidated **`react-router` 8.3.0** package
+  (there is no `react-router-dom@8`), which requires **React ≥ 19.2.7**. The whole
+  frontend was therefore upgraded: **React 18 → 19** (react + react-dom 19.2.8),
+  **`react-router-dom` → `react-router` 8.3.0** with imports rewritten across 22
+  files, **@react-three/fiber 8 → 9** and **@react-three/drei 9 → 10** (React 19
+  reconciler), types bumped to 19, and the unused `recharts` dependency dropped.
+  HEAVEN's own SCA scan of `heaven-ui` now reports **0 vulnerabilities**, and
+  **all 24 UI routes** (plus the finding-detail and not-found routes and a
+  client-side router transition) were live-verified end-to-end — sign-in, the R3F
+  3D topology and framer-motion animations included — with **zero console errors**
+  on every page. This supersedes the interim CVSS-scoring fix above: the finding is
+  now **removed**, not merely rescored.
+- **Pinned the Node ≥ 22.22 build floor everywhere it's declared.** react-router 8
+  requires `node >=22.22.0`, so the requirement is now enforced consistently
+  instead of relying on "latest 22.x" resolving above the floor by chance: a
+  `heaven-ui/package.json` `engines` field, a new `heaven-ui/.nvmrc` (`22.22`),
+  both CI `setup-node` jobs pinned to `22.22`, the Dockerfile `node:22-slim` base
+  documented as the ≥22.22 floor, and the Unix/Windows install scripts warn early
+  when the local Node is older (message and gate updated from the stale "18+/20+").
 
 - **Green CI, reproducibly.** Two jobs had begun failing on `main` from
   environment drift rather than any code defect:

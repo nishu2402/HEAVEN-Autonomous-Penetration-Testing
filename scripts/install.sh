@@ -261,7 +261,7 @@ else
             ok "Node.js installed"
         else
             warn "Could not auto-install Node.js — skipping frontend build"
-            echo -e "  ${DIM}Install Node.js 18+ manually, then:${NC}"
+            echo -e "  ${DIM}Install Node.js 22.22+ manually, then:${NC}"
             echo -e "  ${DIM}cd heaven-ui && npm install --legacy-peer-deps && npm run build${NC}"
             echo -e "  ${DIM}The CLI works fully without the UI; 'heaven serve' shows a${NC}"
             echo -e "  ${DIM}placeholder page until the UI is built.${NC}"
@@ -271,9 +271,19 @@ else
     if command -v npm >/dev/null 2>&1; then
         NODE_VER=$(node --version 2>/dev/null || echo "?")
         NODE_MAJOR=$(echo "$NODE_VER" | sed 's/[^0-9.]//g' | cut -d. -f1)
+        NODE_MINOR=$(echo "$NODE_VER" | sed 's/[^0-9.]//g' | cut -d. -f2)
         info "Node $NODE_VER detected"
-        if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -lt 18 ] 2>/dev/null; then
-            warn "Node.js $NODE_VER is too old — version 18+ recommended. Build may fail."
+        # react-router 8 requires Node >=22.22.0; anything older will fail the build.
+        NODE_TOO_OLD=0
+        if [ -n "$NODE_MAJOR" ]; then
+            if [ "$NODE_MAJOR" -lt 22 ] 2>/dev/null; then
+                NODE_TOO_OLD=1
+            elif [ "$NODE_MAJOR" -eq 22 ] 2>/dev/null && [ "${NODE_MINOR:-0}" -lt 22 ] 2>/dev/null; then
+                NODE_TOO_OLD=1
+            fi
+        fi
+        if [ "$NODE_TOO_OLD" = "1" ]; then
+            warn "Node.js $NODE_VER is too old — the web UI needs Node 22.22+ (react-router 8). Build may fail."
         fi
         # Build with errors visible in a log so a failure is diagnosable
         # (the old version hid every error behind 2>/dev/null).

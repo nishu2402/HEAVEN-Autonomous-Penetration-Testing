@@ -219,6 +219,22 @@ def _extract_nvd_features(finding: dict) -> dict:
     ci_num, ii_num, ai_num = 1, 1, 1
 
     cvss_vector = finding.get("cvss_vector", "")
+    # A CVSS v4.0 vector uses metrics this v3 parser doesn't understand, so don't
+    # misread it — drop it and resolve the class vector below instead.
+    if cvss_vector.strip().upper().startswith("CVSS:4"):
+        cvss_vector = ""
+    if not cvss_vector:
+        # No usable vector on the finding — resolve the curated CVSS vector for its
+        # class so the feature vector (and thus the predicted score) reflects the
+        # specific weakness rather than collapsing to a flat per-severity constant.
+        # Non-fabricated: each class carries its own standard vector in the KB, so
+        # two different classes score differently while the same class is stable.
+        try:
+            from heaven.devsecops.vuln_kb import cvss_vector_for
+            cvss_vector = cvss_vector_for(
+                finding.get("vuln_type") or finding.get("type") or "")
+        except Exception:  # noqa: BLE001 - KB optional; fall back to severity bucket
+            cvss_vector = ""
     if cvss_vector:
         # Parse compact CVSS v3 vector string: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
         for segment in cvss_vector.replace("CVSS:3.1/", "").replace("CVSS:3.0/", "").split("/"):

@@ -714,52 +714,23 @@ class ComplianceReportGenerator:
         vulnerability classes no longer collapse to the same severity constant.
         """
         from heaven.utils import cvss as _cvss
-        ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
 
-        def _num(*keys: str) -> Optional[float]:
-            for src in (f, ev):
-                for k in keys:
-                    try:
-                        v = float(src.get(k))  # type: ignore[arg-type]
-                    except (TypeError, ValueError):
-                        continue
-                    if 0.0 < v <= 10.0:
-                        return v
-            return None
-
-        # 1. a real, published base score (CVE / NVD / OSV ground truth)
-        v = _num("cvss_base", "cvss_base_score", "cvss_score", "cvss")
-        if v is not None:
-            return f"{v:.1f}"
-        vt = str(f.get("vuln_type") or f.get("type") or "")
-        # 2. the KB 'typical' base score curated for this class (per-class, varied)
-        v = _num("typical_cvss")
-        if v is None:
-            try:
-                from heaven.devsecops.vuln_kb import lookup as _lookup
-                tv = (_lookup(vt) or {}).get("typical_cvss")
-                v = float(tv) if tv else None
-                if v is not None and not (0.0 < v <= 10.0):
-                    v = None
-            except Exception:
-                v = None
-        if v is not None:
-            return f"{v:.1f}"
-        # 3. compute from the class's curated vector (never a generic-flat one)
-        import contextlib
-        with contextlib.suppress(Exception):
-            from heaven.devsecops.vuln_kb import cvss_vector_for as _vec_for
-            s = _cvss.base_score_from_vector(_vec_for(vt))
-            if s > 0:
-                return f"{s:.1f}"
-        # 4. compute from the finding's own vector (may be a severity fallback)
-        vec = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
-        s = _cvss.base_score_from_vector(vec)
+        # 1-4. the one authoritative per-finding resolver (published CVE/NVD/OSV
+        # score → KB class typical → class-vector base score → the finding's own
+        # vector) — genuinely per-finding, never a flat per-severity constant.
+        s = _cvss.objective_base_score(f)
         if s > 0:
             return f"{s:.1f}"
         # 5. the ML-predicted score (severity-anchored) — a number beats nothing
-        v = _num("predicted_cvss_score")
-        return f"{v:.1f}" if v is not None else "—"
+        ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+        for src in (f, ev):
+            try:
+                v = float(src.get("predicted_cvss_score"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if 0.0 < v <= 10.0:
+                return f"{v:.1f}"
+        return "—"
 
     @staticmethod
     def _steps_html(text: Any) -> str:

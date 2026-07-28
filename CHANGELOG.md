@@ -90,6 +90,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Severity and CVSS can no longer contradict each other (no more "CVSS 8.1 /
+  Low", or a "Critical" badge beside a 7.5 score).** A finding shows two views of
+  its risk side by side — the qualitative severity the detector assigned and the
+  numeric CVSS resolved for its class — and the two could drift apart. A single
+  shared reconciler (`heaven/utils/cvss.py::reconcile_severity`, applied at the
+  `vuln_kb.enrich_finding` chokepoint every report/export/API path flows through)
+  now keeps them in the same band, honestly and without ever inventing a number:
+  a **weak, unconfirmed detection** ("possible … indicator", low confidence) has
+  its inherited *confirmed-class* base capped down to its own low severity, so a
+  heuristic smuggling indicator reads **Low / 3.9**, not Low / 8.1; a **published
+  CVE score** is authoritative and drives the label up or down (a real Critical is
+  never buried behind a hand-set Low, an over-rated Critical is corrected to its
+  real High); and a confirmed non-CVE posture finding is aligned to its curated
+  class band. To make this correct on **older persisted findings** — a CVE finding
+  that lost its numeric score would otherwise fall back to a generic class number —
+  `enrich_finding` now backfills the **real published CVSS** for any CVE in the
+  bundled inline DB (`cve_mapper.published_cvss_for`, offline), so a stale Critical
+  is never demoted to its class fallback and its severity matches the true per-CVE
+  score. Regression-locked in `tests/test_per_finding_cvss.py`.
+
+- **Report tables no longer overflow the page horizontally.** Wide tables (the
+  Findings Summary with long target URLs, the coverage matrices) pushed the whole
+  page sideways in the HTML report and its in-app viewer. Every table is now
+  wrapped in a horizontally-scrollable box (`.tablewrap`) and long cell content is
+  allowed to break, so a wide table scrolls inside its own frame and the page body
+  never scrolls sideways — across HTML, PDF (already wrapping via reportlab
+  `Paragraph` cells) and Markdown.
+
+- **DNSSEC "not configured" no longer reported twice.** The DNS-recon task emitted
+  `dnssec_not_enabled` (medium) while the email-posture check emitted
+  `dnssec_missing` (low) for the same domain — same issue, different `vuln_type`,
+  so the content-hash dedup never collapsed them. Both now emit `dnssec_missing`
+  at a consistent **medium** severity (matching the class's CVSS base), so a full
+  scan records one DNSSEC finding, not two.
+
 - **DNS enumeration now actually appears after a normal scan — not only after the
   standalone `heaven dns` command.** Scanning a hostname (`heaven scan --target
   example.com`, or the web launcher) produced an empty DNS section everywhere.

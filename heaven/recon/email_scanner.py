@@ -298,7 +298,7 @@ class EmailSecurityScanner:
             logger.debug(f"DNSSEC check failed for {domain}: {e}")
             return
         self._findings.append(EmailFinding(
-            target=domain, vuln_type="dnssec_missing", severity="low",
+            target=domain, vuln_type="dnssec_missing", severity="medium",
             title=f"DNSSEC not enabled: {domain}",
             description="No DNSKEY records — the zone is not DNSSEC-signed, so DNS "
                         "responses (incl. MX) can be spoofed via cache poisoning.",

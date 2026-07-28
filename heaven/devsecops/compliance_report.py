@@ -25,6 +25,7 @@ never break the layout or inject markup into the deliverable.
 from __future__ import annotations
 
 import html
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -84,6 +85,15 @@ def _esc(value: Any) -> str:
 def _sev_of(f: dict) -> str:
     s = (f.get("severity") or "info").lower()
     return s if s in SEVERITY_META else "info"
+
+
+def _wrap_tables(body: str) -> str:
+    """Put every ``<table>`` in a horizontally-scrollable ``.tablewrap`` box so a
+    wide table scrolls inside its own frame instead of forcing the whole report
+    page to scroll sideways. Idempotent for our own output (nothing is
+    pre-wrapped), and it leaves the table markup itself untouched."""
+    body = re.sub(r"<table(\b[^>]*)>", r'<div class="tablewrap"><table\1>', body)
+    return body.replace("</table>", "</table></div>")
 
 
 class ComplianceReportGenerator:
@@ -274,13 +284,18 @@ class ComplianceReportGenerator:
             self._appendix(),
             self._footer(),
         ]
+        # Wrap every table in a horizontally-scrollable box so a wide table (long
+        # target URLs, the coverage matrices) scrolls inside its own frame rather
+        # than pushing the whole page sideways. One central pass covers every
+        # section — Findings Summary, coverage matrices, inventory, DNS, meta.
+        body = _wrap_tables("".join(sections[1:]))
         html_doc = (
             "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             f"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
             f"<title>Penetration Test Report — {_esc(eng)}</title>"
             + sections[0]
             + "</head><body>"
-            + "".join(sections[1:])
+            + body
             + "</body></html>"
         )
         if output_path:
@@ -309,10 +324,15 @@ class ComplianceReportGenerator:
         h2{font-size:20px;margin:0 0 16px;padding-bottom:8px;border-bottom:2px solid var(--brand);}
         h3{font-size:15px;margin:22px 0 6px;}
         p{margin:0 0 12px;} a{color:var(--brand);}
+        /* Any wide table scrolls WITHIN its own box instead of spilling past the
+           page — the report body never scrolls sideways. */
+        .tablewrap{overflow-x:auto;max-width:100%;margin:8px 0 4px;-webkit-overflow-scrolling:touch;}
+        .tablewrap>table{margin:0;}
         table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 4px;}
         th{background:#f0f3f8;text-align:left;padding:8px 10px;border:1px solid var(--line);
-           font-weight:600;color:#33405a;}
-        td{padding:8px 10px;border:1px solid var(--line);vertical-align:top;}
+           font-weight:600;color:#33405a;overflow-wrap:anywhere;word-break:break-word;}
+        td{padding:8px 10px;border:1px solid var(--line);vertical-align:top;
+           overflow-wrap:anywhere;word-break:break-word;}
         .muted{color:var(--muted);} .small{font-size:12px;}
         .pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;
               font-weight:700;color:#fff;letter-spacing:.02em;}
@@ -657,10 +677,12 @@ class ComplianceReportGenerator:
                      f'<td class="small">{_esc(f.get("target") or "—")}</td>'
                      f'<td class="small">{_esc((f.get("status") or "open").title())}</td></tr>')
         return f"""<div class="page section" id="summary"><h2>Findings Summary</h2>
-          <p class="muted small">The <b>CVSS</b> column is the standards base score (a property of
-          the weakness class). <b>Contextual</b> is the per-finding CVSS Temporal + Environmental
-          score, adjusted for this finding's exploit maturity (EPSS / public exploit / CISA KEV),
-          detection confidence and the asset's criticality &amp; exposure.</p>
+          <p class="muted small">The <b>CVSS</b> column is the standards base score for the
+          finding's weakness class — reduced for a detection the scanner flags as unconfirmed or
+          low-confidence, so it never over-states a heuristic "indicator". <b>Contextual</b> is the
+          per-finding CVSS Temporal + Environmental score, adjusted for this finding's exploit
+          maturity (EPSS / public exploit / CISA KEV), detection confidence and the asset's
+          criticality &amp; exposure. Severity always matches the score band.</p>
           <table>
             <tr><th style="width:40px">#</th><th>Finding</th><th style="width:90px">Severity</th>
                 <th style="width:56px">CVSS</th><th style="width:74px">Contextual</th>

@@ -18,6 +18,7 @@ Keys are normalised: lowercased, non-alphanumerics collapsed to ``_``. So
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -3103,4 +3104,26 @@ def enrich_finding(finding: dict) -> dict:
                 (finding.get("severity") or "").lower(), 0.0
             )
         out["typical_cvss"] = typical
+
+    # Backfill the REAL published CVSS for a finding that carries a CVE id but
+    # lost its numeric score (e.g. data persisted before per-finding CVSS wiring),
+    # so its severity band and CVSS column agree on the true per-CVE number rather
+    # than a generic class fallback. Offline (bundled inline CVE DB), so a stale
+    # Critical CVE is never demoted to its class base by the reconciler below.
+    from heaven.utils.cvss import _finding_float, reconcile_severity
+    if _finding_float(out, ("cvss_base", "cvss_base_score", "cvss_score", "cvss")) is None:
+        cve = out.get("cve") or out.get("cve_id") or ev.get("cve")
+        with contextlib.suppress(Exception):  # inline DB optional
+            from heaven.vulnscan.cve_mapper import published_cvss_for
+            pub = published_cvss_for(cve)
+            if pub:
+                out["cvss_base"] = pub
+                ev["cvss_base"] = pub
+                out["evidence"] = ev
+
+    # Keep the finding's qualitative severity and its resolved CVSS base score in
+    # the same band, so no surface ever shows a contradiction like "CVSS 8.1 /
+    # Low". An unconfirmed 'indicator' has its inherited class base capped to its
+    # (low) severity; a published CVE score drives the label. One shared resolver.
+    reconcile_severity(out)
     return out

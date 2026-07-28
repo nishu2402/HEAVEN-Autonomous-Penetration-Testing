@@ -465,7 +465,16 @@ def _risk_value(finding: dict) -> float:
                 return round(float(v), 1)
         except (TypeError, ValueError):
             continue
-    return 0.0
+    # No ML score present — fall back to the finding's genuinely per-finding
+    # CONTEXTUAL CVSS (base adjusted for exploit maturity from EPSS/KEV/exploit
+    # and the detector's confidence), so the risk/priority column is dynamic per
+    # finding rather than a flat per-class constant. Degrades to the plain base
+    # score when the finding carries no such signals.
+    from heaven.utils.cvss import contextual_score, objective_base_score
+    s = contextual_score(finding)
+    if s <= 0:
+        s = objective_base_score(finding)
+    return round(s, 1) if s > 0 else 0.0
 
 
 def _cve_id_of(finding: dict) -> str:
@@ -1237,6 +1246,23 @@ class EngagementStore:
             for ck in ("product", "version", "cwe", "exploit_available"):
                 if ck not in evidence and finding.get(ck):
                     evidence[ck] = finding[ck]
+            # Preserve the real, published per-finding CVSS base score + vector.
+            # The findings table has no cvss column, so without this every CVE
+            # finding loses its true score (8.1, 9.8, 5.9, …) and the report/UI
+            # collapse them ALL onto the vulnerable_component class "typical"
+            # constant (7.5) — the "every Critical shows 7.5" bug. evidence is the
+            # round-trip-safe channel objective_base_score already reads first.
+            if "cvss_base" not in evidence:
+                for sk in ("cvss_base", "cvss_score", "cvss"):
+                    try:
+                        fv = float(finding.get(sk))  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        continue
+                    if 0.0 < fv <= 10.0:
+                        evidence["cvss_base"] = round(fv, 1)
+                        break
+            if finding.get("cvss_vector") and "cvss_vector" not in evidence:
+                evidence["cvss_vector"] = finding["cvss_vector"]
             evidence_json = json.dumps(evidence)
             risk_score = _risk_value(finding)
             confidence = float(finding.get("confidence", 0.0) or 0.0)

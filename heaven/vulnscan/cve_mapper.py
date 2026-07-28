@@ -10,9 +10,39 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from heaven.utils.cvss import severity_from_score
 from heaven.utils.logger import get_logger
 
 logger = get_logger("vulnscan.mapper")
+
+
+def _score_and_severity(cvss: Any, fallback_sev: str) -> tuple[float, str]:
+    """Normalise a CVE record's score + severity so they never disagree.
+
+    Returns ``(rounded_base_score, band)`` to store on the finding. Two things
+    matter for a genuinely per-finding CVSS in the report/UI:
+
+    * the real base score is emitted under the canonical ``cvss_base`` key, so
+      the ML scorer (``feature_engine``) and the report resolver
+      (``utils.cvss.objective_base_score``) read the SAME real number instead
+      of collapsing every ``vulnerable_service`` finding onto the KB class
+      "typical" constant (7.5);
+    * the severity *band* follows that objective score — a curated DB sometimes
+      labels an 8.1 as "critical" when the CVSS band is "high", which shows up
+      in the report as an inconsistent "Critical / 8.1" row. Deriving the band
+      from the score keeps the two columns consistent.
+
+    When no usable score is present (0 / out of range) the caller's curated
+    severity is kept and the base score is 0.0 (the resolver then falls back to
+    the class taxonomy exactly as before).
+    """
+    try:
+        c = float(cvss)
+    except (TypeError, ValueError):
+        c = 0.0
+    if 0.0 < c <= 10.0:
+        return round(c, 1), severity_from_score(c)
+    return 0.0, fallback_sev
 
 # ── CPE vendor/product table ──
 
@@ -810,6 +840,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                         product_key, "", version_str)
                     host_name = host.get("host", "unknown")
                     for lc in live_hits:
+                        lc_score, lc_sev = _score_and_severity(lc.cvss, lc.severity)
                         all_vulns.append({
                             "host": host_name,
                             "port": port_info.get("port", 0),
@@ -818,7 +849,10 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                             # dynamically-discovered CVE never lands uncategorised.
                             "vuln_type": "vulnerable_service",
                             "cve": lc.cve_id, "title": lc.title,
-                            "severity": lc.severity, "cvss": lc.cvss,
+                            # cvss_base is the canonical per-finding score the ML
+                            # scorer + report resolver read; severity follows it.
+                            "severity": lc_sev, "cvss": lc.cvss,
+                            "cvss_base": lc_score,
                             "cvss_vector": lc.cvss_vector,
                             "cwe": lc.cwe, "product": product_key,
                             "version": version_str,
@@ -834,6 +868,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                     logger.debug("live CVE feed error for %s: %s", product_key, e)
 
             for cve_rec in inline_cves:
+                rec_score, rec_sev = _score_and_severity(cve_rec.cvss, cve_rec.severity)
                 all_vulns.append({
                     "host":             host.get("host", "unknown"),
                     "port":             port_info.get("port", 0),
@@ -844,8 +879,11 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                     "vuln_type":        "vulnerable_service",
                     "cve":              cve_rec.cve_id,
                     "title":            cve_rec.title,
-                    "severity":         cve_rec.severity,
+                    # Severity follows the objective CVSS band; cvss_base carries
+                    # the real per-CVE score end-to-end (ML + report resolver).
+                    "severity":         rec_sev,
                     "cvss":             cve_rec.cvss,
+                    "cvss_base":        rec_score,
                     "cwe":              cve_rec.cwe,
                     "product":          product_key,
                     "version":          version_str,
@@ -861,6 +899,8 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                     try:
                         cves = await nvd_client.search_by_cpe(cpe_match.cpe)
                         for cve in cves:
+                            nvd_score, nvd_sev = _score_and_severity(
+                                cve.cvss_base, cve.severity)
                             all_vulns.append({
                                 "host":             host.get("host", "unknown"),
                                 "port":             port_info.get("port", 0),
@@ -869,8 +909,9 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                                 "vuln_type":        "vulnerable_service",
                                 "cve":              cve.cve_id,
                                 "title":            cve.title,
-                                "severity":         cve.severity,
+                                "severity":         nvd_sev,
                                 "cvss":             cve.cvss_base,
+                                "cvss_base":        nvd_score,
                                 "cpe":              cpe_match.cpe,
                                 "cpe_confidence":   cpe_match.confidence,
                                 "source":           "nvd",

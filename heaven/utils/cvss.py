@@ -198,3 +198,229 @@ def objective_base_score(finding: dict[str, Any]) -> float:
     vec = str(finding.get("cvss_vector") or ev.get("cvss_vector") or "")
     s = base_score_from_vector(vec)
     return s if s > 0 else 0.0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Contextual (Temporal + Environmental) scoring — genuinely per-finding.
+#
+# The *base* score above is a property of the weakness class (CVSS's own
+# definition), so two findings of the same class share it. CVSS also defines
+# Temporal and Environmental metric groups whose whole purpose is to adjust the
+# base for a *specific* finding on a *specific* asset — this is the number
+# Tenable/Qualys/Rapid7 surface as their per-asset score. HEAVEN already
+# collects the exact real signals those metrics require:
+#
+#   • Exploit Code Maturity (E)  ← EPSS probability / public-exploit / CISA KEV
+#   • Report Confidence   (RC)   ← the detector's own confidence in the finding
+#   • Security Requirements (CR/IR/AR) ← the asset's criticality tag
+#   • Modified Attack Vector (MAV)     ← whether the target is internet-facing
+#
+# so the contextual score is standards-based and non-fabricated: it varies
+# because the *evidence* varies, not because of any random jitter. When a
+# finding carries no such signals it degrades exactly to its base score.
+# ──────────────────────────────────────────────────────────────────────────
+
+# CVSS v3.1 Security-Requirement weights (spec §7.4): Low 0.5 / Medium 1.0 /
+# High 1.5. HEAVEN's asset-criticality tags map onto them (crown_jewel == High,
+# the spec's ceiling).
+_SR_WEIGHT = {"low": 0.5, "medium": 1.0, "high": 1.5, "crown_jewel": 1.5}
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _num(src: Any, key: str) -> Optional[float]:
+    try:
+        return float(src.get(key))  # type: ignore[union-attr]
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _finding_and_evidence_num(finding: dict, keys: tuple[str, ...]) -> Optional[float]:
+    """First numeric value found under ``keys`` on the finding or its evidence."""
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    for src in (finding, ev):
+        for k in keys:
+            v = _num(src, k)
+            if v is not None:
+                return v
+    return None
+
+
+def _finding_flag(finding: dict, keys: tuple[str, ...]) -> bool:
+    """True when any truthy value exists under ``keys`` on finding/evidence."""
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    for src in (finding, ev):
+        for k in keys:
+            v = src.get(k) if isinstance(src, dict) else None
+            if isinstance(v, str):
+                if v.strip().lower() in {"true", "1", "yes", "y", "available"}:
+                    return True
+            elif v:
+                return True
+    return False
+
+
+def _report_confidence_coeff(finding: dict) -> float:
+    """CVSS Report-Confidence coefficient from the detector's confidence.
+
+    Interpolated continuously inside the spec band [Unknown 0.92 … Confirmed
+    1.00]. A finding with no (or zero) recorded confidence is treated as
+    "Not Defined" (1.0) so it is never penalised for missing data.
+    """
+    c = _finding_and_evidence_num(finding, ("confidence",))
+    if c is None or c <= 0.0:
+        return 1.0
+    return round(0.92 + 0.08 * _clamp(c, 0.0, 1.0), 4)
+
+
+def _exploit_maturity_coeff(finding: dict) -> float:
+    """CVSS Exploit-Code-Maturity coefficient from real threat intel.
+
+    CISA-KEV (actively exploited) → 1.0 (High); a public exploit → ≥0.97
+    (Functional); otherwise interpolated from the EPSS probability inside the
+    spec band [Unproven 0.91 … High 1.0]. With no exploit intel at all the
+    metric is "Not Defined" (1.0).
+    """
+    if _finding_flag(finding, ("in_kev", "kev", "cisa_kev")):
+        return 1.0
+    epss = _finding_and_evidence_num(finding, ("epss", "epss_score"))
+    has_exploit = _finding_flag(finding, ("exploit_available", "exploit_db", "metasploit"))
+    if epss is None and not has_exploit:
+        return 1.0
+    coeff = 0.91
+    if epss is not None:
+        coeff = max(coeff, 0.91 + 0.09 * _clamp(epss, 0.0, 1.0))
+    if has_exploit:
+        coeff = max(coeff, 0.97)
+    return round(min(coeff, 1.0), 4)
+
+
+def _finding_criticality(finding: dict) -> str:
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    for src in (finding, ev):
+        if isinstance(src, dict):
+            c = src.get("criticality") or src.get("asset_criticality")
+            if c:
+                return str(c)
+    return "medium"
+
+
+def _anchor_vector(finding: dict) -> Optional[str]:
+    """The CVSS base vector to anchor the environmental recompute on.
+
+    Prefer the finding's own (published) vector; otherwise the curated class
+    vector from the KB. Returns ``None`` when neither scores.
+    """
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    own = str(finding.get("cvss_vector") or ev.get("cvss_vector") or "")
+    if own and base_score_from_vector(own) > 0:
+        return own
+    vt = str(finding.get("vuln_type") or finding.get("type") or "")
+    with contextlib.suppress(Exception):  # KB optional
+        from heaven.devsecops.vuln_kb import cvss_vector_for as _vec_for
+        v = _vec_for(vt)
+        if v and base_score_from_vector(v) > 0:
+            return v
+    return None
+
+
+def _mav_override(exposure: Optional[str]) -> Optional[str]:
+    """Modified Attack Vector from network exposure.
+
+    An internal / private-network-only target is not reachable from the
+    internet, so a Network-vector weakness is genuinely harder to reach →
+    downgrade Modified Attack Vector to Adjacent. Internet-facing keeps Network.
+    """
+    if (exposure or "").strip().lower() in ("internal", "private", "lan", "rfc1918"):
+        return "A"
+    return None
+
+
+def _environmental_modified_base(
+    vector: str, sr: float, mav_override: Optional[str] = None,
+) -> Optional[float]:
+    """CVSS v3.1 Environmental *modified base* (before temporal), spec §7.3.
+
+    Uses the base metrics as the modified metrics (except an optional MAV
+    override) and applies the Security-Requirement weight ``sr`` to C/I/A.
+    Returns ``None`` when the vector lacks the required base metrics.
+    """
+    m = parse_vector(vector)
+    required = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
+    if not all(k in m for k in required):
+        return None
+    scope_changed = m["S"] == "C"
+    try:
+        mav = _AV[mav_override or m["AV"]]
+        mac = _AC[m["AC"]]
+        mpr = _PR[m["PR"]][1 if scope_changed else 0]
+        mui = _UI[m["UI"]]
+        mc, mi, ma = _CIA[m["C"]], _CIA[m["I"]], _CIA[m["A"]]
+    except KeyError:
+        return None
+
+    isc_mod = min(1 - (1 - mc * sr) * (1 - mi * sr) * (1 - ma * sr), 0.915)
+    if isc_mod <= 0:
+        return 0.0
+    if scope_changed:
+        m_impact = 7.52 * (isc_mod - 0.029) - 3.25 * (isc_mod * 0.9731 - 0.02) ** 13
+    else:
+        m_impact = 6.42 * isc_mod
+    if m_impact <= 0:
+        return 0.0
+
+    m_exploit = 8.22 * mav * mac * mpr * mui
+    raw = m_impact + m_exploit
+    if scope_changed:
+        raw *= 1.08
+    return _roundup(min(raw, 10.0))
+
+
+def contextual_score(
+    finding: dict[str, Any],
+    *,
+    criticality: Optional[str] = None,
+    exposure: Optional[str] = None,
+) -> float:
+    """Genuinely per-finding CVSS **contextual** score (0.0–10.0), 1 d.p.
+
+    Starts from the finding's real base score (:func:`objective_base_score`) and
+    adjusts it with the CVSS Temporal + Environmental metric groups, driven by
+    real per-finding signals: Exploit Code Maturity (EPSS / public-exploit /
+    KEV), Report Confidence (the detector's confidence), and the asset's
+    Security Requirements (criticality) + Modified Attack Vector (exposure).
+
+    Because those signals vary from finding to finding, the returned number is
+    genuinely dynamic — two findings of the *same class* differ when their
+    evidence differs. When a finding carries none of these signals the score
+    degrades exactly to its base score (never a fabricated jitter). Returns
+    ``0.0`` only when the base itself is unscoreable.
+    """
+    base = objective_base_score(finding)
+    if base <= 0:
+        return 0.0
+
+    e = _exploit_maturity_coeff(finding)
+    rc = _report_confidence_coeff(finding)
+    rl = 1.0  # Remediation Level: "Not Defined" — no reliable per-finding signal.
+
+    # Environmental adjustment, expressed as a ratio derived from a faithful
+    # CVSS v3.1 environmental recompute on the finding's anchor vector, so the
+    # number stays pinned to the finding's real base score.
+    crit = criticality or _finding_criticality(finding)
+    sr = _SR_WEIGHT.get((crit or "medium").strip().lower(), 1.0)
+    mav = _mav_override(exposure)
+    ratio = 1.0
+    if sr != 1.0 or mav is not None:
+        vec = _anchor_vector(finding)
+        if vec:
+            plain = base_score_from_vector(vec)
+            env = _environmental_modified_base(vec, sr, mav)
+            if plain and plain > 0 and env is not None and env > 0:
+                ratio = env / plain
+
+    modified_base = min(10.0, base * ratio)
+    score = _roundup(modified_base * e * rl * rc)
+    return min(round(score, 1), 10.0)

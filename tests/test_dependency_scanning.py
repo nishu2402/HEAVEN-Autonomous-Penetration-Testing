@@ -96,9 +96,21 @@ def test_ml_features_vary_by_class_not_flat_per_severity():
 
 def test_ml_predicted_cvss_spreads_within_a_severity_band():
     """The reported bug: every 'high' finding predicted the same CVSS. They must
-    now span a genuine range driven by their real class vectors."""
+    now span a genuine range driven by their real class vectors.
+
+    This asserts on the *model's* output, so it needs the trained NVD regressor
+    (data/models/NVD_model.pkl, ~50 MB). That file is intentionally gitignored and
+    fetched with `heaven download-model`, so a fresh checkout and CI don't have it
+    — there ``predict_cvss_score`` returns a constant fallback by design, and
+    asserting a spread would be asserting model behaviour that legitimately can't
+    exist. Skip in that case. The class-vector spread that actually fixed the bug
+    is guarded model-free by ``test_ml_features_vary_by_class_not_flat_per_severity``
+    above, which runs everywhere.
+    """
     from heaven.ml.risk_model import get_model, _extract_nvd_features
     model = get_model()
+    if not model.get_metrics().get("regression_mode"):
+        pytest.skip("trained NVD model not present (run `heaven download-model`)")
     classes = ["sql_injection", "reflected_xss", "ssrf", "open_redirect",
                "idor", "clickjacking", "command_injection"]
     preds = {

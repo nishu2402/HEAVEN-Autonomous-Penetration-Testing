@@ -90,6 +90,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CI unit tests (Python 3.11 / 3.12) are green again.** The regression test that
+  asserts the ML model spreads predicted CVSS across a genuine range
+  (`test_ml_predicted_cvss_spreads_within_a_severity_band`) requires the trained
+  NVD regressor (`data/models/NVD_model.pkl`), which is intentionally gitignored
+  and fetched with `heaven download-model` — so it is absent on a fresh checkout
+  and in CI, where `predict_cvss_score` returns a constant fallback by design. The
+  test now **skips** when the model isn't loaded instead of failing, matching how
+  the suite already treats other optional artifacts. The class-vector spread that
+  the test guards is still asserted model-free by
+  `test_ml_features_vary_by_class_not_flat_per_severity`, which runs everywhere.
+
 - **Severity and CVSS can no longer contradict each other (no more "CVSS 8.1 /
   Low", or a "Critical" badge beside a 7.5 score).** A finding shows two views of
   its risk side by side — the qualitative severity the detector assigned and the

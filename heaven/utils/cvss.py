@@ -424,3 +424,115 @@ def contextual_score(
     modified_base = min(10.0, base * ratio)
     score = _roundup(modified_base * e * rl * rc)
     return min(round(score, 1), 10.0)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Severity ⇄ score reconciliation.
+#
+# A finding carries two views of its risk that a reader sees side by side: the
+# qualitative *severity* the detector assigned, and the numeric *CVSS base
+# score* resolved for its class. When these disagree — e.g. a "Low" badge next
+# to a CVSS of 8.1 — the report looks broken. This reconciler keeps the two in
+# the same qualitative band, honestly and in one place, so no surface can drift.
+# ──────────────────────────────────────────────────────────────────────────
+
+# Ordered most-severe-last so a numeric comparison expresses "more severe".
+_SEV_RANK = {"info": 0, "none": 0, "low": 1, "medium": 2, "moderate": 2,
+             "high": 3, "critical": 4}
+
+# The representative in-band score used when an *unconfirmed* detection's class
+# base over-states it: the top of the qualitative band, so the number is pulled
+# down to match the badge without under-claiming inside that band.
+_BAND_CEILING = {"critical": 9.9, "high": 8.9, "medium": 6.9, "low": 3.9,
+                 "info": 0.0, "none": 0.0}
+
+# Words a detector uses when it is flagging a *weak, unconfirmed* signal rather
+# than a proven vulnerability. Such a finding must NOT inherit the confirmed
+# weakness class's high base score (an "indicator" is not the real thing).
+_UNCONFIRMED_MARKERS = (
+    "indicator", "possible", "potential", "suspected", "unconfirmed",
+    "heuristic", "likely", "presumed", "maybe",
+)
+
+
+def is_unconfirmed_finding(finding: dict[str, Any]) -> bool:
+    """True when the detector itself signals this is a weak / unconfirmed
+    detection — a heuristic 'indicator / possible / potential' finding, or an
+    explicit low confidence with no authoritative CVE backing it. These must not
+    be scored as if the confirmed weakness class were proven present."""
+    hay = " ".join(str(finding.get(k) or "") for k in ("vuln_type", "type", "title")).lower()
+    if any(m in hay for m in _UNCONFIRMED_MARKERS):
+        return True
+    conf = _finding_and_evidence_num(finding, ("confidence",))
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    has_cve = bool(finding.get("cve") or finding.get("cve_id") or ev.get("cve"))
+    return conf is not None and 0.0 < conf < 0.5 and not has_cve
+
+
+def _has_published_score(finding: dict[str, Any]) -> bool:
+    """Whether the finding carries a real, published base score (CVE / NVD /
+    OSV) — the authoritative number that should drive the severity band."""
+    return _finding_float(
+        finding, ("cvss_base", "cvss_base_score", "cvss_score", "cvss")
+    ) is not None
+
+
+def reconcile_severity(finding: dict[str, Any]) -> dict[str, Any]:
+    """Keep a finding's qualitative ``severity`` and its resolved CVSS base score
+    in the *same* band, so a report never shows "CVSS 8.1 / Low". Mutates and
+    returns the finding. Two honest directions, never a fabricated number:
+
+      • a **published** base score (CVE / NVD / OSV) is authoritative → the
+        severity label is aligned to it (a real Critical is never buried behind a
+        hand-set Low, and a label is never inflated above the published score);
+
+      • an **unconfirmed / low-confidence** detection whose class base
+        over-states it → the *effective* base is capped down to the detector's
+        (lower) severity band, because an "indicator" does not warrant the
+        confirmed class's score. The badge stays as the detector intended and the
+        CVSS / Contextual columns now agree with it.
+
+    A confirmed finding whose class base is *more* severe than a hand-set label
+    has its label raised to match (the class genuinely warrants it); a
+    confirmed finding is never silently *downgraded* off a KB estimate alone.
+    """
+    base = objective_base_score(finding)
+    if base <= 0:
+        return finding
+    label = str(finding.get("severity") or "").strip().lower()
+    score_band = severity_from_score(base)
+
+    # Unconfirmed / weak signal: cap the class base to the label's band so the
+    # numbers match the deliberately-low badge (anti-over-claim).
+    if is_unconfirmed_finding(finding):
+        ceiling = _BAND_CEILING.get(label)
+        if ceiling is not None and base > ceiling:
+            finding["cvss_base"] = ceiling
+            ev = finding.get("evidence")
+            if isinstance(ev, dict):
+                ev["cvss_base"] = ceiling
+            finding["typical_cvss"] = ceiling
+        return finding
+
+    # Published, authoritative score (incl. a real per-CVE score backfilled from
+    # the bundled DB) → the label follows the standard number, up or down.
+    if _has_published_score(finding):
+        if label != score_band:
+            finding["severity"] = score_band
+        return finding
+
+    # KB-estimate base on a confirmed finding. A finding still carrying a CVE id
+    # but no resolvable published score might be a real Critical we can't score
+    # offline — so only *raise* it, never demote off an estimate. A finding with
+    # NO CVE is a class / posture finding whose curated class base *is* its
+    # authoritative severity, so align it in both directions.
+    if label not in _SEV_RANK:
+        return finding
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    has_cve = bool(finding.get("cve") or finding.get("cve_id") or ev.get("cve"))
+    if has_cve:
+        if _SEV_RANK[score_band] > _SEV_RANK[label]:
+            finding["severity"] = score_band
+    elif label != score_band:
+        finding["severity"] = score_band
+    return finding

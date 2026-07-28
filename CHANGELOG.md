@@ -90,6 +90,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CI "Check README test count is in sync" no longer fails — and now can't drift
+  again.** After the previous test-skip fix, `pytest` itself passed on both
+  Python versions, but the 3.12-only docs-sync step (`scripts/sync_test_count.py
+  --check`) still failed: the recent feature commits added tests (**1352 → 1358**)
+  without re-running the sync script, so the decorative count printed in
+  `README.md` (poster alt-text, Project Summary, Project Structure listing,
+  footer) had gone stale. The counts are re-synced to the real values
+  (tests = 1358, modules = 159). To stop this recurring, a **`.githooks/pre-commit`
+  guard** (wired via `core.hooksPath`) now re-syncs and re-stages `README.md`
+  automatically on every commit, so the printed count can never fall out of step
+  with the suite — CI stays green by construction. Fresh clones enable it with
+  `git config core.hooksPath .githooks`.
+
 - **CI unit tests (Python 3.11 / 3.12) are green again.** The regression test that
   asserts the ML model spreads predicted CVSS across a genuine range
   (`test_ml_predicted_cvss_spreads_within_a_severity_band`) requires the trained

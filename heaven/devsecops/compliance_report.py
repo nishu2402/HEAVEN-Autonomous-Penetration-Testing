@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from heaven.devsecops import frameworks as _fw
+from heaven.devsecops.dns_inventory import dns_totals as _dns_totals
+from heaven.devsecops.dns_inventory import normalize_dns as _normalize_dns
 from heaven.devsecops.inventory import inventory_totals as _inventory_totals
 from heaven.devsecops.inventory import normalize_assets as _normalize_assets
 
@@ -206,7 +208,8 @@ class ComplianceReportGenerator:
                              engagement_name: str = "",
                              output_path: Optional[Path] = None,
                              meta: Optional[dict] = None,
-                             assets: Optional[list[dict]] = None) -> str:
+                             assets: Optional[list[dict]] = None,
+                             dns_records: Optional[list[dict]] = None) -> str:
         """Render the full professional report as one HTML string.
 
         `meta` (all optional) may carry: client, assessor, period, version,
@@ -238,6 +241,7 @@ class ComplianceReportGenerator:
         assessor = meta.get("assessor") or "HEAVEN Autonomous Penetration-Testing Platform"
 
         inventory = _normalize_assets(assets) if assets else []
+        dns_inv = _normalize_dns(dns_records) if dns_records else []
         has_api = self.has_api_findings(findings)
         has_iot = self.has_iot_findings(findings)
         has_ot = self.has_ot_findings(findings)
@@ -247,10 +251,11 @@ class ComplianceReportGenerator:
             self._cover(eng, overall, counts, len(findings), len(scope), generated, version),
             self._confidentiality(eng),
             self._doc_control(eng, assessor, version, generated, len(scope), len(findings), overall),
-            self._toc(bool(inventory), has_api, has_iot, has_ot),
+            self._toc(bool(inventory), has_api, has_iot, has_ot, bool(dns_inv)),
             self._exec_summary(eng, counts, len(findings), overall, ordered, len(scope)),
             self._scope_methodology(scope),
             self._inventory(inventory),
+            self._dns_enumeration(dns_inv),
             self._risk_methodology(),
             self._findings_summary(ordered),
             self._detailed_findings(ordered),
@@ -419,13 +424,16 @@ class ComplianceReportGenerator:
 
     @staticmethod
     def _toc(has_inventory: bool = False, has_api: bool = False,
-             has_iot: bool = False, has_ot: bool = False) -> str:
+             has_iot: bool = False, has_ot: bool = False,
+             has_dns: bool = False) -> str:
         items = [
             ("exec", "Executive Summary"),
             ("scope", "Scope & Methodology"),
         ]
         if has_inventory:
             items.append(("inventory", "Host & Service Inventory"))
+        if has_dns:
+            items.append(("dns", "DNS Enumeration"))
         items += [
             ("risk", "Risk Rating Methodology"),
             ("summary", "Findings Summary"),
@@ -563,6 +571,56 @@ class ComplianceReportGenerator:
           An OS marked <em>(heuristic — unconfirmed)</em> was inferred from a TTL value, not a
           full stack fingerprint, and should be treated as indicative only.</p>
           {''.join(host_blocks)}
+        </div>"""
+
+    @staticmethod
+    def _dns_enumeration(dns_inv: list[dict]) -> str:
+        """DNS enumeration — records + resolved subdomains per domain.
+
+        ``dns_inv`` is already normalised (see dns_inventory.normalize_dns).
+        Renders nothing when empty so non-DNS engagements skip the section.
+        """
+        if not dns_inv:
+            return ""
+        tot = _dns_totals(dns_inv)
+        blocks: list[str] = []
+        for n in dns_inv:
+            recs = n.get("records") or {}
+            rrows = "".join(
+                f'<tr><td class="small">{_esc(rt)}</td><td>{_esc(val)}</td></tr>'
+                for rt in ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA")
+                for val in recs.get(rt, [])
+            )
+            rec_tbl = (f'<table><tr><th style="width:64px">Type</th><th>Record</th></tr>'
+                       f'{rrows}</table>' if rrows
+                       else '<p class="muted small">No records resolved.</p>')
+
+            subs = n.get("subdomains") or []
+            if subs:
+                srows = "".join(
+                    f'<tr><td>{_esc(s.get("name"))}</td>'
+                    f'<td class="small">{_esc(", ".join(s.get("addresses") or []) or "—")}</td></tr>'
+                    for s in subs
+                )
+                sub_tbl = (f'<h4 class="small">Subdomains discovered ({len(subs)})</h4>'
+                           f'<table><tr><th>Subdomain</th><th>Addresses</th></tr>{srows}</table>')
+            else:
+                sub_tbl = ""
+
+            dnssec = "enabled" if (n.get("dnssec") or {}).get("enabled") else "not detected"
+            wild = " · Wildcard DNS present" if n.get("wildcard") else ""
+            blocks.append(
+                f'<h3>{_esc(n.get("domain"))} '
+                f'<span class="muted small">— DNSSEC: {dnssec}{_esc(wild)}</span></h3>'
+                f'{rec_tbl}{sub_tbl}'
+            )
+        return f"""<div class="page section" id="dns"><h2>DNS Enumeration</h2>
+          <p>DNS reconnaissance mapped <strong>{tot['domains']}</strong> domain(s) exposing
+          <strong>{tot['records']}</strong> DNS record(s), <strong>{tot['subdomains']}</strong>
+          resolved subdomain(s) and <strong>{tot['mail_servers']}</strong> mail server(s).
+          Records are reported exactly as returned by authoritative DNS; a subdomain is
+          listed only because it actually resolved.</p>
+          {''.join(blocks)}
         </div>"""
 
     @staticmethod

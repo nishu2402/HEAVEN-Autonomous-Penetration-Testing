@@ -198,10 +198,14 @@ def export(engagement: Optional[str], output: str, fmt: str,
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if fmt == "markdown":
-        from heaven.cli.assets import _collect_engagement_assets
+        from heaven.cli.assets import (
+            _collect_engagement_assets,
+            _collect_engagement_dns,
+        )
         text = export_findings_markdown(finding_dicts,
                                          engagement_name=eng.name if eng else "",
-                                         assets=_collect_engagement_assets(engagement))
+                                         assets=_collect_engagement_assets(engagement),
+                                         dns_records=_collect_engagement_dns(engagement))
         out_path.write_text(text)
     elif fmt == "csv":
         out_path.write_text(export_findings_csv(finding_dicts))
@@ -295,12 +299,16 @@ def report(engagement: Optional[str], output: str, framework: str) -> None:
                       "predicted_cvss_score": f.risk_score,
                       "priority_score": f.risk_score} for f in findings_list]
     eng = store.get_engagement()
-    from heaven.cli.assets import _collect_engagement_assets
+    from heaven.cli.assets import (
+        _collect_engagement_assets,
+        _collect_engagement_dns,
+    )
     gen = ComplianceReportGenerator()
     gen.generate_html_report(finding_dicts,
                               engagement_name=eng.name if eng else "",
                               output_path=Path(output),
-                              assets=_collect_engagement_assets(engagement))
+                              assets=_collect_engagement_assets(engagement),
+                              dns_records=_collect_engagement_dns(engagement))
     _print(f"[green]Report written:[/green] {output} ({len(finding_dicts)} findings)")
     sev: dict[str, int] = {}
     for f in finding_dicts:

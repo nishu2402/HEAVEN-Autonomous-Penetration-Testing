@@ -648,8 +648,163 @@ async def dns_recon(domain: str, enumerate_subdomains: bool = False,
     }
 
 
+# ── DNS Enumeration (records + subdomains) ─────────────────────────────────────
+# A curated brute-force wordlist for genuine subdomain discovery. Only labels that
+# actually resolve are reported — nothing is invented. Kept deliberately focused
+# (common infra / mail / dev / admin surfaces) so a full scan stays bounded.
+_SUBDOMAIN_WORDLIST: tuple[str, ...] = (
+    "www", "www2", "web", "mail", "email", "webmail", "smtp", "smtp2", "pop",
+    "pop3", "imap", "mx", "mx1", "mx2", "ns", "ns1", "ns2", "ns3", "ns4",
+    "dns", "dns1", "dns2", "autodiscover", "autoconfig", "owa", "exchange",
+    "lync", "sip", "voip", "pbx", "ftp", "sftp", "ssh", "rdp", "vpn", "vpn2",
+    "remote", "gateway", "gw", "proxy", "firewall", "router", "citrix",
+    "portal", "admin", "administrator", "adm", "cpanel", "whm", "webdisk",
+    "plesk", "dashboard", "manage", "manager", "console", "dev", "development",
+    "staging", "stage", "stg", "test", "testing", "qa", "uat", "sandbox",
+    "demo", "beta", "preprod", "prod", "api", "api2", "apis", "app", "apps",
+    "gateway-api", "graphql", "rest", "ws", "m", "mobile", "blog", "news",
+    "shop", "store", "cart", "checkout", "pay", "payment", "billing",
+    "cdn", "static", "assets", "img", "images", "media", "files", "file",
+    "download", "downloads", "share", "cloud", "nextcloud", "owncloud",
+    "drive", "docs", "wiki", "confluence", "jira", "git", "gitlab", "github",
+    "svn", "jenkins", "ci", "cd", "build", "nexus", "registry", "harbor",
+    "sso", "auth", "login", "id", "identity", "idp", "oauth", "account",
+    "accounts", "ldap", "ad", "dc", "kdc", "radius", "intranet", "internal",
+    "corp", "corporate", "extranet", "helpdesk", "support", "ticket", "desk",
+    "crm", "erp", "hr", "payroll", "finance", "secure", "vault", "secrets",
+    "monitor", "monitoring", "grafana", "kibana", "prometheus", "status",
+    "health", "metrics", "logs", "elk", "splunk", "db", "database", "sql",
+    "mysql", "postgres", "pgsql", "redis", "mongo", "mongodb", "backup",
+    "backups", "old", "new", "legacy", "archive", "temp", "tmp",
+)
+
+
+async def enumerate_dns(domain: str, *, subdomains: bool = True,
+                        wordlist: Optional[list[str]] = None,
+                        max_subdomains: Optional[int] = None,
+                        timeout: float = 5.0) -> dict:
+    """Enumerate a domain's DNS surface — records + resolvable subdomains.
+
+    Returns a structured, deduplicated record view (distinct from
+    :func:`dns_recon`, which returns *security findings*). This is the raw
+    attack-surface data surfaced in the Assets view and reports.
+
+    Args:
+        domain:         Target domain (``example.com``).
+        subdomains:     Brute-force the common-subdomain wordlist (skipped when a
+                        DNS wildcard is present, since every label would resolve).
+        wordlist:       Override the default subdomain wordlist.
+        max_subdomains: Cap the number of labels probed (for quick/CI runs).
+        timeout:        Per-query resolver timeout (seconds).
+
+    Returns:
+        ``{domain, records, a, aaaa, cname, txt, soa, nameservers, mail_servers,
+           subdomains, dnssec, wildcard, resolver, record_count}`` — empty
+        ``records``/``subdomains`` when nothing resolves (e.g. offline), never an
+        exception. All resolution is best-effort and read-only.
+    """
+    domain = (domain or "").strip().rstrip(".").lower()
+    if not domain:
+        return {}
+
+    loop = asyncio.get_running_loop()
+
+    # ── Base record set (A / AAAA / MX / NS / TXT / SOA / CNAME) ──────────────
+    records: dict[str, list[str]] = {}
+    for rtype in ("A", "AAAA", "MX", "NS", "TXT", "SOA", "CNAME"):
+        vals = await loop.run_in_executor(None, _resolve, domain, rtype, None, timeout)
+        if vals:
+            records[rtype] = list(dict.fromkeys(vals))  # preserve order, dedup
+
+    # ── Structured views the UI / report render directly ─────────────────────
+    nameservers = sorted({r.rstrip(".") for r in records.get("NS", []) if r.strip()})
+
+    mail_servers: list[dict] = []
+    seen_mx: set[str] = set()
+    for mx in records.get("MX", []):
+        parts = mx.split()
+        host = parts[-1].rstrip(".") if parts else ""
+        if not host or host in seen_mx:
+            continue
+        prio: Optional[int] = None
+        if len(parts) >= 2 and parts[0].lstrip("-").isdigit():
+            prio = int(parts[0])
+        mail_servers.append({"priority": prio, "host": host})
+        seen_mx.add(host)
+    mail_servers.sort(key=lambda m: (m["priority"] if m["priority"] is not None else 9999,
+                                     m["host"]))
+
+    dnssec = await loop.run_in_executor(None, _check_dnssec, domain)
+    wildcard = await loop.run_in_executor(None, _detect_wildcard, domain)
+
+    # ── Subdomain brute-force (only when a wildcard wouldn't make it bogus) ───
+    subs: list[dict] = []
+    if subdomains and not wildcard:
+        wl = list(wordlist or _SUBDOMAIN_WORDLIST)
+        if max_subdomains is not None:
+            wl = wl[:max_subdomains]
+        sem = asyncio.Semaphore(40)
+
+        async def _probe(label: str) -> Optional[dict]:
+            fqdn = f"{label}.{domain}"
+            async with sem:
+                a = await loop.run_in_executor(None, _resolve, fqdn, "A", None, timeout)
+                aaaa = await loop.run_in_executor(None, _resolve, fqdn, "AAAA", None, timeout)
+            addrs = sorted({*a, *aaaa})
+            if addrs:
+                return {"name": fqdn, "addresses": addrs}
+            return None
+
+        results = await asyncio.gather(*[_probe(lbl) for lbl in wl],
+                                       return_exceptions=True)
+        subs = [r for r in results if isinstance(r, dict)]
+        subs.sort(key=lambda s: s["name"])
+
+    return {
+        "domain": domain,
+        "records": records,
+        "a": records.get("A", []),
+        "aaaa": records.get("AAAA", []),
+        "cname": records.get("CNAME", []),
+        "txt": records.get("TXT", []),
+        "soa": (records.get("SOA") or [""])[0],
+        "nameservers": nameservers,
+        "mail_servers": mail_servers,
+        "subdomains": subs,
+        "dnssec": dnssec,
+        "wildcard": wildcard,
+        "resolver": "dnspython" if HAS_DNSPYTHON else "socket",
+        "record_count": sum(len(v) for v in records.values()),
+    }
+
+
+async def enumerate_dns_targets(domains: list[str], *,
+                                subdomains: bool = True) -> list[dict]:
+    """Enumerate DNS for multiple domains concurrently (deduplicated input)."""
+    sem = asyncio.Semaphore(5)
+    out: list[dict] = []
+
+    async def _one(domain: str) -> None:
+        async with sem:
+            rec = await enumerate_dns(domain, subdomains=subdomains)
+            if rec:
+                out.append(rec)
+
+    await asyncio.gather(*[_one(d) for d in dict.fromkeys(domains)],
+                         return_exceptions=True)
+    out.sort(key=lambda r: r["domain"])
+    return out
+
+
 async def dns_recon_targets(domains: list[str]) -> dict:
-    """Run DNS recon against multiple domains concurrently."""
+    """Run DNS recon + enumeration against multiple domains concurrently.
+
+    Returns both the security ``findings`` (zone transfer, SPF/DMARC, takeover…)
+    and the structured ``dns_records`` enumeration (records + subdomains) that
+    the orchestrator persists into the scan summary for the Assets view and the
+    report's DNS Enumeration section.
+    """
+    uniq = list(dict.fromkeys(domains))
     sem = asyncio.Semaphore(5)
     all_findings: list[dict] = []
 
@@ -658,9 +813,11 @@ async def dns_recon_targets(domains: list[str]) -> dict:
             r = await dns_recon(domain)
             all_findings.extend(r.get("findings", []))
 
-    await asyncio.gather(*[_one(d) for d in domains], return_exceptions=True)
+    await asyncio.gather(*[_one(d) for d in uniq], return_exceptions=True)
+    dns_records = await enumerate_dns_targets(uniq)
     return {
         "total": len(all_findings),
         "findings": all_findings,
         "vulnerabilities": all_findings,
+        "dns_records": dns_records,
     }

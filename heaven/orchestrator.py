@@ -50,6 +50,44 @@ def _registered_domain(host: str) -> Optional[str]:
     return ".".join(parts[-2:])
 
 
+def _scan_domains(targets: dict) -> list[str]:
+    """Registered domain names to run domain-level DNS checks against.
+
+    Domain-level lookups — DNS enumeration (records/subdomains), SPF/DMARC/DKIM,
+    DNSSEC, tenant recon — only make sense against a real domain name. The CLI and
+    API both drop plain hostnames into the ``ips`` bucket (it carries "IPs,
+    hostnames, or CIDRs"), so a scan of ``--target example.com`` used to reach the
+    DNS task with an empty domain list and enumerate nothing. This gathers domains
+    from every source that can carry a hostname — the explicit ``domains`` bucket,
+    URL hosts, and hostnames living in ``ips`` — collapsing each to its registered
+    domain (eTLD+1). IP literals, ``localhost`` and single-label hosts are dropped
+    by :func:`_registered_domain`, so we never fire DNS record lookups at them.
+    """
+    from urllib.parse import urlparse
+
+    out: list[str] = []
+
+    def _add(host: str) -> None:
+        if host and host not in out:
+            out.append(host)
+
+    # Explicit domains are honoured as given (a user who names sub.example.com
+    # wants that zone), only normalised for case / trailing dot.
+    for d in targets.get("domains", []) or []:
+        _add(str(d).strip().rstrip(".").lower())
+    # URL hosts and hostnames in the ips bucket collapse to their registered
+    # domain — that is where MX/NS/SOA/TXT records and the subdomain space live.
+    for u in targets.get("urls", []) or []:
+        reg = _registered_domain(urlparse(str(u)).hostname or "")
+        if reg:
+            _add(reg)
+    for ip in targets.get("ips", []) or []:
+        reg = _registered_domain(str(ip))
+        if reg:
+            _add(reg)
+    return out
+
+
 class TaskState(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -933,7 +971,7 @@ class ScanOrchestrator:
         self.progress.phase = ScanPhase.DONE
         elapsed = self.progress.elapsed_seconds
 
-        all_vulns, all_assets = [], []
+        all_vulns, all_assets, all_dns = [], [], []
         sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
 
         for tid, res in self.results.items():
@@ -950,6 +988,10 @@ class ScanOrchestrator:
             all_vulns.extend(data.get("suppressed_findings", []))
             all_assets.extend(data.get("hosts", []))
             all_assets.extend(data.get("endpoints", []))
+            # DNS enumeration records (from the DNS recon task) — persisted into
+            # the summary so the Assets view and the report's DNS section render
+            # the attack surface's naming layer, not just host/port inventory.
+            all_dns.extend(data.get("dns_records", []))
 
         # One vuln flows through the pipeline as candidate -> validated ->
         # scored, and a single scanner emits it under both "findings" and
@@ -973,6 +1015,7 @@ class ScanOrchestrator:
             "vulnerabilities": all_vulns,
             "findings": all_vulns,
             "assets": all_assets,
+            "dns_records": all_dns,
             **sev_counts,
             "results": {r.task_id: r.state.value for r in all_results},
         }
@@ -1261,14 +1304,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # *identity* surface — tenant existence, managed-vs-federated auth, tenant
     # GUID — that the bucket/metadata checks don't touch. Read-only; CLOUD mode.
     async def _azure_tenant_recon(**kw):
-        from urllib.parse import urlparse
-
         from heaven.recon.azure_tenant import recon_azure_tenants
-        domains: list[str] = list(targets.get("domains", []))
-        for u in targets.get("urls", []):
-            d = _registered_domain(urlparse(u).hostname or "")
-            if d and d not in domains:
-                domains.append(d)
+        domains: list[str] = _scan_domains(targets)
         if not domains:
             return {"skipped": True, "reason": "no domains for Azure tenant recon"}
         return await recon_azure_tenants(domains)
@@ -2124,12 +2161,10 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _dns_recon(**kw):
         try:
             from heaven.recon.dns_recon import dns_recon_targets
-            from urllib.parse import urlparse
-            domains: list[str] = list(targets.get("domains", []))
-            for url in targets.get("urls", []):
-                domain = _registered_domain(urlparse(url).hostname or "")
-                if domain and domain not in domains:
-                    domains.append(domain)
+            # Domains from every target source that can carry a hostname —
+            # crucially including the ips bucket, where the CLI/API place plain
+            # hostname targets (so `--target example.com` actually enumerates DNS).
+            domains: list[str] = _scan_domains(targets)
             # Also gather domains from subdomain enumeration results
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
@@ -2769,7 +2804,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             # validated -> scored collapses to one entry; suppressed/junk dropped).
             raw_vulns: list = []
             scan_data: dict = {"scan_id": orch.scan_id, "vulnerabilities": [],
-                               "assets": [], "secrets_list": []}
+                               "assets": [], "dns_records": [], "secrets_list": []}
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
                     continue
@@ -2781,6 +2816,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 raw_vulns.extend(data.get("suppressed_findings", []))
                 scan_data["assets"].extend(data.get("hosts", []))
                 scan_data["assets"].extend(data.get("endpoints", []))
+                scan_data["dns_records"].extend(data.get("dns_records", []))
                 scan_data["secrets_list"].extend(data.get("secrets", []))
                 scan_data["secrets_list"].extend(data.get("js_secrets", []))
             scan_data["vulnerabilities"] = dedup_findings(raw_vulns)

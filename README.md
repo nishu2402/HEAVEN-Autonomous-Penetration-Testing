@@ -1,7 +1,7 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1327 tests · 50 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+<img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1352 tests · 51 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </p>
 
 ---
@@ -17,7 +17,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-157-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-159-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-50-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-24-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
@@ -85,7 +85,7 @@ HEAVEN is a **production-grade penetration-testing platform** that automates the
 
 It runs three ways from the **same engagement dataset**:
 
-- **CLI** — 50 commands for scriptable, CI-friendly workflows.
+- **CLI** — 51 commands for scriptable, CI-friendly workflows.
 - **Web UI** — a 24-page React command centre (scan launcher, live findings, kill-chain, reports).
 - **REST + WebSocket API** — 64 RBAC-protected routes for automation and integration.
 
@@ -106,9 +106,9 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 1327 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 1352 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 157 |
+| 🧩 **Modules** | 159 |
 | ⌨️ **CLI Commands** | 50 |
 | 🌐 **API Routes** | 64 RBAC-protected routes |
 | 🖥️ **UI Pages** | 24 (React + Vite, dark glassmorphic) |
@@ -393,7 +393,7 @@ deterministic heuristic (or pass `--no-llm`).
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,33:7400B8,66:FF36AB,100:FF6E00"/>
 </p>
 
-50 commands. Run `heaven <command> --help` for full options.
+51 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
 <img width="820" alt="heaven CLI dashboard — module status + live command reference (v1.0.0)" src="docs/screenshots/Heaven_cli.png" />
@@ -415,6 +415,7 @@ deterministic heuristic (or pass `--no-llm`).
 | `sast` | Semgrep static analysis + curated OWASP rule pack |
 | `sca` | Software Composition Analysis — dependency manifests vs. OSV.dev advisories |
 | `cve <product> [version]` | **Dynamic live CVE lookup** — query NVD + CIRCL for any product/version *not* in the local DB (merged, de-duped, version-confirmed, EPSS-scored, Exploit-DB-correlated; `--engagement` persists them) |
+| `dns <domain>` | **DNS enumeration** — A/AAAA/MX/NS/TXT/SOA/CNAME records, resolvable subdomains, mail servers, DNSSEC & wildcard, plus DNS security posture; surfaces in the **Assets** view and reports (`--engagement` persists them) |
 | `postex enum/loot/full` | Post-exploitation — privesc enumeration (Linux + Windows via `--os`) · loot harvest · full playbook (kill-chain + AI) |
 | `cloud storage` | Credential-free public S3/GCS/Azure bucket-exposure scan derived from a target domain |
 | `cloud iam` | Read-only IAM privilege audit of the authenticated AWS identity (over-privileged principals · missing MFA · stale/root keys · weak password policy) |
@@ -669,7 +670,7 @@ The 48 MB model isn't bundled in the wheel or git — fetch it once (SHA-256 ver
 </p>
 
 ```
-heaven/                   ← Python package (157 modules)
+heaven/                   ← Python package (159 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines — Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -680,10 +681,10 @@ heaven/                   ← Python package (157 modules)
 ├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
 ├── api/                  FastAPI server + WebSocket (64 routes)
-└── cli/                  Click CLI — one module per command group (50 commands)
+└── cli/                  Click CLI — one module per command group (51 commands)
 
 heaven-ui/                React + Vite web console (24 pages)
-tests/                    1327 pytest tests + native & DVWA benchmark suites
+tests/                    1352 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -769,7 +770,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>1327 tests · 157 modules · 50 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>1352 tests · 159 modules · 51 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
 python scripts/sync_test_count.py</p>
 
 <p align="center">

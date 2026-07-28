@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DNS enumeration tool (`heaven dns`) — records + subdomains surfaced in the
+  Assets view and reports, wired end-to-end.** A new enumeration engine
+  (`heaven/recon/dns_recon.py::enumerate_dns`) resolves a domain's full DNS
+  surface — A / AAAA / MX / NS / TXT / SOA / CNAME records, mail servers,
+  nameservers, DNSSEC status, wildcard detection — and brute-forces a curated
+  common-subdomain wordlist, reporting a subdomain **only** when it actually
+  resolves (nothing fabricated; skipped entirely on wildcard domains where every
+  label would resolve). A shared normalizer (`heaven/devsecops/dns_inventory.py`,
+  the DNS counterpart of the host `inventory` module) is the single source every
+  surface renders identically. Surfaced everywhere: the standalone CLI tool
+  `heaven dns <domain>` (`--no-subdomains` / `--no-security` / `--engagement` /
+  `--format table|json|markdown`), a new **🌐 DNS Enumeration** section on the web
+  **Assets** page and in the `heaven assets` CLI output (both fed by `GET
+  /api/assets`, which now returns `dns` + `dns_totals`), and a **DNS Enumeration**
+  section (records table + resolved subdomains + DNSSEC/wildcard) in the HTML,
+  PDF and Markdown reports with a matching table-of-contents entry. The
+  orchestrator's DNS recon task now persists the enumeration into the scan
+  summary (`dns_records`) so every full/network/web/email scan populates it
+  automatically, and the whole scoring/rendering path is offline-safe (empty,
+  never an exception, when nothing resolves). Regression-locked by
+  `tests/test_dns_enumeration.py`.
+
 - **Per-finding CONTEXTUAL CVSS — a genuinely dynamic 0.0–10.0 score for every
   finding, shown beside the standards base score.** A CVSS *base* score is, by
   the spec, a property of the weakness class, so two findings of the same class
@@ -37,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Ascendant Aegis mark, the violet→cyan→emerald brand ramp, a live-recon radar
   with target-lock pings, the **Recon → ML Risk → Verified Exploit → Report**
   pipeline (with a travelling packet), and a verified in-sync stat strip (1327
-  tests · 50 CLI · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML R²=0.9925).
+  tests · 51 CLI · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML R²=0.9925).
   Replaces the three external capsule-render / typing-SVG banners at the top of the
   README with one brand-exact, offline-safe hero.
 
@@ -68,6 +90,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **DNS enumeration now actually appears after a normal scan — not only after the
+  standalone `heaven dns` command.** Scanning a hostname (`heaven scan --target
+  example.com`, or the web launcher) produced an empty DNS section everywhere.
+  Root cause: the DNS-reconnaissance task gathered domains only from the `domains`
+  and `urls` target buckets, but a plain hostname target is placed in the `ips`
+  bucket ("IPs, hostnames, or CIDRs") by both the CLI and the API — so the task
+  ran with no domains and enumerated nothing. A new shared `_scan_domains()`
+  resolver now also mines registered domains (eTLD+1) from the `ips` bucket (IP
+  literals, `localhost` and single-label hosts are dropped), so every scan of a
+  real domain populates the Assets **DNS Enumeration** section and the report's
+  DNS section. As a bonus, email-posture checks (SPF/DMARC/DKIM/DNSSEC) now also
+  run against hostname targets. Two further gaps in the same feature were closed:
+  `heaven dns --engagement <name>` now **auto-creates** the engagement instead of
+  erroring when it doesn't exist yet, and the CLI `heaven report` (HTML) and
+  `heaven export --format markdown` now include the DNS Enumeration section (they
+  passed host inventory but not DNS records; the web report-download already did).
 - **A CVE finding now shows its own real CVSS — not a flat 7.5 for every service
   vulnerability.** In a live report, every OpenSSH / Apache / Dovecot CVE in the
   Findings Summary rendered the same **7.5** regardless of the actual CVE, and the

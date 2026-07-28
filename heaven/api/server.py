@@ -726,6 +726,55 @@ def create_app() -> FastAPI:
                                  exc_info=True)
         return raw
 
+    def _collect_raw_dns(engagement: Optional[str] = None,
+                         scan_id: Optional[str] = None) -> list[dict]:
+        """Gather raw DNS enumeration records (records + subdomains) from scans.
+
+        Mirrors :func:`_collect_raw_assets` but for the DNS enumeration blob a
+        scan persists inside ``summary_json`` under ``dns_records``. Falls back
+        to the report JSON when there's no store row yet. ``normalize_dns`` then
+        dedupes across scans by domain.
+        """
+        raw: list[dict] = []
+        try:
+            store = _read_store(engagement)
+            scans = ([store.get_scan(scan_id)] if scan_id
+                     else store.list_scans(limit=200))
+            for s in scans:
+                if not s:
+                    continue
+                blob = s.get("summary_json")
+                if not blob:
+                    continue
+                try:
+                    summ = json.loads(blob)
+                except (ValueError, TypeError):
+                    continue
+                raw.extend(d for d in (summ.get("dns_records") or []) if isinstance(d, dict))
+        except Exception:
+            logger.debug("suppressed non-fatal exception collecting store DNS records",
+                         exc_info=True)
+        if not raw:
+            if scan_id:
+                data = _get_latest_report_data(scan_id)
+                raw.extend(d for d in (data.get("dns_records") or []) if isinstance(d, dict))
+            else:
+                try:
+                    st = _read_store(engagement)
+                    for s in (st.list_scans(limit=50) if st else []):
+                        sid = s.get("scan_id") or s.get("id")
+                        if not sid or not _is_safe_scan_id(sid):
+                            continue
+                        data = _get_latest_report_data(sid)
+                        found = [d for d in (data.get("dns_records") or []) if isinstance(d, dict)]
+                        if found:
+                            raw.extend(found)
+                            break
+                except Exception:
+                    logger.debug("suppressed non-fatal exception in report-DNS fallback",
+                                 exc_info=True)
+        return raw
+
     def _asset_scan_index(engagement: Optional[str] = None) -> list[dict]:
         """Newest-first list of scans that carry host assets, for the picker.
 
@@ -1288,6 +1337,7 @@ def create_app() -> FastAPI:
         so a guess is never mistaken for a confirmed fact.
         """
         from heaven.devsecops.inventory import inventory_totals, normalize_assets
+        from heaven.devsecops.dns_inventory import dns_totals, normalize_dns
         # The inventory is scoped to ONE scan so two separate scans never merge
         # into a single blended host table. Default to the most recent scan that
         # produced assets; the caller can pass ?scan_id= to view an older one, or
@@ -1312,10 +1362,20 @@ def create_app() -> FastAPI:
         # summary assets and we fall back to the report-JSON path for legacy data).
         raw = _collect_raw_assets(engagement, selected)
         inventory = normalize_assets(raw)
+        # DNS enumeration (records + subdomains) for the Assets view's own
+        # section. Prefer the selected scan's records; fall back to the
+        # engagement-wide union so a DNS-only scan (or a web scan whose host
+        # picker selected a different scan) still surfaces here. DNS records are
+        # keyed by domain, so merging across scans is well-defined (unlike the
+        # per-scan host table).
+        dns_raw = _collect_raw_dns(engagement, selected) or _collect_raw_dns(engagement)
+        dns_inv = normalize_dns(dns_raw)
         return {
             "assets": inventory[:limit],
             "total": len(inventory),
             "totals": inventory_totals(inventory),
+            "dns": dns_inv,
+            "dns_totals": dns_totals(dns_inv),
             "scans": scans,
             "scan_id": selected,
         }
@@ -1797,6 +1857,8 @@ def create_app() -> FastAPI:
         # so HTML/PDF/Markdown reports document the attack surface, not just the
         # findings. Empty for engagements with no network scan.
         raw_assets = _collect_raw_assets(engagement)
+        # DNS enumeration (records + subdomains) for the report's DNS section.
+        raw_dns = _collect_raw_dns(engagement)
 
         fmt = (format or "html").lower()
         media = {
@@ -1821,7 +1883,8 @@ def create_app() -> FastAPI:
                 tmp.close()
                 ok = PDFReportGenerator().generate(
                     {"engagement": eng_name, "vulnerabilities": findings,
-                     "findings": findings, "assets": raw_assets}, tmp.name)
+                     "findings": findings, "assets": raw_assets,
+                     "dns_records": raw_dns}, tmp.name)
                 if not ok or not os.path.getsize(tmp.name):
                     try:
                         os.unlink(tmp.name)
@@ -1835,11 +1898,12 @@ def create_app() -> FastAPI:
             if fmt == "html":
                 from heaven.devsecops.compliance_report import ComplianceReportGenerator
                 body = ComplianceReportGenerator().generate_html_report(
-                    findings, engagement_name=eng_name, assets=raw_assets)
+                    findings, engagement_name=eng_name, assets=raw_assets,
+                    dns_records=raw_dns)
             elif fmt == "markdown":
                 from heaven.devsecops.evidence import export_findings_markdown
                 body = export_findings_markdown(findings, engagement_name=eng_name,
-                                                assets=raw_assets)
+                                                assets=raw_assets, dns_records=raw_dns)
             elif fmt == "csv":
                 from heaven.devsecops.evidence import export_findings_csv
                 body = export_findings_csv(findings)
@@ -3712,6 +3776,9 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                     # web-launched scan's open ports/services were invisible unless
                     # the global "latest report" happened to be this exact scan.
                     "assets": result.get("assets", []),
+                    # DNS enumeration (records + subdomains) for the Assets view's
+                    # DNS section and the report's DNS Enumeration section.
+                    "dns_records": result.get("dns_records", []),
                     "severity": {
                         s: sum(1 for f in findings if (f.get("severity") or "info").lower() == s)
                         for s in ("critical", "high", "medium", "low", "info")
@@ -3733,6 +3800,7 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                 "vulnerabilities": findings,
                 "findings": findings,
                 "assets": result.get("assets", []),
+                "dns_records": result.get("dns_records", []),
                 "summary": {
                     "total_vulnerabilities": len(findings),
                     "total_assets": len(result.get("assets", [])),

@@ -187,3 +187,81 @@ def test_inline_db_records_have_consistent_score_and_severity():
             if score and sev != severity_from_score(score):
                 mismatches.append((rec.cve_id, score, sev))
     assert not mismatches, mismatches
+
+
+# ── Severity ⇄ CVSS reconciliation (no more "CVSS 8.1 / Low") ─────────────────
+
+def test_unconfirmed_indicator_caps_score_to_its_low_severity():
+    """The exact bug the user reported: a weak "possible ... indicator" inherited
+    the confirmed class's high base (8.1) while badged Low. The unconfirmed
+    finding's score is now capped to its severity band, so both agree."""
+    f = enrich_finding({
+        "target": "http://x", "vuln_type": "http_smuggling_indicator",
+        "title": "Possible HTTP Request Smuggling Indicator (CL.TE)",
+        "severity": "low", "confidence": 0.35,
+    })
+    base = objective_base_score(f)
+    assert f["severity"] == "low"
+    assert base < 4.0                         # capped into the low band
+    assert severity_from_score(base) == "low"  # band matches the badge
+
+
+def test_published_cve_score_drives_severity_both_ways():
+    from heaven.utils.cvss import reconcile_severity
+    # An authoritative published score RAISES a hand-set low label to match.
+    hi = reconcile_severity({"vuln_type": "vulnerable_component",
+                             "severity": "low", "cvss_base": 9.8})
+    assert hi["severity"] == "critical"
+    # …and LOWERS an over-rated critical to the real high-band score.
+    lo = reconcile_severity({"vuln_type": "vulnerable_component",
+                             "severity": "critical", "cvss_base": 7.5})
+    assert lo["severity"] == "high"
+
+
+def test_posture_finding_aligns_to_class_base_band():
+    """A confirmed non-CVE finding rated above its curated class base is brought
+    down to the standard band (e.g. an over-rated 'high' DMARC → medium)."""
+    f = enrich_finding({"target": "example.com", "vuln_type": "dmarc_missing",
+                        "title": "DMARC Missing", "severity": "high"})
+    base = objective_base_score(f)
+    assert f["severity"] == severity_from_score(base)
+
+
+def test_published_cvss_for_known_and_unknown():
+    from heaven.vulnscan.cve_mapper import published_cvss_for
+    assert published_cvss_for("CVE-2024-6387") == 8.1      # regreSSHion, real NVD
+    assert published_cvss_for("cve-2024-6387") == 8.1      # case-insensitive
+    assert published_cvss_for("CVE-0000-0000") is None
+    assert published_cvss_for(None) is None
+
+
+def test_stale_cve_finding_backfills_real_score_not_class_fallback():
+    """A finding that carries a CVE id but lost its numeric score (older data)
+    is backfilled with the real per-CVE base — so a stale Critical is never
+    demoted to the generic class base, and its severity matches the true score."""
+    f = enrich_finding({
+        "target": "1.2.3.4", "vuln_type": "vulnerable_service",
+        "title": "OpenSSH regreSSHion RCE", "severity": "critical",
+        "cve_id": "CVE-2024-6387", "confidence": 0.9,
+    })
+    base = objective_base_score(f)
+    assert base == 8.1                          # real published score, not 7.5 class
+    assert f["severity"] == "high"              # band follows the real score
+
+
+def test_report_tables_are_wrapped_for_overflow():
+    """Every report table is wrapped in a horizontally-scrollable box and long
+    cell content is allowed to break, so a wide table never pushes the page
+    sideways."""
+    from heaven.devsecops.compliance_report import _wrap_tables
+    gen = ComplianceReportGenerator()
+    long_target = "https://www.example.com/" + "a" * 120
+    html = gen.generate_html_report(
+        [enrich_finding({"target": long_target, "vuln_type": "sql_injection",
+                         "title": "SQLi", "severity": "critical"})],
+        engagement_name="t")
+    assert html.count('class="tablewrap"') == html.count("<table")  # all wrapped
+    assert "word-break:break-word" in html                          # long URLs wrap
+    # The wrapper never mangles an already-formed table into a broken one.
+    assert _wrap_tables("<table><tr><td>x</td></tr></table>") == (
+        '<div class="tablewrap"><table><tr><td>x</td></tr></table></div>')

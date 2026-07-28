@@ -1,7 +1,7 @@
 """Regression tests for orchestrator domain extraction (`_registered_domain`).
 
 A live web-mode scan against ``http://127.0.0.1:8890`` used to emit
-``spf_missing`` / ``dmarc_missing`` / ``dkim_not_found`` / ``dnssec_not_enabled``
+``spf_missing`` / ``dmarc_missing`` / ``dkim_not_found`` / ``dnssec_missing``
 findings whose target was the string ``"0.1"`` — a bare IP mangled by a naive
 ``host.split(".")[-2:]`` (``127.0.0.1`` → ``["0", "1"]`` → ``"0.1"``). Those
 DNS/email-posture checks are domain-level record lookups and are meaningless

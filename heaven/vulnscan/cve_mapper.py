@@ -699,6 +699,30 @@ def _version_in_range(version: str, spec: str) -> bool:
         return False
 
 
+_CVE_INDEX: dict[str, CVERecord] = {}
+
+
+def _cve_index() -> dict[str, CVERecord]:
+    """Flat ``CVE-id → CVERecord`` view of the inline DB, built once."""
+    if not _CVE_INDEX:
+        for recs in INLINE_CVE_DB.values():
+            for r in recs:
+                _CVE_INDEX.setdefault(r.cve_id.upper(), r)
+    return _CVE_INDEX
+
+
+def published_cvss_for(cve_id: Optional[str]) -> Optional[float]:
+    """The real published CVSS base score for a CVE in the bundled inline DB,
+    or ``None``. Offline and deterministic. Used to backfill the true per-CVE
+    score onto a finding that carries a CVE id but lost its numeric score (e.g.
+    persisted before per-finding CVSS wiring) so its severity band and CVSS
+    column agree on the *real* number rather than a generic class fallback."""
+    if not cve_id:
+        return None
+    rec = _cve_index().get(str(cve_id).strip().upper())
+    return rec.cvss if rec and 0.0 < rec.cvss <= 10.0 else None
+
+
 def lookup_inline_cves(product_key: str, version: str) -> list[CVERecord]:
     """Return CVEs from INLINE_CVE_DB matching product and version."""
     records = INLINE_CVE_DB.get(product_key, [])

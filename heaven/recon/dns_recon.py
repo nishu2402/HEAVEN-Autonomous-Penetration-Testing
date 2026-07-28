@@ -550,7 +550,7 @@ async def dns_recon(domain: str, enumerate_subdomains: bool = False,
     dns_data["dnssec"] = dnssec
     if not dnssec.get("enabled"):
         all_findings.append(_finding(
-            domain, "dnssec_not_enabled", "medium",
+            domain, "dnssec_missing", "medium",
             "DNSSEC Not Configured",
             f"Domain {domain} has no DNSSEC signature records. "
             f"DNS responses can be forged (cache poisoning, Kaminsky attack).",

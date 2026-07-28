@@ -1,7 +1,7 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1352 tests · 51 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+<img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1358 tests · 51 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </p>
 
 ---
@@ -106,7 +106,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 1352 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 1358 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 159 |
 | ⌨️ **CLI Commands** | 50 |
@@ -684,7 +684,7 @@ heaven/                   ← Python package (159 modules)
 └── cli/                  Click CLI — one module per command group (51 commands)
 
 heaven-ui/                React + Vite web console (24 pages)
-tests/                    1352 pytest tests + native & DVWA benchmark suites
+tests/                    1358 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -770,7 +770,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>1352 tests · 159 modules · 51 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>1358 tests · 159 modules · 51 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
 python scripts/sync_test_count.py</p>
 
 <p align="center">

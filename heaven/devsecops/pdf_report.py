@@ -189,6 +189,9 @@ class PDFReportGenerator:
         from heaven.devsecops.inventory import inventory_totals, normalize_assets
         inventory = normalize_assets(data.get("assets"))
         inv_totals = inventory_totals(inventory)
+        from heaven.devsecops.dns_inventory import dns_totals, normalize_dns
+        dns_inv = normalize_dns(data.get("dns_records"))
+        dns_tot = dns_totals(dns_inv)
         now = datetime.datetime.now(datetime.UTC)
         gen_date = now.strftime("%d %B %Y, %H:%M UTC")
         version = str(data.get("version") or "1.0")
@@ -452,6 +455,42 @@ class PDFReportGenerator:
                     ])
                 story.append(table(prows,
                                    [16 * mm, 14 * mm, 26 * mm, cw - 116 * mm, 60 * mm]))
+            story.append(PageBreak())
+
+        # ── DNS Enumeration (only when a DNS recon ran) ──
+        if dns_inv:
+            story.append(heading("", "DNS Enumeration"))
+            story.append(Paragraph(
+                f"DNS reconnaissance mapped <b>{dns_tot['domains']}</b> domain(s) exposing "
+                f"<b>{dns_tot['records']}</b> DNS record(s), <b>{dns_tot['subdomains']}</b> "
+                f"resolved subdomain(s) and <b>{dns_tot['mail_servers']}</b> mail server(s). "
+                "Records are reported exactly as returned by authoritative DNS; a subdomain is "
+                "listed only because it actually resolved.", styles["body"]))
+            for n in dns_inv:
+                dnssec = "enabled" if (n.get("dnssec") or {}).get("enabled") else "not detected"
+                wild = " · Wildcard DNS present" if n.get("wildcard") else ""
+                story.append(Paragraph(
+                    f'{_esc(n.get("domain"))} — DNSSEC: {dnssec}{_esc(wild)}', styles["h3"]))
+                recs = n.get("records") or {}
+                rrows = [[Paragraph(c, styles["th"]) for c in ("Type", "Record")]]
+                for rt in ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"):
+                    for val in recs.get(rt, []):
+                        rrows.append([Paragraph(_esc(rt), styles["cell"]),
+                                      Paragraph(_esc(val), styles["cell"])])
+                if len(rrows) > 1:
+                    story.append(table(rrows, [22 * mm, cw - 22 * mm]))
+                else:
+                    story.append(Paragraph("No records resolved.", styles["small"]))
+                subs = n.get("subdomains") or []
+                if subs:
+                    story.append(Paragraph(
+                        f"Subdomains discovered ({len(subs)})", styles["h3"]))
+                    srows = [[Paragraph(c, styles["th"]) for c in ("Subdomain", "Addresses")]]
+                    for s in subs:
+                        addrs = ", ".join(s.get("addresses") or []) or "—"
+                        srows.append([Paragraph(_esc(s.get("name")), styles["cell"]),
+                                      Paragraph(_esc(addrs), styles["cell"])])
+                    story.append(table(srows, [cw * 0.5, cw * 0.5]))
             story.append(PageBreak())
 
         # ── 7. Risk methodology ──

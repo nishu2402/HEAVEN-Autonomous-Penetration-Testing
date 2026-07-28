@@ -59,6 +59,32 @@ def _collect_engagement_assets(engagement: Optional[str],
     return raw if (all_scans or scan_id) else fallback
 
 
+def _collect_engagement_dns(engagement: Optional[str],
+                            scan_id: Optional[str] = None) -> list[dict]:
+    """Raw DNS enumeration records from an engagement's persisted scans.
+
+    DNS records are keyed by domain, so merging every scan's records is
+    well-defined (unlike the per-scan host table) — always engagement-wide.
+    """
+    from heaven.engagement import EngagementStore
+    store = EngagementStore(_engagement_db_path(engagement), create=False)
+    scans = ([store.get_scan(scan_id)] if scan_id
+             else store.list_scans(limit=200))
+    raw: list[dict] = []
+    for s in scans:
+        if not s:
+            continue
+        blob = s.get("summary_json")
+        if not blob:
+            continue
+        try:
+            summ = json.loads(blob)
+        except (ValueError, TypeError):
+            continue
+        raw.extend(d for d in (summ.get("dns_records") or []) if isinstance(d, dict))
+    return raw
+
+
 @click.command()
 @click.option("--engagement", help="Engagement name")
 @click.option("--scan-id", help="Show a single scan id (default: the most recent scan)")
@@ -73,6 +99,8 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
     Shows the most recent scan by default; use --scan-id to pin one or --all to
     merge every scan in the engagement.
     """
+    from heaven.devsecops.dns_inventory import dns_totals, normalize_dns
+    from heaven.devsecops.dns_inventory import render_markdown as render_dns_markdown
     from heaven.devsecops.inventory import (
         inventory_totals,
         normalize_assets,
@@ -83,39 +111,68 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
 
     raw = _collect_engagement_assets(engagement, scan_id, all_scans)
     inventory = normalize_assets(raw)
+    dns_inv = normalize_dns(_collect_engagement_dns(engagement, scan_id))
 
     if fmt == "json":
         print(json.dumps(
-            {"assets": inventory, "totals": inventory_totals(inventory)},
+            {"assets": inventory, "totals": inventory_totals(inventory),
+             "dns": dns_inv, "dns_totals": dns_totals(dns_inv)},
             indent=2, default=str,
         ))
         return
 
-    if not inventory:
+    if not inventory and not dns_inv:
         _print("[yellow]No host inventory yet.[/yellow] Run a network scan first, e.g. "
-               "[cyan]heaven scan -m network -t <target> --i-have-authorization[/cyan]")
+               "[cyan]heaven scan -m network -t <target> --i-have-authorization[/cyan]"
+               "\n[dim]DNS records appear here too — run [cyan]heaven dns <domain> "
+               "--engagement <name>[/cyan].[/dim]")
         return
 
     if fmt == "markdown":
-        print(render_markdown(inventory, already_normalized=True))
+        parts = []
+        if inventory:
+            parts.append(render_markdown(inventory, already_normalized=True))
+        if dns_inv:
+            parts.append(render_dns_markdown(dns_inv, already_normalized=True))
+        print("\n\n".join(p for p in parts if p))
         return
 
-    tot = inventory_totals(inventory)
-    _print(f"\n[bold]Host & Service Inventory[/bold]  [dim]— {tot['hosts']} host(s), "
-           f"{tot['open_ports']} open port(s), {tot['distinct_services']} service(s)[/dim]")
-    for h in inventory:
-        os_txt = h.get("os_label") or "OS not determined"
-        _print(f"\n[bold cyan]{h['host']}[/bold cyan]  [dim]{os_txt}[/dim]")
-        if not h.get("ports"):
-            _print("  [dim]No open ports observed.[/dim]")
-            continue
-        _print(f"  [dim]{'PORT':>7}  {'PROTO':5}  {'SERVICE':14}  VERSION[/dim]")
-        for p in h["ports"]:
-            ver = p.get("service_version") or ""
-            _print(f"  {p['port']:>7}  {p.get('protocol','tcp'):5}  "
-                   f"{(p.get('service') or '—')[:14]:14}  {ver}")
-    _print("\n[dim]An OS marked '(heuristic — unconfirmed)' is a TTL guess, not a "
-           "stack fingerprint.[/dim]")
+    if inventory:
+        tot = inventory_totals(inventory)
+        _print(f"\n[bold]Host & Service Inventory[/bold]  [dim]— {tot['hosts']} host(s), "
+               f"{tot['open_ports']} open port(s), {tot['distinct_services']} service(s)[/dim]")
+        for h in inventory:
+            os_txt = h.get("os_label") or "OS not determined"
+            _print(f"\n[bold cyan]{h['host']}[/bold cyan]  [dim]{os_txt}[/dim]")
+            if not h.get("ports"):
+                _print("  [dim]No open ports observed.[/dim]")
+                continue
+            _print(f"  [dim]{'PORT':>7}  {'PROTO':5}  {'SERVICE':14}  VERSION[/dim]")
+            for p in h["ports"]:
+                ver = p.get("service_version") or ""
+                _print(f"  {p['port']:>7}  {p.get('protocol','tcp'):5}  "
+                       f"{(p.get('service') or '—')[:14]:14}  {ver}")
+        _print("\n[dim]An OS marked '(heuristic — unconfirmed)' is a TTL guess, not a "
+               "stack fingerprint.[/dim]")
+
+    if dns_inv:
+        dtot = dns_totals(dns_inv)
+        _print(f"\n[bold]DNS Enumeration[/bold]  [dim]— {dtot['domains']} domain(s), "
+               f"{dtot['records']} record(s), {dtot['subdomains']} subdomain(s)[/dim]")
+        for n in dns_inv:
+            dnssec = "enabled" if (n.get("dnssec") or {}).get("enabled") else "not detected"
+            wild = "  ·  wildcard DNS present" if n.get("wildcard") else ""
+            _print(f"\n[bold cyan]{n['domain']}[/bold cyan]  [dim]DNSSEC: {dnssec}{wild}[/dim]")
+            recs = n.get("records") or {}
+            for rt in ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"):
+                for val in recs.get(rt, []):
+                    _print(f"  [dim]{rt:<5}[/dim] {val}")
+            subs = n.get("subdomains") or []
+            if subs:
+                _print(f"  [bold]Subdomains ({len(subs)}):[/bold]")
+                for s in subs:
+                    addrs = ", ".join(s.get("addresses") or []) or "—"
+                    _print(f"    [green]{s['name']}[/green]  [dim]{addrs}[/dim]")
 
 
 def register(cli: click.Group) -> None:

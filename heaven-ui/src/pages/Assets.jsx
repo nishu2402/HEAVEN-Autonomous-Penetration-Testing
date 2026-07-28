@@ -37,6 +37,8 @@ export default function AssetsPage() {
   const [error, setError] = useState(null);
   const [inventory, setInventory] = useState([]);
   const [totals, setTotals] = useState(null);
+  const [dns, setDns] = useState([]);
+  const [dnsTotals, setDnsTotals] = useState(null);
   const [scans, setScans] = useState([]);
   const [scanId, setScanId] = useState(null);
 
@@ -50,6 +52,8 @@ export default function AssetsPage() {
       .then((d) => {
         setInventory(d.assets || []);
         setTotals(d.totals || null);
+        setDns(d.dns || []);
+        setDnsTotals(d.dns_totals || null);
         setScans(d.scans || []);
         setScanId(d.scan_id || null);
       })
@@ -122,12 +126,12 @@ export default function AssetsPage() {
 
       {loading && <div style={{ marginTop: 12 }}><SkeletonCard lines={6} /></div>}
 
-      {!loading && !error && inventory.length === 0 && (
+      {!loading && !error && inventory.length === 0 && dns.length === 0 && (
         <div className="card" style={{ marginTop: 12 }}>
           <EmptyState
             icon="🖧"
             headline="No host inventory yet"
-            body="Run a network scan for this engagement — discovered hosts, ports, service versions and OS appear here."
+            body="Run a network or DNS scan for this engagement — discovered hosts, ports, service versions, OS and DNS records appear here."
             cta="Launch a scan"
             ctaTo="/scans"
           />
@@ -178,6 +182,98 @@ export default function AssetsPage() {
               <div className="dim" style={{ marginTop: 8, fontSize: 12 }}>
                 ⚠ Honeypot indicators: {h.honeypot_indicators.join("; ")}
               </div>
+            )}
+          </div>
+        );
+      })}
+
+      {!loading && dns.length > 0 && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🌐 DNS Enumeration</h2>
+          <p className="page-lead" style={{ marginBottom: 8 }}>
+            DNS records and resolvable subdomains discovered for this engagement —
+            reported exactly as authoritative DNS returned them. A subdomain is
+            listed only because it actually resolved; nothing is fabricated.
+          </p>
+          {dnsTotals && (
+            <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              {[
+                ["Domains", dnsTotals.domains],
+                ["Records", dnsTotals.records],
+                ["Subdomains", dnsTotals.subdomains],
+                ["Mail servers", dnsTotals.mail_servers],
+              ].map(([label, val]) => (
+                <div key={label} className="mini-stat">
+                  <div className="mini-stat-label" style={{ textTransform: "uppercase" }}>{label}</div>
+                  <div className="mini-stat-value">{val ?? 0}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!loading && dns.map((n) => {
+        const RT = ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"];
+        const recRows = RT.flatMap((rt) =>
+          (n.records?.[rt] || []).map((val, i) => ({ rt, val, key: `${rt}-${i}` })),
+        );
+        const dnssecOk = n.dnssec?.enabled;
+        return (
+          <div key={n.domain} className="card" style={{ marginTop: 12 }}>
+            <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span className="mono">{n.domain}</span>
+              <span style={{
+                fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999,
+                color: dnssecOk ? "var(--ok, #3fb950)" : "var(--text-dim)",
+                border: `1px solid ${dnssecOk ? "var(--ok, #3fb950)" : "var(--border)"}`,
+              }}>
+                DNSSEC {dnssecOk ? "enabled" : "not detected"}
+              </span>
+              {n.wildcard && (
+                <span className="dim" style={{ fontSize: 12 }}>⚠ wildcard DNS present</span>
+              )}
+            </div>
+
+            {recRows.length > 0 && (
+              <table className="data-table">
+                <thead><tr>
+                  <th style={{ width: 70 }}>Type</th>
+                  <th>Record</th>
+                </tr></thead>
+                <tbody>
+                  {recRows.map(({ rt, val, key }) => (
+                    <tr key={key}>
+                      <td className="mono" style={{ fontSize: 11.5 }}>{rt}</td>
+                      <td className="mono" style={{ fontSize: 11.5, wordBreak: "break-all" }}>{val}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {(n.subdomains || []).length > 0 && (
+              <>
+                <div className="card-title" style={{ marginTop: 12, fontSize: 13 }}>
+                  Subdomains discovered ({n.subdomains.length})
+                </div>
+                <table className="data-table">
+                  <thead><tr>
+                    <th>Subdomain</th>
+                    <th>Addresses</th>
+                  </tr></thead>
+                  <tbody>
+                    {n.subdomains.map((s, i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{ fontSize: 11.5 }}>{s.name}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>
+                          {(s.addresses || []).join(", ") || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
             )}
           </div>
         );

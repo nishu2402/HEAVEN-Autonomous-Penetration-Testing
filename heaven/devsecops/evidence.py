@@ -298,12 +298,15 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
 
 
 def export_findings_markdown(findings: list[dict], engagement_name: str = "",
-                             assets: Optional[list[dict]] = None) -> str:
+                             assets: Optional[list[dict]] = None,
+                             dns_records: Optional[list[dict]] = None) -> str:
     """Render multiple findings as a single Markdown report.
 
     When ``assets`` (raw network-scan host records) are supplied, a
     "Host & Service Inventory" section (open ports / service versions / OS) is
     appended so the written report matches what the terminal and web UI show.
+    When ``dns_records`` (raw DNS enumeration) are supplied, a "DNS Enumeration"
+    section (records + resolved subdomains) is appended too.
     """
     from datetime import datetime, timezone
     out = []
@@ -341,6 +344,12 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
     if assets:
         from heaven.devsecops.inventory import render_markdown as _render_inventory_md
         section = _render_inventory_md(assets)
+        if section:
+            out.append(section)
+
+    if dns_records:
+        from heaven.devsecops.dns_inventory import render_markdown as _render_dns_md
+        section = _render_dns_md(dns_records)
         if section:
             out.append(section)
 

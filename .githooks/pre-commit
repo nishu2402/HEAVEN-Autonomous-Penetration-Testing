@@ -1,0 +1,48 @@
+#!/bin/sh
+# HEAVEN pre-commit hook — keep the README's decorative test/module counts in sync.
+#
+# Why this exists
+# ---------------
+# CI's "Check README test count is in sync" step (Python 3.12 only) runs
+# `scripts/sync_test_count.py --check` and FAILS the build if the test/module
+# numbers printed in README.md have drifted from reality. That number drifts
+# every time a commit adds or removes a test without re-running the sync script
+# by hand — which has broken CI more than once. This hook removes the footgun:
+# it re-syncs the counts automatically and re-stages README.md, so no commit can
+# ever ship a stale count. CI then stays green by construction.
+#
+# It is deliberately fail-SAFE: any problem (missing interpreter, collection
+# hiccup) prints a note and lets the commit proceed rather than blocking you.
+# Enabled via `git config core.hooksPath .githooks` (already set in this repo).
+
+# Resolve repo root so the hook works regardless of the invoking cwd.
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+SCRIPT="scripts/sync_test_count.py"
+[ -f "$SCRIPT" ] || exit 0   # script absent (e.g. partial checkout) → don't block
+
+# Prefer the project venv, then a plain interpreter. If none, don't block.
+if [ -x "./venv/bin/python" ]; then
+    PY="./venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PY="python3"
+elif command -v python >/dev/null 2>&1; then
+    PY="python"
+else
+    exit 0
+fi
+
+# Sync in fix mode (best-effort). If it errors, warn but let the commit through.
+if ! "$PY" "$SCRIPT" >/dev/null 2>&1; then
+    echo "heaven pre-commit: README count sync could not run — skipping (commit continues)." >&2
+    exit 0
+fi
+
+# If the sync changed README.md, fold the correction into this commit.
+if ! git diff --quiet -- README.md 2>/dev/null; then
+    git add README.md
+    echo "heaven pre-commit: README test/module counts re-synced and staged." >&2
+fi
+
+exit 0

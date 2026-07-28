@@ -113,14 +113,20 @@ _VULN_TYPE_CVSS: dict[str, float] = {
 
 def _cvss_from_finding(vuln_data: dict) -> float:
     """Derive a realistic CVSS baseline from severity + vuln_type."""
-    explicit = vuln_data.get("cvss_base") or vuln_data.get("predicted_cvss_score")
-    if explicit:
-        try:
-            v = float(explicit)
-            if v > 0:
+    # A real published per-finding score wins. Check every key a CVE source may
+    # use ("cvss"/"cvss_score" from cve_mapper/live-feed, "cvss_base" from the
+    # canonical path) plus evidence — otherwise the inline-DB score lands under
+    # "cvss" and is ignored, collapsing every vulnerable_service onto one class
+    # vector.
+    ev = vuln_data.get("evidence") if isinstance(vuln_data.get("evidence"), dict) else {}
+    for src in (vuln_data, ev):
+        for key in ("cvss_base", "cvss_score", "cvss", "predicted_cvss_score"):
+            try:
+                v = float(src.get(key))  # type: ignore[union-attr,arg-type]
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if 0.0 < v <= 10.0:
                 return v
-        except (TypeError, ValueError):
-            pass
     vt = (vuln_data.get("vuln_type") or "").lower().replace("-", "_").replace(" ", "_")
     if vt in _VULN_TYPE_CVSS:
         return _VULN_TYPE_CVSS[vt]

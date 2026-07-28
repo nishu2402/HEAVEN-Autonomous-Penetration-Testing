@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-finding CONTEXTUAL CVSS — a genuinely dynamic 0.0–10.0 score for every
+  finding, shown beside the standards base score.** A CVSS *base* score is, by
+  the spec, a property of the weakness class, so two findings of the same class
+  (two reflected-XSS, two missing-header issues) legitimately share it — which is
+  why the report's CVSS column repeated within a severity band. HEAVEN now also
+  computes each finding's CVSS **Temporal + Environmental** score
+  (`heaven/utils/cvss.py::contextual_score`) — the same instance-specific number
+  Tenable/Qualys/Rapid7 surface — from the real per-finding signals the platform
+  already collects: Exploit Code Maturity (EPSS probability / public-exploit /
+  CISA-KEV), Report Confidence (the detector's own confidence), and the asset's
+  Security Requirements (criticality) + Modified Attack Vector (internet-facing vs
+  internal). It is standards-based, not fabricated: the number moves because the
+  *evidence* moves, and a finding with no such signals degrades exactly to its
+  base score (never a random jitter). The HTML **and** PDF reports now show a
+  **CVSS** (base) column and a **Contextual** column side by side, the web
+  Finding Detail shows both (`contextual_cvss_score` on `GET /api/.../evidence`),
+  and the persisted risk/priority score falls back to the contextual score so
+  prioritisation is per-finding too. Result: same-class findings that used to
+  read one identical number now read e.g. 7.4 / 6.0 / 4.6. Regression-locked by
+  `tests/test_per_finding_cvss.py`.
+
 - **Animated README hero poster** (`docs/assets/heaven-poster.svg`). A single,
   self-contained SMIL-animated SVG — no third-party image services — carrying the
   Ascendant Aegis mark, the violet→cyan→emerald brand ramp, a live-recon radar
@@ -47,6 +68,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A CVE finding now shows its own real CVSS — not a flat 7.5 for every service
+  vulnerability.** In a live report, every OpenSSH / Apache / Dovecot CVE in the
+  Findings Summary rendered the same **7.5** regardless of the actual CVE, and the
+  score disagreed with the severity ("Critical … 7.5", "Low … 8.1"). Root cause:
+  the findings table has no CVSS column and `upsert_finding` never preserved the
+  real per-CVE base score, so after the DB round-trip the report resolver fell
+  back to the `vulnerable_component` class "typical" constant (7.5) for all of
+  them — and the ML feature extractor had the same blind spot (it read
+  `cvss_base` but the CVE score was carried under `cvss`), collapsing the priority
+  score too. Fixed end-to-end and in sync: `cve_mapper` now emits the canonical
+  `cvss_base` on every inline / live-feed / NVD CVE **and derives the severity
+  band from that objective score** (a curated "critical/8.1" like regreSSHion is
+  corrected to its true **High/8.1**, matching NVD); `upsert_finding` persists the
+  real `cvss_base` + vector through the DB round-trip; the ML extractor and the
+  risk fallback both read the real score; and the web finding-detail shows the
+  same objective score the report does. A live re-run of the certifiedhacker
+  engagement now renders **9.8 / 8.8 / 8.2 / 8.1 / 7.5 / 5.9** across the CVE
+  findings with every severity band consistent with its score. Regression-locked
+  by `tests/test_per_finding_cvss.py`.
 - **CVSS is now a genuine per-finding score, not a flat per-severity constant.**
   Every finding in a severity band used to show the same number (all highs 8.0,
   all mediums 5.5, …) because the ML feature extractor collapsed any finding

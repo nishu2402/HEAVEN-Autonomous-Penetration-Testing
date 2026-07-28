@@ -473,15 +473,17 @@ class PDFReportGenerator:
         story.append(heading("4.", "Findings Summary"))
         if findings:
             fs = [[Paragraph(h, styles["th"]) for h in
-                   ("#", "Finding", "Severity", "CVSS", "Target", "Status")]]
+                   ("#", "Finding", "Severity", "CVSS", "Ctx", "Target", "Status")]]
             for i, f in enumerate(findings, 1):
                 cvss = _OWASP._finding_cvss(f)
+                ctx = _OWASP._finding_contextual_cvss(f)
                 fs.append([Paragraph(str(i), styles["cell"]),
                            Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
                            pill(_sev_of(f)), Paragraph(_esc(cvss), styles["small"]),
+                           Paragraph(_esc(ctx), styles["small"]),
                            Paragraph(_esc(f.get("target") or "—"), styles["small"]),
                            Paragraph(_esc((f.get("status") or "open").title()), styles["small"])])
-            story.append(table(fs, [9 * mm, cw - 119 * mm, 26 * mm, 14 * mm, 50 * mm, 20 * mm]))
+            story.append(table(fs, [9 * mm, cw - 135 * mm, 26 * mm, 14 * mm, 16 * mm, 50 * mm, 20 * mm]))
         else:
             story.append(Paragraph("No findings recorded.", styles["small"]))
         story.append(PageBreak())
@@ -563,6 +565,12 @@ class PDFReportGenerator:
             "ML-assisted risk scoring.", styles["body"]))
         story.append(Paragraph("Glossary", styles["h3"]))
         gloss = [["CVSS", "Common Vulnerability Scoring System — a 0–10 severity score."],
+                 ["CVSS base", "The base score — a property of the weakness class, so two findings "
+                               "of the same class share it."],
+                 ["Contextual CVSS", "The CVSS Temporal + Environmental score: the base adjusted for "
+                                     "THIS finding's exploit maturity (EPSS / exploit / KEV), detection "
+                                     "confidence and the asset's criticality & exposure. Per-finding, so "
+                                     "it varies even within one weakness class."],
                  ["EPSS", "Exploit Prediction Scoring System — probability a vuln will be exploited."],
                  ["CISA KEV", "Catalog of vulnerabilities known to be actively exploited."],
                  ["CWE", "Common Weakness Enumeration — category of the underlying weakness."],
@@ -681,6 +689,7 @@ class PDFReportGenerator:
         ev = f.get("evidence") or {}
         title = f.get("title") or f.get("vuln_type") or "Finding"
         cvss = _OWASP._finding_cvss(f)
+        contextual = _OWASP._finding_contextual_cvss(f)
         # Upgrade any legacy 2021 tag stored on the finding to its 2025 label.
         owasp = _fw.normalize_owasp(f.get("owasp") or "") or _OWASP._owasp_for(f.get("vuln_type", "")) or "—"
 
@@ -693,7 +702,8 @@ class PDFReportGenerator:
 
         meta_pairs = [
             ("Target", f.get("target") or "—"), ("Severity", m["label"]),
-            ("CVSS (predicted)", cvss),
+            ("CVSS base (class)", cvss),
+            ("Contextual CVSS (temporal+environmental)", contextual),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
             ("CWE", f.get("cwe") or "—"), ("OWASP", owasp),

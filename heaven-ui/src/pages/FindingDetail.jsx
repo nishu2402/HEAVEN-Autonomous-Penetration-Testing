@@ -154,12 +154,18 @@ export default function FindingDetail() {
               {f.confidence_bucket && <span className="dim" style={{ marginLeft: 6 }}>({f.confidence_bucket})</span>}
             </td></tr>
             <tr><td>CVE</td><td>{cveCell(f)}</td></tr>
-            <tr><td>CVSS</td><td>
+            <tr><td>CVSS base</td><td>
               {f.predicted_cvss_score?.toFixed?.(1)
                 ?? (f.typical_cvss ? Number(f.typical_cvss).toFixed(1) : "—")}
               {!f.predicted_cvss_score && f.typical_cvss
                 ? <span className="dim" style={{ marginLeft: 6 }}>(typical for class)</span>
-                : null}
+                : <span className="dim" style={{ marginLeft: 6 }}>(weakness class)</span>}
+            </td></tr>
+            <tr><td>Contextual CVSS</td><td>
+              {f.contextual_cvss_score?.toFixed?.(1) ?? "—"}
+              <span className="dim" style={{ marginLeft: 6 }}>
+                (temporal + environmental — this finding&apos;s exploit maturity, confidence &amp; asset criticality)
+              </span>
             </td></tr>
             <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "—"}</td></tr>
             <tr><td>CWE</td><td>{f.cwe || ev.cwe || "—"}</td></tr>

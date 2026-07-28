@@ -590,16 +590,23 @@ class ComplianceReportGenerator:
             sev = _sev_of(f)
             m = SEVERITY_META[sev]
             cvss = self._finding_cvss(f)
+            ctx = self._finding_contextual_cvss(f)
             rows += (f'<tr><td class="small">{i}</td>'
                      f'<td><a href="#f{i}">{_esc(f.get("title") or f.get("vuln_type") or "Finding")}</a></td>'
                      f'<td><span class="pill" style="background:{m["color"]}">{m["label"]}</span></td>'
                      f'<td class="small">{_esc(cvss)}</td>'
+                     f'<td class="small">{_esc(ctx)}</td>'
                      f'<td class="small">{_esc(f.get("target") or "—")}</td>'
                      f'<td class="small">{_esc((f.get("status") or "open").title())}</td></tr>')
         return f"""<div class="page section" id="summary"><h2>Findings Summary</h2>
+          <p class="muted small">The <b>CVSS</b> column is the standards base score (a property of
+          the weakness class). <b>Contextual</b> is the per-finding CVSS Temporal + Environmental
+          score, adjusted for this finding's exploit maturity (EPSS / public exploit / CISA KEV),
+          detection confidence and the asset's criticality &amp; exposure.</p>
           <table>
             <tr><th style="width:40px">#</th><th>Finding</th><th style="width:90px">Severity</th>
-                <th style="width:60px">CVSS</th><th>Target</th><th style="width:80px">Status</th></tr>
+                <th style="width:56px">CVSS</th><th style="width:74px">Contextual</th>
+                <th>Target</th><th style="width:80px">Status</th></tr>
             {rows}
           </table>
         </div>"""
@@ -618,6 +625,7 @@ class ComplianceReportGenerator:
         ev = f.get("evidence") or {}
         title = f.get("title") or f.get("vuln_type") or "Finding"
         cvss = self._finding_cvss(f)
+        contextual = self._finding_contextual_cvss(f)
 
         # Classification: an IoT/OT finding is labelled against its own
         # framework (OWASP IoT Top 10 / IEC 62443), a web finding against the
@@ -632,7 +640,8 @@ class ComplianceReportGenerator:
         meta_rows = [
             ("Target", f.get("target") or "—", False),
             ("Severity", m["label"], False),
-            ("CVSS (predicted)", cvss, False),
+            ("CVSS base (class)", cvss, False),
+            ("Contextual CVSS (temporal+environmental)", contextual, False),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—", False),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—", False),
             ("CWE", f.get("cwe") or "—", False),
@@ -731,6 +740,20 @@ class ComplianceReportGenerator:
             if 0.0 < v <= 10.0:
                 return f"{v:.1f}"
         return "—"
+
+    def _finding_contextual_cvss(self, f: dict) -> str:
+        """Per-finding CVSS **contextual** score (Temporal + Environmental).
+
+        Genuinely dynamic and instance-specific — unlike the class-level base
+        score, this folds in the finding's own real signals (exploit maturity
+        from EPSS / public-exploit / KEV, the detector's confidence, and the
+        asset's criticality + exposure), so two findings of the *same class*
+        differ when their evidence differs. Degrades to the base score when a
+        finding carries no such signals. Returns a 1-dp string, or '—'.
+        """
+        from heaven.utils import cvss as _cvss
+        s = _cvss.contextual_score(f)
+        return f"{s:.1f}" if s > 0 else "—"
 
     @staticmethod
     def _steps_html(text: Any) -> str:
@@ -990,6 +1013,12 @@ class ComplianceReportGenerator:
     def _appendix() -> str:
         gloss = [
             ("CVSS", "Common Vulnerability Scoring System — a 0–10 severity score."),
+            ("CVSS base", "The base score — a property of the weakness class, so two findings "
+                          "of the same class share it."),
+            ("Contextual CVSS", "The CVSS Temporal + Environmental score — the base adjusted for "
+                                "THIS finding's exploit maturity (EPSS / public exploit / CISA KEV), "
+                                "detection confidence and the asset's criticality & exposure. "
+                                "Genuinely per-finding, so it varies even within one weakness class."),
             ("EPSS", "Exploit Prediction Scoring System — probability a vuln will be exploited."),
             ("CISA KEV", "Catalog of vulnerabilities known to be actively exploited."),
             ("CWE", "Common Weakness Enumeration — category of the underlying weakness."),

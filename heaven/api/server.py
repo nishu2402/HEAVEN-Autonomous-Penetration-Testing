@@ -6,6 +6,7 @@ Central API server with WebSocket support, JWT/API-key auth, and RBAC.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import time
@@ -1693,6 +1694,26 @@ def create_app() -> FastAPI:
         # Enrich from the vuln knowledge base so description / remediation /
         # references / CWE / OWASP / MITRE / typical-CVSS are never blank.
         finding_dict = enrich_finding(finding_dict)
+        # Show the SAME genuinely-per-finding CVSS the report renders: the real
+        # published base score (persisted in evidence.cvss_base) via the one
+        # shared resolver, so the web detail's CVSS row can never disagree with
+        # the report or collapse onto a per-severity constant. risk_score stays
+        # the priority number.
+        from heaven.utils.cvss import contextual_score, objective_base_score
+        # Tag the finding with its asset criticality (from engagement scope) so the
+        # contextual score's environmental adjustment is real, not defaulted.
+        with contextlib.suppress(Exception):
+            crit = store.criticality_for_target(f.target)
+            if crit:
+                finding_dict["criticality"] = crit
+        _obj_cvss = objective_base_score(finding_dict)
+        if _obj_cvss > 0:
+            finding_dict["predicted_cvss_score"] = round(_obj_cvss, 1)
+        # The genuinely per-finding CVSS: base adjusted by exploit maturity (EPSS/
+        # KEV/exploit), detection confidence and asset criticality + exposure.
+        _ctx = contextual_score(finding_dict)
+        if _ctx > 0:
+            finding_dict["contextual_cvss_score"] = round(_ctx, 1)
         pkg = package_finding(finding_dict)
         return {
             "finding": finding_dict,
@@ -1749,6 +1770,27 @@ def create_app() -> FastAPI:
                 "last_seen_at": f.last_seen_at, "status": f.status,
                 "operator_notes": f.operator_notes, "evidence": f.evidence,
             }
+            # Surface the real per-finding CVSS base score + vector (persisted in
+            # evidence) to the top level so EVERY export format — SARIF, Burp,
+            # JSON — carries the true score, not just the HTML/PDF resolver.
+            ev = f.evidence if isinstance(f.evidence, dict) else {}
+            if ev.get("cvss_base") is not None:
+                d["cvss_base"] = ev["cvss_base"]
+            if ev.get("cvss_vector"):
+                d["cvss_vector"] = ev["cvss_vector"]
+            # Tag the asset criticality (from engagement scope) so the report's
+            # per-finding contextual CVSS applies a real environmental adjustment.
+            with contextlib.suppress(Exception):
+                crit = store.criticality_for_target(f.target)
+                if crit and crit != "medium":
+                    d["criticality"] = crit
+            # Attach the genuinely per-finding contextual CVSS so machine exports
+            # (JSON / SARIF / Burp) carry the same number the HTML/PDF report shows.
+            with contextlib.suppress(Exception):
+                from heaven.utils.cvss import contextual_score as _ctx
+                _cv = _ctx(d)
+                if _cv > 0:
+                    d["contextual_cvss_score"] = round(_cv, 1)
             findings.append(enrich_finding(d))
 
         # Host/service inventory (open ports, versions, OS) for this engagement,

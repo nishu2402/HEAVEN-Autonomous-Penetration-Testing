@@ -81,7 +81,7 @@ server is ready (use `heaven serve --no-open` to suppress that). Log in with:
   on first login. Set `HEAVEN_ADMIN_PASSWORD` beforehand to use a strong
   password from the start and skip the prompt.
 
-You'll see 19 pages:
+You'll see 24 pages:
 
 | Page | What it does |
 |---|---|
@@ -96,7 +96,7 @@ You'll see 19 pages:
 | Coverage | Self-grading — "what didn't we test?" |
 | Methodology | OWASP / NIST / PTES mapping viewer |
 | Benchmark | Latest DVWA precision / recall / F1 |
-| … + 8 more |
+| … + 13 more |
 
 ---
 
@@ -119,9 +119,9 @@ so the README's benchmark badge has a target to link to.
 
 | You want to … | Read |
 |---|---|
-| Set up production HEAVEN | [README — Installation (Detailed)](../README.md#installation-detailed) |
+| Set up production HEAVEN | [README — Quick Start](../README.md#quick-start) |
 | Add an LLM to the AI layer | `pip install -e ".[gemini]"`, set `GEMINI_API_KEY` (or Anthropic/OpenAI), re-run. Full guide: [README — API Keys](../README.md#api-keys) |
-| Continuously monitor a target | [README — Continuous Monitoring](../README.md#continuous-monitoring) |
+| Continuously monitor a target | [README — CLI Reference (`watch`)](../README.md#cli) |
 | Compare HEAVEN vs Burp / ZAP / sqlmap | [COMPARISON.md](COMPARISON.md) |
 | Record a demo video | [DEMO.md](DEMO.md) |
 | Contribute code | [CONTRIBUTING.md](../CONTRIBUTING.md) |

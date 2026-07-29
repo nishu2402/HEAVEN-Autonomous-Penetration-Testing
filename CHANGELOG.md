@@ -90,6 +90,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Documentation accuracy pass — corrected stale counts, a stale demo banner,
+  broken README deep-links, and two out-of-date runbooks.** A full sweep of
+  `docs/` against the shipped code: the README Project-Summary table said **50**
+  CLI commands while its own poster/footer (and the real CLI) say **51** — aligned
+  to 51; `docs/QUICKSTART.md` claimed **19** web pages (actual **24**);
+  `docs/DEMO.md`'s Scene 1 described the `heaven --version` output as a branded
+  banner "listing 31 commands" (it prints only the version string) — rewritten to
+  use `heaven info`, which shows the real ASCENDANT AEGIS banner. Three README
+  deep-links that no longer resolved (`#installation-detailed`,
+  `#continuous-monitoring`, `#scanner-rating`) were repointed to live anchors, and
+  `docs/BENCHMARK_HOWTO.md` §3 now points at `BENCHMARK_RESULTS.md` instead of a
+  removed section. Two aspirational runbooks that misrepresented the shipped
+  product were rewritten to match reality: `docs/runbooks/frontend_audit.md` (the
+  UI ships with token auth + a 401 interceptor + CSP/security headers — it no
+  longer reads as "the frontend has no auth yet") and `docs/runbooks/ml_training.md`
+  (the CVSS model is a **real** NVD-trained ExtraTreesRegressor, R²=0.9925, via
+  `heaven train-model` — not the "synthetic stub" the old doc described; it also
+  referenced two files that don't exist). `docs/runbooks/ad_lab.md` no longer
+  claims "HEAVEN doesn't do lateral movement" (it does — `heaven lateral` /
+  `heaven postex`). No product code changed; the README test/module count-check
+  still passes.
+
 - **CI "Check README test count is in sync" no longer fails — and now can't drift
   again.** After the previous test-skip fix, `pytest` itself passed on both
   Python versions, but the 3.12-only docs-sync step (`scripts/sync_test_count.py

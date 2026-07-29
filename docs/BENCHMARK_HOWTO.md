@@ -102,12 +102,12 @@ Aggregated over **5** runs. Mean scan duration: 38.2s ± 4.1s.
 
 ---
 
-## 3 · Update the README with the numbers
+## 3 · Publish the numbers
 
-Copy the headline metrics into the [Vulnerability-Scanner Rating
-section](../README.md#scanner-rating). Replace the "TBD" cells with
-real numbers. Commit `dvwa_aggregated.md` so the GitHub Actions
-benchmark workflow has a baseline to compare against.
+Fold the headline metrics into [`docs/BENCHMARK_RESULTS.md`](BENCHMARK_RESULTS.md)
+— the file the README's **Benchmark** row links to — then commit
+`dvwa_aggregated.md` so the GitHub Actions benchmark workflow has a
+baseline to diff future runs against.
 
 ---
 

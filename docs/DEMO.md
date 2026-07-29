@@ -11,13 +11,17 @@ The narrative is **observe → act → reproduce**. ~60 seconds total.
 ### Scene 1 — Brand the demo (5s)
 
 ```bash
-heaven --version
+heaven info
 clear
 ```
 
-The banner reads `HEAVEN v1.0.0 — Autonomous Penetration Testing Platform`
-and lists 31 commands. This is the "moment of trust" — the viewer knows
-they're not watching a toy.
+The branded banner appears — the **ASCENDANT AEGIS** ASCII logo, the
+`Find It · Confirm It · Prove It · Report It` tagline, and the
+`v1.0.0 · Recon → Exploit → Post-Ex → Report` line — followed by the
+platform-info table (version, wired integrations, active engagement).
+This is the "moment of trust" — the viewer knows they're not watching a
+toy. (`heaven --version` prints just the version string if you want the
+terse form.)
 
 ### Scene 2 — One-shot scan (20s)
 

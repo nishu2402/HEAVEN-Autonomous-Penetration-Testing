@@ -119,12 +119,11 @@ If any of those types are completely absent **and** GOAD/Samba is correctly conf
 
 ---
 
-## Out-of-scope
+## Out-of-scope for this runbook
 
-This runbook does NOT cover:
-- Lateral movement (HEAVEN doesn't do that — see README disclaimer)
-- Pass-the-hash or pass-the-ticket attacks (out of scope for a scanner)
-- DCSync (out of scope; would require Domain Admin)
-- Golden Ticket / Silver Ticket (out of scope)
+This runbook validates the AD **enumeration** scanner (`heaven/recon/ad_scanner.py`). It does not walk through:
 
-If you need any of the above for a real engagement, use BloodHound + impacket directly. HEAVEN's job ends at "here are the misconfigurations a privileged attacker would chain."
+- **Lateral movement / pass-the-hash** — HEAVEN *does* automate a credential-reuse loop (`heaven lateral`, `heaven postex`), but driving it needs a foothold + valid credentials this recon-only lab doesn't stand up. Validate it separately once you have that.
+- **DCSync, Golden / Silver Ticket** — genuinely out of scope for HEAVEN: they require Domain Admin and offensive TGT/TGS forging, which HEAVEN deliberately does not perform.
+
+The AD scanner's job is to surface the misconfigurations (Kerberoastable SPNs, AS-REP-roastable users, unconstrained delegation, weak ACL paths) that a privileged attacker would chain. For hands-on exploitation of those paths, use BloodHound + impacket directly.

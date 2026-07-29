@@ -109,7 +109,7 @@ It runs three ways from the **same engagement dataset**:
 | 🧪 **Tests** | 1358 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 159 |
-| ⌨️ **CLI Commands** | 50 |
+| ⌨️ **CLI Commands** | 51 |
 | 🌐 **API Routes** | 64 RBAC-protected routes |
 | 🖥️ **UI Pages** | 24 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |

@@ -1,0 +1,9 @@
+{
+  "name": "heaven-screenshots",
+  "private": true,
+  "description": "Dev-only tooling to regenerate docs/screenshots. Not part of the app or the web UI build.",
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

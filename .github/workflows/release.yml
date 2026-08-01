@@ -140,4 +140,4 @@ jobs:
             dist/*
             data/models/NVD_model.pkl
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}   # tag like v1.0.0-rc1 → prerelease
+          prerelease: ${{ contains(github.ref_name, '-') }}   # tag like v2.0.0-rc1 → prerelease

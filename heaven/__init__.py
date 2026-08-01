@@ -1,7 +1,7 @@
 # HEAVEN — Autonomous Pen-Testing Framework
 # Core package initialisation
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __codename__ = "HEAVEN"
 __tagline__ = "Autonomous Penetration-Testing Platform"
 

@@ -90,7 +90,7 @@ class HeavenRiskModel:
         # (data/models/cvss_regressor.joblib from `heaven train-model`); the file
         # itself is never loaded directly.
         self.model_path = model_path or Path("models/risk_model_v2.joblib")
-        self.version = "1.0.0"
+        self.version = "2.0.0"
         self._is_trained = False
         self._regressor = None
         self._feature_names: list[str] = []

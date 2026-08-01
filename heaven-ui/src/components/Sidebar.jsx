@@ -158,7 +158,7 @@ export default function Sidebar() {
           </span>
         </div>
         <div style={{ marginTop: 8, fontSize: 10.5, color: 'var(--text-2)' }}>
-          v1.0.0 · press <kbd>⌘K</kbd> for commands
+          v2.0.0 · press <kbd>⌘K</kbd> for commands
         </div>
       </div>
     </aside>

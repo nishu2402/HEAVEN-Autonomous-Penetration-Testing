@@ -21,8 +21,8 @@ def compile_json_report(scan_data: dict, output_path: Optional[str] = None) -> d
     report = {
         "schema_version": "1.0",
         "tool": {
-            "name": "HEAVEN", 
-            "version": "1.0.0",
+            "name": "HEAVEN",
+            "version": "2.0.0",
             "author": "Nisarg Chasmawala (Shroff)"
         },
         "scan_id": scan_data.get("scan_id", str(uuid4())),
@@ -61,7 +61,7 @@ def export_sarif(scan_data: dict, output_path: str = "heaven-results.sarif") -> 
             "tool": {
                 "driver": {
                     "name": "HEAVEN",
-                    "version": "1.0.0",
+                    "version": "2.0.0",
                     "organization": "Nisarg Chasmawala (Shroff)",
                     "informationUri": "https://github.com/heaven-security",
                     "rules": [],

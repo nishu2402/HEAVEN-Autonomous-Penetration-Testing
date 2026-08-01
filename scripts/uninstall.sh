@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  HEAVEN — Autonomous Penetration Testing Framework
-#  Uninstaller v1.0.0
+#  Uninstaller v2.0.0
 #
 #  Removes: venv, CLI symlinks, shell RC PATH entries, egg-info, __pycache__
 #  Keeps:   source code, scan data (unless empty), engagement DBs, config
@@ -25,7 +25,7 @@ INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}${BOLD}║                    HEAVEN Uninstaller v1.0.0                   ║${NC}"
+echo -e "${CYAN}${BOLD}║                    HEAVEN Uninstaller v2.0.0                   ║${NC}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 info "Project directory: ${BOLD}${INSTALL_DIR}${NC}"

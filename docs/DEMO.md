@@ -17,7 +17,7 @@ clear
 
 The branded banner appears — the **ASCENDANT AEGIS** ASCII logo, the
 `Find It · Confirm It · Prove It · Report It` tagline, and the
-`v1.0.0 · Recon → Exploit → Post-Ex → Report` line — followed by the
+`v2.0.0 · Recon → Exploit → Post-Ex → Report` line — followed by the
 platform-info table (version, wired integrations, active engagement).
 This is the "moment of trust" — the viewer knows they're not watching a
 toy. (`heaven --version` prints just the version string if you want the

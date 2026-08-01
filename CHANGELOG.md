@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet — changes for the next release will be listed here._
+
+## [2.0.0] — 2026-08-01
+
+HEAVEN's first **major** release, consolidating everything built on top of the
+1.0.0 foundation into a hardened 2.0 line. Highlights: the web risk taxonomy
+moved to the **OWASP Top 10:2025** model platform-wide; scoring was overhauled
+with **per-finding contextual CVSS** (Temporal + Environmental), **CVSS v4.0**
+support, and severity ⇄ CVSS reconciliation so a label and its score can never
+contradict; the web UI migrated to **React 19**, clearing the `react-router`
+advisory at the source; and new capabilities landed — a standalone **DNS
+enumeration** tool, authenticated **cloud IAM auditing** (AWS / GCP / Azure), a
+network-reachable **wireless configuration review**, and **OT / IoT framework**
+scoring — alongside a sustained false-positive-reduction effort and reproducibly
+green CI. The complete, itemised history follows.
+
 ### Added
 
 - **DNS enumeration tool (`heaven dns`) — records + subdomains surfaced in the

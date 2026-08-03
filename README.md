@@ -1,7 +1,11 @@
 # ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
-<img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1358 tests · 51 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1358 tests · 51 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+</picture>
 </p>
 
 ---

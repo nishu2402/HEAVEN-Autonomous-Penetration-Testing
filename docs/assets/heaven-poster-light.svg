@@ -1,0 +1,273 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 500" role="img"
+     aria-label="HEAVEN — Autonomous Penetration-Testing Framework. Pipeline: Recon to ML Risk Scoring to Verified Exploitation to Reporting. 1358 tests, 51 CLI commands, 64 API routes, 24 UI pages, 12 scan modes, CVSS ML predictor R-squared 0.9925.">
+  <title>HEAVEN — Autonomous Penetration-Testing Framework</title>
+
+  <defs>
+    <!-- brand ramp: violet to cyan to emerald (the app heat-grad / logo edge) -->
+    <radialGradient id="coreL" cx="0.32" cy="0.30" r="1.05">
+      <stop offset="0" stop-color="#FBFDFF"/>
+      <stop offset="0.55" stop-color="#F1F5FC"/>
+      <stop offset="1" stop-color="#E7EEF9"/>
+    </radialGradient>
+    <linearGradient id="frameL" x1="0" y1="0" x2="1280" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6D7CFF"/>
+      <stop offset="0.5" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#34E5A3"/>
+    </linearGradient>
+    <linearGradient id="brandL" x1="248" y1="96" x2="612" y2="182" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5B54E6"/>
+      <stop offset="0.5" stop-color="#0EA5C4"/>
+      <stop offset="1" stop-color="#0E9F6E"/>
+    </linearGradient>
+    <linearGradient id="statL" x1="150" y1="0" x2="1140" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5B54E6"/>
+      <stop offset="0.5" stop-color="#0EA5C4"/>
+      <stop offset="1" stop-color="#0E9F6E"/>
+    </linearGradient>
+    <linearGradient id="lineL" x1="155" y1="0" x2="1122" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6D7CFF"/>
+      <stop offset="0.5" stop-color="#12B0CE"/>
+      <stop offset="1" stop-color="#17C08A"/>
+    </linearGradient>
+    <linearGradient id="sheenL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="scanL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0EA5C4" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#0EA5C4" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#0EA5C4" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="blobVL" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6D7CFF" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#6D7CFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blobEL" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#34E5A3" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#34E5A3" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sweepL" cx="1052" cy="152" r="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17C08A" stop-opacity="0.34"/>
+      <stop offset="0.7" stop-color="#0EA5C4" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#0EA5C4" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- ── the Ascendant Aegis gem (verbatim geometry from heaven-mark.svg) ── -->
+    <linearGradient id="hvnEdgeL" x1="18" y1="12" x2="110" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6D7CFF"/><stop offset="0.5" stop-color="#22D3EE"/><stop offset="1" stop-color="#34E5A3"/>
+    </linearGradient>
+    <linearGradient id="hvnMonoL" x1="48" y1="45" x2="80" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5B54E6"/><stop offset="0.5" stop-color="#0E9F6E"/><stop offset="1" stop-color="#0EA5C4"/>
+    </linearGradient>
+    <radialGradient id="hvnCoreL" cx="0.5" cy="0.42" r="0.72">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCE6F7"/>
+    </radialGradient>
+
+    <filter id="glowL" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowBigL" x="-30%" y="-60%" width="160%" height="220%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <filter id="softL" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="nodeL" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="3.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <clipPath id="panelL"><rect x="4" y="4" width="1272" height="492" rx="26"/></clipPath>
+    <clipPath id="radarL"><circle cx="1052" cy="152" r="110"/></clipPath>
+    <mask id="wmL" maskUnits="userSpaceOnUse" x="230" y="80" width="420" height="110">
+      <text x="248" y="176" font-family="'Segoe UI',Roboto,-apple-system,'Helvetica Neue',Arial,sans-serif"
+            font-size="92" font-weight="800" letter-spacing="8" fill="#fff">HEAVEN</text>
+    </mask>
+  </defs>
+
+  <!-- ── backdrop ── -->
+  <rect x="4" y="4" width="1272" height="492" rx="26" fill="url(#coreL)"/>
+  <g clip-path="url(#panelL)">
+    <!-- soft ambient light blobs, slow breathing -->
+    <circle cx="150" cy="120" r="260" fill="url(#blobVL)" filter="url(#softL)" opacity="0.5">
+      <animate attributeName="opacity" values="0.35;0.6;0.35" dur="7s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="1120" cy="430" r="280" fill="url(#blobEL)" filter="url(#softL)" opacity="0.45">
+      <animate attributeName="opacity" values="0.5;0.28;0.5" dur="8s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- faint recon grid -->
+    <g stroke="#2A3A57" stroke-opacity="0.05" stroke-width="1">
+      <path d="M40 0V500M120 0V500M200 0V500M280 0V500M360 0V500M440 0V500M520 0V500M600 0V500M680 0V500M760 0V500M840 0V500M920 0V500M1000 0V500M1080 0V500M1160 0V500M1240 0V500"/>
+      <path d="M0 60H1280M0 140H1280M0 220H1280M0 300H1280M0 380H1280M0 460H1280"/>
+    </g>
+
+    <!-- descending scan line -->
+    <g opacity="0.85">
+      <rect x="8" y="0" width="1264" height="2.2" fill="url(#scanL)">
+        <animateTransform attributeName="transform" type="translate" values="0 30; 0 470; 0 30" keyTimes="0;0.5;1" dur="5.5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0;0.9;0.9;0" keyTimes="0;0.1;0.9;1" dur="5.5s" repeatCount="indefinite"/>
+      </rect>
+    </g>
+
+    <!-- ── right: recon radar with target locks ── -->
+    <g clip-path="url(#radarL)">
+      <path d="M1052 152 L1162 152 A110 110 0 0 0 1133.7 78.7 Z" fill="url(#sweepL)">
+        <animateTransform attributeName="transform" type="rotate" from="0 1052 152" to="360 1052 152" dur="6s" repeatCount="indefinite"/>
+      </path>
+    </g>
+    <g fill="none" stroke="#0EA5C4" stroke-opacity="0.18">
+      <circle cx="1052" cy="152" r="110"/><circle cx="1052" cy="152" r="76"/><circle cx="1052" cy="152" r="42"/>
+      <path d="M1052 42V262M942 152H1162" stroke-opacity="0.12"/>
+    </g>
+    <circle cx="1052" cy="152" r="110" fill="none" stroke="url(#frameL)" stroke-opacity="0.45"/>
+    <!-- target pings: emerald = mapped host, pink = live finding -->
+    <g>
+      <circle cx="1018" cy="112" r="3" fill="#0E9F6E"/>
+      <circle cx="1018" cy="112" r="3" fill="none" stroke="#0E9F6E" stroke-width="1.5">
+        <animate attributeName="r" values="3;20" dur="2.6s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="2.6s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="1104" cy="176" r="3.2" fill="#E0356F"/>
+      <circle cx="1104" cy="176" r="3.2" fill="none" stroke="#E0356F" stroke-width="1.5">
+        <animate attributeName="r" values="3;20" dur="2.6s" begin="0.9s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="2.6s" begin="0.9s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="1006" cy="196" r="3" fill="#0E9F6E"/>
+      <circle cx="1006" cy="196" r="3" fill="none" stroke="#0E9F6E" stroke-width="1.5">
+        <animate attributeName="r" values="3;18" dur="2.6s" begin="1.7s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="2.6s" begin="1.7s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="1086" cy="108" r="3.2" fill="#E0356F"/>
+      <circle cx="1086" cy="108" r="3.2" fill="none" stroke="#E0356F" stroke-width="1.5">
+        <animate attributeName="r" values="3;18" dur="2.6s" begin="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="2.6s" begin="2.3s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+    <g font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" text-anchor="middle">
+      <circle cx="1008" cy="279" r="3.4" fill="#0E9F6E">
+        <animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite"/>
+      </circle>
+      <text x="1020" y="283" font-size="12.5" fill="#0B9A78" letter-spacing="3" text-anchor="start">LIVE RECON</text>
+    </g>
+
+    <!-- ── left: logo + wordmark ── -->
+    <circle cx="145" cy="146" r="86" fill="url(#blobEL)" opacity="0.6">
+      <animate attributeName="opacity" values="0.4;0.75;0.4" dur="3.4s" repeatCount="indefinite"/>
+    </circle>
+    <g transform="translate(80,82) scale(1.02)">
+      <polygon points="64,10 110,37 110,91 64,118 18,91 18,37" fill="url(#hvnCoreL)" stroke="url(#hvnEdgeL)" stroke-width="4.5" stroke-linejoin="round"/>
+      <polygon points="64,22 101,44 101,84 64,106 27,84 27,44" fill="none" stroke="url(#hvnEdgeL)" stroke-width="1.1" stroke-opacity="0.45" stroke-linejoin="round"/>
+      <g stroke="url(#hvnMonoL)" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glowL)">
+        <path d="M48 50V88"/><path d="M80 50V88"/><path d="M48 72 64 54 80 72"/>
+      </g>
+      <circle cx="64" cy="45" r="4.6" fill="#0EA5C4" filter="url(#glowL)">
+        <animate attributeName="r" values="4.6;6.4;4.6" dur="2.6s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="1;0.6;1" dur="2.6s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- wordmark: gradient fill + soft halo + travelling sheen -->
+    <g font-family="'Segoe UI',Roboto,-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" letter-spacing="8">
+      <text x="248" y="176" font-size="92" fill="url(#brandL)" filter="url(#glowBigL)" opacity="0.22">HEAVEN</text>
+      <text x="248" y="176" font-size="92" fill="url(#brandL)">HEAVEN</text>
+    </g>
+    <g mask="url(#wmL)">
+      <polygon points="18,86 92,86 62,190 -12,190" fill="url(#sheenL)">
+        <animateTransform attributeName="transform" type="translate" values="70 0; 610 0; 610 0" keyTimes="0;0.42;1" dur="3.8s" repeatCount="indefinite"/>
+      </polygon>
+    </g>
+
+    <text x="250" y="210" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="16.5" letter-spacing="4.4" fill="#0E92AE">AUTONOMOUS PENETRATION-TESTING FRAMEWORK</text>
+    <text x="250" y="240" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="15.5" letter-spacing="1">
+      <tspan fill="#5B54E6">Find It.</tspan><tspan fill="#AEB9CC">  ·  </tspan><tspan fill="#0E9BB8">Confirm It.</tspan><tspan fill="#AEB9CC">  ·  </tspan><tspan fill="#0E9F6E">Report It.</tspan>
+    </text>
+    <text x="80" y="270" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="12.5" letter-spacing="1.5" fill="#63728E">LLM OBSERVE → PLAN → ACT   ·   DETERMINISTIC FALLBACK, NO API KEY REQUIRED</text>
+
+    <!-- ── header / pipeline divider ── -->
+    <path d="M32 293H1248" stroke="#DCE3EF" stroke-width="1"/>
+
+    <!-- ── pipeline: recon → ML risk → verified exploit → report ── -->
+    <path d="M155 344H1122" stroke="#D2DBEC" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M155 344H1122" stroke="url(#lineL)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="2 15">
+      <animate attributeName="stroke-dashoffset" values="0;-17" dur="0.7s" repeatCount="indefinite"/>
+    </path>
+    <!-- travelling packet -->
+    <circle r="4.5" fill="#0EA5C4" filter="url(#nodeL)">
+      <animateMotion path="M155 344H1122" dur="3.4s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"/>
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.95;1" dur="3.4s" repeatCount="indefinite"/>
+    </circle>
+
+    <g font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" text-anchor="middle">
+      <!-- node 1 RECON -->
+      <text x="155" y="320" font-size="13" font-weight="700" letter-spacing="1.5" fill="#0B1424">RECON</text>
+      <circle cx="155" cy="344" r="6.5" fill="#6D7CFF" filter="url(#nodeL)"/>
+      <circle cx="155" cy="344" r="6.5" fill="none" stroke="#5B54E6" stroke-width="1.5">
+        <animate attributeName="r" values="6.5;15" dur="3.4s" begin="0s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="3.4s" begin="0s" repeatCount="indefinite"/>
+      </circle>
+      <text x="155" y="368" font-size="10" letter-spacing="0.5" fill="#6A7890">nmap · dns · osint</text>
+      <!-- node 2 ML RISK -->
+      <text x="478" y="320" font-size="13" font-weight="700" letter-spacing="1.5" fill="#0B1424">ML RISK</text>
+      <circle cx="478" cy="344" r="6.5" fill="#12B0CE" filter="url(#nodeL)"/>
+      <circle cx="478" cy="344" r="6.5" fill="none" stroke="#0EA5C4" stroke-width="1.5">
+        <animate attributeName="r" values="6.5;15" dur="3.4s" begin="0.85s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="3.4s" begin="0.85s" repeatCount="indefinite"/>
+      </circle>
+      <text x="478" y="368" font-size="10" letter-spacing="0.5" fill="#6A7890">cvss · epss · kev</text>
+      <!-- node 3 VERIFIED EXPLOIT -->
+      <text x="800" y="320" font-size="13" font-weight="700" letter-spacing="1.5" fill="#0B1424">VERIFIED EXPLOIT</text>
+      <circle cx="800" cy="344" r="6.5" fill="#14BE9A" filter="url(#nodeL)"/>
+      <circle cx="800" cy="344" r="6.5" fill="none" stroke="#0E9F6E" stroke-width="1.5">
+        <animate attributeName="r" values="6.5;15" dur="3.4s" begin="1.7s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="3.4s" begin="1.7s" repeatCount="indefinite"/>
+      </circle>
+      <text x="800" y="368" font-size="10" letter-spacing="0.5" fill="#6A7890">sqlmap · rce · oast</text>
+      <!-- node 4 REPORT -->
+      <text x="1122" y="320" font-size="13" font-weight="700" letter-spacing="1.5" fill="#0B1424">REPORT</text>
+      <circle cx="1122" cy="344" r="6.5" fill="#17C08A" filter="url(#nodeL)"/>
+      <circle cx="1122" cy="344" r="6.5" fill="none" stroke="#0E9F6E" stroke-width="1.5">
+        <animate attributeName="r" values="6.5;15" dur="3.4s" begin="2.55s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.9;0" dur="3.4s" begin="2.55s" repeatCount="indefinite"/>
+      </circle>
+      <text x="1122" y="368" font-size="10" letter-spacing="0.5" fill="#6A7890">pdf · sarif · burp</text>
+    </g>
+
+    <!-- ── stat pills (verified, in-sync counts) ── -->
+    <g>
+      <rect x="67"   y="392" width="176" height="66" rx="13" fill="#FFFFFF" stroke="#D9E1F0"/>
+      <rect x="261"  y="392" width="176" height="66" rx="13" fill="#FFFFFF" stroke="#D9E1F0"/>
+      <rect x="455"  y="392" width="176" height="66" rx="13" fill="#FFFFFF" stroke="#D9E1F0"/>
+      <rect x="649"  y="392" width="176" height="66" rx="13" fill="#FFFFFF" stroke="#D9E1F0"/>
+      <rect x="843"  y="392" width="176" height="66" rx="13" fill="#FFFFFF" stroke="#D9E1F0"/>
+      <rect x="1037" y="392" width="176" height="66" rx="13" fill="#FFFFFF" stroke="#D9E1F0"/>
+    </g>
+    <g text-anchor="middle" fill="url(#statL)" font-family="'Segoe UI',Roboto,-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800">
+      <text x="155"  y="426" font-size="28">1358</text>
+      <text x="349"  y="426" font-size="28">51</text>
+      <text x="543"  y="426" font-size="28">64</text>
+      <text x="737"  y="426" font-size="28">24</text>
+      <text x="931"  y="426" font-size="28">12</text>
+      <text x="1125" y="426" font-size="24">0.9925</text>
+    </g>
+    <g text-anchor="middle" fill="#6A7890" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.6">
+      <text x="155"  y="444">TESTS</text>
+      <text x="349"  y="444">CLI COMMANDS</text>
+      <text x="543"  y="444">API ROUTES</text>
+      <text x="737"  y="444">UI PAGES</text>
+      <text x="931"  y="444">SCAN MODES</text>
+      <text x="1125" y="444">CVSS ML · R²</text>
+    </g>
+
+    <!-- ── bottom accent + captions ── -->
+    <rect x="67" y="474" width="1146" height="2.5" rx="1.25" fill="url(#lineL)" opacity="0.55"/>
+    <rect x="67" y="474" width="150" height="2.5" rx="1.25" fill="#0EA5C4" opacity="0.9">
+      <animateTransform attributeName="transform" type="translate" values="0 0; 996 0; 0 0" keyTimes="0;0.5;1" dur="5s" repeatCount="indefinite"/>
+    </rect>
+    <text x="67" y="489" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#66748F">CLI · WEB UI · REST + WEBSOCKET API — ONE ENGAGEMENT DATASET</text>
+    <text x="1213" y="489" text-anchor="end" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#66748F">v2.0.0 · MIT LICENSE</text>
+  </g>
+
+  <!-- outer frame -->
+  <rect x="4.75" y="4.75" width="1270.5" height="490.5" rx="25.5" fill="none" stroke="url(#frameL)" stroke-opacity="0.6" stroke-width="1.5"/>
+</svg>

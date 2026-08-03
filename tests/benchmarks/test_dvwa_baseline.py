@@ -104,20 +104,25 @@ def _run_heaven_scan(
     engagement_dir = engagement_db.parent
     engagement_dir.mkdir(parents=True, exist_ok=True)
 
-    # Heaven derives engagement DB path from the --engagement name relative to
-    # CWD: engagements/<name>.db. Run from a tempdir so we control that.
+    # Heaven writes the engagement DB to <data_dir>/engagements/<name>.db, where
+    # data_dir follows HEAVEN_DATA_DIR (default ./data). Pin HEAVEN_DATA_DIR to
+    # this tempdir so the DB lands at <tmp>/engagements/<name>.db, exactly where
+    # we look below — and so it is unaffected by the suite's autouse data-dir
+    # isolation (tests/conftest.py points HEAVEN_DATA_DIR at pytest's tmp_path,
+    # which these subprocesses would otherwise inherit).
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
+        env = {**os.environ, "HEAVEN_DATA_DIR": str(tmp_path)}
         # Pre-create the engagement DB shell
         init_cmd = [heaven, "engage", "init", engagement_name, "--client", "benchmark"]
-        subprocess.run(init_cmd, cwd=tmp_path, capture_output=True, text=True, timeout=60)
+        subprocess.run(init_cmd, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
 
         # Add the target to scope so the auth gate accepts it
         scope_cmd = [
             heaven, "scope", "add", base_url,
             "--engagement", engagement_name, "--kind", "url",
         ]
-        subprocess.run(scope_cmd, cwd=tmp_path, capture_output=True, text=True, timeout=60)
+        subprocess.run(scope_cmd, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
 
         scan_cmd = [
             heaven, "scan",
@@ -132,7 +137,7 @@ def _run_heaven_scan(
             scan_cmd += ["--cookie-file", cookie_file, "--no-use-scope"]
         start = time.time()
         result = subprocess.run(
-            scan_cmd, cwd=tmp_path, capture_output=True, text=True,
+            scan_cmd, cwd=tmp_path, env=env, capture_output=True, text=True,
             timeout=_scan_timeout(),
         )
         duration = time.time() - start
@@ -143,7 +148,9 @@ def _run_heaven_scan(
             print("HEAVEN stderr:\n" + result.stderr[-2000:])
             pytest.fail(f"heaven scan exited {result.returncode}")
 
-        # Copy the DB out before the tempdir is cleaned up
+        # Copy the DB out before the tempdir is cleaned up. HEAVEN_DATA_DIR is
+        # pinned to tmp_path above, so the engagement lands at
+        # <tmp>/engagements/<name>.db.
         produced = tmp_path / "engagements" / f"{engagement_name}.db"
         if not produced.exists():
             pytest.fail(f"engagement DB not produced at {produced}")

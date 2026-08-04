@@ -207,15 +207,18 @@ async def test_uniformly_slow_post_is_not_time_based_sqli(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_injectable_post_is_time_based_sqli(monkeypatch):
-    monkeypatch.setattr(ij, "SQLI_TIME_PROBES", [("' AND SLEEP(1)-- ", 0.3, "sleep")])
+    # A genuine time-based oracle: the delay SCALES with the injected SLEEP value
+    # (SLEEP(0.5) → 0.5s, and the scanner's double-the-sleep confirmation turns it
+    # into SLEEP(1.0) → 1.0s). The probe's sleep_secs matches the value embedded in
+    # the payload so the doubling substitution works, exactly as in production.
+    import re as _re
+
+    monkeypatch.setattr(ij, "SQLI_TIME_PROBES", [("' AND SLEEP(0.5)-- ", 0.5, "sleep")])
     monkeypatch.setattr(ij, "SQLI_ERROR_PROBES", [])
 
     async def cond_post(session, url, data, headers=None, timeout=10.0):
-        # only the SLEEP payload is slow → genuine time-based oracle
-        if "SLEEP" in str(data.get("q", "")):
-            await asyncio.sleep(0.4)
-        else:
-            await asyncio.sleep(0.02)
+        m = _re.search(r"SLEEP\(([\d.]+)\)", str(data.get("q", "")))
+        await asyncio.sleep(float(m.group(1)) if m else 0.02)  # delay scales with SLEEP(n)
         return 200, "<html>ok</html>"
 
     monkeypatch.setattr(ij, "_post", cond_post)

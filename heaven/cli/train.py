@@ -18,7 +18,7 @@ from heaven.cli._helpers import _print
 # both the release asset and this digest (or pass --sha256 / --no-verify).
 _MODEL_REPO = "nishu2402/HEAVEN-Autonomous-Penetration-Testing"
 _MODEL_ASSET = "NVD_model.pkl"
-_MODEL_DEFAULT_TAG = "v2.0.0"
+_MODEL_DEFAULT_TAG = "v2.1.0"
 _MODEL_SHA256 = "ba0167681a6c2ca22f94a3c6d15fb7cc75115992122869421e6399a9a2066845"
 _MODEL_SIZE_BYTES = 50238433
 

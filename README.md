@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1358 tests · 51 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1393 tests · 51 CLI commands · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -94,7 +94,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API** — 64 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN — Autonomous Penetration Testing Platform v2.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN — Autonomous Penetration Testing Platform v2.1.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -110,7 +110,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 1358 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 1393 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 159 |
 | ⌨️ **CLI Commands** | 51 |
@@ -400,7 +400,7 @@ deterministic heuristic (or pass `--no-llm`).
 51 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard — module status + live command reference (v2.0.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard — module status + live command reference (v2.1.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">
@@ -688,7 +688,7 @@ heaven/                   ← Python package (159 modules)
 └── cli/                  Click CLI — one module per command group (51 commands)
 
 heaven-ui/                React + Vite web console (24 pages)
-tests/                    1358 pytest tests + native & DVWA benchmark suites
+tests/                    1393 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES) · runbooks
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -774,7 +774,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>1358 tests · 159 modules · 51 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>1393 tests · 159 modules · 51 CLI commands · 64 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
 python scripts/sync_test_count.py</p>
 
 <p align="center">

@@ -173,6 +173,24 @@ vulnerabilities:
     detection_required: true
     notes: "The session cookie is set without HttpOnly/SameSite, exposing it to theft via XSS and cross-site sending."
 
+  # Opportunistic (not required): werkzeug (the app's WSGI server) stamps its
+  # own version into the `Server:` response header on every response, so HEAVEN's
+  # header scanner raises one origin-scoped server-version-disclosure finding.
+  # It is a real information leak; labelling it keeps that true finding from being
+  # scored as a false positive. Anchors to the origin (no path) → matches "/".
+  - id: server_version_disclosure
+    endpoint: "/"
+    method: GET
+    parameter: null
+    category: info_disclosure
+    subtypes_ok: [server_version_disclosure]
+    owasp: "A02:2025-Security Misconfiguration"
+    cwe: CWE-200
+    severity: low
+    difficulty: low
+    detection_required: false
+    notes: "The WSGI server advertises its exact version in the Server header (origin-scoped, collapses to one finding)."
+
   # Opportunistic (not required): every HTML page omits CSP / X-Frame-Options /
   # X-Content-Type-Options, so the misconfig scanner raises one origin-scoped
   # hardening finding. It is a real gap; labelling it keeps that true finding

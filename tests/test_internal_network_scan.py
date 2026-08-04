@@ -317,15 +317,43 @@ class TestWebUrlBridge:
         crawl = [t for t in orch.tasks.values() if "discovered services" in t.name]
         assert crawl, "no follow-up crawl injected for the discovered web app"
 
-    def test_existing_url_not_duplicated(self):
-        """An origin the operator already supplied must not be added again, but
-        a *different* discovered port on the same host still is."""
+    def test_url_only_host_does_not_expand_to_other_ports(self):
+        """Scope safety: a host reached *only* via an explicit URL is scanned at
+        exactly that origin — a *different* discovered port on the same host is
+        NOT bridged into web scanning. Authorising ``http://192.168.1.50/`` does
+        not authorise ``192.168.1.50:8080`` (which may be a separate app/team),
+        and it stops a ``localhost``-targeted scan from dragging in an unrelated
+        dev server co-located on another port. The supplied origin is, of course,
+        still there exactly once."""
         targets = {"ips": [], "urls": ["http://192.168.1.50/"], "ports": "1-1000",
                    "stealth_level": "normal"}
         orch = build_full_scan(targets, scan_mode=ScanMode.FULL)
         orch._inject_service_tasks(self._WEB_HOSTS)
 
         assert targets["urls"].count("http://192.168.1.50/") == 1
+        assert "http://192.168.1.50:8080/" not in targets["urls"]
+        assert not [t for t in orch.tasks.values() if "discovered services" in t.name]
+
+    def test_bare_host_in_scope_still_expands_ports(self):
+        """The port-expansion capability is intact for the intended case: a host
+        the operator submitted as a bare hostname (the ``ips`` bucket) DOES gain
+        its other discovered web ports, even when net-recon reports the host by
+        its original string rather than a resolved IP."""
+        targets = {"ips": ["192.168.1.50"], "urls": [], "ports": "1-1000",
+                   "stealth_level": "normal"}
+        orch = build_full_scan(targets, scan_mode=ScanMode.FULL)
+        orch._inject_service_tasks(self._WEB_HOSTS)
+        assert "http://192.168.1.50/" in targets["urls"]
+        assert "http://192.168.1.50:8080/" in targets["urls"]
+
+    def test_cidr_scope_expands_discovered_host_ports(self):
+        """A host discovered *inside* an operator-supplied CIDR is in the
+        port-expansion scope, so its web ports are bridged."""
+        targets = {"ips": ["192.168.1.0/24"], "urls": [], "ports": "1-1000",
+                   "stealth_level": "normal"}
+        orch = build_full_scan(targets, scan_mode=ScanMode.FULL)
+        orch._inject_service_tasks(self._WEB_HOSTS)
+        assert "http://192.168.1.50/" in targets["urls"]
         assert "http://192.168.1.50:8080/" in targets["urls"]
 
     def test_non_web_host_adds_nothing(self):

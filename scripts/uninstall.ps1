@@ -2,7 +2,7 @@
 <#
 ==============================================================================
   HEAVEN - Autonomous Penetration Testing Framework
-  Windows uninstaller (PowerShell) v2.0.0
+  Windows uninstaller (PowerShell) v2.1.0
 
   Removes: the venv, the user-PATH entry, egg-info and __pycache__.
   Keeps:   source code, and any non-empty scan / engagement / report data.
@@ -36,7 +36,7 @@ $InstallDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "              HEAVEN Uninstaller (Windows) v2.0.0            " -ForegroundColor Cyan
+Write-Host "              HEAVEN Uninstaller (Windows) v2.1.0            " -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Info "Project directory: $InstallDir"

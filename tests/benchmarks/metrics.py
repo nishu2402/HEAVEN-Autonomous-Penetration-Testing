@@ -98,6 +98,12 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     "idor": "idor", "insecure_direct_object_reference": "idor",
     # Misc
     "info_disclosure": "info_disclosure", "information_disclosure": "info_disclosure",
+    # Server/framework version leaked in a response header is information
+    # disclosure (OWASP A05 Security Misconfiguration). Mapped so a real header
+    # leak is credited against a labelled info_disclosure entry rather than being
+    # scored as a false positive.
+    "server_version_disclosure": "info_disclosure",
+    "technology_disclosure": "info_disclosure",
     "auth_bypass": "auth_bypass", "authentication_bypass": "auth_bypass",
     "deserialization": "deserialization", "insecure_deserialization": "deserialization",
     "broken_access_control": "broken_access_control",

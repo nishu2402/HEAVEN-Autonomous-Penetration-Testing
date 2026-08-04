@@ -10,12 +10,73 @@ import re
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Optional, cast
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urljoin, urlparse, urlsplit
 
 from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
 
 logger = get_logger("recon.web")
+
+
+# ── Session-destroying URLs ────────────────────────────────────────────────
+# An authenticated crawler that follows a logout link logs ITSELF out: the
+# server tears down the session, and every subsequent request — plus every other
+# scanner that shares the same session (injection / fuzzer / auth) — is then
+# bounced to the login page. Coverage and detection silently collapse, and
+# because requests fire concurrently, *whether* the logout lands before or after
+# a given scanner is timing-dependent → non-deterministic, unreproducible scans.
+# This is the classic authenticated-scan pitfall (DVWA's /logout.php is the
+# textbook case). We never enqueue, fetch, or emit these URLs. Matching is on
+# path segments / query values so a normal page that merely contains the
+# substring (e.g. /about) is unaffected.
+# A path *segment* (between slashes, minus any extension) that means "end the
+# session". Matched per-segment so an incidental substring never trips it:
+# /checkout, /hangout, /login, /legend, /sessions all stay in scope.
+_SESSION_KILL_SEGMENT_RE = re.compile(
+    r"^(?:"
+    r"log[_\-]?out\w*|log[_\-]?off\w*|"          # logout, log-out, logoutUser, logoff
+    r"sign[_\-]?out\w*|sign[_\-]?off\w*|"        # signout, sign-out, signoff
+    r"deauth(?:enticate)?\w*|disconnect|"
+    r"end[_\-]?session|revoke[_\-]?session|"
+    r"session[_\-](?:destroy|end|kill|logout|invalidate|terminate)"  # session_destroy
+    r")$",
+    re.IGNORECASE,
+)
+# "session" followed by a kill verb as the *next* path segment: /session/destroy.
+_SESSION_KILL_AFTER = {"destroy", "end", "kill", "logout", "invalidate", "terminate"}
+# A query VALUE that means logout: ?action=logout, ?do=logoff, &op=signout.
+_SESSION_KILL_VALUES = {
+    "logout", "log_out", "log-out", "logoff", "log_off", "signout",
+    "sign_out", "sign-out", "signoff", "deauth", "disconnect",
+}
+
+
+def _is_session_destroying(url: str) -> bool:
+    """True if fetching ``url`` would likely end the current auth session.
+
+    Inspects path segments (``/logout.php``, ``/user/sign-out``,
+    ``/api/session/destroy``) and query values (``?action=logout``). Pure and
+    side-effect free.
+    """
+    if not url:
+        return False
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    segs = [s for s in (parts.path or "").split("/") if s]
+    for i, seg in enumerate(segs):
+        stem = seg.rsplit(".", 1)[0]  # logout.php -> logout
+        if _SESSION_KILL_SEGMENT_RE.match(seg) or _SESSION_KILL_SEGMENT_RE.match(stem):
+            return True
+        if seg.lower() == "session" and i + 1 < len(segs):
+            nxt = segs[i + 1].rsplit(".", 1)[0].lower()
+            if nxt in _SESSION_KILL_AFTER:
+                return True
+    for _k, v in parse_qsl(parts.query or ""):
+        if v.strip().lower() in _SESSION_KILL_VALUES:
+            return True
+    return False
 
 
 @dataclass
@@ -78,6 +139,10 @@ async def crawl_url(
             current_url, depth = queue.popleft()
             if current_url in visited or depth > max_depth:
                 continue
+            if _is_session_destroying(current_url):
+                # Never fetch a logout/session-kill URL — it would end the
+                # authenticated session for this crawl and every scanner sharing it.
+                continue
             visited.add(current_url)
 
             async with sem:
@@ -103,6 +168,8 @@ async def crawl_url(
                             for a in soup.find_all("a", href=True):
                                 href = a.get("href")
                                 link = urljoin(current_url, str(href or ""))
+                                if _is_session_destroying(link):
+                                    continue  # don't log ourselves out mid-crawl
                                 if urlparse(link).netloc == base_domain and link not in visited:
                                     queue.append((link, depth + 1))
 
@@ -343,6 +410,8 @@ async def crawl_url_js(
                 current_url, depth = queue.pop(0)
                 if current_url in visited or depth > max_depth:
                     continue
+                if _is_session_destroying(current_url):
+                    continue  # never fetch a logout/session-kill URL while authed
                 visited.add(current_url)
 
                 try:
@@ -355,6 +424,8 @@ async def crawl_url_js(
                     # Extract links from rendered DOM
                     links = await page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
                     for link in links:
+                        if _is_session_destroying(link):
+                            continue  # don't log ourselves out mid-crawl
                         parsed = urlparse(link)
                         if parsed.netloc == base_domain and link not in visited:
                             queue.append((link, depth + 1))

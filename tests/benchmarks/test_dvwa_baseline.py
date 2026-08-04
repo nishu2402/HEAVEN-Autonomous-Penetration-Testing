@@ -13,22 +13,29 @@ Optional env vars:
     HEAVEN_BENCH_SCAN_TIMEOUT : per-scan timeout in seconds (default 900)
     HEAVEN_BENCH_REPORT_DIR   : where to save reports (default tests/benchmarks/reports/)
 
-Authenticated vs. unauthenticated
----------------------------------
-This baseline runs UNAUTHENTICATED. DVWA's vulnerable endpoints all live under
-/vulnerabilities/* behind a login, so a no-auth scan only exercises the public
-surface (/login.php, /setup.php, robots.txt, the index page) and recall is low
-by design. That is deliberate: it is a stable, reproducible floor that
-regressions can be measured against.
+Authenticated scanning
+----------------------
+This benchmark runs AUTHENTICATED. DVWA's vulnerable endpoints all live under
+/vulnerabilities/* behind a login, so the fixture (tests/benchmarks/conftest.py)
+logs in as admin/password and hands the scan a cookie jar carrying the session
+cookie **and** `security=low` (via `heaven scan --cookie-file <jar>`). The
+authenticated crawl then reaches the /vulnerabilities/* pages and the injection
+scanner detects the SQLi / reflected-XSS / command-injection / LFI there,
+yielding a real recall number — typically ~0.8 of the detection-required set.
 
-HEAVEN *does* support authenticated scanning — `heaven scan --cookie-file <jar>`
-or `--auth "url=/login.php,user=admin,pass=password,csrf_field=user_token"`.
-Verified live against this DVWA image: the authenticated crawl reaches the
-/vulnerabilities/* pages and the injection scanner detects the SQLi/XSS/cmdi
-there. To measure *authenticated* recall, hand the scan a cookie jar that also
-carries DVWA's `security=low` cookie (see docs/BENCHMARK_HOWTO.md, "authenticated
-DVWA scanning"). Wiring that into this fixture — and tightening boolean-blind
-SQLi precision on reflective endpoints — is tracked as a follow-up.
+An authenticated crawler must never follow a logout link: DVWA's /logout.php
+destroys the shared session server-side, after which every scanner reusing that
+session is bounced to /login.php and detection silently collapses — and because
+requests fire concurrently, *whether* the logout lands before a given scanner is
+timing-dependent, so the collapse is intermittent and unreproducible. HEAVEN's
+crawler skips session-destroying URLs
+(heaven/recon/web_crawler.py::_is_session_destroying); without that guard recall
+here is ~0. If login can't be completed the fixture falls back to an
+unauthenticated run (low recall) rather than failing outright.
+
+Remaining swing cases: blind-SQLi (timing-dependent) and CSRF (a non-injection
+class); tightening boolean-blind SQLi precision on reflective endpoints is a
+tracked follow-up.
 """
 
 from __future__ import annotations
@@ -239,8 +246,18 @@ def test_heaven_vs_dvwa_baseline(dvwa_target: GroundTruth) -> None:
     print(f"Reports written to: {report_dir}")
     print("=" * 70)
 
-    # ── Loose floors. Tighten over time, see README. ─────────────────────
-    # Smoke floor: scan completed, engagement DB was produced.
+    # ── Floors ────────────────────────────────────────────────────────────
+    # Smoke floor: every run loaded ground truth and produced findings.
     assert all(r.total_gt > 0 for r in run_results), "ground truth empty?"
-    # Don't assert recall/precision until HEAVEN has authenticated-scan
-    # support — see module docstring.
+    # Detection floor: the authenticated scan must find the bulk of DVWA's core
+    # injection vulnerabilities. Eight of the ten detection-required entries —
+    # SQLi (id) ×2, reflected XSS (name) ×2, command injection (ip) ×2, LFI
+    # (page) ×2 — detect deterministically; blind-SQLi (timing) and CSRF (a
+    # non-injection class) are the swing cases. The 0.5 floor catches a real
+    # regression — most importantly an authenticated-crawl session collapse,
+    # which drops recall to ~0 (see the module docstring on /logout) — while
+    # leaving headroom so timing jitter on a loaded CI runner never flakes it.
+    assert agg.mean_recall >= 0.5, (
+        f"DVWA authenticated recall {agg.mean_recall:.0%} is below the 0.5 floor — "
+        "core injection detection regressed (check the authenticated crawl / session)."
+    )

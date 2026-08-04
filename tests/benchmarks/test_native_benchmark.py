@@ -67,15 +67,19 @@ def test_native_benchmark_scores() -> None:
             print(f"  - {f.category:6} {f.parameter:8} {f.url}")
     print("=" * 64)
 
-    # ── Floors. Every required vuln must be found (this is what the comment-
-    #    style fix restored), and precision must stay high — the target is a
-    #    known surface, so unmatched findings are genuine false positives. ────
+    # ── Floors. The native target is a controlled surface with a COMPLETE ground
+    #    truth (every real finding HEAVEN emits — including the werkzeug server
+    #    header leak — is labelled), so the honest bar is a perfect score: every
+    #    required vuln found AND zero unmatched findings. Any unmatched finding is
+    #    therefore a genuine regression — either a real false positive to fix or a
+    #    real finding to add to the ground truth — and must fail the benchmark. ──
     assert result.recall == 1.0, (
         f"missed required GT: detected {sorted(result.detected_required_ids)} "
         f"of {result.total_required}"
     )
-    assert result.precision >= 0.90, (
-        f"precision {result.precision:.2f} — unexpected false positives: "
+    assert result.precision == 1.0, (
+        f"precision {result.precision:.3f} — unmatched findings (each is either a "
+        f"false positive to fix or a real finding to label in native.yaml): "
         f"{[(f.category, f.parameter, f.url) for f in result.unmatched_findings]}"
     )
-    assert result.f1 >= 0.95, f"F1 {result.f1:.2f} below floor"
+    assert result.f1 == 1.0, f"F1 {result.f1:.3f} — expected a perfect score on the native surface"

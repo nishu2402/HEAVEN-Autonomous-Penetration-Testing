@@ -9,7 +9,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — changes for the next release will be listed here._
+## [2.1.0] — 2026-08-04
+
+Accuracy and scope-correctness release. Builds on 2.0.0 with a false-positive
+elimination pass on the injection scanner, a scope-safety fix so a URL target
+never drags in unrelated services on a host's *other* ports, a completed DVWA
+benchmark ground truth, and a genuine 100 % native functional benchmark.
+
+### Fixed
+
+- **Authenticated crawler no longer logs itself out — restores deep, behind-login
+  detection.** The web crawler followed *every* same-origin link, including
+  logout links (e.g. DVWA's `/logout.php`). Because that URL tears the session
+  down server-side and every scanner shares the one authenticated session, once
+  any request reached it the crawler, injection, fuzzing and auth scanners were
+  all bounced to the login page and detection silently collapsed — and, since
+  requests fire concurrently, *whether* the logout landed first was
+  timing-dependent, so the collapse was intermittent and unreproducible. The
+  crawler (both the aiohttp and Playwright paths) now skips session-destroying
+  URLs — `logout` / `logoff` / `signout` / `signoff` / `deauth` / `disconnect` /
+  `session/{destroy,end,kill}` and `?action=logout`-style query values — via a
+  new, unit-tested `heaven/recon/web_crawler.py::_is_session_destroying` (matched
+  per path-segment, so `/checkout`, `/login`, `/sessions` stay in scope).
+  Measured against the DVWA benchmark, authenticated recall of the
+  detection-required set went from **0% → ~80%** (SQLi ×2, reflected-XSS ×2,
+  command-injection ×2, LFI ×2 detect deterministically). The DVWA benchmark now
+  asserts a real recall floor (≥ 0.5) instead of only "a scan ran," so this
+  regression cannot return unnoticed.
+- **Injection scanner false-positive pass — three real detector FPs eliminated,
+  live-verified against DVWA.**
+  - *Time-based SQLi cross-parameter false positive.* Every parameter of a URL is
+    probed concurrently, so a genuinely-injectable parameter's `SLEEP` request and
+    a benign parameter's probe were in flight at once; against a serialising
+    target (single-threaded PHP/MySQL) the benign request queued behind the real
+    sleep and inherited its delay — and the interference *scaled* when the sleep
+    doubled, defeating a naive check. Time-based detection now (a) runs every
+    timed measurement under a global lock so no two injected sleeps ever overlap,
+    and (b) confirms a hit only when doubling the sleep adds proportional delay
+    (`_time_blind_confirmed`). Fixed a critical-looking `SLEEP` false positive on
+    DVWA's non-injectable `Submit` button.
+  - *RFI false positive on pages that merely mention a PHP directive.* The remote-
+    file-inclusion check keyed on a bare `allow_url_include` / `allow_url_fopen`
+    substring, so any documentation or phpinfo page that *names* the directive
+    (DVWA's `instructions.php`) was flagged. RFI now requires the response to name
+    our unroutable probe host — proof the app actually attempted the remote fetch.
+  - *Command-injection false positive on log/aggregation pages.* The echo marker
+    was a fixed constant, so a page that reflects previously-submitted payloads (a
+    log viewer such as DVWA's `ids_log.php`) echoed the marker from *other* scan
+    requests and false-positived as RCE. The marker is now unique per request and
+    the reflected `echo <marker>` command text is stripped, so only genuine echo
+    *output* counts.
+- **Scope-safe port expansion — a URL target no longer pulls in unrelated
+  services on the same host's *other* ports.** When the operator submits a bare
+  IP / hostname / CIDR, HEAVEN discovers and web-scans whatever web app that host
+  turns out to run (the internal-scan capability, unchanged). But a host reached
+  *only* via an explicit `scheme://host:port` URL is now scanned at exactly that
+  origin: its other open ports are outside the operator's declared scope, so
+  authorising `https://app.example.com` never spills over into a different
+  service on `app.example.com:8080` (potentially a separate app or team), and a
+  scan of `http://localhost:8080/` no longer drags in an unrelated dev server
+  co-located on `localhost:5000`. The web-URL bridge is gated on a new
+  `heaven/orchestrator.py::_is_port_expansion_host` predicate (exact host, CIDR
+  containment, or subdomain of a bare-host target); service-level checks
+  (exposed-DB / SSH / RDP) on directly-scanned hosts are unaffected. This also
+  removes the localhost cross-service noise that had depressed recall on shared
+  developer boxes.
+- **DVWA benchmark ground truth completed** so real, previously-unlabelled DVWA
+  vulnerabilities (the `brute` username SQLi, the `fi` header-reflected XSS, the
+  `xss_s` name-field stored XSS, and the `csp` script-injection sink) are credited
+  as true positives instead of being scored as false positives. Focused
+  crawl→scan precision rose from **59% → 94%** with recall holding at 80–90%.
+
+### Changed
+
+- **Native functional benchmark is now a genuine 100% / 100% / 100%
+  (precision / recall / F1).** The one remaining unmatched finding — the werkzeug
+  server-version header leak — is a real information disclosure, so it is now
+  labelled in the ground truth; the benchmark floor is tightened from "precision
+  ≥ 0.90" to an exact perfect score, making any future false positive *or* newly
+  emitted real finding fail the benchmark until it is triaged.
 
 ## [2.0.0] — 2026-08-01
 

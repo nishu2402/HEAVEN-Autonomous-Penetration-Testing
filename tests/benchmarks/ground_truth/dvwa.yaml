@@ -67,6 +67,27 @@ vulnerabilities:
     detection_required: true
     notes: "Blind SQLi — output suppressed but boolean/time-based payloads work."
 
+  - id: dvwa-sqli-brute-low-username
+    endpoint: /vulnerabilities/brute/
+    method: GET
+    parameter: username
+    category: sqli
+    subtypes_ok: [sqli_error, sqli_union, sqli_boolean]
+    owasp: A05_2025
+    cwe: CWE-89
+    severity: critical
+    difficulty: low
+    # Opportunistic, not required for the recall floor — but a REAL vulnerability,
+    # so it is credited when found instead of being scored as a false positive.
+    detection_required: false
+    notes: >-
+      Brute-force login interpolates the username straight into the auth SELECT
+      (SELECT * FROM users WHERE user='$user' AND password='$pass'; only $pass is
+      md5'd), so it is genuinely error- and UNION-based SQL-injectable — distinct
+      from, and co-located with, the no-throttle weak_auth issue (dvwa-brute-low).
+      Verified live: `username='` returns the MySQL syntax error and a UNION
+      SELECT surfaces the injected marker.
+
   # ── Cross-Site Scripting ────────────────────────────────────────────────
 
   - id: dvwa-xss-reflected-low-name
@@ -108,6 +129,53 @@ vulnerabilities:
     # Stored XSS detection requires GET-back to confirm — harder for unauthenticated scanners
     detection_required: false
     notes: "Stored XSS in guestbook — payload persists across sessions."
+
+  - id: dvwa-xss-stored-low-name
+    endpoint: /vulnerabilities/xss_s/
+    method: POST
+    parameter: txtName
+    category: xss
+    subtypes_ok: [xss_stored]
+    owasp: A05_2025
+    cwe: CWE-79
+    severity: high
+    difficulty: low
+    # The guestbook 'name' field is stored and reflected unescaped too — a real,
+    # distinct stored-XSS sink. Opportunistic: credited when found, not required.
+    detection_required: false
+    notes: "Stored XSS in the guestbook name field (txtName), reflected unescaped."
+
+  - id: dvwa-xss-fi-header-reflected
+    endpoint: /vulnerabilities/fi/
+    method: GET
+    parameter: null
+    category: xss
+    subtypes_ok: [xss_reflected]
+    owasp: A05_2025
+    cwe: CWE-79
+    severity: high
+    difficulty: low
+    # fi's demo include (file3.php) echoes Referer / X-Forwarded-For / User-Agent
+    # unescaped, so those request headers are a genuine reflected-XSS sink. Verified
+    # live. Header-based (no query parameter). Opportunistic, not required.
+    detection_required: false
+    notes: "Reflected XSS via Referer/X-Forwarded-For/User-Agent headers echoed unescaped by fi's included page."
+
+  - id: dvwa-xss-csp-include
+    endpoint: /vulnerabilities/csp/
+    method: POST
+    parameter: include
+    category: xss
+    subtypes_ok: [xss_reflected]
+    owasp: A05_2025
+    cwe: CWE-79
+    severity: high
+    difficulty: low
+    # The CSP demo drops the 'include' value into an unescaped <script src='…'>,
+    # a genuine reflected script-injection sink (the documented CSP-low exercise).
+    # Opportunistic, not required.
+    detection_required: false
+    notes: "Reflected script injection — the 'include' value is written into a <script src> unescaped (CSP-low)."
 
   # ── Command Injection ───────────────────────────────────────────────────
 

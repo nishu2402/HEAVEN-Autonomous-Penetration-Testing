@@ -33,6 +33,7 @@ import difflib
 import hashlib
 import html
 import re
+import secrets
 import time
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -191,30 +192,68 @@ _RFI_HOST = "heaven-rfi-probe.invalid"
 RFI_PROBES: list[tuple[str, str]] = [
     (f"http://{_RFI_HOST}/h3av3n.txt", "remote_http"),
 ]
+# Every pattern must name OUR probe host — that is the only proof the app
+# actually processed the remote URL we supplied. A page that merely *mentions*
+# `allow_url_include`/`allow_url_fopen` (PHP docs, a phpinfo dump, DVWA's own File
+# Inclusion help text) is NOT evidence of RFI; keying on that bare directive was a
+# false-positive source (it fired on DVWA's instructions.php help page, where our
+# host never appears). Both remaining patterns still catch genuine RFI: an
+# unroutable probe host always fails to fetch, so PHP emits `include(...): Failed
+# opening 'http://<host>/...'` / `failed to open stream: ... <host>`, naming it.
 RFI_PATTERNS: list[re.Pattern] = [
     re.compile(rf"failed to open stream:.*{re.escape(_RFI_HOST)}", re.I),
-    re.compile(rf"(include|require)(_once)?\(\).*{re.escape(_RFI_HOST)}", re.I),
-    re.compile(r"allow_url_(include|fopen)", re.I),
+    re.compile(rf"{re.escape(_RFI_HOST)}.*failed to open stream", re.I),
+    re.compile(rf"(include|require)(_once)?\(\)?.*{re.escape(_RFI_HOST)}", re.I),
 ]
 
 # ── OS Command Injection ───────────────────────────────────────────
-# Output-based: shell metacharacters chaining `id`; we detect the uid=… output.
-# Plus a deterministic echo-math marker for apps that swallow id's output.
-_CMDI_MARK = "h3av3n7x7"
-CMDI_PROBES: list[tuple[str, str]] = [
+# Output-based: shell metacharacters chaining `id` (we detect the uid=… output),
+# plus an echo marker for apps that swallow id's output.
+_CMDI_MARK = "h3av3n7x7"  # echo-marker STEM; the scanner appends a fresh random
+                          # suffix per request (see _fresh_cmdi_mark) so a log or
+                          # aggregation page echoing ANOTHER request's payload
+                          # cannot be mistaken for command execution.
+# `id`-based probes: real execution prints `uid=…`; a log page echoes the payload
+# (`;id`), not its output, so the uid= signal is inherently reflection-safe.
+CMDI_ID_PROBES: list[tuple[str, str]] = [
     (";id", "semicolon_id"),
     ("| id", "pipe_id"),
     ("&& id", "and_id"),
     ("`id`", "backtick_id"),
     ("$(id)", "subshell_id"),
     ("127.0.0.1;id", "ip_semicolon_id"),               # for ping-style endpoints (DVWA exec)
+]
+# Echo-marker probes as (separator, probe_name); the scanner appends a unique
+# marker to the separator per request.
+CMDI_ECHO_SEPARATORS: list[tuple[str, str]] = [
+    ("; echo ", "echo_marker"),
+    ("& echo ", "echo_marker_win"),
+]
+# Back-compat export: the full id+echo probe list (echo entries carry the bare
+# stem). The live scanner uses CMDI_ID_PROBES + CMDI_ECHO_SEPARATORS with a unique
+# per-request marker instead — see _test_cmdi_param.
+CMDI_PROBES: list[tuple[str, str]] = CMDI_ID_PROBES + [
     (f"; echo {_CMDI_MARK}", "echo_marker"),
     (f"& echo {_CMDI_MARK}", "echo_marker_win"),
 ]
+CMDI_UID_PATTERN: re.Pattern = re.compile(r"uid=\d+\([^)]+\)\s+gid=\d+\(", re.I)  # `id` output
 CMDI_PATTERNS: list[re.Pattern] = [
-    re.compile(r"uid=\d+\([^)]+\)\s+gid=\d+\(", re.I),  # `id` output
-    re.compile(_CMDI_MARK),                              # echo marker reflected raw
+    CMDI_UID_PATTERN,
+    re.compile(_CMDI_MARK),                              # echo marker stem (back-compat)
 ]
+
+
+def _fresh_cmdi_mark() -> str:
+    """A per-request echo marker: the recognizable stem plus random entropy.
+
+    Command-injection detection echoes a unique marker and looks for it in the
+    response. With a FIXED marker, a page that reflects previously-submitted
+    payloads — a log/aggregation viewer such as DVWA's ids_log.php — echoes other
+    requests' markers and false-positives as command execution. A per-request
+    random marker can only appear if THIS request's `echo` actually ran (or as a
+    verbatim reflection of this exact payload, which is stripped first).
+    """
+    return f"{_CMDI_MARK}{secrets.token_hex(4)}"
 # Time-based blind command injection: (payload, sleep_seconds, probe)
 CMDI_TIME_PROBES: list[tuple[str, int, str]] = [
     (f"; sleep {_SLEEP}", _SLEEP, "semicolon_sleep"),
@@ -331,6 +370,32 @@ def _boolean_sqli_confirmed(
     # SQL result. Require a real, sizable TRUE/FALSE divergence that is driven by
     # the FALSE branch (TRUE must stay markedly closer to the baseline).
     return delta_tf >= min_delta and delta_tf > delta_tb * 2
+
+
+def _time_blind_confirmed(
+    baseline: float,
+    elapsed_single: float,
+    elapsed_double: float,
+    sleep_secs: int,
+    factor: float = _TIME_THRESHOLD_FACTOR,
+) -> bool:
+    """True iff a time-based blind injection is CONTROLLED by the injected sleep.
+
+    A real oracle satisfies BOTH conditions: the single-sleep response exceeds
+    the baseline by ~sleep_secs, AND doubling the sleep adds ~sleep_secs more
+    delay. Timing noise — or a parameter whose value never reaches the query,
+    such as a submit button — can cross a single fixed threshold by chance on a
+    loaded/jittery target, but it will not *scale* when the sleep is doubled, so
+    the differential check rejects it. This is the same payload-control proof the
+    CmdI time-based detector uses, lifted into a pure, unit-tested helper.
+
+    Pure and side-effect free (unit-tested in tests/test_injection_time_blind.py).
+    """
+    margin = sleep_secs * factor
+    return (
+        elapsed_single >= baseline + margin
+        and elapsed_double >= elapsed_single + margin
+    )
 
 
 def _inject_param(url: str, param: str, payload: str) -> str:
@@ -475,6 +540,16 @@ class InjectionScanner:
         self._headers = {"User-Agent": user_agent}
         self._seen: set[str] = set()
         self._findings: list[dict] = []
+        # Time-based detection is only sound when the injected sleep is the ONLY
+        # thing that could delay the response. The scanner probes every parameter
+        # of a URL concurrently, so a genuinely-injectable param's SLEEP request
+        # and a benign param's probe are in flight at once; a serialising target
+        # (single-threaded PHP/MySQL, a rate-limiter, a busy DB) queues them and
+        # the benign param inherits the real param's delay — a cross-parameter
+        # timing false positive that even the double-and-scale check can't catch,
+        # because the interference scales too. This lock serialises EVERY timed
+        # measurement (baseline + sleep probes) so each one runs in isolation.
+        self._timing_lock = asyncio.Lock()
 
     def _add_finding(self, **kwargs) -> None:
         key = _finding_key(
@@ -629,54 +704,70 @@ class InjectionScanner:
                     return
 
     async def _test_sqli_time_param(self, session, url: str, param: str) -> None:
-        """Time-based blind SQLi: inject SLEEP/WAITFOR and measure response time.
+        """Time-based blind SQLi via DIFFERENTIAL timing.
 
-        A naturally slow endpoint must not be flagged — the injected delay is
-        compared against a measured baseline, and every hit is reproduced once.
+        A hit must (a) exceed a measured baseline by the injected sleep AND
+        (b) scale when the sleep is doubled — proving the response time is
+        CONTROLLED by our payload. A naturally slow / jittery endpoint, or a
+        parameter whose value never reaches the query (e.g. a submit button),
+        can cross a single fixed threshold by chance on a loaded target but will
+        not scale, so it can no longer false-fire. See _time_blind_confirmed.
         """
         async def _timed(value: str, timeout: float) -> tuple[int, float]:
-            t0 = time.monotonic()
-            async with self._sem:
-                status, _ = await _get(session, _inject_param(url, param, value),
-                                       self._headers, timeout=timeout)
-            return status, time.monotonic() - t0
+            # Isolated under the timing lock so no concurrent injected sleep
+            # (another param, another URL) can leak its delay into this sample.
+            async with self._timing_lock:
+                t0 = time.monotonic()
+                async with self._sem:
+                    status, _ = await _get(session, _inject_param(url, param, value),
+                                           self._headers, timeout=timeout)
+                return status, time.monotonic() - t0
 
         # Baseline = slower of two benign requests, so one slow sample
         # doesn't drag the bar down.
         _, b1 = await _timed("1", 15.0)
         _, b2 = await _timed("1", 15.0)
         baseline = max(b1, b2)
+        if baseline > 6.0:
+            return  # endpoint too slow/variable for reliable timing
 
         for payload, sleep_secs, probe_name in SQLI_TIME_PROBES:
-            timeout = float(sleep_secs + 8)
             margin = sleep_secs * _TIME_THRESHOLD_FACTOR  # required extra delay
-            status, elapsed = await _timed(payload, timeout)
+            status, elapsed = await _timed(payload, float(sleep_secs + 8))
+            if status == 0 or elapsed < baseline + margin:
+                continue  # single sleep didn't even register → not a candidate
 
-            if status != 0 and elapsed >= baseline + margin:
-                # Reproduce — a transient slow response is not an injection.
-                status2, elapsed2 = await _timed(payload, timeout)
-                if status2 != 0 and elapsed2 >= baseline + margin:
-                    self._add_finding(
-                        target=_inject_param(url, param, payload),
-                        vuln_type="sqli",
-                        title=f"SQL Injection (time-based blind) — param '{param}'",
-                        severity="critical",
-                        confidence=0.88,
-                        evidence={
-                            "param": param,
-                            "payload": payload,
-                            "probe": probe_name,
-                            "technique": "time_blind",
-                            "baseline_sec": round(baseline, 2),
-                            "elapsed_sec": round(elapsed, 2),
-                            "reproduce_sec": round(elapsed2, 2),
-                            "sleep_secs": sleep_secs,
-                            "url": url,
-                        },
-                        remediation="Use parameterised queries / prepared statements.",
-                        cwe="CWE-89",
-                    )
-                    return
+            # Differential confirmation: double the sleep and require ~that much
+            # MORE delay. A real oracle is controlled by our payload and scales;
+            # timing noise / a non-injectable param does not, so it's rejected.
+            big_payload = payload.replace(str(sleep_secs), str(sleep_secs * 2), 1)
+            status2, elapsed2 = await _timed(big_payload, float(sleep_secs * 2 + 8))
+            if status2 != 0 and _time_blind_confirmed(baseline, elapsed, elapsed2, sleep_secs):
+                self._add_finding(
+                    target=_inject_param(url, param, payload),
+                    vuln_type="sqli",
+                    title=f"SQL Injection (time-based blind) — param '{param}'",
+                    severity="critical",
+                    confidence=0.88,
+                    evidence={
+                        "param": param,
+                        "payload": payload,
+                        "probe": probe_name,
+                        "technique": "time_blind",
+                        "baseline_sec": round(baseline, 2),
+                        "elapsed_sec": round(elapsed, 2),
+                        "doubled_sec": round(elapsed2, 2),
+                        "doubled_payload": big_payload,
+                        "sleep_secs": sleep_secs,
+                        "proof": (f"response time scaled with the injected sleep "
+                                  f"({round(elapsed, 2)}s at {sleep_secs}s → "
+                                  f"{round(elapsed2, 2)}s at {sleep_secs * 2}s)"),
+                        "url": url,
+                    },
+                    remediation="Use parameterised queries / prepared statements.",
+                    cwe="CWE-89",
+                )
+                return
 
     async def _test_sqli_post(self, session, url: str, param: str,
                                baseline_body: str, other_fields: dict) -> None:
@@ -711,51 +802,60 @@ class InjectionScanner:
                     )
                     return
 
-        # 2. Time-based blind (POST) — baseline + reproduce, mirroring the GET
-        # path so a naturally slow POST endpoint isn't flagged on one sample.
+        # 2. Time-based blind (POST) — DIFFERENTIAL timing (baseline + double-and-
+        # scale), mirroring the GET path so a naturally slow POST endpoint or a
+        # non-injectable field can't false-fire on one slow sample.
         async def _timed_post(value: str, timeout: float) -> tuple[int, float]:
             d = {**other_fields, param: value}
-            t0 = time.monotonic()
-            async with self._sem:
-                if self._delay:
-                    await asyncio.sleep(self._delay)
-                st, _ = await _post(session, url, d, self._headers, timeout=timeout)
-            return st, time.monotonic() - t0
+            # Isolated under the timing lock (see _test_sqli_time_param).
+            async with self._timing_lock:
+                t0 = time.monotonic()
+                async with self._sem:
+                    if self._delay:
+                        await asyncio.sleep(self._delay)
+                    st, _ = await _post(session, url, d, self._headers, timeout=timeout)
+                return st, time.monotonic() - t0
 
         _, pb1 = await _timed_post("1", 15.0)
         _, pb2 = await _timed_post("1", 15.0)
         post_baseline = max(pb1, pb2)
+        if post_baseline > 6.0:
+            return  # endpoint too slow/variable for reliable timing
 
         for payload, sleep_secs, probe_name in SQLI_TIME_PROBES[:4]:
-            timeout = float(sleep_secs + 8)
             margin = sleep_secs * _TIME_THRESHOLD_FACTOR
-            status, elapsed = await _timed_post(payload, timeout)
+            status, elapsed = await _timed_post(payload, float(sleep_secs + 8))
+            if status == 0 or elapsed < post_baseline + margin:
+                continue
 
-            if status != 0 and elapsed >= post_baseline + margin:
-                # Reproduce — a transient slow response is not an injection.
-                status2, elapsed2 = await _timed_post(payload, timeout)
-                if status2 != 0 and elapsed2 >= post_baseline + margin:
-                    self._add_finding(
-                        target=url,
-                        vuln_type="sqli",
-                        title=f"SQL Injection (POST, time-based blind) — param '{param}'",
-                        severity="critical",
-                        confidence=0.88,
-                        evidence={
-                            "param": param,
-                            "payload": payload,
-                            "probe": probe_name,
-                            "technique": "time_blind",
-                            "method": "POST",
-                            "baseline_sec": round(post_baseline, 2),
-                            "elapsed_sec": round(elapsed, 2),
-                            "reproduce_sec": round(elapsed2, 2),
-                            "sleep_secs": sleep_secs,
-                        },
-                        remediation="Use parameterised queries / prepared statements.",
-                        cwe="CWE-89",
-                    )
-                    return
+            big_payload = payload.replace(str(sleep_secs), str(sleep_secs * 2), 1)
+            status2, elapsed2 = await _timed_post(big_payload, float(sleep_secs * 2 + 8))
+            if status2 != 0 and _time_blind_confirmed(post_baseline, elapsed, elapsed2, sleep_secs):
+                self._add_finding(
+                    target=url,
+                    vuln_type="sqli",
+                    title=f"SQL Injection (POST, time-based blind) — param '{param}'",
+                    severity="critical",
+                    confidence=0.88,
+                    evidence={
+                        "param": param,
+                        "payload": payload,
+                        "probe": probe_name,
+                        "technique": "time_blind",
+                        "method": "POST",
+                        "baseline_sec": round(post_baseline, 2),
+                        "elapsed_sec": round(elapsed, 2),
+                        "doubled_sec": round(elapsed2, 2),
+                        "doubled_payload": big_payload,
+                        "sleep_secs": sleep_secs,
+                        "proof": (f"response time scaled with the injected sleep "
+                                  f"({round(elapsed, 2)}s at {sleep_secs}s → "
+                                  f"{round(elapsed2, 2)}s at {sleep_secs * 2}s)"),
+                    },
+                    remediation="Use parameterised queries / prepared statements.",
+                    cwe="CWE-89",
+                )
+                return
 
     # ── XSS discovery ─────────────────────────────────────────────
 
@@ -897,64 +997,98 @@ class InjectionScanner:
                                baseline_body: str, *, post: bool = False,
                                other_fields: Optional[dict] = None) -> None:
         """Command injection: output-based (`id`/echo marker) then time-based blind."""
-        async def _probe(payload: str, timeout: float = 8.0) -> tuple[float, str]:
-            t0 = time.monotonic()
-            async with self._sem:
-                if self._delay:
-                    await asyncio.sleep(self._delay)
-                if post:
-                    _, body = await _post(session, url, {**(other_fields or {}), param: payload},
-                                          self._headers, timeout=timeout)
-                else:
-                    _, body = await _get(session, _inject_param(url, param, payload),
-                                         self._headers, timeout=timeout)
-            return time.monotonic() - t0, body or ""
+        async def _probe(payload: str, timeout: float = 8.0, *, timed: bool = False) -> tuple[float, str]:
+            # Timing-sensitive measurements (baseline + sleep probes) run under
+            # the global timing lock so a concurrent injected sleep can't leak its
+            # delay into this sample (see InjectionScanner.__init__). Output-based
+            # probes don't need it — they match on body content, not wall-clock.
+            async def _do() -> tuple[float, str]:
+                t0 = time.monotonic()
+                async with self._sem:
+                    if self._delay:
+                        await asyncio.sleep(self._delay)
+                    if post:
+                        _, body = await _post(session, url, {**(other_fields or {}), param: payload},
+                                              self._headers, timeout=timeout)
+                    else:
+                        _, body = await _get(session, _inject_param(url, param, payload),
+                                             self._headers, timeout=timeout)
+                return time.monotonic() - t0, body or ""
+            if timed:
+                async with self._timing_lock:
+                    return await _do()
+            return await _do()
 
         # 1) Output-based — shell metacharacters chaining `id` / echo. Use a
         # generous timeout: command endpoints often run a slow command first
         # (e.g. DVWA's exec runs `ping -c 4 <ip>` before our `;id`), so an 8s
         # cap would truncate the response and miss the injected output.
-        for payload, probe in CMDI_PROBES:
+        #
+        # 1a) `id`-based: real execution prints `uid=…`. A log/aggregation page
+        #     echoes the *payload* (`;id`), not its output, so the uid= signal is
+        #     inherently reflection-safe; we still strip the reflected payload.
+        for payload, probe in CMDI_ID_PROBES:
             _, body = await _probe(payload, timeout=20.0)
             if not body:
                 continue
-            # Reflection guard: an app that merely echoes the payload back would
-            # contain our echo marker (`h3av3n7x7`) inside the reflected payload
-            # text — that is NOT command execution. Strip the reflected payload
-            # first (HTML-entity-decoding, so escaped echoes are covered too), so
-            # the marker/`uid=` only counts when it survives as real command
-            # OUTPUT rather than as a verbatim echo of the input.
             probed = _strip_reflection(body, payload)
-            for pat in CMDI_PATTERNS:
-                if pat.search(probed) and not pat.search(baseline_body):
-                    self._add_finding(
-                        target=url, vuln_type="cmdi",
-                        title=f"OS Command Injection — param '{param}'",
-                        severity="critical", confidence=0.9,
-                        evidence={"param": param, "payload": payload, "probe": probe,
-                                  "match": pat.pattern, "method": "POST" if post else "GET", "url": url},
-                        remediation="Never pass user input to a shell; use argument arrays / safe APIs.",
-                        cwe="CWE-78",
-                    )
-                    return
+            if CMDI_UID_PATTERN.search(probed) and not CMDI_UID_PATTERN.search(baseline_body):
+                self._add_finding(
+                    target=url, vuln_type="cmdi",
+                    title=f"OS Command Injection — param '{param}'",
+                    severity="critical", confidence=0.9,
+                    evidence={"param": param, "payload": payload, "probe": probe,
+                              "match": CMDI_UID_PATTERN.pattern,
+                              "method": "POST" if post else "GET", "url": url},
+                    remediation="Never pass user input to a shell; use argument arrays / safe APIs.",
+                    cwe="CWE-78",
+                )
+                return
+
+        # 1b) echo-marker: a UNIQUE marker per request. This defeats pages that
+        #     reflect OTHER requests' payloads — a log/aggregation viewer such as
+        #     DVWA's ids_log.php would otherwise echo our fixed marker and
+        #     false-positive as command execution. We strip the reflected payload
+        #     AND any reflected `echo <mark>` command text (in any residual
+        #     encoding), so only a STANDALONE marker — genuine echo OUTPUT —
+        #     counts. A per-request marker can't come from another request's log.
+        for sep, probe in CMDI_ECHO_SEPARATORS:
+            mark = _fresh_cmdi_mark()
+            payload = f"{sep}{mark}"
+            _, body = await _probe(payload, timeout=20.0)
+            if not body:
+                continue
+            cleaned = _strip_reflection(body, payload)
+            cleaned = re.sub(rf"echo\s*{re.escape(mark)}", "", cleaned, flags=re.I)
+            if mark in cleaned and mark not in baseline_body:
+                self._add_finding(
+                    target=url, vuln_type="cmdi",
+                    title=f"OS Command Injection — param '{param}'",
+                    severity="critical", confidence=0.9,
+                    evidence={"param": param, "payload": payload, "probe": probe,
+                              "match": mark, "method": "POST" if post else "GET", "url": url},
+                    remediation="Never pass user input to a shell; use argument arrays / safe APIs.",
+                    cwe="CWE-78",
+                )
+                return
 
         # 2) Time-based blind — DIFFERENTIAL timing to defeat server jitter:
         #    only flag if doubling the injected sleep adds ~that much delay, i.e.
         #    the response time is CONTROLLED by our payload, not random latency.
         #    A naturally slow/jittery endpoint won't scale, so it won't false-fire.
-        base = max((await _probe("1"))[0], (await _probe("1"))[0])
+        base = max((await _probe("1", timed=True))[0], (await _probe("1", timed=True))[0])
         if base > 3.0:
             return  # endpoint too slow/variable for reliable timing
         for payload, sleep_secs, probe in CMDI_TIME_PROBES:
             if str(sleep_secs) not in payload:
                 continue  # only sleep-style payloads support the scaling check
             margin = sleep_secs * _TIME_THRESHOLD_FACTOR
-            el1, _ = await _probe(payload, timeout=float(sleep_secs + 8))
+            el1, _ = await _probe(payload, timeout=float(sleep_secs + 8), timed=True)
             if el1 < base + margin:
                 continue
             # Confirm: double the sleep → ~sleep_secs MORE delay (proves control).
             big_payload = payload.replace(str(sleep_secs), str(sleep_secs * 2), 1)
-            el2, _ = await _probe(big_payload, timeout=float(sleep_secs * 2 + 8))
+            el2, _ = await _probe(big_payload, timeout=float(sleep_secs * 2 + 8), timed=True)
             if el2 >= el1 + margin:
                 self._add_finding(
                     target=url, vuln_type="cmdi",

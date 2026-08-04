@@ -66,6 +66,46 @@ async def test_cmdi_detected_on_id_output(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cmdi_detected_on_real_echo_execution(monkeypatch):
+    """A genuine echo execution emits the (unique) marker as standalone output."""
+    import re as _re
+
+    async def fake_get(session, url, headers=None, timeout=8.0):
+        val = _injected_value(url)
+        m = _re.search(r"echo\s+(h3av3n7x7\w+)", val)
+        if m and any(c in val for c in ";&"):        # executed → output is the bare marker
+            return 200, f"<pre>PING ok\n{m.group(1)}</pre>"
+        return 200, "<pre>PING ok</pre>"
+
+    monkeypatch.setattr(ij, "_get", fake_get)
+    sc = ij.InjectionScanner()
+    await sc._test_cmdi_param(object(), "http://t/ping.php?ip=1", "ip",
+                              baseline_body="<pre>PING ok</pre>")
+    assert any(f["vuln_type"] == "cmdi" for f in sc._findings), \
+        "genuine echo-marker execution must still be detected"
+
+
+@pytest.mark.asyncio
+async def test_cmdi_not_flagged_on_log_reflecting_other_markers(monkeypatch):
+    """A log/aggregation page echoing a DIFFERENT request's echo payload must NOT
+    be flagged as command injection — the live DVWA ids_log.php false positive.
+    A unique per-request marker means another request's marker can't match."""
+    other = ij._CMDI_MARK + "deadbeef"               # a marker from some other request
+
+    async def fake_get(session, url, headers=None, timeout=8.0):
+        # The page shows a log containing another request's echo payload verbatim,
+        # but nothing is ever executed.
+        return 200, f"<pre>IDS log: 127.0.0.1 ; echo {other} | & echo {other}</pre>"
+
+    monkeypatch.setattr(ij, "_get", fake_get)
+    sc = ij.InjectionScanner()
+    await sc._test_cmdi_param(object(), "http://t/ids_log.php?clear_log=1", "clear_log",
+                              baseline_body="<pre>IDS log:</pre>")
+    assert not any(f["vuln_type"] == "cmdi" for f in sc._findings), \
+        "must not flag cmdi when the page only reflects another request's marker"
+
+
+@pytest.mark.asyncio
 async def test_clean_endpoint_yields_no_injection(monkeypatch):
     async def fake_get(session, url, headers=None, timeout=8.0):
         return 200, "<html>perfectly safe, nothing reflected</html>"

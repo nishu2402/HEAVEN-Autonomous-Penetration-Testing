@@ -630,8 +630,18 @@ class ScanOrchestrator:
                 # above, because web ports don't overlap ssh/smb/rdp/db. This is
                 # what lets a bare-IP target that turns out to host a web app get
                 # web-scanned instead of showing only its open ports.
+                #
+                # Scope gate: only bridge a *derived* origin when the host was
+                # submitted as a bare IP / hostname / CIDR (the ``ips`` bucket).
+                # A host reached only via an explicit ``scheme://host:port`` URL
+                # is scanned at exactly that origin — its *other* open ports are
+                # out of the operator's declared scope, so authorising
+                # ``https://app.example.com`` never drags in a different service
+                # on ``app.example.com:8080`` (which may be a separate app/team),
+                # and scanning ``http://localhost:8080/`` never pulls in an
+                # unrelated dev server co-located on ``localhost:5000``.
                 _wurl = self._web_url_for(ip, port, service)
-                if _wurl:
+                if _wurl and self._is_port_expansion_host(ip):
                     derived_web_urls.append(_wurl)
 
         # Bridge discovered web origins into the shared targets + a crawl so the
@@ -665,6 +675,69 @@ class ScanOrchestrator:
         scheme = "https" if is_tls else "http"
         is_default = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
         return f"{scheme}://{host}/" if is_default else f"{scheme}://{host}:{port}/"
+
+    def _port_expansion_scope(self) -> tuple[set[str], list, set[str]]:
+        """The operator's *port-expansion* scope: hosts submitted as a bare IP,
+        hostname, or CIDR (the ``ips`` bucket). Only these hosts have their
+        *other* discovered ports bridged into web scanning — a host reached only
+        via an explicit ``scheme://host:port`` URL is scanned at exactly that
+        origin. Cached; returns ``(exact_hosts, ip_networks, domains)``. The
+        network-scanner preserves the operator's original target string as each
+        host's identifier (``HostResult(host=host)``), so hostnames and IPs match
+        without any resolution guesswork."""
+        cached = getattr(self, "_pexp_scope_cache", None)
+        if cached is not None:
+            return cached
+        import ipaddress
+        from urllib.parse import urlparse
+        exact: set[str] = set()
+        nets: list = []
+        domains: set[str] = set()
+        tgts = self.scan_targets if isinstance(self.scan_targets, dict) else {}
+        for raw in tgts.get("ips", []) or []:
+            h = str(raw or "").strip().lower()
+            if "://" in h:
+                h = urlparse(h).hostname or ""
+            if not h:
+                continue
+            try:
+                nets.append(ipaddress.ip_network(h, strict=False))
+                exact.add(h)
+            except ValueError:
+                hh = h.split("/", 1)[0].split(":", 1)[0].strip("[]")
+                if hh:
+                    exact.add(hh)
+                    domains.add(hh)
+        cached = (exact, nets, domains)
+        self._pexp_scope_cache = cached
+        return cached
+
+    def _is_port_expansion_host(self, host: str) -> bool:
+        """True if ``host`` is inside the operator's bare-host/IP/CIDR scope and
+        may therefore have its *other* discovered ports bridged into web
+        scanning. False for a host reached only via an explicit URL — a
+        scope-safety guarantee (an out-of-scope service on another port is never
+        scanned), not merely noise reduction."""
+        import ipaddress
+        host = (host or "").strip().lower()
+        if not host:
+            return False
+        exact, nets, domains = self._port_expansion_scope()
+        if host in exact:
+            return True
+        try:
+            probe = ipaddress.ip_network(host, strict=False)
+            for net in nets:
+                try:
+                    if probe.subnet_of(net):  # type: ignore[arg-type]
+                        return True
+                except TypeError:
+                    continue  # mixed IPv4/IPv6 — not comparable
+        except ValueError:
+            for dom in domains:
+                if host == dom or host.endswith("." + dom):
+                    return True
+        return False
 
     def _bridge_derived_web_urls(self, urls: list[str]) -> None:
         """Append newly-discovered web URLs to the shared targets dict and inject

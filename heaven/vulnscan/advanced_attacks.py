@@ -19,6 +19,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -564,7 +565,28 @@ class CredentialSprayer:
 
     @classmethod
     async def spray_ssh(cls, host: str, port: int = 22) -> list[AdvancedFinding]:
-        """Try common SSH credentials using asyncssh (if available) or socket probing."""
+        """Try common SSH credentials, reporting ONLY genuine password hits.
+
+        Correctness guard against a real false positive: ``asyncssh.connect``
+        does not restrict itself to the password we pass — by default it will
+        also offer the *operator's* SSH agent keys, their default identity
+        files (``~/.ssh/id_*``) and a GSSAPI/Kerberos ticket. A connection that
+        succeeds by any of those makes the naive ``async with`` block run and we
+        would report that a *password* ("root:root", "user:user", …) was
+        accepted when it never was — a critical finding fabricated from the
+        auditor's own credentials against, say, their own ``localhost:22``.
+
+        Two safeguards close that:
+
+        1. **Password-only auth.** Every non-password method is switched off
+           (no client keys, no agent, no public-key auth, no GSSAPI), so a
+           success can only mean the *sprayed password* was accepted.
+        2. **Accept-all baseline.** Before spraying, probe with a random,
+           certainly-invalid credential. If the service accepts *that*, it
+           enforces no password auth at all (SSH ``none`` auth permitted, or an
+           accept-everything honeypot); we report that once, honestly, instead
+           of emitting a bogus specific "default credential".
+        """
         findings: list[AdvancedFinding] = []
         try:
             import asyncssh  # optional dependency  # noqa: F401
@@ -572,6 +594,55 @@ class CredentialSprayer:
             logger.debug("asyncssh not installed — SSH spray skipped")
             return findings
         from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
+
+        # Force authentication to use the sprayed password and nothing else, so a
+        # success can never come from the operator's own key / agent / ticket.
+        pw_only: dict[str, Any] = dict(
+            known_hosts=None,
+            client_keys=[],          # offer no public keys
+            agent_path=None,         # never consult the SSH agent
+            public_key_auth=False,   # refuse public-key auth outright
+            gss_kex=False,           # no GSSAPI key exchange
+            gss_auth=False,          # no GSSAPI / Kerberos authentication
+            connect_timeout=6,
+        )
+
+        # Baseline: a random credential that cannot legitimately be valid. If the
+        # service authorises it, it does not enforce authentication — reporting a
+        # specific default pair here would be a false positive.
+        nonce = secrets.token_hex(8)
+        try:
+            async with ssh_safe.connect(
+                host, port=port,
+                username=f"heaven_probe_{nonce}",
+                password=f"invalid_{nonce}",
+                **pw_only,
+            ):  # noqa: F841
+                findings.append(AdvancedFinding(
+                    target=f"ssh://{host}:{port}",
+                    vuln_type="missing_authentication",
+                    severity="critical",
+                    title="SSH service accepts unauthenticated access",
+                    description=(
+                        "The SSH service authorised a random, invalid credential, "
+                        "so it does not enforce authentication (e.g. 'none' auth is "
+                        "permitted, or it accepts any login). Any specific "
+                        "default-credential result would be misleading here."
+                    ),
+                    confidence=0.9,
+                    evidence={"port": port,
+                              "probe": "random invalid credential accepted"},
+                    remediation=(
+                        "Disable 'none'/empty-password authentication and require "
+                        "key or strong-password auth (sshd: PermitEmptyPasswords "
+                        "no; AuthenticationMethods publickey or password)."
+                    ),
+                    cwe="CWE-287",
+                ))
+                return findings  # accept-all — do not spray specific pairs
+        except Exception:
+            logger.debug("SSH baseline probe rejected (good); spraying real creds",
+                         exc_info=True)
 
         ssh_creds = [
             ("root", "root"), ("root", "toor"), ("root", "password"), ("root", ""),
@@ -586,8 +657,7 @@ class CredentialSprayer:
                 async with ssh_safe.connect(
                     host, port=port,
                     username=username, password=password,
-                    known_hosts=None,
-                    connect_timeout=6,
+                    **pw_only,
                 ) as conn:  # noqa: F841
                     findings.append(AdvancedFinding(
                         target=f"ssh://{host}:{port}",

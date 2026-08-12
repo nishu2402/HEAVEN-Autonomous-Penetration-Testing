@@ -243,6 +243,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Network scan no longer hangs and then reports 0 findings on a slow /
+  heavily-filtered host (e.g. Metasploitable in a VM).** A full-range
+  `-sV -sC -p 1-65535` nmap sweep cannot finish on a slow, emulated, or firewalled
+  host — most ports are *filtered* (silently dropped), so nmap spends its whole
+  budget waiting on them and never reaches the dozen that are open. It then either
+  (a) ran until the orchestrator's deep-scan `time_budget` fired and **cancelled
+  the whole `scan_host` coroutine mid-nmap, discarding the host result** (the "scan
+  sits for minutes then finds nothing" symptom), or (b) hit its own
+  `--host-timeout` and emitted a *clean, well-formed* XML reporting **0 ports**
+  (`timedout="true"`, `rc 0`) that HEAVEN accepted as "nothing open". Under `-Pn`
+  the old connect-scan safety net was gated on the host having *answered* (a real
+  probe reason or a refused/closed port), which a fully-filtered `-Pn` target never
+  satisfies — so it never fired. Fixed on three fronts: (1) `_parse_nmap_xml` now
+  detects `timedout="true"` and treats a cut-short scan as **incomplete**, not
+  clean-empty; (2) `scan_host` runs a reworked **connect-scan recovery** whenever
+  nmap finds no open ports *or* timed out — it probes the high-value service ports
+  first (a live host answers in seconds; a dead one is ruled out just as fast, so a
+  `/24` sweep isn't slowed), then completes the range, and **unions** its result
+  with any ports a partial nmap did find (nmap's version-rich entries are kept); and
+  (3) `scan_network` now caps nmap's per-host `--host-timeout` well below the deep-
+  scan budget so a stuck sweep always yields in time for recovery to run and the
+  host to be **kept**, not cancelled. Live result vs a real Metasploitable 2 VM at
+  `192.168.0.162` (UTM/QEMU): **0 → 54 findings (9 critical)** including the
+  vsftpd 2.3.4 backdoor (CVE-2011-2523), telnetd `-f root` auth bypass, Apache
+  SSRF, and OpenSSH agent RCE.
+
+- **SSH credential spray no longer fabricates a "Default Credentials" finding
+  from the auditor's own key or a permissive server.** `CredentialSprayer.
+  spray_ssh` reported a critical `SSH Default Credentials: <user>:<pass>` finding
+  whenever `asyncssh.connect` succeeded — but asyncssh does not restrict itself
+  to the sprayed password: by default it also offers the operator's SSH agent
+  keys, their `~/.ssh/id_*` identity files, and a GSSAPI/Kerberos ticket, and it
+  will authenticate against a server that permits SSH `none` auth. Any of those
+  made the connection succeed while the *password* was never accepted — so a scan
+  that happened to probe the auditor's own `localhost:22` could emit a fabricated
+  "default password" critical. The spray now (1) forces **password-only
+  authentication** (public-key/agent/GSSAPI all disabled), so a hit can only mean
+  the sprayed password was accepted, and (2) runs an **accept-all baseline
+  probe** first with a random invalid credential — if the service accepts *that*
+  it enforces no authentication, and HEAVEN reports it **once, honestly** as
+  "SSH service accepts unauthenticated access" (`missing_authentication`) instead
+  of a bogus specific pair. Genuinely weak servers (`user:user` really works) are
+  still detected — the true positive is preserved.
+
+- **Network scan no longer returns 0 findings when nmap under-reports a live
+  host.** A vulnerable, wide-open box (Metasploitable, an internal server) could
+  come back with an empty inventory and **0 findings** even though its ports were
+  open. Root cause: the pure-Python connect-scan safety net only deployed when
+  nmap's XML was *unparseable* (a crash). When nmap instead returned a clean,
+  well-formed document that wrongly reported **every port closed** on a host that
+  was plainly answering — an aggressive-timing connect scan exhausting ephemeral
+  ports, a half-applied privilege state, transient drops under `-T4`/`--min-rate`
+  — HEAVEN trusted it, so `scan_host` returned no open ports and every downstream
+  stage (CVE mapping, service exposure, EOL audit) inherited an empty inventory.
+  `scan_host` now **cross-checks with a real TCP connect scan whenever nmap
+  reports zero open ports on a host that answered** (it refused ports, or a probe
+  confirmed it). The check is free on the happy path (skipped the instant nmap
+  finds a port), cheap exactly where it fires (a responsive host refuses ports
+  instantly, so `connect()` never waits), and can only *add* genuinely-open ports
+  — a truly closed host still yields nothing, and a firewalled/all-filtered host
+  is still handled by the existing evasion re-probe. Banners grabbed for the
+  standard service ports keep the recovered ports' CVE findings intact.
 - **Shell Tab-completion now completes options and flag values, and installs with
   one command.** Two problems are fixed. First, pressing Tab after an option
   (`heaven scan --<TAB>`) or a choice flag (`heaven scan --stealth <TAB>`)

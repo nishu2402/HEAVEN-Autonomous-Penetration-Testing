@@ -86,14 +86,16 @@ done
 
 [ "$_removed_wrapper" -eq 0 ] && warn "No CLI wrapper found (already removed or never installed)"
 
-# ── Step 2: Remove PATH export from shell RC files ────────────────────────────
+# ── Step 2: Remove PATH export + Tab-completion from shell RC files ────────────
 echo ""
-info "Step 2/5 — Removing PATH entries from shell configs..."
+info "Step 2/5 — Removing PATH entries + Tab-completion from shell configs..."
 
-# install.sh writes these two lines (# HEAVEN_BIN marker + export):
-#   # HEAVEN_BIN
-#   export PATH="/path/to/venv/bin:$PATH"
-#
+# install.sh writes two things:
+#   1. a PATH block (# HEAVEN_BIN marker + export) — only in the PATH-fallback case
+#   2. a Tab-completion block delimited by
+#        # >>> heaven completion >>>  …  # <<< heaven completion <<<
+#      (added by `heaven completion --install`; may exist even when the PATH
+#      block does not, e.g. a symlink install).
 # Earlier installer versions used: # HEAVEN — added by install.sh
 
 _cleaned_rc=0
@@ -102,30 +104,53 @@ for rc in \
     "$TARGET_HOME/.bashrc" \
     "$TARGET_HOME/.bash_profile" \
     "$TARGET_HOME/.profile" \
-    "$TARGET_HOME/.config/fish/config.fish"
+    "$TARGET_HOME/.config/fish/config.fish" \
+    "$TARGET_HOME/.config/powershell/profile.ps1"
 do
     [ -f "$rc" ] || continue
+    _touched=0
+
+    # (a) Tab-completion block — handled independently of the PATH block.
+    if grep -q "^# >>> heaven completion >>>" "$rc" 2>/dev/null; then
+        _sed_i '/^# >>> heaven completion >>>/,/^# <<< heaven completion <<</d' "$rc"
+        _touched=1
+    fi
+
+    # (b) PATH export block placed by install.sh.
     _hit=0
     grep -q "HEAVEN_BIN"             "$rc" 2>/dev/null && _hit=1
     grep -q "HEAVEN.*added by"       "$rc" 2>/dev/null && _hit=1
     grep -q "venv/bin.*HEAVEN"       "$rc" 2>/dev/null && _hit=1
     echo "$rc" | grep -qF "$INSTALL_DIR" && _hit=1
-
     if [ "$_hit" -eq 1 ]; then
-        # Remove the marker comment
         _sed_i '/^# HEAVEN_BIN$/d' "$rc"
-        # Remove the venv/bin export line placed by this repo's installer
         _sed_i "\|export PATH=\"${INSTALL_DIR}/venv/bin:\\\$PATH\"|d" "$rc"
-        # Legacy: export with $HOME/.local/bin added by old installer
         _sed_i '/export PATH="\$HOME\/\.local\/bin:\$PATH"/d' "$rc"
-        # Remove any old-style HEAVEN marker comment
         _sed_i '/# HEAVEN.*added by install\.sh/d' "$rc"
+        _touched=1
+    fi
+
+    if [ "$_touched" -eq 1 ]; then
+        # Drop the backup `heaven completion --install` left next to this rc.
+        rm -f "${rc}.heaven.bak" 2>/dev/null || true
         ok "Cleaned: $rc"
         _cleaned_rc=1
     fi
 done
 
-[ "$_cleaned_rc" -eq 0 ] && warn "No HEAVEN PATH entries found in shell configs"
+# Remove the installed completion scripts (safe when absent).
+for _cf in \
+    "$TARGET_HOME/.config/heaven/completion.zsh" \
+    "$TARGET_HOME/.config/heaven/completion.bash" \
+    "$TARGET_HOME/.config/heaven/completion.ps1" \
+    "$TARGET_HOME/.config/fish/completions/heaven.fish"
+do
+    [ -f "$_cf" ] && rm -f "$_cf" && ok "Removed: $_cf"
+done
+# Prune the completion dir if it's now empty.
+rmdir "$TARGET_HOME/.config/heaven" 2>/dev/null || true
+
+[ "$_cleaned_rc" -eq 0 ] && warn "No HEAVEN PATH / completion entries found in shell configs"
 
 # ── Step 3: Remove virtual environment ───────────────────────────────────────
 echo ""

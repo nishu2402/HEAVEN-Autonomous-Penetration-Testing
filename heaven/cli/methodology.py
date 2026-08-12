@@ -1,4 +1,9 @@
-"""HEAVEN — `heaven methodology` (browse OWASP / NIST / PTES mappings)."""
+"""HEAVEN — `heaven methodology` (browse pen-test & compliance mappings).
+
+Covers the pen-test methodologies (OWASP WSTG, NIST SP 800-115, PTES) and the
+compliance/control frameworks (Cyber Essentials + Plus, ISO/IEC 27001:2022,
+PCI DSS, CIS Controls v8.1, NIST CSF 2.0, SOC 2).
+"""
 
 from __future__ import annotations
 
@@ -16,10 +21,39 @@ logger = logging.getLogger(__name__)
 
 _DOCS_DIR = Path(__file__).resolve().parents[2] / "docs" / "methodology"
 
+# Short, memorable aliases → doc stem. The full stem is always accepted too, so
+# ``--standard iso_27001`` and ``--standard iso`` both work. Kept here (not a
+# hardcoded ``click.Choice``) so a newly-added ``docs/methodology/*.md`` is
+# selectable without editing the CLI.
+_STANDARD_ALIAS: dict[str, str] = {
+    "owasp": "owasp_testing_guide", "wstg": "owasp_testing_guide",
+    "nist": "nist_800_115", "800-115": "nist_800_115",
+    "ptes": "ptes",
+    "ce": "cyber_essentials", "cyber-essentials": "cyber_essentials",
+    "ce-plus": "cyber_essentials_plus", "ceplus": "cyber_essentials_plus",
+    "cyber-essentials-plus": "cyber_essentials_plus",
+    "iso": "iso_27001", "iso27001": "iso_27001", "27001": "iso_27001",
+    "pci": "pci_dss", "pci-dss": "pci_dss", "pcidss": "pci_dss",
+    "cis": "cis_controls_v8", "cis8": "cis_controls_v8", "cis-v8": "cis_controls_v8",
+    "csf": "nist_csf", "nist-csf": "nist_csf",
+    "soc2": "soc2", "soc": "soc2",
+}
+
+
+def _resolve_standard(value: str) -> str:
+    """Alias or stem → canonical doc stem (unchanged if already a stem)."""
+    v = value.strip().lower()
+    return _STANDARD_ALIAS.get(v, v)
+
 
 @click.group(name="methodology")
 def methodology() -> None:
-    """Show the OWASP / NIST / PTES mapping documents shipped with HEAVEN."""
+    """Browse the pen-test & compliance mapping documents shipped with HEAVEN.
+
+    Pen-test methodologies (OWASP WSTG, NIST SP 800-115, PTES) and compliance
+    frameworks (Cyber Essentials + Plus, ISO/IEC 27001, PCI DSS, CIS v8.1,
+    NIST CSF 2.0, SOC 2).
+    """
 
 
 @methodology.command("list")
@@ -40,7 +74,8 @@ def list_docs() -> None:
 def show(name: str) -> None:
     """Print one methodology mapping doc to stdout.
 
-    NAME is the filename stem, e.g. owasp_testing_guide, nist_800_115, ptes.
+    NAME is the filename stem, e.g. owasp_testing_guide, nist_800_115, ptes,
+    cyber_essentials, iso_27001, pci_dss, cis_controls_v8, nist_csf, soc2.
     """
     candidate = _DOCS_DIR / f"{name}.md"
     if not candidate.exists():
@@ -66,8 +101,9 @@ def show(name: str) -> None:
 @click.option("--engagement", "-e", default=None,
               help="Engagement to overlay (default: the active engagement).")
 @click.option("--standard", "-s", default=None,
-              type=click.Choice(["owasp", "nist", "ptes"], case_sensitive=False),
-              help="Limit output to one standard.")
+              help="Limit output to one standard — a doc stem (e.g. iso_27001) "
+                   "or a short alias (owasp, nist, ptes, ce, ce-plus, iso, pci, "
+                   "cis, csf, soc2).")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
 def coverage(engagement: str | None, standard: str | None, as_json: bool) -> None:
     """Live methodology coverage for an engagement.
@@ -98,9 +134,14 @@ def coverage(engagement: str | None, standard: str | None, as_json: bool) -> Non
     built["engagement"]["name"] = eng_name
 
     stds = built["standards"]
-    alias = {"owasp": "owasp_testing_guide", "nist": "nist_800_115", "ptes": "ptes"}
     if standard:
-        stds = [s for s in stds if s["name"] == alias[standard.lower()]]
+        wanted = _resolve_standard(standard)
+        stds = [s for s in stds if s["name"] == wanted]
+        if not stds:
+            available = ", ".join(s["name"] for s in built["standards"])
+            _print(f"[red]Unknown standard:[/red] {standard}")
+            _print(f"[dim]Available:[/dim] {available}")
+            sys.exit(2)
 
     if as_json:
         payload = {"engagement": built["engagement"],

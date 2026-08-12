@@ -91,6 +91,68 @@ class WebhookAlerter:
 
         return await self._post_async({"content": message, "text": message})
 
+    async def send_watch_alert_async(self, summary_data: dict[str, Any]) -> bool:
+        """Send a **watch-mode** change alert.
+
+        Unlike ``send_alert_async`` (which is a scan-complete alert that
+        deliberately stays silent unless there are critical/high findings),
+        watch mode alerts on *change* — a new medium finding, a regressed low,
+        or an operator-requested heartbeat are all worth a ping. So this method
+        ALWAYS posts when a webhook is configured, and the message describes
+        what changed (new / regressed / resolved) rather than a generic
+        "critical vulnerabilities detected" line.
+
+        Recognised keys: ``engagement``, ``watch_iteration``, ``new``,
+        ``regressed``, ``resolved``, ``critical`` (new-critical count),
+        ``high`` (new-high count), ``regressed_critical_or_high``,
+        ``total_assets`` (findings tracked), ``first_run`` (bool).
+        """
+        if not self.webhook_url:
+            logger.debug("No WEBHOOK_URL configured, skipping watch alert.")
+            return False
+
+        eng = summary_data.get("engagement") or "—"
+        it = summary_data.get("watch_iteration")
+        it_label = f", iteration {it}" if it is not None else ""
+        new = int(summary_data.get("new", 0) or 0)
+        regressed = int(summary_data.get("regressed", 0) or 0)
+        resolved = int(summary_data.get("resolved", 0) or 0)
+        tracked = summary_data.get("total_assets", 0)
+
+        if summary_data.get("first_run"):
+            message = (
+                f"🔁 HEAVEN Watch started — monitoring engagement '{eng}'.\n"
+                f"Alerts fire only when a NEW or REGRESSED finding appears "
+                f"(no spam from unchanged re-scans)."
+            )
+        elif not (new or regressed):
+            message = (
+                f"🔁 HEAVEN Watch heartbeat — engagement '{eng}'{it_label}: "
+                f"no change this cycle. {tracked} finding(s) tracked."
+            )
+        else:
+            lines = [
+                f"🔁 HEAVEN Watch — change detected in engagement "
+                f"'{eng}'{it_label}",
+            ]
+            if new:
+                lines.append(
+                    f"🆕 New: {new} (critical {summary_data.get('critical', 0)}, "
+                    f"high {summary_data.get('high', 0)})"
+                )
+            if regressed:
+                lines.append(
+                    f"⚠️ Regressed: {regressed} "
+                    f"(critical/high {summary_data.get('regressed_critical_or_high', 0)})"
+                )
+            if resolved:
+                lines.append(f"✅ Resolved: {resolved}")
+            lines.append(f"Total findings tracked: {tracked}")
+            lines.append("Open the HEAVEN dashboard → Watch for details.")
+            message = "\n".join(lines)
+
+        return await self._post_async({"content": message, "text": message})
+
     async def _post_async(self, payload: dict) -> bool:
         """POST payload to webhook using aiohttp."""
         try:

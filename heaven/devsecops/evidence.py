@@ -43,6 +43,11 @@ class EvidencePackage:
     reasons: list[str] = field(default_factory=list)
     fp_check_evidence: dict = field(default_factory=dict)
 
+    # Domain-specific observed evidence for findings that made NO HTTP request
+    # (DNS/mail posture, TLS, exposed network services, host-level). Rendered as
+    # a plain "Observed" block instead of a fabricated HTTP request/response.
+    evidence_data: dict = field(default_factory=dict)
+
     # Reproduction
     curl_command: str = ""
     repro_steps: list[str] = field(default_factory=list)
@@ -89,31 +94,74 @@ class EvidencePackage:
             lines.append(f"**Technique:** `{self.technique}`")
             lines.append("")
 
-        # The proof
+        # The proof. Only findings that actually made an HTTP request get an
+        # HTTP request/response/curl block. DNS, mail, TLS, exposed-service and
+        # other host-level findings never issued a `GET` — rendering a fabricated
+        # `GET example.com` → `HTTP 0 (0 bytes)` with a bogus `curl` command made
+        # every such finding look fake. Those get a plain "Observed" block built
+        # from their real evidence instead.
+        http_txn = (
+            (isinstance(self.request_url, str)
+             and self.request_url.lower().startswith(("http://", "https://")))
+            # …or the finding carries real HTTP-transaction evidence even if the
+            # target string has no scheme (a payload/technique/captured response).
+            or self.response_status > 0
+            or bool(self.payload) or bool(self.technique)
+            or bool(self.request_headers) or bool(self.request_body)
+            or bool(self.response_excerpt)
+        )
         lines.append("#### Proof of issue")
         lines.append("")
-        lines.append("**Request:**")
-        lines.append("```http")
-        req = f"{self.request_method} {self.request_url}"
-        lines.append(req)
-        for k, v in self.request_headers.items():
-            lines.append(f"{k}: {v}")
-        if self.request_body:
-            lines.append("")
-            lines.append(self.request_body[:500])
-            if len(self.request_body) > 500:
-                lines.append("[... truncated ...]")
-        lines.append("```")
-        lines.append("")
 
-        lines.append(f"**Response:** HTTP {self.response_status} ({self.response_size_bytes} bytes)")
-        if self.response_excerpt:
+        if http_txn:
+            lines.append("**Request:**")
+            lines.append("```http")
+            lines.append(f"{self.request_method} {self.request_url}")
+            for k, v in self.request_headers.items():
+                lines.append(f"{k}: {v}")
+            if self.request_body:
+                lines.append("")
+                lines.append(self.request_body[:500])
+                if len(self.request_body) > 500:
+                    lines.append("[... truncated ...]")
             lines.append("```")
-            lines.append(self.response_excerpt[:1000])
-            if len(self.response_excerpt) > 1000:
-                lines.append("[... truncated ...]")
-            lines.append("```")
-        lines.append("")
+            lines.append("")
+
+            # Only claim a response when we actually captured one. A status of 0
+            # means the probe never completed — don't dress that up as "HTTP 0".
+            if self.response_status > 0:
+                size = f" ({self.response_size_bytes} bytes)" if self.response_size_bytes else ""
+                lines.append(f"**Response:** HTTP {self.response_status}{size}")
+                # Response headers are frequently the proof itself (a missing or
+                # insecure security header). Show them, capped so a chatty server
+                # can't flood the report.
+                if self.response_headers:
+                    shown = list(self.response_headers.items())[:15]
+                    lines.append("```http")
+                    for k, v in shown:
+                        lines.append(f"{k}: {v}")
+                    if len(self.response_headers) > 15:
+                        lines.append("... [truncated] ...")
+                    lines.append("```")
+                if self.response_excerpt:
+                    lines.append("```")
+                    lines.append(self.response_excerpt[:1000])
+                    if len(self.response_excerpt) > 1000:
+                        lines.append("[... truncated ...]")
+                    lines.append("```")
+                lines.append("")
+        else:
+            # Non-HTTP finding — render the real observed evidence.
+            if self.description:
+                lines.append(self.description)
+                lines.append("")
+            observed = {k: v for k, v in self.evidence_data.items()
+                        if v not in (None, "", [], {})}
+            if observed:
+                lines.append("**Observed:**")
+                for k, v in observed.items():
+                    lines.append(f"- **{k}:** {_evidence_value(v)}")
+                lines.append("")
 
         # Why
         if self.reasons:
@@ -122,8 +170,8 @@ class EvidencePackage:
                 lines.append(f"- {r}")
             lines.append("")
 
-        # Repro
-        if self.curl_command:
+        # Repro — a curl command only makes sense for an HTTP finding.
+        if http_txn and self.curl_command:
             lines.append("**Reproduce with curl:**")
             lines.append("```bash")
             lines.append(self.curl_command)
@@ -194,6 +242,33 @@ def build_curl(method: str, url: str, headers: Optional[dict] = None,
     return " ".join(parts)
 
 
+# Evidence keys that are rendered by the HTTP request/response block (or are
+# internal bookkeeping) and so must NOT be repeated in the "Observed" block of a
+# non-HTTP finding.
+_HTTP_EVIDENCE_KEYS = frozenset({
+    # rendered by the HTTP request/response block
+    "method", "request_url", "url", "request_headers", "request_body",
+    "response_excerpt", "response_body", "response_headers", "status",
+    "payload", "param", "technique", "reasons",
+    # class metadata rendered elsewhere (title/remediation/badges)
+    "description", "impact", "references", "owasp", "mitre", "remediation",
+    "cwe", "cwe_id", "cve", "cve_id",
+    # internal scoring / bookkeeping that must not surface as "observed" evidence
+    "cvss_vector", "cvss_base", "cvss4_vector", "cvss4_base", "cvss_version",
+    "typical_cvss", "risk_score", "severity", "confidence", "confidence_bucket",
+    "title", "vuln_type", "source", "owasp_api",
+})
+
+
+def _evidence_value(v: object) -> str:
+    """Render an evidence value compactly for the "Observed" block."""
+    if isinstance(v, (list, tuple)):
+        return ", ".join(str(x) for x in v)[:400]
+    if isinstance(v, dict):
+        return ", ".join(f"{k}={val}" for k, val in v.items())[:400]
+    return str(v)[:400]
+
+
 def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
     """
     Convert a finding dict from the validator/scanner pipeline into a
@@ -250,7 +325,10 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
     # back to a direct KB lookup so any caller gets useful, accurate data.
     from heaven.devsecops.vuln_kb import lookup as _kb_lookup
     _kb = _kb_lookup(vuln_type)
-    _description = evidence.get("description", "") or _kb.get("description", "")
+    # Prefer the detector's own description (e.g. "SPF uses '?all' (neutral)")
+    # over the generic class description — it carries the concrete observation.
+    _description = (finding.get("description", "") or evidence.get("description", "")
+                    or _kb.get("description", ""))
     _impact = evidence.get("impact", "") or _kb.get("impact", "")
     _references = evidence.get("references", []) or _kb.get("references", [])
     _cwe = finding.get("cwe", "") or finding.get("cwe_id", "") or _kb.get("cwe", "")
@@ -281,6 +359,8 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
         response_size_bytes=len(response_excerpt),
         reasons=reasons,
         fp_check_evidence=finding.get("fp_check_evidence", {}) or {},
+        evidence_data={k: v for k, v in evidence.items()
+                       if k not in _HTTP_EVIDENCE_KEYS},
         curl_command=curl,
         repro_steps=finding.get("repro_steps", []),
         cwe_id=_cwe or finding.get("cwe_id", ""),

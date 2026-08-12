@@ -48,15 +48,38 @@ class SettingSpec:
 # order. Keep this aligned with `.env.example` and `heaven init`.
 
 SETTINGS: tuple[SettingSpec, ...] = (
-    # ── AI / LLM (unlocks autonomous mode, AI attack plans, LLM FP review) ──
+    # ── AI / LLM (unlocks autonomous mode, AI attack plans, LLM FP review,
+    #    and the AI security assistant / chatbot) ──
     SettingSpec(
         "HEAVEN_LLM_PROVIDER", "LLM provider", "AI / LLM",
-        "Which provider to use. Leave blank to auto-detect from whichever key is set.",
-        secret=False, placeholder="gemini", choices=("", "anthropic", "openai", "gemini"),
+        "Which provider to use. 'ollama' = a local model (no API key, no rate "
+        "limits — run `heaven ai setup`); 'local' = any OpenAI-compatible server "
+        "(LM Studio / llama.cpp / vLLM). Leave blank to auto-detect.",
+        secret=False, placeholder="ollama",
+        choices=("", "ollama", "local", "gemini", "anthropic", "openai"),
+    ),
+    SettingSpec(
+        "HEAVEN_OLLAMA_HOST", "Ollama host", "AI / LLM",
+        "Local Ollama server URL. No API key needed. Default is localhost:11434; "
+        "run `heaven ai setup` to install a model.",
+        secret=False, placeholder="http://localhost:11434",
+        url="https://ollama.com/download",
+    ),
+    SettingSpec(
+        "HEAVEN_LLM_BASE_URL", "Local endpoint (OpenAI-compatible)", "AI / LLM",
+        "For provider 'local': the OpenAI-compatible base URL of your server "
+        "(LM Studio / llama.cpp / vLLM / LocalAI).",
+        secret=False, placeholder="http://localhost:1234/v1",
+    ),
+    SettingSpec(
+        "HEAVEN_LLM_API_KEY", "Local endpoint token", "AI / LLM",
+        "Optional bearer token for a secured local/self-hosted endpoint. Ollama "
+        "needs none.",
+        placeholder="(usually blank)",
     ),
     SettingSpec(
         "GEMINI_API_KEY", "Google Gemini API key", "AI / LLM",
-        "Free tier available. Enables the AI layers via Gemini.",
+        "Free tier available (rate-limited). Enables the AI layers via Gemini.",
         url="https://aistudio.google.com/apikey", placeholder="AIza…",
     ),
     SettingSpec(
@@ -72,8 +95,16 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         "HEAVEN_LLM_MODEL", "LLM model override", "AI / LLM",
         "Optional. Pin a specific model id; blank uses the provider default "
-        "(gemini-flash-latest / claude-sonnet-5 / gpt-4o).",
-        secret=False, placeholder="gemini-flash-latest",
+        "(qwen2.5:7b for Ollama / gemini-flash-latest / claude-sonnet-5 / gpt-4o).",
+        secret=False, placeholder="qwen2.5:7b",
+    ),
+    SettingSpec(
+        "HEAVEN_LLM_FALLBACK_PROVIDER", "Fallback provider", "AI / LLM",
+        "Optional hybrid mode. If the primary provider is unavailable or returns "
+        "nothing, fall back to this one (needs its own key/endpoint). E.g. local "
+        "primary + gemini fallback.",
+        secret=False, placeholder="gemini",
+        choices=("", "ollama", "local", "gemini", "anthropic", "openai"),
     ),
 
     # ── Recon enrichment ──

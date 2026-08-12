@@ -93,10 +93,11 @@ class LinpeasRunner:
                 host=host, user=username, success=False,
                 error="asyncssh not installed — pip install asyncssh",
             )
+        from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
 
         client_keys = [private_key] if private_key else None
         try:
-            async with asyncssh.connect(  # type: ignore[attr-defined]
+            async with ssh_safe.connect(  # type: ignore[attr-defined]
                 host, port=port, username=username,
                 password=password, client_keys=client_keys,
                 known_hosts=None,                  # operator-driven; trust on first use

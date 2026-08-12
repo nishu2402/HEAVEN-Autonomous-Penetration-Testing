@@ -102,5 +102,83 @@ def diff(baseline_scan_id: str, current_scan_id: str,
         sys.exit(1)
 
 
+@click.command(name="retest")
+@click.argument("baseline_scan_id")
+@click.argument("current_scan_id")
+@click.option("--engagement", help="Engagement name (default: active)")
+@click.option("--output", "-o", type=click.Path(),
+              help="Write the HTML retest report to this path")
+@click.option("--format", "fmt", type=click.Choice(["html", "json"]), default="html",
+              help="Report format for --output / stdout")
+def retest(baseline_scan_id: str, current_scan_id: str,
+           engagement: Optional[str], output: Optional[str], fmt: str) -> None:
+    """Produce a client-facing remediation retest report.
+
+    Compares a baseline scan to a later re-scan of the same engagement and
+    reports the remediation posture in plain language: how many baseline
+    findings are verified fixed, which are still open, which were reintroduced
+    (a previously-fixed finding that came back — flagged urgent), and any newly
+    introduced since the baseline. The remediation rate counts only findings
+    that existed at the baseline (the set under retest).
+
+    Example:
+
+        heaven retest scan-A scan-B --engagement q1 -o retest.html
+    """
+    from heaven.cli._helpers import json_output
+    from heaven.devsecops.diff_finder import compute_diff
+    from heaven.devsecops.retest_report import render_retest_html, retest_posture
+    from heaven.engagement import EngagementStore
+
+    db_path = _engagement_db_path(engagement)
+    if not db_path.exists():
+        _print(f"[red]Engagement DB not found:[/red] {db_path}")
+        sys.exit(2)
+
+    store = EngagementStore(db_path)
+    try:
+        report = compute_diff(store, baseline_scan_id, current_scan_id)
+    except ValueError as e:
+        _print(f"[red]{e}[/red]  Both scans must belong to this engagement.")
+        sys.exit(2)
+
+    posture = retest_posture(report)
+    eng = store.get_engagement()
+    eng_name = eng.name if eng else (engagement or "")
+
+    if fmt == "json" or json_output():
+        payload = {"posture": posture, "diff": report.to_dict()}
+        if output:
+            Path(output).write_text(json.dumps(payload, indent=2, default=str))
+            _print(f"[green]Retest JSON written:[/green] {output}")
+        else:
+            print(json.dumps(payload, indent=2, default=str))
+        return
+
+    if output:
+        html_text = render_retest_html(
+            report, engagement_name=eng_name,
+            baseline_label=baseline_scan_id[:8], current_label=current_scan_id[:8])
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(html_text)
+        _print(f"[green]Retest report written:[/green] {output}")
+
+    rate = posture["remediation_rate"]
+    rate_str = f"{rate:.0f}%" if rate is not None else "—"
+    _print(f"\n[bold]Remediation retest — {current_scan_id[:8]} vs. {baseline_scan_id[:8]}[/bold]")
+    _print(f"  Remediated:       [green]{posture['remediated']:4}[/green]  "
+           f"([bold green]{rate_str}[/bold green] of {posture['prior_total']} baseline findings)")
+    _print(f"  Still open:       [yellow]{posture['still_open']:4}[/yellow]")
+    _print(f"  Reintroduced:     [bold red]{posture['reintroduced']:4}[/bold red]"
+           + ("  ← URGENT" if posture['reintroduced'] else ""))
+    _print(f"  Newly introduced: [cyan]{posture['newly_introduced']:4}[/cyan]")
+
+    # CI-friendly: non-zero when previously-fixed critical/high came back.
+    if posture["regressed_critical_or_high"] > 0:
+        sys.exit(1)
+
+
 def register(cli: click.Group) -> None:
     cli.add_command(diff)
+    cli.add_command(retest)

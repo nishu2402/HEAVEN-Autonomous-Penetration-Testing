@@ -177,12 +177,49 @@ class FeedbackEngine:
         self._host_count = 0
         self._emitted = 0
         self._max_generations = max_generations
+        # Hosts already assessed this run — the operator's seed targets plus any
+        # host we've since emitted a follow-up for. A host in here is NEVER
+        # re-emitted as a lead: it was already deep-scanned, so re-scanning it is
+        # pure waste. This is what stops the DYNAMIC_FOLLOWUP phase from queuing a
+        # redundant full re-scan of the seed host (every finding carries the seed
+        # as its ``target``, and the network result lists it under ``hosts``),
+        # which froze scans for ~90s at ~44% while thousands of ports were
+        # re-probed for zero new findings. Genuinely-new hosts (DNS subdomains,
+        # loot references, redirects to *other* hosts) are not in here, so their
+        # follow-up is unaffected.
+        self._known_hosts: set[str] = self._collect_seed_hosts(targets or {})
         # Recorded for the scan summary / operator visibility (deduped).
         self.hosts: list[str] = []
         self.urls: list[str] = []
         self.creds: list[tuple[str, str]] = []
         self.tokens: list[str] = []
         self.out_of_scope_hosts: list[str] = []
+
+    # ── host bookkeeping ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _norm_host(raw: str) -> str:
+        """Normalise a host reference to a bare lowercase hostname/IP — drop the
+        scheme, any ``:port`` and IPv6 brackets — so seed / already-scanned
+        comparisons match regardless of the form a lead arrived in
+        (``http://h:80`` and ``h`` must compare equal)."""
+        raw = (raw or "").strip().lower()
+        if "://" in raw:
+            raw = urlparse(raw).hostname or ""
+        return raw.split(":", 1)[0].strip("[]")
+
+    @classmethod
+    def _collect_seed_hosts(cls, targets: dict[str, Any]) -> set[str]:
+        """The operator's seed hosts (from ``ips`` / ``urls`` / ``domains``),
+        normalised — these were named explicitly and are scanned by the main
+        pipeline, so the feedback loop must never re-queue them."""
+        known: set[str] = set()
+        for key in ("ips", "urls", "domains"):
+            for t in targets.get(key, []) or []:
+                h = cls._norm_host(str(t))
+                if h:
+                    known.add(h)
+        return known
 
     # ── emission ─────────────────────────────────────────────────────────────
 
@@ -195,15 +232,27 @@ class FeedbackEngine:
             return None
 
         if kind == HOST:
-            host = str(value).strip().lower()
+            host = self._norm_host(str(value))
+            if not host:
+                return None
             if not self.scope.allows(host):
-                if host and host not in self.out_of_scope_hosts:
+                if host not in self.out_of_scope_hosts:
                     self.out_of_scope_hosts.append(host)
                     logger.debug(f"feedback: dropping out-of-scope host {host}")
+                return None
+            if host in self._known_hosts:
+                # Already scanned this run (a seed target, or a host we've already
+                # followed up) — skip it so we never re-scan an already-assessed
+                # host. Without this the seed host, echoed back as every finding's
+                # ``target`` and in the network result's ``hosts``, was re-queued
+                # for a full DYNAMIC_FOLLOWUP re-scan (the ~90s "stuck at 44%,
+                # nothing new" symptom).
+                logger.debug(f"feedback: host {host} already scanned — no re-scan")
                 return None
             if self._host_count >= self.MAX_HOSTS:
                 return None
             self._host_count += 1
+            self._known_hosts.add(host)   # so a later reference can't re-queue it
             self.hosts.append(host)
         elif kind == URL:
             self.urls.append(str(value))

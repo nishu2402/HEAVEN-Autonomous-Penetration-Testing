@@ -52,7 +52,7 @@ from heaven.utils.logger import get_logger
 from heaven.vulnscan.cve_mapper import (
     CPE_MAP,
     _fingerprint_from_banner,
-    _version_in_range,
+    specs_match_version,
 )
 
 logger = get_logger("vulnscan.live_cve")
@@ -234,7 +234,10 @@ def filter_by_version(records: list[LiveCVE], product_key: str, version: str,
     for r in records:
         specs = inline_ranges.get(r.cve_id)
         if specs:
-            r.version_confirmed = any(_version_in_range(version, s) for s in specs)
+            # Window-aware match: a bounded range (>=lo AND <=hi) must hold
+            # jointly, so a patched version above the fixed ceiling is not
+            # falsely marked version_confirmed.
+            r.version_confirmed = specs_match_version(version, specs)
     return records
 
 

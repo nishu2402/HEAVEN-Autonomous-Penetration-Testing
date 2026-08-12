@@ -25,6 +25,7 @@ from heaven.ai.fp_review import (
 from heaven.ai.vuln_hypothesis import (
     HypothesisOutput, VulnHypothesis, VulnHypothesisAgent, verify_hypotheses,
 )
+from heaven.ai.chat_assistant import ChatAssistant, build_engagement_context
 
 __all__ = [
     "LLMGateway", "LLMRequest", "LLMResponse", "LLMProviderError", "get_gateway",
@@ -33,4 +34,5 @@ __all__ = [
     "plan_to_killchain_findings",
     "FPReviewer", "FPReviewVerdict", "review_borderline_findings",
     "VulnHypothesisAgent", "VulnHypothesis", "HypothesisOutput", "verify_hypotheses",
+    "ChatAssistant", "build_engagement_context",
 ]

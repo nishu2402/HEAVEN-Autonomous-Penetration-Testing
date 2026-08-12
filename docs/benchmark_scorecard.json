@@ -1,0 +1,31 @@
+{
+  "tool": "HEAVEN",
+  "kind": "native-controlled-functional-benchmark",
+  "generated_at": "2026-08-04T21:49:44.943471+00:00",
+  "target": "heaven-native-vuln-app",
+  "target_version": "1.0",
+  "metrics": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "recall_overall": 1.0,
+    "f1": 1.0
+  },
+  "required_detected": 11,
+  "required_total": 11,
+  "categories": [
+    "cmdi",
+    "cors",
+    "info_disclosure",
+    "insecure_cookie",
+    "jwt",
+    "lfi",
+    "open_redirect",
+    "security_misconfig",
+    "sqli",
+    "ssrf",
+    "xss",
+    "xxe"
+  ],
+  "duration_seconds": 19.55,
+  "note": "Controlled functional benchmark on a known, labelled surface \u2014 measures end-to-end detection + attribution, not a claim against any live third-party app."
+}

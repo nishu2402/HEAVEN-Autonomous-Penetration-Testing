@@ -10,6 +10,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Settings as SettingsApi, changePassword, getUser } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import LocalAISetup from "../components/LocalAISetup.jsx";
 
 export default function Settings() {
   const [status, setStatus] = useState(null);
@@ -19,6 +20,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [llm, setLlm] = useState(null);          // test-llm result
   const [testing, setTesting] = useState(false);
+  const [local, setLocal] = useState(null);      // aiLocalStatus() — local runtime
   const [nvd, setNvd] = useState(null);          // test-nvd result
   const [testingNvd, setTestingNvd] = useState(false);
   const nvdAutoTested = useRef(false);           // run the auto-check at most once
@@ -50,6 +52,14 @@ export default function Settings() {
     SettingsApi.get().then(setStatus).catch((e) => setError(e.message));
   }
   useEffect(load, []);
+
+  // Local-LLM runtime status for the "Local AI" card (installed / reachable /
+  // models). Best-effort; the card only renders once this resolves. Exposed as a
+  // function so the setup wizard can re-check after a pull / configure.
+  const reloadLocal = React.useCallback(
+    () => SettingsApi.aiLocalStatus().then(setLocal).catch(() => setLocal(null)),
+    []);
+  useEffect(() => { reloadLocal(); }, [reloadLocal]);
 
   const dirtyKeys = useMemo(() => Object.keys(draft), [draft]);
 
@@ -337,6 +347,10 @@ export default function Settings() {
                   {llm.model ? ` (${llm.model})` : ""} — {llm.reason}
                 </span>
               ) : null}
+
+              {/* Local AI (Ollama / OpenAI-compatible) — no API key, no rate
+                  limits. Full point-and-click setup: detect → pull → use. */}
+              <LocalAISetup status={local} onChanged={reloadLocal} toast={toast} />
             </div>
           ) : null}
 

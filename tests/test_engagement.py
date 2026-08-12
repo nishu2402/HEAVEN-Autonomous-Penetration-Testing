@@ -33,6 +33,33 @@ class TestEngagementMetadata:
     def test_get_engagement_when_empty(self, store):
         assert store.get_engagement() is None
 
+    def test_update_details_client_only_preserves_sow(self, store):
+        store.create_engagement("acme", client="ACME", statement_of_work="SOW-1")
+        eng = store.update_engagement_details(client="ACME Corp")
+        assert eng.client == "ACME Corp"
+        assert eng.statement_of_work == "SOW-1"   # untouched field preserved
+
+    def test_update_details_sow_only_preserves_client(self, store):
+        store.create_engagement("acme", client="ACME")
+        eng = store.update_engagement_details(statement_of_work="SOW-2026-001")
+        assert eng.client == "ACME"
+        assert eng.statement_of_work == "SOW-2026-001"
+
+    def test_update_details_can_clear_a_field(self, store):
+        store.create_engagement("acme", client="ACME", statement_of_work="SOW-1")
+        eng = store.update_engagement_details(client="")
+        assert eng.client == ""
+        assert eng.statement_of_work == "SOW-1"
+
+    def test_update_details_creates_row_when_absent(self, tmp_path):
+        from heaven.engagement import EngagementStore
+        st = EngagementStore(tmp_path / "fresh.db")
+        assert st.get_engagement() is None
+        eng = st.update_engagement_details(client="NewCo")
+        assert eng is not None
+        assert eng.name == "fresh"                # canonical DB-stem name
+        assert eng.client == "NewCo"
+
 
 # ── Scope management ───────────────────────────────────────────────────
 

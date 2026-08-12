@@ -134,6 +134,15 @@ export default function FindingDetail() {
             </Link>
             <h2 style={{ fontSize: 16, marginTop: 8, color: "var(--text-0)", fontWeight: 700, letterSpacing: "0.05em" }}>
               <span className={`sev-pill sev-${f.severity}`} style={{ marginRight: 8 }}>{f.severity}</span>
+              {f.confirmation && (
+                <span className={`conf-badge conf-${String(f.confirmation).toLowerCase()}`}
+                      style={{ marginRight: 8 }}
+                      title={f.confirmation === "Potential"
+                        ? "Inferred from a service version banner — not confirmed from the outside. Verify the running version before treating as present."
+                        : "Proven by direct observation or active validation."}>
+                  {f.confirmation}
+                </span>
+              )}
               {(f.vuln_type || "").toUpperCase()}
             </h2>
             <div style={{ color: "var(--text-1)", fontSize: 13, marginTop: 4 }}>{f.target}</div>
@@ -147,6 +156,18 @@ export default function FindingDetail() {
         <table className="kv-table" style={{ marginTop: 16 }}>
           <tbody>
             <tr><td>Title</td><td style={{ color: "var(--text-0)" }}>{f.title || "—"}</td></tr>
+            {f.confirmation && (
+              <tr><td>Confirmation</td><td>
+                <span className={`conf-badge conf-${String(f.confirmation).toLowerCase()}`}>
+                  {f.confirmation}
+                </span>
+                <span className="dim" style={{ marginLeft: 8, fontSize: 11.5 }}>
+                  {f.confirmation === "Potential"
+                    ? "inferred from a version banner — verify the running version"
+                    : "proven by direct observation or active validation"}
+                </span>
+              </td></tr>
+            )}
             <tr><td>Confidence</td><td>
               <span style={{ color: Number(f.confidence) >= 0.9 ? "var(--text-0)" : "var(--med)" }}>
                 {Number(f.confidence).toFixed(2)}
@@ -155,11 +176,13 @@ export default function FindingDetail() {
             </td></tr>
             <tr><td>CVE</td><td>{cveCell(f)}</td></tr>
             <tr><td>CVSS base</td><td>
-              {f.predicted_cvss_score?.toFixed?.(1)
-                ?? (f.typical_cvss ? Number(f.typical_cvss).toFixed(1) : "—")}
-              {!f.predicted_cvss_score && f.typical_cvss
-                ? <span className="dim" style={{ marginLeft: 6 }}>(typical for class)</span>
-                : <span className="dim" style={{ marginLeft: 6 }}>(weakness class)</span>}
+              {Number(f.predicted_cvss_score) > 0
+                ? <>{Number(f.predicted_cvss_score).toFixed(1)}
+                    <span className="dim" style={{ marginLeft: 6 }}>(base score)</span></>
+                : Number(f.typical_cvss) > 0
+                  ? <>{Number(f.typical_cvss).toFixed(1)}
+                      <span className="dim" style={{ marginLeft: 6 }}>(typical for class)</span></>
+                  : "—"}
             </td></tr>
             <tr><td>Contextual CVSS</td><td>
               {f.contextual_cvss_score?.toFixed?.(1) ?? "—"}
@@ -395,6 +418,66 @@ function RemediationCard({ id, staticText }) {
   );
 }
 
+// ── Sub-component: renders the structured active-confirmation verdict ──
+// The backend returns an honest status for EVERY finding class — a fresh proof,
+// an already-evidenced finding, a probe that couldn't reproduce, or a class with
+// no safe automated proof — each shown distinctly instead of a blunt "no".
+
+const VERDICT = {
+  confirmed:         { label: "Confirmed", color: "var(--green)", icon: "✓" },
+  already_confirmed: { label: "Already confirmed", color: "var(--green)", icon: "✓" },
+  unconfirmed:       { label: "Could not confirm", color: "var(--amber)", icon: "•" },
+  not_applicable:    { label: "No automated proof", color: "var(--med)", icon: "ⓘ" },
+  unauthorized:      { label: "Not authorized", color: "var(--red)", icon: "⚠" },
+  unavailable:       { label: "Unavailable", color: "var(--med)", icon: "ⓘ" },
+};
+
+const METHOD_LABEL = {
+  exploit: "Exploitation canary",
+  "active-probe": "Safe CVE probe",
+  "http-recheck": "Live HTTP re-check",
+  "tls-recheck": "Live TLS handshake",
+  "tcp-connect": "TCP reachability",
+  none: "",
+};
+
+function ConfirmVerdict({ payload }) {
+  const v = VERDICT[payload.status] || VERDICT.unconfirmed;
+  const method = METHOD_LABEL[payload.method] || "";
+  const ev = Array.isArray(payload.evidence) ? payload.evidence.filter(Boolean) : [];
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span
+          style={{
+            color: v.color, fontWeight: 700, fontSize: 13,
+            border: `1px solid ${v.color}`, borderRadius: 6, padding: "2px 9px",
+          }}
+        >
+          {v.icon} {v.label}
+        </span>
+        {method && <span className="dim" style={{ fontSize: 11.5 }}>via {method}</span>}
+        {payload.technique && (
+          <code style={{ fontSize: 11, color: "var(--text-2)" }}>{payload.technique}</code>
+        )}
+      </div>
+      {payload.summary && (
+        <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-1)" }}>{payload.summary}</div>
+      )}
+      {payload.detail && (
+        <div className="dim" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.55 }}>
+          {payload.detail}
+        </div>
+      )}
+      {ev.length > 0 && (
+        <pre className="cli-block" style={{ marginTop: 8, fontSize: 11 }}>
+          {JSON.stringify(ev, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 // ── Sub-component: active confirmation + LLM FP review (Gaps 4 + 6) ──
 
 function ExploitAndReviewActions({ id, finding, onChange }) {
@@ -438,14 +521,17 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
     <div className="card">
       <div className="card-title">Active Confirmation</div>
       <div className="dim" style={{ fontSize: 12, marginBottom: 10 }}>
-        Run a controlled exploitation proof against the live target, or ask the
-        LLM reviewer (if configured) to second-opinion the existing rule-based
-        verdict. Both require the operator to have written authorization for the target.
+        Run the safest available live proof for this finding — an exploitation
+        canary, a behavioural CVE probe, an HTTP/TLS re-check, or a TCP
+        reachability test — and get an honest verdict. Where no safe automated
+        proof exists you'll get the manual next step instead. You can also ask the
+        LLM reviewer (if configured) to second-opinion the rule-based verdict. Both
+        require the operator to have written authorization for the target.
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className="btn" disabled={proving} onClick={runProof}>
-          {proving ? "Proving…" : "Prove via exploit"}
+          {proving ? "Confirming…" : "Actively confirm"}
         </button>
         <button className="btn-small" disabled={reviewing} onClick={runReview}>
           {reviewing ? "Reviewing…" : "LLM false-positive review"}
@@ -457,18 +543,7 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
       )}
 
       {result && result.kind === "prove" && (
-        <div style={{ marginTop: 12 }}>
-          <div>
-            Proved: <strong style={{ color: result.payload.proved ? "var(--text-0)" : "var(--med)" }}>
-              {result.payload.proved ? "yes" : "no"}
-            </strong>
-          </div>
-          {result.payload.exploit_proof && result.payload.exploit_proof.length > 0 && (
-            <pre className="cli-block" style={{ marginTop: 8, fontSize: 11 }}>
-              {JSON.stringify(result.payload.exploit_proof, null, 2)}
-            </pre>
-          )}
-        </div>
+        <ConfirmVerdict payload={result.payload} />
       )}
 
       {result && result.kind === "review" && (

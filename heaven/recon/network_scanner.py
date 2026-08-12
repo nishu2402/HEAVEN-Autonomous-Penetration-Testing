@@ -9,6 +9,7 @@ Cross-platform: Linux, macOS, Windows.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import ipaddress
 import os
@@ -40,6 +41,13 @@ SERVICE_FINGERPRINTS: dict[int, str] = {
     3306: "mysql", 3389: "rdp", 5432: "postgresql", 5900: "vnc", 6379: "redis",
     8080: "http-proxy", 8443: "https-alt", 8888: "http-alt", 9200: "elasticsearch",
     27017: "mongodb",
+    # Shared-hosting / cPanel & WHM control-plane ports — extremely common on
+    # web hosts (Bluehost, HostGator, etc.) and a real admin-login attack
+    # surface. Previously unlabelled, so a scan of a cPanel host showed them (if
+    # at all) as generic "unknown".
+    2077: "cpanel-webdav", 2078: "cpanel-webdav-ssl",
+    2082: "cpanel", 2083: "cpanel-ssl", 2086: "whm", 2087: "whm-ssl",
+    2095: "webmail", 2096: "webmail-ssl", 2222: "ssh-alt",
 }
 
 # UDP probe payloads for common services
@@ -85,6 +93,35 @@ class HostResult:
     ttl: int = 0
     scan_time_ms: float = 0.0
     honeypot_indicators: list[str] = field(default_factory=list)
+    # ── Layer-2 / device identity ─────────────────────────────────────────────
+    # Every value comes straight from nmap and is blank when nmap did not observe
+    # it — never fabricated (same contract as os_guess).
+    #   mac_address        : from the ARP <address addrtype="mac"> reply. Only
+    #                        present when the target is on the SAME local subnet
+    #                        AND the scan had raw-socket privileges; empty for any
+    #                        routed / remote host (there is no MAC to see).
+    #   mac_vendor         : OUI manufacturer nmap resolved for that MAC.
+    #   device_name        : the host's name — NetBIOS/SMB computer name (a
+    #                        machine's own advertised name) or a reverse-DNS PTR.
+    #   device_name_source : "netbios" | "ptr"  (how device_name was learned)
+    #   device_type        : device role — nmap -O <osclass type> (fingerprinted)
+    #                        or a conservative MAC-vendor category.
+    #   device_type_source : "nmap" | "mac-vendor"
+    mac_address: str = ""
+    mac_vendor: str = ""
+    device_name: str = ""
+    device_name_source: str = ""
+    device_type: str = ""
+    device_type_source: str = ""
+    # ── Perimeter-defence signal ──────────────────────────────────────────────
+    # Port-state tallies used to tell a firewall (drops probes → many 'filtered')
+    # apart from a normal host (refuses probes → 'closed'/RST). Both come straight
+    # from the nmap parse (0 in the pure-Python connect path, which can't observe
+    # the distinction). ``perimeter`` holds the PerimeterVerdict.to_dict() once
+    # scan_network has classified the host.
+    filtered_ports: int = 0
+    closed_ports: int = 0
+    perimeter: dict = field(default_factory=dict)
 
 
 def parse_port_range(port_spec: str) -> list[int]:
@@ -336,6 +373,86 @@ def _os_from_service_evidence(ostypes: list[str], os_cpes: list[str]) -> str:
     return Counter(names).most_common(1)[0][0]
 
 
+# Conservative OUI-vendor → device-type map. Keyed on a lowercased fragment of
+# the vendor string nmap resolves from the MAC's OUI. The OUI is a real,
+# manufacturer-assigned identifier, but it names the *maker*, not a proven device
+# role — so callers label anything derived here "(per MAC vendor)" and never as a
+# stack fingerprint. Deliberately small and high-signal: an unrecognised vendor
+# returns '' rather than a guess. Order matters (most-specific fragment first).
+_MAC_VENDOR_DEVICE_TYPES: list[tuple[str, str]] = [
+    ("raspberry pi", "single-board computer"),
+    ("hikvision", "IP camera"),
+    ("dahua", "IP camera"),
+    ("axis communications", "IP camera"),
+    ("ubiquiti", "network equipment"),
+    ("mikrotik", "network equipment"),
+    ("juniper", "network equipment"),
+    ("aruba", "network equipment"),
+    ("fortinet", "network equipment"),
+    ("palo alto", "network equipment"),
+    ("netgear", "network equipment"),
+    ("tp-link", "network equipment"),
+    ("d-link", "network equipment"),
+    ("cisco", "network equipment"),
+    ("brother", "printer"),
+    ("lexmark", "printer"),
+    ("xerox", "printer"),
+    ("epson", "printer"),
+    ("espressif", "IoT device"),
+    ("nest labs", "IoT device"),
+    ("philips lighting", "IoT device"),
+    ("signify", "IoT device"),
+    ("sonos", "media device"),
+    ("roku", "media device"),
+    ("vmware", "virtual machine"),
+    ("apple", "Apple device"),
+]
+
+
+def _device_type_from_mac_vendor(vendor: str) -> str:
+    """Map a MAC OUI vendor to a conservative device category; '' when unknown.
+
+    A real, manufacturer-assigned signal — but a hint about the *maker*, so the
+    caller labels it "(per MAC vendor)" and never as a fingerprint. An
+    unrecognised vendor returns '' (we never guess a role we didn't see evidence
+    for).
+    """
+    v = (vendor or "").strip().lower()
+    if not v:
+        return ""
+    for frag, dtype in _MAC_VENDOR_DEVICE_TYPES:
+        if frag in v:
+            return dtype
+    return ""
+
+
+def _netbios_name_from_script(script_id: str, output: str) -> str:
+    """Pull a device / computer name out of an nmap host-script's output; '' when
+    none is present.
+
+    Handles the two default host scripts that advertise a machine's own name:
+    ``nbstat`` (``NetBIOS name: WIN-ABC123``) and ``smb-os-discovery``
+    (``NetBIOS computer name: WIN-ABC`` / ``Computer name: host.example.com``).
+    Any other script, or output we can't confidently parse, yields '' — a name is
+    never invented. The result is trimmed of a trailing NetBIOS/AD suffix.
+    """
+    import re
+
+    sid = (script_id or "").lower()
+    text = output or ""
+    if sid == "nbstat":
+        m = re.search(r"NetBIOS name:\s*([^,\n<]+)", text, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    if sid == "smb-os-discovery":
+        for pat in (r"NetBIOS computer name:\s*([^\n\x00]+)",
+                    r"Computer name:\s*([^\n\x00]+)"):
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                return m.group(1).strip().rstrip(".")
+    return ""
+
+
 def _build_nmap_port_spec(ports: list[int]) -> str:
     """
     Convert a sorted list of port numbers into a compact nmap port spec string.
@@ -362,14 +479,371 @@ def _nmap_timing_args(stealth_level: str) -> list[str]:
     """
     Return nmap timing and rate flags for the requested stealth level.
     Lower stealth = slower + quieter. Higher stealth = faster + noisier.
+
+    Two properties matter as much as speed here:
+
+    * **Every level must actually finish.** The old paranoid floor of
+      ``--min-rate 10`` (10 packets/sec) meant a real port range could never
+      complete inside the scan's time budget — the whole host was cancelled and
+      returned ZERO ports, so a paranoid scan produced *different* (empty)
+      results than a normal one against the same target. The floors below keep
+      the progressively-quieter ``-T`` templates (which provide the real IDS
+      evasion: parallelism caps, longer timeouts, scan delay) while guaranteeing
+      even paranoid sweeps a full range in bounded time.
+    * **Determinism.** ``--max-retries 1`` drops open ports on any lossy hop, so
+      the same target yields a different port set run-to-run. Every level now
+      retries at least twice (loud, a lab-only profile, stays at 1) so repeated
+      scans of one host converge on the same result.
     """
     return {
-        "paranoid":   ["-T1", "--min-rate", "10",    "--max-retries", "3"],
-        "stealth":    ["-T2", "--min-rate", "100",   "--max-retries", "2"],
-        "normal":     ["-T4", "--min-rate", "1000",  "--max-retries", "2"],
-        "aggressive": ["-T4", "--min-rate", "5000",  "--max-retries", "1"],
-        "loud":       ["-T5", "--min-rate", "10000", "--max-retries", "1"],
-    }.get(stealth_level, ["-T4", "--min-rate", "1000", "--max-retries", "2"])
+        "paranoid":   ["-T1", "--min-rate", "100",  "--max-retries", "2"],
+        "stealth":    ["-T2", "--min-rate", "300",  "--max-retries", "2"],
+        "normal":     ["-T4", "--min-rate", "800",  "--max-retries", "3"],
+        "aggressive": ["-T4", "--min-rate", "3000", "--max-retries", "2"],
+        "loud":       ["-T5", "--min-rate", "8000", "--max-retries", "1"],
+    }.get(stealth_level, ["-T4", "--min-rate", "800", "--max-retries", "3"])
+
+
+def _nmap_evasion_args(raw_capable: bool) -> list[str]:
+    """Firewall/IDS-evasion nmap flags for an AUTHORIZED re-probe of a filtered
+    host — the standard nmap techniques for getting probes past a simple packet
+    filter (RFC-legal, the same ones ``nmap`` documents).
+
+    Raw-socket-gated: packet fragmentation (``-f``), padding (``--data-length``)
+    and decoys (``-D``) only affect nmap's *raw* SYN/UDP scans, so they are added
+    only when we can run privileged. An unprivileged connect scan can still spoof
+    a trusted source port, which defeats naive port-based ACLs on most platforms.
+    Nothing here spoofs the source IP address or forges credentials — it only
+    reshapes our own probes so a default-drop filter is more likely to pass them.
+    """
+    if not raw_capable:
+        return ["--source-port", "53"]
+    return [
+        "-f",                    # fragment IP headers so signature filters miss them
+        "--data-length", "24",   # pad probes past fixed-length-packet heuristics
+        "--source-port", "53",   # source from DNS/53 — frequently allowed outbound
+        "-D", "RND:5",           # 5 random decoys obscure which source is the scanner
+    ]
+
+
+# Ports whose services typically greet with a banner the instant a connection
+# opens — worth a short read to capture a version string in the pure-Python
+# (no-nmap) path. HTTP-family ports get a minimal HEAD request instead.
+_BANNER_READ_PORTS: frozenset[int] = frozenset({
+    21, 22, 23, 25, 110, 143, 587, 3306, 5432, 6379, 11211, 27017,
+})
+_HTTP_LIKE_PORTS: frozenset[int] = frozenset({
+    80, 591, 2082, 2086, 2095, 8000, 8008, 8080, 8081, 8888,
+})
+
+
+async def _grab_banner(host: str, port: int, timeout: float) -> str:
+    """Best-effort, READ-ONLY banner grab from a known-open TCP port.
+
+    Returns a short, cleaned banner string, or '' when nothing was offered.
+    Never writes anything except a single benign HTTP ``HEAD`` on web-like
+    ports, so it's safe to run against any authorized target.
+    """
+    read_timeout = min(3.0, max(1.0, timeout))
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=read_timeout,
+        )
+    except (OSError, asyncio.TimeoutError):
+        return ""
+    data = b""
+    try:
+        if port in _HTTP_LIKE_PORTS:
+            writer.write(
+                f"HEAD / HTTP/1.0\r\nHost: {host}\r\nUser-Agent: HEAVEN\r\n\r\n".encode()
+            )
+            with contextlib.suppress(OSError, asyncio.TimeoutError):
+                await writer.drain()
+        with contextlib.suppress(OSError, asyncio.TimeoutError):
+            data = await asyncio.wait_for(reader.read(256), timeout=read_timeout)
+    finally:
+        writer.close()
+        with contextlib.suppress(OSError, asyncio.TimeoutError):
+            await writer.wait_closed()
+    text = data.decode("utf-8", "replace").strip()
+    if port in _HTTP_LIKE_PORTS and text:
+        # Surface just the Server header (or the status line) rather than a wall
+        # of HTML — that's the version-bearing part.
+        server = status = ""
+        for line in text.splitlines():
+            if line.lower().startswith("server:"):
+                server = line.split(":", 1)[1].strip()
+            elif line.upper().startswith("HTTP/") and not status:
+                status = line.strip()
+        text = server or status or text.splitlines()[0]
+    return text[:200]
+
+
+async def _python_connect_scan(
+    host: str,
+    ports: list[int],
+    timeout: float = 2.0,
+    stealth_level: str = "normal",
+) -> list[PortResult]:
+    """Pure-Python TCP connect scan — the no-nmap fallback.
+
+    Guarantees a full-range sweep still genuinely covers *every* requested port
+    (not just a handful) when nmap isn't installed, instead of the scanner
+    returning nothing. Every result is a REAL observation: a port is reported
+    ``open`` only when the OS completed a TCP handshake to it; the service name
+    comes from the well-known port map and any banner is read live from the
+    socket. No port, state, service or banner is ever invented — the honest
+    trade-off vs nmap is no ``-sV`` version depth or ``-O`` OS fingerprint.
+    """
+    if not ports:
+        return []
+    profile = profile_for(stealth_level)
+    concurrency = min(1000, max(50, profile.max_concurrent if profile else 500))
+    sem = asyncio.Semaphore(concurrency)
+    connect_timeout = min(3.0, max(0.4, timeout))
+
+    async def _probe(port: int) -> Optional[int]:
+        async with sem:
+            try:
+                _reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port), timeout=connect_timeout,
+                )
+            except (OSError, asyncio.TimeoutError):
+                return None
+            writer.close()
+            with contextlib.suppress(OSError, asyncio.TimeoutError):
+                await writer.wait_closed()
+            return port
+
+    probed = await asyncio.gather(*[_probe(p) for p in ports])
+    open_ports = sorted(p for p in probed if p is not None)
+
+    # Banner-grab only the (few) open ports — cheap, and adds real version data.
+    banners: dict[int, str] = {}
+    grab = [p for p in open_ports if p in _BANNER_READ_PORTS or p in _HTTP_LIKE_PORTS]
+    if grab:
+        grabbed = await asyncio.gather(
+            *[_grab_banner(host, p, connect_timeout) for p in grab]
+        )
+        banners = {p: b for p, b in zip(grab, grabbed) if b}
+
+    return [
+        PortResult(
+            host=host, port=port, protocol="tcp", state="open",
+            service=SERVICE_FINGERPRINTS.get(port, ""),
+            banner=banners.get(port, ""),
+        )
+        for port in open_ports
+    ]
+
+
+def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
+    """Parse nmap ``-oX`` output into open ports + OS evidence.
+
+    Returns a dict with ``ports`` (list[PortResult]), ``probe_confirmed`` (bool),
+    and ``os_guess`` / ``os_source`` / ``os_accuracy`` / ``ttl``. Returns ``None``
+    when the XML cannot be parsed — which is precisely how a *crashed* nmap is told
+    apart from a clean scan that simply found nothing: a crash (e.g. the nmap 7.9x
+    ``-sC``/NSE ``lua_status(L) == LUA_YIELD`` SIGABRT) emits only a truncated,
+    unclosed document, whereas a live host with no open ports emits valid XML with
+    an empty port list. The caller uses that distinction to retry without ``-sC``
+    instead of silently reporting zero ports.
+    """
+    try:
+        xml_root = _safe_xml_fromstring(stdout)
+    except ET.ParseError as e:
+        logger.debug(f"nmap XML parse error for {host}: {e}")
+        return None
+
+    # ── Host liveness ─────────────────────────────────────────────────────────
+    # With -Pn nmap always reports state="up" reason="user-set" (we told it to skip
+    # discovery), so "up" alone no longer proves reachability. Trust a real probe
+    # reason (echo-reply / syn-ack / arp-response …); otherwise liveness defers to
+    # "did any port actually respond?" (decided by the caller from the port list).
+    status = xml_root.find(".//status")
+    _status_up = status is not None and status.get("state") == "up"
+    probe_confirmed = _status_up and (status.get("reason") or "") not in ("", "user-set")
+
+    # ── Device identity: MAC (ARP), device name (NetBIOS/SMB, then PTR) ────────
+    # All strictly observed; each stays '' when nmap didn't report it.
+    mac_address = ""
+    mac_vendor = ""
+    for addr in xml_root.findall(".//address"):
+        if addr.get("addrtype") == "mac":
+            mac_address = (addr.get("addr") or "").strip().upper()
+            mac_vendor = (addr.get("vendor") or "").strip()
+            break
+
+    device_name = ""
+    device_name_source = ""
+    # NetBIOS / SMB computer name — the machine's own advertised name, the
+    # strongest device-name signal. nmap surfaces it under <hostscript>.
+    for script in xml_root.findall(".//hostscript/script"):
+        name = _netbios_name_from_script(script.get("id", ""), script.get("output", ""))
+        if name:
+            device_name = name
+            device_name_source = "netbios"
+            break
+    # Reverse-DNS PTR (works remotely, weaker than a self-advertised name). Only a
+    # type="PTR" name is a discovered fact; type="user" is just the target we were
+    # given echoed back, so it is ignored.
+    if not device_name:
+        for hn in xml_root.findall(".//hostnames/hostname"):
+            if (hn.get("type") or "") != "PTR":
+                continue
+            nm = (hn.get("name") or "").strip()
+            if nm:
+                device_name = nm
+                device_name_source = "ptr"
+                break
+
+    # ── Perimeter-defence tallies ─────────────────────────────────────────────
+    # 'filtered' = no response (a firewall silently dropped the probe); 'closed'
+    # = a TCP RST (the host is reachable, the port is just shut). The ratio of
+    # the two is the primary firewall signal (see firewall_detector). nmap lists
+    # a handful of ports individually and collapses the bulk into <extraports>.
+    filtered_count = 0
+    closed_count = 0
+    for xp in xml_root.findall(".//ports/extraports"):
+        st = (xp.get("state") or "").lower()
+        try:
+            cnt = int(xp.get("count") or 0)
+        except (ValueError, TypeError):
+            cnt = 0
+        if st == "filtered":
+            filtered_count += cnt
+        elif st == "closed":
+            closed_count += cnt
+
+    # ── Open ports + service info ─────────────────────────────────────────────
+    ports: list[PortResult] = []
+    os_evidence_types: list[str] = []
+    os_evidence_cpes: list[str] = []
+    for port_elem in xml_root.findall(".//port"):
+        state_elem = port_elem.find("state")
+        _pstate = state_elem.get("state") if state_elem is not None else None
+        if _pstate == "filtered":
+            filtered_count += 1
+        elif _pstate == "closed":
+            closed_count += 1
+        if _pstate != "open":
+            continue
+
+        # Malformed nmap XML can carry portid="" — int("") raises ValueError and
+        # would abort parsing the remaining ports.
+        try:
+            portid = int(port_elem.get("portid") or 0)
+        except (ValueError, TypeError):
+            continue
+        protocol = port_elem.get("protocol", "tcp")
+
+        svc = port_elem.find("service")
+        service = svc.get("name", "")    if svc is not None else ""
+        product = svc.get("product", "") if svc is not None else ""
+        version = svc.get("version", "") if svc is not None else ""
+        extra   = svc.get("extrainfo", "") if svc is not None else ""
+        ostype  = svc.get("ostype", "")    if svc is not None else ""
+        if ostype:
+            os_evidence_types.append(ostype)
+
+        banner_parts = [p for p in [product, version, extra] if p]
+        banner = " ".join(banner_parts)
+
+        # First app-level CPE is the port's; collect OS-level CPEs (cpe:/o:…)
+        # separately as OS evidence.
+        cpe = ""
+        for cpe_elem in port_elem.findall(".//cpe"):
+            txt = (cpe_elem.text or "").strip()
+            if not txt:
+                continue
+            low = txt.lower()
+            if "/o:" in low or ":o:" in low:  # OS-level CPE
+                os_evidence_cpes.append(txt)
+            elif not cpe:
+                cpe = txt
+
+        # Collect NSE script output into fingerprint dict
+        script_output: dict = {}
+        for script in port_elem.findall(".//script"):
+            sid = script.get("id", "")
+            out = script.get("output", "")
+            if sid and out:
+                script_output[sid] = out[:500]
+
+        ports.append(PortResult(
+            host=host, port=portid, protocol=protocol, state="open",
+            service=service, product=product, version=version, banner=banner,
+            extrainfo=extra, cpe=cpe, fingerprint=script_output,
+        ))
+
+    # ── OS detection (three honestly-labelled tiers) ──────────────────────────
+    # 1. nmap -O TCP/IP stack fingerprint → authoritative (needs raw sockets).
+    # 2. service-detection evidence (ostype / OS CPEs from -sV) → real but
+    #    service-claimed, so marked heuristic. Works fully unprivileged.
+    # 3. a single TTL value → coarsest guess, also heuristic.
+    os_guess = ""
+    os_source = ""
+    os_accuracy = 0
+    ttl = 0
+    os_match = xml_root.find(".//osmatch")
+    if os_match is not None and os_match.get("name"):
+        os_guess = os_match.get("name", "")
+        os_source = "nmap"
+        try:
+            os_accuracy = int(os_match.get("accuracy") or 0)
+        except (ValueError, TypeError):
+            os_accuracy = 0
+    if not os_guess:
+        svc_os = _os_from_service_evidence(os_evidence_types, os_evidence_cpes)
+        if svc_os:
+            os_guess = svc_os
+            os_source = "heuristic"
+    if not os_guess:
+        for dist in xml_root.findall(".//distance"):
+            try:
+                ttl_val = int(dist.get("value", 0))
+            except (ValueError, TypeError):
+                ttl_val = 0
+            if ttl_val:
+                os_guess = guess_os_from_ttl(ttl_val)
+                os_source = "heuristic"
+                ttl = ttl_val
+
+    # ── Device type ────────────────────────────────────────────────────────────
+    # nmap -O classifies the device (general purpose / router / printer / webcam
+    # …) inside <osclass type="…"> — authoritative, but needs raw sockets. When
+    # that's absent, fall back to a conservative category from the MAC's OUI
+    # vendor (labelled 'mac-vendor'); an unknown vendor leaves it blank.
+    device_type = ""
+    device_type_source = ""
+    osclass = xml_root.find(".//osclass")
+    if osclass is not None:
+        dt = (osclass.get("type") or "").strip()
+        if dt:
+            device_type = dt
+            device_type_source = "nmap"
+    if not device_type and mac_vendor:
+        cat = _device_type_from_mac_vendor(mac_vendor)
+        if cat:
+            device_type = cat
+            device_type_source = "mac-vendor"
+
+    return {
+        "ports": ports,
+        "probe_confirmed": probe_confirmed,
+        "os_guess": os_guess,
+        "os_source": os_source,
+        "os_accuracy": os_accuracy,
+        "ttl": ttl,
+        "mac_address": mac_address,
+        "mac_vendor": mac_vendor,
+        "device_name": device_name,
+        "device_name_source": device_name_source,
+        "device_type": device_type,
+        "device_type_source": device_type_source,
+        "filtered_count": filtered_count,
+        "closed_count": closed_count,
+    }
 
 
 async def scan_host(
@@ -380,12 +854,23 @@ async def scan_host(
     include_udp: bool = False,
     udp_ports: Optional[list[int]] = None,
     stealth_level: str = "normal",
+    host_timeout: str = "30m",
+    evade: bool = False,
 ) -> HostResult:
     """
     Full-spectrum nmap scan: all ports, service detection, default NSE scripts,
     OS fingerprinting, and UDP probes when requested.
+
+    ``evade`` adds firewall/IDS-evasion flags (packet fragmentation, padding, a
+    trusted source port, decoys — see :func:`_nmap_evasion_args`) for an
+    authorized re-probe of a host whose ports are being silently filtered.
     Uses stealth-level-aware timing so the same function works from
     ghost-mode recon through loud exploitation-support scans.
+
+    ``host_timeout`` is passed straight to nmap's ``--host-timeout`` — a targeted
+    re-probe of a *known* short port list (e.g. the passive-OSINT confirmation
+    step) sets a small value like ``"20s"`` so nmap self-terminates on a
+    firewalled host instead of retrying for the full 30-minute default.
     """
     sem = semaphore or asyncio.Semaphore(50)
     host_result = HostResult(host=host)
@@ -435,164 +920,116 @@ async def scan_host(
         scan_flags = []
         port_args = ["-p", port_str]
 
+    # Firewall/IDS-evasion flags for an authorized re-probe of a filtered host.
+    evasion = _nmap_evasion_args(raw_capable) if evade else []
+
     cmd = [
         *sudo_prefix, "nmap", "-sV", "-sC", "-Pn", *os_flag, *scan_flags, *port_args,
-        "-oX", "-", "--host-timeout", "30m", *timing, host,
+        "-oX", "-", "--host-timeout", host_timeout, *timing, *evasion, host,
     ]
 
+    # nmap's default-script engine (-sC / NSE) ABORTS the whole scan on some nmap
+    # builds — notably the 7.9x Lua/nsock assertion "lua_status(L) == LUA_YIELD"
+    # (SIGABRT) — emitting a truncated XML document and therefore ZERO ports, which
+    # silently turns a scan of a live, service-rich host into "0 findings". Guard
+    # against it: if the first attempt crashes or yields no parseable ports, retry
+    # WITHOUT -sC so the full port + service-version inventory is still captured
+    # (only the default-script output is lost). A clean scan that genuinely found no
+    # open ports (valid XML, exit 0) is NOT retried.
+    attempts = [cmd]
+    if "-sC" in cmd:
+        attempts.append([c for c in cmd if c != "-sC"])
+
+    parsed: Optional[dict] = None
+    nmap_ran = False
     async with sem:
         logger.debug(f"nmap: {' '.join(cmd)}")
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
+            for idx, attempt in enumerate(attempts):
+                proc = await asyncio.create_subprocess_exec(
+                    *attempt,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                nmap_ran = True
+                # A real asyncio subprocess always exposes returncode after
+                # communicate(); default to 0 (success) so a test double that omits
+                # it is treated as a clean run rather than crashing the scan.
+                rc = getattr(proc, "returncode", 0)
 
-            if stdout:
-                try:
-                    xml_root = _safe_xml_fromstring(stdout)
+                if stderr:
+                    err_text = stderr.decode(errors="replace").strip()
+                    if err_text and "WARNING" not in err_text and "Note:" not in err_text:
+                        logger.debug(f"nmap stderr ({host}): {err_text[:300]}")
 
-                    # ── Host liveness ─────────────────────────────────────────
-                    # With -Pn nmap always reports state="up" reason="user-set"
-                    # (we told it to skip discovery), so "up" alone no longer
-                    # proves the host is reachable. Trust a real probe reason
-                    # (echo-reply / syn-ack / arp-response …); otherwise defer
-                    # liveness to "did any port actually respond?" — set below
-                    # once the open-port list is parsed. This keeps alive_hosts
-                    # honest instead of counting every scanned address as alive.
-                    status = xml_root.find(".//status")
-                    _status_up = status is not None and status.get("state") == "up"
-                    _probe_confirmed = (
-                        _status_up and (status.get("reason") or "") not in ("", "user-set")
+                parsed = _parse_nmap_xml(stdout, host) if stdout else None
+                got_ports = bool(parsed and parsed["ports"])
+                # A clean run (valid XML, normal exit) that found no ports is a real
+                # "nothing open" result, not a crash — accept it and stop.
+                clean = parsed is not None and rc in (0, None)
+                if got_ports or clean:
+                    break
+                # Abnormal: nmap crashed / emitted unparseable output AND found no
+                # ports. Retry the next (no -sC) attempt if one remains.
+                if idx + 1 < len(attempts):
+                    logger.warning(
+                        "nmap exited %s for %s with no parseable results — likely "
+                        "the -sC/NSE crash on this nmap build; retrying with service "
+                        "detection only (-sV, no -sC).", rc, host,
                     )
-                    if _probe_confirmed:
-                        host_result.is_alive = True
 
-                    # ── Open ports + service info ─────────────────────────────
-                    # Service-detection OS evidence (nmap's `ostype` attr + any
-                    # OS-level CPEs) gathered as we go — this needs no raw-socket
-                    # privileges and feeds the heuristic OS fallback below.
-                    os_evidence_types: list[str] = []
-                    os_evidence_cpes: list[str] = []
-                    for port_elem in xml_root.findall(".//port"):
-                        state_elem = port_elem.find("state")
-                        if state_elem is None or state_elem.get("state") != "open":
-                            continue
+            if parsed is not None:
+                host_result.open_ports = parsed["ports"]
+                # A port that answered proves the host is genuinely reachable — the
+                # honest liveness signal under -Pn, where "up" is just our own flag.
+                host_result.is_alive = parsed["probe_confirmed"] or bool(parsed["ports"])
+                host_result.filtered_ports = parsed.get("filtered_count", 0)
+                host_result.closed_ports = parsed.get("closed_count", 0)
+                host_result.os_guess = parsed["os_guess"]
+                host_result.os_source = parsed["os_source"]
+                host_result.os_accuracy = parsed["os_accuracy"]
+                host_result.ttl = parsed["ttl"]
+                host_result.mac_address = parsed.get("mac_address", "")
+                host_result.mac_vendor = parsed.get("mac_vendor", "")
+                host_result.device_name = parsed.get("device_name", "")
+                host_result.device_name_source = parsed.get("device_name_source", "")
+                host_result.device_type = parsed.get("device_type", "")
+                host_result.device_type_source = parsed.get("device_type_source", "")
 
-                        # Malformed nmap XML can carry portid="" — int("") raises
-                        # ValueError and would abort parsing the remaining ports.
-                        try:
-                            portid = int(port_elem.get("portid") or 0)
-                        except (ValueError, TypeError):
-                            continue
-                        protocol = port_elem.get("protocol", "tcp")
-
-                        svc = port_elem.find("service")
-                        service = svc.get("name", "")    if svc is not None else ""
-                        product = svc.get("product", "") if svc is not None else ""
-                        version = svc.get("version", "") if svc is not None else ""
-                        extra   = svc.get("extrainfo", "") if svc is not None else ""
-                        ostype  = svc.get("ostype", "")    if svc is not None else ""
-                        if ostype:
-                            os_evidence_types.append(ostype)
-
-                        banner_parts = [p for p in [product, version, extra] if p]
-                        banner = " ".join(banner_parts)
-
-                        # First app-level CPE is the port's; collect OS-level
-                        # CPEs (cpe:/o:…) separately as OS evidence.
-                        cpe = ""
-                        for cpe_elem in port_elem.findall(".//cpe"):
-                            txt = (cpe_elem.text or "").strip()
-                            if not txt:
-                                continue
-                            low = txt.lower()
-                            if "/o:" in low or ":o:" in low:  # OS-level CPE
-                                os_evidence_cpes.append(txt)
-                            elif not cpe:
-                                cpe = txt
-
-                        # Collect NSE script output into fingerprint dict
-                        script_output: dict = {}
-                        for script in port_elem.findall(".//script"):
-                            sid = script.get("id", "")
-                            out = script.get("output", "")
-                            if sid and out:
-                                script_output[sid] = out[:500]
-
-                        pr = PortResult(
-                            host=host,
-                            port=portid,
-                            protocol=protocol,
-                            state="open",
-                            service=service,
-                            product=product,
-                            version=version,
-                            banner=banner,
-                            extrainfo=extra,
-                            cpe=cpe,
-                            fingerprint=script_output,
-                        )
-                        host_result.open_ports.append(pr)
-
-                    # Any port that answered proves the host is genuinely
-                    # reachable — the honest liveness signal under -Pn, where the
-                    # "up" status itself is just our forced flag (see above).
-                    if host_result.open_ports:
-                        host_result.is_alive = True
-
-                    # ── OS detection (three honestly-labelled tiers) ──────────
-                    # 1. nmap -O TCP/IP stack fingerprint → authoritative, with
-                    #    its own confidence (needs raw sockets; see above).
-                    # 2. service-detection evidence (ostype / OS CPEs from -sV) →
-                    #    a real observed signal, but what the service claims, so
-                    #    marked heuristic. Works fully unprivileged.
-                    # 3. a single TTL value → coarsest guess, also heuristic.
-                    # Tiers 2-3 are never presented as a confirmed OS.
-                    os_match = xml_root.find(".//osmatch")
-                    if os_match is not None and os_match.get("name"):
-                        host_result.os_guess = os_match.get("name", "")
-                        host_result.os_source = "nmap"
-                        try:
-                            host_result.os_accuracy = int(os_match.get("accuracy") or 0)
-                        except (ValueError, TypeError):
-                            host_result.os_accuracy = 0
-                    if not host_result.os_guess:
-                        svc_os = _os_from_service_evidence(os_evidence_types, os_evidence_cpes)
-                        if svc_os:
-                            host_result.os_guess = svc_os
-                            host_result.os_source = "heuristic"
-                    if not host_result.os_guess:
-                        # Fallback: infer from TTL in host element
-                        host_elem = xml_root.find(".//host")
-                        if host_elem is not None:
-                            # nmap reports TTL in <distance> under <os>; try host ttl attr
-                            ttl_val = 0
-                            for dist in xml_root.findall(".//distance"):
-                                try:
-                                    ttl_val = int(dist.get("value", 0))
-                                except ValueError:
-                                    pass
-                            if ttl_val:
-                                host_result.os_guess = guess_os_from_ttl(ttl_val)
-                                host_result.os_source = "heuristic"
-                                host_result.ttl = ttl_val
-
-                except ET.ParseError as e:
-                    logger.error(f"nmap XML parse error for {host}: {e}")
-
-            if stderr:
-                err_text = stderr.decode(errors="replace").strip()
-                if err_text and "WARNING" not in err_text and "Note:" not in err_text:
-                    logger.debug(f"nmap stderr ({host}): {err_text[:300]}")
+            # Every nmap attempt crashed / was unparseable (no clean result, no
+            # ports) → fall back to the pure-Python connect scan so a live,
+            # service-rich host is never reported as 0 ports just because nmap's NSE
+            # aborted. Real TCP handshakes only; no -sV/-O depth (nmap is broken).
+            if nmap_ran and parsed is None and not host_result.open_ports:
+                logger.warning(
+                    "nmap produced no usable output for %s (crash / parse failure) "
+                    "— falling back to the built-in TCP connect scanner.", host,
+                )
+                fb = await _python_connect_scan(
+                    host, ports, timeout=timeout, stealth_level=stealth_level,
+                )
+                host_result.open_ports = fb
+                if fb:
+                    host_result.is_alive = True
 
         except FileNotFoundError:
-            logger.error(
-                "nmap not found. Install it: apt install nmap  /  brew install nmap"
+            # No nmap on PATH — fall back to the built-in pure-Python TCP connect
+            # scanner so a full-range sweep still genuinely covers every requested
+            # port (real handshakes only) instead of returning nothing. Service
+            # versions / OS fingerprinting need nmap; install it for that depth.
+            logger.warning(
+                "nmap not found — using the built-in TCP connect scanner for %s "
+                "(install nmap for -sV/-sC/-O depth: apt install nmap / brew install nmap)",
+                host,
             )
-            
+            fallback_ports = await _python_connect_scan(
+                host, ports, timeout=timeout, stealth_level=stealth_level,
+            )
+            host_result.open_ports = fallback_ports
+            if fallback_ports:
+                host_result.is_alive = True
+
     # Honeypot heuristic: too many open ports is suspicious
     open_count = len(host_result.open_ports)
     if open_count > 50:
@@ -603,6 +1040,53 @@ async def scan_host(
 
     host_result.scan_time_ms = (time.time() - start) * 1000
     return host_result
+
+
+async def _evasion_reprobe(
+    host: str,
+    ports: list[int],
+    *,
+    timeout: float,
+    sem: Optional[asyncio.Semaphore],
+    stealth_level: str,
+) -> list[PortResult]:
+    """Authorized firewall/IDS-evasion re-probe of a filtered host's high-value
+    ports — the "still get findings through the perimeter" step.
+
+    Runs TWO independent probes and merges them, because a packet-filter that
+    drops one path often lets the other through:
+
+    * an nmap evasion scan (``evade=True`` → fragmentation / padding / trusted
+      source port / decoys), and
+    * a pure-Python TCP connect scan, which rides the OS network stack and so
+      presents a completely different packet signature.
+
+    Timing is bumped to at least ``stealth`` (slower, lower parallelism) so an
+    IPS that started rate-blocking has cooled down. Bounded by a short per-host
+    nmap ``--host-timeout`` and the small high-value port set the caller passes.
+    Returns the union of open ports discovered; never raises.
+    """
+    if not ports:
+        return []
+    bumped = "stealth" if stealth_level in ("normal", "aggressive", "loud") else stealth_level
+    found: dict[int, PortResult] = {}
+    try:
+        r = await scan_host(
+            host, ports, timeout=max(timeout, 3.0), semaphore=sem,
+            stealth_level=bumped, evade=True, host_timeout="60s",
+        )
+        for p in r.open_ports:
+            found[p.port] = p
+    except Exception:
+        logger.debug("evasion nmap re-probe failed for %s", host, exc_info=True)
+    try:
+        for p in await _python_connect_scan(
+            host, ports, timeout=max(timeout, 3.0), stealth_level=bumped,
+        ):
+            found.setdefault(p.port, p)
+    except Exception:
+        logger.debug("evasion connect re-probe failed for %s", host, exc_info=True)
+    return list(found.values())
 
 
 def expand_targets(targets: list[str]) -> list[str]:
@@ -636,7 +1120,22 @@ _DISCOVERY_THRESHOLD = 16
 _LIVENESS_PROBE_PORTS: tuple[int, ...] = (
     80, 443, 22, 445, 3389, 8080, 139, 135, 53, 21, 23, 25, 110, 143,
     3306, 5432, 1433, 8443, 8000, 8888, 5900, 111, 993, 995, 6379, 27017,
+    # cPanel / WHM / webmail control-plane + alt-SSH — common on shared-hosting
+    # targets and a live-host signal in their own right.
+    2082, 2083, 2086, 2087, 2095, 2096, 2222,
 )
+
+# High-value ports ALWAYS folded into the requested scan range so a flaky /
+# rate-limited / narrowed run can never silently drop the web, database,
+# mail-transport, directory or cPanel surface — the direct structural fix for the
+# "1-65535 scan came back without 80/443/3306" class of miss. Union-only: it can
+# add coverage, never remove it, and is a no-op when the caller already asked for
+# the full range.
+_ALWAYS_PROBE_PORTS: frozenset[int] = frozenset(_LIVENESS_PROBE_PORTS) | frozenset({
+    465, 587, 389, 636, 993, 995,           # mail submission / LDAP(S) / secure mail
+    1521, 9200, 5984, 11211, 9042, 9300,    # Oracle / ES / CouchDB / memcached / Cassandra
+    2077, 2078, 8443, 10000,                # cPanel WebDAV / https-alt / Webmin
+})
 
 
 async def _nmap_ping_sweep(
@@ -745,6 +1244,8 @@ async def scan_network(
     include_udp: bool = False,
     stealth_level: str = "normal",
     time_budget: Optional[float] = None,
+    passive_enrich: bool = True,
+    evade: bool = False,
     **kwargs,
 ) -> dict[str, Any]:
     """
@@ -783,6 +1284,18 @@ async def scan_network(
     # Expand CIDR targets → individual addresses.
     expanded_targets = expand_targets(targets)
     ports = parse_port_range(port_range)
+
+    # Fold in the high-value always-probe superset (web / DB / mail / LDAP /
+    # cPanel). Union-only — this can add coverage but never removes a requested
+    # port, and is a no-op when the caller already asked for the full range.
+    _requested = set(ports)
+    _missing = sorted(p for p in _ALWAYS_PROBE_PORTS if p not in _requested)
+    if _missing:
+        ports = sorted(_requested | set(_missing))
+        logger.debug(
+            "Folded %d high-value port(s) into the scan range for coverage: %s",
+            len(_missing), _missing,
+        )
 
     concurrency = profile.max_concurrent if profile else 500
     sem = asyncio.Semaphore(concurrency)
@@ -833,7 +1346,7 @@ async def scan_network(
 
         result = await scan_host(
             host, ports, timeout=timeout, semaphore=sem,
-            include_udp=include_udp, stealth_level=stealth_level,
+            include_udp=include_udp, stealth_level=stealth_level, evade=evade,
         )
         if not isinstance(result, HostResult):
             return None
@@ -907,6 +1420,80 @@ async def scan_network(
             if isinstance(res, HostResult):
                 host_results.append(res)
 
+    # ── Adaptive perimeter-defence pass ───────────────────────────────────────
+    # The most common "the box is vulnerable but the scan found nothing" cause is
+    # a firewall silently dropping probes. Here we classify each host's perimeter
+    # from the port-state tallies the scan already collected and — for a host
+    # whose ports are being *filtered* (a firewall / active IPS) — run ONE
+    # bounded, authorized evasion re-probe of its high-value ports so results
+    # still come back. A normal host (ports refused with RST) is classified
+    # "none", triggers no re-probe, and costs nothing.
+    perimeter_hosts: dict[str, dict] = {}
+    try:
+        from heaven.recon.firewall_detector import classify_perimeter
+    except Exception:  # pragma: no cover - detector import is best-effort
+        classify_perimeter = None  # type: ignore[assignment]
+    if classify_perimeter is not None and host_results:
+        reprobe_ports = sorted(set(ports) & _ALWAYS_PROBE_PORTS) or ports[:200]
+        reprobe_budget = 30.0 if not time_budget else max(10.0, time_budget * 0.5)
+        reprobe_deadline = time.time() + reprobe_budget
+        reprobed = 0
+        _MAX_REPROBE_HOSTS = 5
+        for h in host_results:
+            reachable = h.is_alive or (h.filtered_ports + h.closed_ports) > 0
+            rts = [p.response_time_ms for p in h.open_ports if p.response_time_ms]
+            verdict = classify_perimeter(
+                h.host,
+                open_count=len(h.open_ports),
+                filtered_count=h.filtered_ports,
+                closed_count=h.closed_ports,
+                total_probed=len(ports),
+                reachable=reachable,
+                response_times_ms=rts,
+            )
+            if (verdict.evasion_recommended and not evade
+                    and reprobed < _MAX_REPROBE_HOSTS
+                    and time.time() < reprobe_deadline and reprobe_ports):
+                reprobed += 1
+                logger.info(
+                    "🧱 Perimeter defence on %s (%s) — evasion re-probing %d "
+                    "high-value port(s) [fragmented / trusted source-port / decoys].",
+                    h.host, verdict.posture, len(reprobe_ports),
+                )
+                recovered = await _evasion_reprobe(
+                    h.host, reprobe_ports, timeout=timeout, sem=sem,
+                    stealth_level=stealth_level,
+                )
+                existing = {p.port for p in h.open_ports}
+                added = [p for p in recovered if p.port not in existing]
+                if added:
+                    h.open_ports.extend(added)
+                    h.open_ports.sort(key=lambda p: p.port)
+                    h.is_alive = True
+                    logger.info(
+                        "  ↳ evasion re-probe recovered %d port(s) through the "
+                        "perimeter on %s: %s", len(added), h.host,
+                        ", ".join(str(p.port) for p in added),
+                    )
+                    verdict = classify_perimeter(
+                        h.host,
+                        open_count=len(h.open_ports),
+                        filtered_count=max(0, h.filtered_ports - len(added)),
+                        closed_count=h.closed_ports,
+                        total_probed=len(ports),
+                        reachable=True,
+                        response_times_ms=[p.response_time_ms for p in h.open_ports
+                                           if p.response_time_ms],
+                    )
+                    verdict.indicators.append(
+                        f"Evasion re-probe recovered {len(added)} port(s) the initial "
+                        "scan could not see — the perimeter was filtering them."
+                    )
+                    verdict.evidence["recovered_ports"] = [p.port for p in added]
+            h.perimeter = verdict.to_dict() if verdict.detected else {}
+            if verdict.detected:
+                perimeter_hosts[h.host] = h.perimeter
+
     total_open = sum(len(h.open_ports) for h in host_results)
 
     logger.info(
@@ -914,7 +1501,7 @@ async def scan_network(
         f"(honeypots skipped: {honeypots_skipped})"
     )
 
-    output = {
+    output: dict[str, Any] = {
         "hosts": [_host_to_dict(h) for h in host_results],
         "total_open_ports": total_open,
         "total_hosts": len(host_results),
@@ -926,12 +1513,57 @@ async def scan_network(
         # Whether this run could do SYN/UDP/OS scans, and (if not) how to enable
         # them — so the CLI/report can be honest about scan depth on this host.
         "scan_privilege": scan_capability(),
+        # Perimeter-defence verdicts (firewall / IDS-IPS / tarpit) for hosts where
+        # one was detected, plus whether an evasion re-probe recovered ports. Empty
+        # hosts map ⇒ nothing detected. Consumed by build_perimeter_findings and
+        # the inventory/report "Perimeter Defenses" note.
+        "perimeter": {"detected": bool(perimeter_hosts), "hosts": perimeter_hosts},
     }
 
     if ctf:
         output["ctf"] = ctf.summary()
     if hp_engine:
         output["evasion"] = hp_engine.summary()
+
+    # ── Passive OSINT enrichment ──────────────────────────────────────────────
+    # Cross-reference each PUBLIC target against Shodan's key-less InternetDB so
+    # a port/service the active run missed (timeout, rate-limit, flaky nmap) is
+    # still surfaced — merged into the very same host dicts every downstream
+    # stage reads (inventory, exposed-DB, EOL, CVE mapping). Passively-observed
+    # ports are re-probed read-only to confirm and are labelled honestly; a
+    # private target, an offline network, or HEAVEN_NO_PASSIVE_INTEL=1 make this
+    # a silent no-op.
+    if passive_enrich:
+        try:
+            from heaven.recon.passive_intel import (
+                _ENRICH_TOTAL_BUDGET,
+                enrich_hosts,
+            )
+            # enrich_hosts mutates the host dicts (and appends any public-only
+            # host) IN PLACE, so even if this backstop fires mid-pass the ports
+            # merged so far are already recorded. The backstop sits just above the
+            # module's own internal deadline and comfortably inside the
+            # orchestrator's network-task slack, so enrichment can never overrun
+            # the scan's hard timeout and take the active results down with it.
+            try:
+                await asyncio.wait_for(
+                    enrich_hosts(output["hosts"], stealth_level=stealth_level,
+                                 targets=targets),
+                    timeout=_ENRICH_TOTAL_BUDGET + 10.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Passive OSINT enrichment hit its time backstop — keeping "
+                    "whatever merged so far and continuing.")
+            # Recompute totals unconditionally: the host dicts were mutated in
+            # place, so this is correct whether enrichment finished or was bounded.
+            output["total_open_ports"] = sum(
+                len(h.get("open_ports", [])) for h in output["hosts"])
+            output["total_hosts"] = len(output["hosts"])
+            output["alive_hosts"] = sum(
+                1 for h in output["hosts"] if h.get("is_alive") or h.get("open_ports"))
+        except Exception as e:  # noqa: BLE001 - enrichment must never break a scan
+            logger.debug("passive OSINT enrichment skipped: %s", e)
 
     return output
 
@@ -965,17 +1597,59 @@ def _extract_http_server(response: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def _generate_cpe(service: str, version: str) -> str:
-    """Generate a CPE 2.3 string from service and version info."""
-    if not service or not version:
+# nmap-product fragment (lowercased) → (NVD vendor, NVD product). Only
+# well-established CPE identifiers are listed; an unrecognised product yields no
+# CPE — we never guess a vendor. Order matters: most-specific fragment first
+# (e.g. "apache tomcat" before "apache httpd", "mariadb" before "mysql").
+_CPE_PRODUCTS: list[tuple[str, str, str]] = [
+    ("openssh", "openbsd", "openssh"),
+    ("pure-ftpd", "pureftpd", "pure-ftpd"),
+    ("proftpd", "proftpd", "proftpd"),
+    ("apache tomcat", "apache", "tomcat"),
+    ("apache httpd", "apache", "http_server"),
+    ("openresty", "openresty", "openresty"),
+    ("nginx", "nginx", "nginx"),
+    ("lighttpd", "lighttpd", "lighttpd"),
+    ("microsoft iis", "microsoft", "internet_information_services"),
+    ("mariadb", "mariadb", "mariadb"),
+    ("mysql", "mysql", "mysql"),
+    ("postgresql", "postgresql", "postgresql"),
+    ("mongodb", "mongodb", "mongodb"),
+    ("elasticsearch", "elastic", "elasticsearch"),
+    ("memcached", "memcached", "memcached"),
+    ("redis", "redis", "redis"),
+    ("exim", "exim", "exim"),
+    ("postfix", "postfix", "postfix"),
+    ("dovecot", "dovecot", "dovecot"),
+    ("isc bind", "isc", "bind"),
+    ("php", "php", "php"),
+]
+
+
+def _cpe_version(version: str) -> str:
+    """First version token if it looks like a version, else the '*' wildcard."""
+    tokens = (version or "").split()
+    tok = tokens[0] if tokens else ""
+    return tok if any(ch.isdigit() for ch in tok) else "*"
+
+
+def _generate_cpe(product: str, version: str = "") -> str:
+    """Derive a CPE 2.3 identifier from nmap's own product + version.
+
+    A CPE is just the canonical, structured restatement of a product/version nmap
+    already observed (e.g. "nginx 1.29.8" → ``cpe:2.3:a:nginx:nginx:1.29.8``) —
+    nothing here is fetched or guessed. nmap emits a ``<cpe>`` for many matches but
+    omits it for newer versions, leaving the column blank; this fills that gap for
+    the products whose NVD vendor is well-established. An unknown product, or a
+    bare service name with no product, returns '' — we never invent a vendor.
+    """
+    prod = (product or "").strip().lower()
+    if not prod:
         return ""
-    service_map = {
-        "ssh": "openssh", "http": "apache", "nginx": "nginx",
-        "mysql": "mysql", "postgresql": "postgresql", "redis": "redis",
-    }
-    vendor = service_map.get(service.lower(), service.lower())
-    ver = version.split(" ")[0]  # Take first version token
-    return f"cpe:2.3:a:{vendor}:{service}:{ver}:*:*:*:*:*:*:*"
+    for frag, vendor, cpe_product in _CPE_PRODUCTS:
+        if frag in prod:
+            return f"cpe:2.3:a:{vendor}:{cpe_product}:{_cpe_version(version)}:*:*:*:*:*:*:*"
+    return ""
 
 
 def _check_service_consistency(host: HostResult) -> None:
@@ -1014,19 +1688,39 @@ def _host_to_dict(host: HostResult) -> dict:
         "os_guess": host.os_guess,
         "os_source": host.os_source,
         "os_accuracy": host.os_accuracy,
+        # Device identity — blank unless nmap actually observed it (MAC needs a
+        # same-subnet privileged scan; device type/name from -O / NetBIOS / PTR).
+        "mac_address": host.mac_address,
+        "mac_vendor": host.mac_vendor,
+        "device_name": host.device_name,
+        "device_name_source": host.device_name_source,
+        "device_type": host.device_type,
+        "device_type_source": host.device_type_source,
         "scan_time_ms": round(host.scan_time_ms, 1),
         "honeypot_indicators": host.honeypot_indicators,
+        # Perimeter-defence signal (empty {} when nothing was inferred). Carries
+        # the firewall/IDS verdict + the port-state tallies it was derived from so
+        # the report/inventory can explain thin results and recommend evasion.
+        "perimeter": host.perimeter,
+        "filtered_ports": host.filtered_ports,
+        "closed_ports": host.closed_ports,
         "open_ports": [
             {
                 "port": p.port,
                 "protocol": p.protocol,
                 "state": p.state,
-                "service": p.service,
+                # nmap leaves the service name blank on ports it can't identify by
+                # banner even when the port number is a well-known one; fall back to
+                # the conventional label so a known port is never shown unnamed. A
+                # port with no conventional label (e.g. 26) honestly stays blank.
+                "service": p.service or SERVICE_FINGERPRINTS.get(p.port, ""),
                 "product": p.product,
                 "version": p.version,
                 "service_version": _service_version(p.product, p.version, p.extrainfo),
                 "banner": p.banner[:200] if p.banner else "",
-                "cpe": p.cpe,
+                # Prefer nmap's own CPE; when nmap omits one, derive it from the
+                # product/version nmap did report (never fabricated — see _generate_cpe).
+                "cpe": p.cpe or _generate_cpe(p.product, p.version),
                 "response_time_ms": round(p.response_time_ms, 1),
             }
             for p in host.open_ports

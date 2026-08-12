@@ -45,8 +45,8 @@ Write-Host ""
 $VenvDir     = Join-Path $InstallDir 'venv'
 $VenvScripts = Join-Path $VenvDir 'Scripts'
 
-# -- Step 1: Remove venv\Scripts from the user PATH ---------------------------
-Write-Info "Step 1/4 - Removing PATH entry..."
+# -- Step 1: Remove venv\Scripts from the user PATH + Tab-completion -----------
+Write-Info "Step 1/4 - Removing PATH entry + Tab-completion..."
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (-not [string]::IsNullOrEmpty($userPath)) {
     $parts = $userPath.Split(';') | Where-Object { $_ -ne '' -and $_ -ne $VenvScripts }
@@ -59,6 +59,31 @@ if (-not [string]::IsNullOrEmpty($userPath)) {
     }
 } else {
     Write-Warn "User PATH is empty - nothing to remove"
+}
+
+# Strip the Tab-completion block from $PROFILE and delete the completion script.
+# Done directly (not via `heaven completion --uninstall`) because the venv is
+# removed in Step 2 — the command may already be gone.
+$profilePath = $PROFILE.CurrentUserAllHosts
+if ($profilePath -and (Test-Path $profilePath)) {
+    $text = Get-Content -Raw -Path $profilePath
+    if ($text -match '# >>> heaven completion >>>') {
+        $pattern = '(?ms)^# >>> heaven completion >>>.*?^# <<< heaven completion <<<\r?\n?'
+        $new = [regex]::Replace($text, $pattern, '')
+        Set-Content -Path $profilePath -Value $new -NoNewline
+        Remove-Item -Force "$profilePath.heaven.bak" -ErrorAction SilentlyContinue
+        Write-Ok "Removed Tab-completion block from $profilePath"
+    }
+}
+$compPs1 = Join-Path $HOME '.config\heaven\completion.ps1'
+if (Test-Path $compPs1) {
+    Remove-Item -Force $compPs1 -ErrorAction SilentlyContinue
+    Write-Ok "Removed: $compPs1"
+    # Prune the completion dir if now empty.
+    $compDir = Split-Path $compPs1 -Parent
+    if ((Test-Path $compDir) -and -not (Get-ChildItem -Force $compDir -ErrorAction SilentlyContinue)) {
+        Remove-Item -Force $compDir -ErrorAction SilentlyContinue
+    }
 }
 
 # -- Step 2: Remove the virtual environment -----------------------------------

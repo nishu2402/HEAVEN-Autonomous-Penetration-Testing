@@ -21,6 +21,7 @@ const FORMATS = [
   { id: "csv", label: "CSV", hint: "Spreadsheet / triage" },
   { id: "json", label: "JSON", hint: "Automation / re-import" },
   { id: "sarif", label: "SARIF", hint: "GitHub code scanning" },
+  { id: "junit", label: "JUnit XML", hint: "CI build gate" },
   { id: "burp", label: "Burp XML", hint: "Burp Suite import" },
   { id: "proxy-jsonl", label: "Proxy JSONL", hint: "Replay / pipelines" },
 ];

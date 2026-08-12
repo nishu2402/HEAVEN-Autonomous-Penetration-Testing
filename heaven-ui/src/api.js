@@ -275,6 +275,10 @@ export const Engagement = {
       method: "PUT",
       body: JSON.stringify({ status, notes }),
     }),
+  // Edit the active engagement's Client / Statement-of-work. Send either or
+  // both; omitted fields are left unchanged. → { ok, engagement }.
+  updateDetails: (fields) =>
+    api(`/engagement`, { method: "PATCH", body: JSON.stringify(fields) }),
 };
 
 export const Scans = {
@@ -374,7 +378,68 @@ export const Settings = {
     api("/settings", { method: "POST", body: JSON.stringify({ settings }) }),
   testLlm: () => api("/settings/test-llm", { method: "POST" }),
   testNvd: () => api("/settings/test-nvd", { method: "POST" }),
+  // Local-LLM runtime status for the "Local AI" card (installed / reachable /
+  // models / recommended default).
+  aiLocalStatus: () => api("/ai/local/status"),
+  // One-click: point HEAVEN at a local model + live-test it.
+  // payload: { provider:'ollama'|'local', model?, host?, base_url? }
+  // → { ok, provider, model, test:{available,reason}, status }
+  aiLocalConfigure: (payload) =>
+    api("/ai/local/configure", { method: "POST", body: JSON.stringify(payload || {}) }),
 };
+
+// AI security assistant (chatbot). `reply` is the non-streaming fallback;
+// `openChatStream` streams tokens over a WebSocket for a live typing effect.
+export const Chat = {
+  // POST /api/chat → { reply, provider, model, grounded } | { skipped }
+  reply: (messages, opts = {}) =>
+    api("/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        messages,
+        engagement: opts.engagement,
+        grounded: opts.grounded !== false,
+        max_tokens: opts.maxTokens,
+      }),
+    }),
+};
+
+// Stream a chat reply. Sends one JSON frame {messages, engagement?, grounded?},
+// then invokes onMessage with parsed frames: {type:'start'|'delta'|'done'|
+// 'skipped'|'error', ...}. Returns the WebSocket (or null if unauthenticated).
+export function openChatStream(payload, onMessage) {
+  if (!authToken) return null;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(
+    `${proto}//${window.location.host}/api/chat/stream?token=${encodeURIComponent(authToken)}`
+  );
+  ws.onopen = () => {
+    try { ws.send(JSON.stringify(payload)); } catch { /* socket closed early */ }
+  };
+  ws.onmessage = (ev) => {
+    try { onMessage(JSON.parse(ev.data)); } catch { /* ignore malformed frame */ }
+  };
+  return ws;
+}
+
+// Stream an Ollama model pull (Settings → Local AI wizard). Sends {model}, then
+// invokes onMessage with parsed frames: {type:'progress', status, percent,
+// completed, total} … then {type:'done', ok, models} | {type:'error', error}.
+// Returns the WebSocket (or null if unauthenticated).
+export function openLocalPullStream(model, onMessage) {
+  if (!authToken) return null;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(
+    `${proto}//${window.location.host}/api/ai/local/pull?token=${encodeURIComponent(authToken)}`
+  );
+  ws.onopen = () => {
+    try { ws.send(JSON.stringify({ model })); } catch { /* socket closed early */ }
+  };
+  ws.onmessage = (ev) => {
+    try { onMessage(JSON.parse(ev.data)); } catch { /* ignore malformed frame */ }
+  };
+  return ws;
+}
 
 // ── New API surface (publication-gap features) ──
 // Mirrors the FastAPI endpoints added in heaven/api/server.py.
@@ -472,6 +537,10 @@ export const Benchmark = {
   //     markdown, metrics: { precision, recall, f1 }, generated_at, size_bytes }
   // or { available: false, note } when nothing has been generated yet.
   latest: () => api(`/benchmark/results`),
+  // Regenerate the native, Docker-free benchmark on the server and return the
+  // fresh report (same shape as latest()). Takes ~1–20 s; needs the benchmark
+  // extras server-side (503 with a clear message otherwise).
+  run: () => api(`/benchmark/run`, { method: "POST" }),
 };
 
 // ── Sync round 2: autonomous loop, coverage, lateral, knowledge, ExploitDB ──
@@ -485,6 +554,22 @@ export const Autonomous = {
   job: (jobId) => api(`/autonomous/jobs/${encodeURIComponent(jobId)}`),
   // GET /api/autonomous/jobs → { jobs: [...] }
   jobs: () => api(`/autonomous/jobs`),
+};
+
+export const Watch = {
+  // POST /api/watch/start → { job_id, status: "running" }. Runs a bounded
+  // continuous-monitoring loop in the background (scan → diff → alert-on-change).
+  start: (body) =>
+    api(`/watch/start`, { method: "POST", body: JSON.stringify(body) }),
+  // GET /api/watch/jobs/{id} → { status, progress, result, ... }
+  job: (jobId) => api(`/watch/jobs/${encodeURIComponent(jobId)}`),
+  // GET /api/watch/jobs → { jobs: [...] }
+  jobs: () => api(`/watch/jobs`),
+  // POST /api/watch/jobs/{id}/stop → { ok, status }
+  stop: (jobId) =>
+    api(`/watch/jobs/${encodeURIComponent(jobId)}/stop`, { method: "POST" }),
+  // GET /api/watch/channels → honest per-channel configured state
+  channels: () => api(`/watch/channels`),
 };
 
 export const Coverage = {
@@ -535,6 +620,39 @@ export const Diff = {
   },
 };
 
+export const Retest = {
+  // GET /api/scans/{id}/retest?baseline=... → { posture, diff }
+  posture: (currentScanId, baselineScanId, opts = {}) => {
+    const q = new URLSearchParams();
+    q.append("baseline", baselineScanId);
+    if (opts.engagement) q.append("engagement", opts.engagement);
+    return api(`/scans/${encodeURIComponent(currentScanId)}/retest?${q.toString()}`);
+  },
+};
+
+// Open the rendered HTML remediation-retest report in a new tab (auth-aware
+// blob fetch, same pattern as previewReport).
+export async function previewRetestReport(currentScanId, baselineScanId, opts = {}) {
+  const q = new URLSearchParams();
+  q.append("baseline", baselineScanId);
+  if (opts.engagement) q.append("engagement", opts.engagement);
+  const r = await fetch(
+    `${API_BASE}/scans/${encodeURIComponent(currentScanId)}/retest.html?${q.toString()}`,
+    { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} },
+  );
+  if (!r.ok) {
+    let detail;
+    try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(detail || `Retest report failed (${r.status})`);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  if (!w) throw new Error("Popup blocked — allow popups to open the report");
+  return true;
+}
+
 export const Tickets = {
   // GET /api/tickets/status
   status: () => api(`/tickets/status`),
@@ -583,6 +701,22 @@ export function openAutonomousStream(jobId, onMessage) {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(
     `${proto}//${window.location.host}/api/autonomous/jobs/${encodeURIComponent(jobId)}` +
+    `/stream?token=${encodeURIComponent(authToken)}`
+  );
+  ws.onmessage = (ev) => {
+    try { onMessage(JSON.parse(ev.data)); } catch { /* ignore malformed frame */ }
+  };
+  return ws;
+}
+
+// Live progress for a watch job. `onMessage` receives parsed JSON
+// ({type:"snapshot"|"iteration"|"done", ...}). Returns the WebSocket (or null
+// if not authenticated). Polling GET /api/watch/jobs/{id} remains a fallback.
+export function openWatchStream(jobId, onMessage) {
+  if (!authToken) return null;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(
+    `${proto}//${window.location.host}/api/watch/jobs/${encodeURIComponent(jobId)}` +
     `/stream?token=${encodeURIComponent(authToken)}`
   );
   ws.onmessage = (ev) => {

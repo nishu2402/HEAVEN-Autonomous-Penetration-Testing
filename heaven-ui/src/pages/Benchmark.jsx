@@ -11,6 +11,7 @@ import React, { useEffect, useState } from "react";
 import { Benchmark as B } from "../api";
 import { SkeletonLine, EmptyState } from "../components/Skeleton.jsx";
 import Markdown from "../components/Markdown.jsx";
+import { useToast } from "../components/Toast.jsx";
 
 function fmtWhen(iso) {
   if (!iso) return null;
@@ -53,13 +54,34 @@ function MetricTile({ label, value, hint }) {
 }
 
 export default function Benchmark() {
-  const [data, setData]   = useState(null);
-  const [error, setError] = useState(null);
+  const toast = useToast();
+  const [data, setData]     = useState(null);
+  const [error, setError]   = useState(null);
+  const [running, setRunning] = useState(false);
 
+  // Initial paint from the last cached report (fast, read-only).
   function load() {
     setError(null);
     setData(null);
     B.latest().then(setData).catch((e) => setError(e.message));
+  }
+
+  // Actually re-run the native, Docker-free benchmark on the server and show
+  // the fresh numbers. Keeps the current report visible (dimmed) while it runs
+  // instead of blanking the page, and surfaces any server error verbatim.
+  async function rerun() {
+    setRunning(true);
+    setError(null);
+    try {
+      const fresh = await B.run();
+      setData(fresh);
+      toast.success?.("Benchmark re-run complete");
+    } catch (e) {
+      setError(e.message);
+      toast.error?.("Benchmark re-run failed");
+    } finally {
+      setRunning(false);
+    }
   }
 
   useEffect(load, []);
@@ -79,8 +101,22 @@ export default function Benchmark() {
               Precision / recall / F1 against a labelled ground-truth target.
             </p>
           </div>
-          <button className="btn-small" onClick={load}>↻ Refresh</button>
+          <button
+            className="btn-small"
+            onClick={rerun}
+            disabled={running}
+            title="Re-run the native, Docker-free benchmark on the server and load fresh numbers"
+          >
+            {running ? "⏳ Running…" : "↻ Re-run benchmark"}
+          </button>
         </div>
+
+        {running && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-2)" }}>
+            Running the native benchmark on the server (Docker-free) — this
+            usually takes a few seconds…
+          </div>
+        )}
 
         {data && data.available && (
           <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-2)" }}>
@@ -134,7 +170,10 @@ export default function Benchmark() {
         )}
 
         {data && data.available && (
-          <div className="md-block" style={{ marginTop: 14, maxHeight: "none" }}>
+          <div
+            className="md-block"
+            style={{ marginTop: 14, maxHeight: "none", opacity: running ? 0.5 : 1, transition: "opacity .2s" }}
+          >
             <Markdown>{data.markdown}</Markdown>
           </div>
         )}

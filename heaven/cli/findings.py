@@ -47,9 +47,12 @@ def findings(engagement: Optional[str], severity: Optional[str],
             _print("[yellow]No findings match.[/yellow]")
         return
 
+    from heaven.utils.cvss import is_confirmed_finding
     if fmt == "json":
         print(json.dumps([
-            {**f.__dict__, "evidence": f.evidence} for f in results
+            {**f.__dict__, "evidence": f.evidence,
+             "confirmation": "Confirmed" if is_confirmed_finding(f.__dict__) else "Potential"}
+            for f in results
         ], indent=2, default=str))
     elif fmt == "ids":
         for f in results:
@@ -58,10 +61,13 @@ def findings(engagement: Optional[str], severity: Optional[str],
         for f in results:
             sev_color = {"critical": "bold red", "high": "red",
                          "medium": "yellow", "low": "blue", "info": "dim"}.get(f.severity, "dim")
+            confirmed = is_confirmed_finding(f.__dict__)
+            conf_tag = ("[green]CONFIRMED[/green]" if confirmed
+                        else "[yellow]POTENTIAL[/yellow]")
             _print(
                 f"  [{sev_color}]{f.severity[:4].upper():4}[/{sev_color}] "
-                f"{f.id}  conf={f.confidence:.2f}  {f.vuln_type:18} {f.target[:40]:40} "
-                f"[dim]{f.status}[/dim]"
+                f"{conf_tag} {f.id}  conf={f.confidence:.2f}  "
+                f"{f.vuln_type:18} {f.target[:40]:40} [dim]{f.status}[/dim]"
             )
         _print(f"\n[dim]{len(results)} finding(s) shown.[/dim]")
 
@@ -141,8 +147,13 @@ def replay(finding_id: str, engagement: Optional[str]) -> None:
 @click.option("--engagement", help="Engagement name")
 @click.option("--output", "-o", required=True, type=click.Path(), help="Output file")
 @click.option("--format", "fmt",
-              type=click.Choice(["markdown", "csv", "json", "sarif", "burp", "proxy-jsonl"]),
+              type=click.Choice(["markdown", "csv", "json", "sarif", "junit",
+                                 "burp", "proxy-jsonl"]),
               default="markdown", help="Export format")
+@click.option("--fail-on",
+              type=click.Choice(["critical", "high", "medium", "low", "none"]),
+              default="medium",
+              help="JUnit only: findings at/above this severity become failing tests.")
 @click.option("--severity",
               type=click.Choice(["critical", "high", "medium", "low", "info"]),
               help="Filter by minimum severity")
@@ -150,7 +161,7 @@ def replay(finding_id: str, engagement: Optional[str]) -> None:
     "open", "verified", "false_positive", "accepted_risk", "fixed",
 ]), help="Only export findings in this status")
 @click.option("--min-confidence", type=float, default=0.0)
-def export(engagement: Optional[str], output: str, fmt: str,
+def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
            severity: Optional[str], status: Optional[str],
            min_confidence: float) -> None:
     """Export engagement findings.
@@ -159,7 +170,8 @@ def export(engagement: Optional[str], output: str, fmt: str,
       markdown    Human-readable report with curl repros (default)
       csv         For Jira / spreadsheet import
       json        Raw findings, full evidence
-      sarif       SARIF 2.1.0 for code-scanning dashboards
+      sarif       SARIF 2.1.0 for GitHub/GitLab code-scanning dashboards
+      junit       JUnit XML for CI — fails the build on --fail-on severity
       burp        Burp Suite XML — load into Site Map, replay in Repeater
       proxy-jsonl JSONL with full request/response, for mitmproxy / Caido
     """
@@ -212,10 +224,16 @@ def export(engagement: Optional[str], output: str, fmt: str,
     elif fmt == "json":
         out_path.write_text(json.dumps(finding_dicts, indent=2, default=str))
     elif fmt == "sarif":
-        from heaven.devsecops.aggregator import export_sarif
-        out_path.write_text(json.dumps(
-            export_sarif({"vulnerabilities": finding_dicts}), indent=2,
-        ))
+        from heaven.devsecops.ci_export import findings_to_sarif_str
+        out_path.write_text(findings_to_sarif_str(
+            finding_dicts, engagement_name=eng.name if eng else ""))
+    elif fmt == "junit":
+        from heaven.devsecops.ci_export import findings_to_junit, summarize_gate
+        out_path.write_text(findings_to_junit(
+            finding_dicts, engagement_name=eng.name if eng else "", fail_on=fail_on))
+        gate = summarize_gate(finding_dicts, fail_on=fail_on)
+        _print(f"[dim]JUnit gate (fail-on {fail_on}): "
+               f"{gate['breaching']} failing / {gate['total']} total[/dim]")
     elif fmt == "burp":
         from heaven.devsecops.burp_export import export_burp_xml
         out_path.write_text(export_burp_xml(
@@ -282,6 +300,94 @@ def remediate(finding_id: str, engagement: Optional[str]) -> None:
 
 
 @click.command()
+@click.option("--engagement", help="Engagement name")
+@click.option("--i-have-authorization", is_flag=True,
+              help="REQUIRED. Confirms you are authorized to send active probes to the "
+                   "engagement's in-scope hosts.")
+@click.option("--limit", type=int, default=200, help="Max Potential findings to consider")
+def verify(engagement: Optional[str], i_have_authorization: bool, limit: int) -> None:
+    """Actively verify Potential (version-banner) findings with SAFE probes.
+
+    A network version banner does not prove a CVE is exploitable (vendors
+    backport fixes without bumping the banner). For a curated set of well-known
+    CVEs — e.g. Apache path-traversal (CVE-2021-41773/42013), Shellshock
+    (CVE-2014-6271) — HEAVEN runs a SAFE, read-only behavioural probe. A probe
+    that fires promotes the finding Potential → Confirmed and persists the proof;
+    a negative probe leaves the finding untouched (never fabricated, never
+    deleted). Requires --i-have-authorization.
+    """
+    import asyncio
+
+    from heaven.engagement import EngagementStore
+    from heaven.utils.cvss import is_confirmed_finding
+    from heaven.vulnscan.active_verifier import (
+        supported_cves, verify_finding, _finding_cve, _PROBES,
+    )
+
+    store = EngagementStore(_engagement_db_path(engagement))
+    rows = store.list_findings(limit=limit)
+    # Only Potential findings whose CVE has a registered safe probe.
+    targets = [
+        f for f in rows
+        if _finding_cve(f.__dict__) in _PROBES and not is_confirmed_finding(f.__dict__)
+    ]
+
+    if json_output() and not targets:
+        print(json.dumps({"candidates": 0, "promoted": 0,
+                          "supported_cves": supported_cves()}, indent=2))
+        return
+    if not targets:
+        _print("[yellow]No Potential findings with a safe active-verification probe.[/yellow]")
+        _print(f"[dim]Supported CVEs: {', '.join(supported_cves())}[/dim]")
+        return
+    if not i_have_authorization:
+        _print(f"[yellow]{len(targets)} finding(s) can be actively verified:[/yellow]")
+        for f in targets:
+            _print(f"  [dim]{f.id}[/dim]  {_finding_cve(f.__dict__):16} {f.target}")
+        _print("\n[red]Refusing to probe without authorization.[/red] "
+               "Re-run with [cyan]--i-have-authorization[/cyan].")
+        sys.exit(3)
+
+    async def _run() -> list[dict]:
+        promoted: list[dict] = []
+        for f in targets:
+            fd = {
+                "id": f.id, "target": f.target, "host": f.target,
+                "port": (f.evidence or {}).get("port"),
+                "vuln_type": f.vuln_type, "cve": f.cve_id,
+                "severity": f.severity, "confidence": f.confidence,
+                "source": (f.evidence or {}).get("source", ""),
+                "evidence": dict(f.evidence or {}),
+            }
+            out = await verify_finding(fd, authorized=True)
+            rec = (out.get("evidence") or {}).get("active_verification") or {}
+            if rec.get("proved"):
+                # Persist the confirmed proof back into the engagement store.
+                store.upsert_finding(f.scan_id or f.id, out)
+                promoted.append({"id": f.id, "cve": _finding_cve(fd),
+                                 "target": f.target, "technique": rec.get("technique")})
+        return promoted
+
+    promoted = asyncio.run(_run())
+
+    if json_output():
+        print(json.dumps({"candidates": len(targets), "probed": len(targets),
+                          "promoted": len(promoted), "promotions": promoted,
+                          "supported_cves": supported_cves()}, indent=2))
+        return
+
+    _print(f"[cyan]Probed {len(targets)} Potential finding(s).[/cyan]")
+    if promoted:
+        _print(f"[green]✔ Promoted {len(promoted)} → Confirmed:[/green]")
+        for p in promoted:
+            _print(f"  [green]CONFIRMED[/green] {p['cve']:16} {p['target']} "
+                   f"[dim]({p['technique']})[/dim]")
+    else:
+        _print("[dim]No probe fired — findings remain Potential "
+               "(patched, endpoint disabled, or not reachable).[/dim]")
+
+
+@click.command()
 @click.option("--engagement")
 @click.option("--output", "-o", required=True, type=click.Path())
 @click.option("--framework",
@@ -324,5 +430,6 @@ def register(cli: click.Group) -> None:
     cli.add_command(mark)
     cli.add_command(replay)
     cli.add_command(remediate)
+    cli.add_command(verify)
     cli.add_command(export)
     cli.add_command(report)

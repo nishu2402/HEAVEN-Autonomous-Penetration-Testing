@@ -236,12 +236,13 @@ class PostExSession:
         two without a second heuristic. Any error defaults to 'linux'.
         """
         try:
-            import asyncssh  # type: ignore[import-not-found]
+            import asyncssh  # type: ignore[import-not-found]  # noqa: F401 — import is the availability guard; connect() goes via ssh_safe
         except ImportError:
             return "linux"
+        from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
         client_keys = [self.private_key] if self.private_key else None
         try:
-            async with asyncssh.connect(  # type: ignore[attr-defined]
+            async with ssh_safe.connect(  # type: ignore[attr-defined]
                 self.host, port=self.port, username=self.username,
                 password=self.password, client_keys=client_keys,
                 known_hosts=None,

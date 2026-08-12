@@ -62,6 +62,7 @@ from tests.benchmarks.reporters.markdown_report import (
     render_markdown_report,
 )
 from tests.benchmarks.reporters.comparison_csv import render_comparison_csv
+from heaven import __version__ as _heaven_version
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -220,7 +221,10 @@ def test_heaven_vs_dvwa_baseline(dvwa_target: GroundTruth) -> None:
         run_results.append(result)
 
         # Write per-run markdown report
-        md = render_markdown_report(result, dvwa_target, scanner_name="HEAVEN")
+        md = render_markdown_report(
+            result, dvwa_target, scanner_name="HEAVEN",
+            scanner_version=_heaven_version,
+        )
         (report_dir / f"dvwa_run{i + 1}.md").write_text(md, encoding="utf-8")
 
         # Write comparison CSVs (one scanner; usable for diff vs. Burp/ZAP later)
@@ -230,7 +234,9 @@ def test_heaven_vs_dvwa_baseline(dvwa_target: GroundTruth) -> None:
 
     # Aggregate + write the headline report
     agg = aggregate(run_results)
-    agg_md = render_aggregated_markdown_report(agg, scanner_name="HEAVEN")
+    agg_md = render_aggregated_markdown_report(
+        agg, scanner_name="HEAVEN", scanner_version=_heaven_version,
+    )
     (report_dir / "dvwa_aggregated.md").write_text(agg_md, encoding="utf-8")
 
     # Print the headline numbers to test output for at-a-glance visibility

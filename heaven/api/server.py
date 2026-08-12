@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import os
 import re
+import sys
 import time
 import uuid
 import json
@@ -113,7 +114,10 @@ class ScanRequest(BaseModel):
     urls: list[str] = Field(default_factory=list)
     repositories: list[str] = Field(default_factory=list)
     cloud_providers: list[str] = Field(default_factory=list)
-    ports: str = "1-1024"
+    # Full 65 535-port sweep by default so the web/API path matches `heaven scan`
+    # (CLI default) and a plain `nmap -p-` — the launcher exposes a Port scope
+    # control to narrow this to a fast common-ports run when speed matters.
+    ports: str = "1-65535"
     scan_type: str = "full"
     mode: str = "full"
     stealth_level: int = 3
@@ -130,6 +134,11 @@ class ScanRequest(BaseModel):
     auth: str = ""
     low_priv_cookie: str = ""
     low_priv_auth: str = ""
+    # Firewall/IDS evasion for authorized testing. When true, nmap evasion
+    # (fragmentation / padding / trusted source port / decoys) is applied to
+    # every host. Off by default — HEAVEN still auto-detects a filtering
+    # perimeter and runs a bounded evasion re-probe of the affected hosts.
+    evade: bool = False
 
 
 class ScanResponse(BaseModel):
@@ -168,6 +177,33 @@ class DashboardData(BaseModel):
     top_vulns: list[dict] = Field(default_factory=list)
     severity_trend: list[dict] = Field(default_factory=list)
     assets: list[dict] = Field(default_factory=list)
+    # Confirmation split — Overall Risk is rated from *confirmed* findings so an
+    # unauthenticated, version-based match never inflates the headline.
+    overall_risk: str = "Informational"
+    confirmed_total: int = 0
+    potential_total: int = 0
+    confirmed_critical: int = 0
+    confirmed_high: int = 0
+    confirmed_medium: int = 0
+    confirmed_low: int = 0
+
+
+def _confirmation_of(finding: Any) -> str:
+    """Canonical confirmation label — 'Confirmed' or 'Potential' — for a finding
+    dict or ORM object. Single source of truth in ``heaven.utils.cvss``."""
+    from heaven.utils.cvss import is_confirmed_finding
+    d = finding if isinstance(finding, dict) else getattr(finding, "__dict__", {})
+    return "Confirmed" if is_confirmed_finding(d) else "Potential"
+
+
+def _overall_risk_from(sev_counts: dict[str, int]) -> str:
+    """Highest severity band present, as a title-case label (matches the report
+    generator's ``_overall_risk``)."""
+    for band, label in (("critical", "Critical"), ("high", "High"),
+                        ("medium", "Medium"), ("low", "Low")):
+        if sev_counts.get(band):
+            return label
+    return "Informational"
 
 
 # ── Active scan tracking ──
@@ -196,6 +232,26 @@ def _autonomous_broadcast(job_id: str, message: dict) -> None:
     """Push a message to every live WebSocket subscriber of an autonomous job.
     Safe to call from the loop thread — uses put_nowait and swallows errors."""
     for q in list(_autonomous_subscribers.get(job_id, set())):
+        try:
+            q.put_nowait(message)
+        except Exception:  # noqa: BLE001 — a full/closed queue must not break the run
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+
+
+# ── Watch-mode jobs ──
+# `heaven watch` is a continuous monitoring loop (scan → diff → alert-on-change).
+# Like the autonomous loop it can run for a long time, so the web launcher runs
+# it as a DETACHED background task with a bounded iteration count, streams each
+# iteration over a WebSocket, and supports Stop (task cancellation — run_watch
+# treats CancelledError as a clean operator interrupt and returns its summary).
+watch_jobs: dict[str, dict] = {}
+_watch_tasks: dict[str, Any] = {}                 # job_id -> asyncio.Task (for Stop)
+_watch_subscribers: dict[str, set] = {}           # job_id -> set[asyncio.Queue]
+
+
+def _watch_broadcast(job_id: str, message: dict) -> None:
+    """Fan a message out to every live WebSocket subscriber of a watch job."""
+    for q in list(_watch_subscribers.get(job_id, set())):
         try:
             q.put_nowait(message)
         except Exception:  # noqa: BLE001 — a full/closed queue must not break the run
@@ -325,6 +381,7 @@ from heaven.engagement import (  # noqa: E402, F401
     active_engagement_file as _active_engagement_file,  # re-exported for tests
     best_populated_engagement as _best_populated_engagement,
     clear_active_engagement as _clear_active_engagement,
+    dedup_findings as _dedup_findings,
     delete_engagement_store as _delete_engagement_store,
     get_active_engagement as _get_active_engagement,
     rename_engagement_store as _rename_engagement_store,
@@ -445,6 +502,19 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
+        # Native-crash safety net. Scans run in-process, so a native (C-level)
+        # segfault in any dependency would take the whole server down — the
+        # user sees "Python quit unexpectedly" and every in-flight scan dies.
+        # asyncssh's optional UMAC MACs are a broken ctypes→Nettle binding that
+        # segfaults on some platforms the moment an SSH MAC is computed; strip
+        # them before any connection. faulthandler turns any *future* native
+        # crash into a Python traceback instead of a silent kill.
+        try:
+            from heaven.utils import ssh_safe
+            ssh_safe.enable_crash_dumps()
+            ssh_safe.harden_asyncssh()
+        except Exception:  # a safety shim must never block startup
+            logger.debug("ssh_safe hardening skipped", exc_info=True)
         admin_pwd_set = bool(os.environ.get("HEAVEN_ADMIN_PASSWORD"))
         if not admin_pwd_set:
             logger.warning(
@@ -893,10 +963,20 @@ def create_app() -> FastAPI:
             vulns = report_findings
 
         sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        # Confirmed-only severity tally drives the Overall Risk headline so a
+        # version-based "potential" match never inflates it (parity with reports).
+        csev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        confirmed_total = 0
         for f in vulns:
             s = (f.get("severity") or "info").lower()
             if s in sev:
                 sev[s] += 1
+            if _confirmation_of(f) == "Confirmed":
+                confirmed_total += 1
+                if s in csev:
+                    csev[s] += 1
+        potential_total = len(vulns) - confirmed_total
+        overall_risk = _overall_risk_from(csev)
 
         avg_risk = 0.0
         if vulns:
@@ -952,7 +1032,12 @@ def create_app() -> FastAPI:
             except Exception as e:
                 logger.debug(f"Skipping unreadable report {file}: {e}")
 
-        top_vulns = sorted(vulns, key=lambda f: float(f.get("priority_score") or f.get("predicted_cvss_score") or 0), reverse=True)[:5]
+        top_vulns = [
+            {**f, "confirmation": _confirmation_of(f)}
+            for f in sorted(vulns, key=lambda f: float(
+                f.get("priority_score") or f.get("predicted_cvss_score") or 0),
+                reverse=True)[:5]
+        ]
 
         # Real host topology — aggregated from actual findings. Each node is a
         # host that a scan actually touched; severity is the worst finding on
@@ -1014,6 +1099,13 @@ def create_app() -> FastAPI:
             top_vulns=top_vulns,
             severity_trend=[],
             assets=assets,
+            overall_risk=overall_risk,
+            confirmed_total=confirmed_total,
+            potential_total=potential_total,
+            confirmed_critical=csev["critical"],
+            confirmed_high=csev["high"],
+            confirmed_medium=csev["medium"],
+            confirmed_low=csev["low"],
         )
 
     # ── Scans ──
@@ -1467,6 +1559,29 @@ def create_app() -> FastAPI:
             eng = store.get_engagement()
             stats = store.stats()
             no_engagement = stats.get("total_findings", 0) == 0 and stats.get("scans_run", 0) == 0
+            # Confirmation split — Overall Risk from confirmed findings only, in
+            # parity with the reports and /api/dashboard. Computed on read.
+            try:
+                from heaven.engagement import is_attack_plan_artifact
+                csev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+                conf_total = 0
+                real = 0
+                for f in store.list_findings(limit=5000):
+                    d = f.__dict__
+                    if is_attack_plan_artifact(d):
+                        continue
+                    real += 1
+                    if _confirmation_of(d) == "Confirmed":
+                        conf_total += 1
+                        s = (d.get("severity") or "info").lower()
+                        if s in csev:
+                            csev[s] += 1
+                stats["confirmed_total"] = conf_total
+                stats["potential_total"] = max(0, real - conf_total)
+                stats["confirmed_by_severity"] = csev
+                stats["overall_risk"] = _overall_risk_from(csev)
+            except Exception:
+                logger.debug("confirmation stats unavailable", exc_info=True)
             return {
                 "engagement": eng.__dict__ if eng else None,
                 "stats": stats,
@@ -1483,6 +1598,50 @@ def create_app() -> FastAPI:
                 },
                 "no_engagement": True,
             }
+
+    @app.patch("/api/engagement")
+    async def update_engagement_details_endpoint(
+        body: dict,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Edit the active engagement's Client and/or Statement-of-work.
+
+        Backs the inline edit on the Engagement page. Send either or both of
+        ``client`` / ``statement_of_work``; omitted fields are left unchanged.
+        Values are trimmed and length-capped so the dashboard label and the
+        report cover page stay tidy. Returns the refreshed engagement.
+        """
+        if not isinstance(body, dict):
+            raise HTTPException(422, "expected a JSON object")
+
+        has_client = "client" in body
+        has_sow = "statement_of_work" in body
+        if not (has_client or has_sow):
+            raise HTTPException(422, "provide client and/or statement_of_work")
+
+        def _clean(v: Any) -> str:
+            # Collapse to a tidy single-line string; cap length to keep the DB
+            # and the report cover page sane. None/whitespace → "".
+            return " ".join(str(v or "").split())[:200]
+
+        client = _clean(body.get("client")) if has_client else None
+        sow = _clean(body.get("statement_of_work")) if has_sow else None
+
+        # A write store (create=True) so the row materialises even on a
+        # switched-to-but-never-scanned engagement.
+        store = _engagement_store_factory()
+        try:
+            eng = store.update_engagement_details(
+                client=client, statement_of_work=sow
+            )
+        except Exception as e:  # noqa: BLE001 — surface the failure to the UI
+            logger.warning("Engagement details update failed: %s", e)
+            raise HTTPException(500, "Could not update engagement details")
+        logger.info(
+            "Engagement details updated by %s (client=%s, sow=%s)",
+            user.username, has_client, has_sow,
+        )
+        return {"ok": True, "engagement": eng.__dict__ if eng else None}
 
     @app.get("/api/engagements")
     async def list_engagements(
@@ -1680,7 +1839,8 @@ def create_app() -> FastAPI:
         # pseudo-findings (vuln_type is a bare MITRE technique like ``T1190`` with
         # no taxonomy) so a re-scan isn't needed to clear the blank rows.
         findings = [
-            {**f.__dict__} for f in results
+            {**f.__dict__, "confirmation": _confirmation_of(f.__dict__)}
+            for f in results
             if not is_attack_plan_artifact(f.__dict__)
         ]
         return {"findings": findings, "count": len(findings)}
@@ -1774,6 +1934,8 @@ def create_app() -> FastAPI:
         _ctx = contextual_score(finding_dict)
         if _ctx > 0:
             finding_dict["contextual_cvss_score"] = round(_ctx, 1)
+        # Confirmation status (Confirmed vs Potential) for the detail meta table.
+        finding_dict["confirmation"] = _confirmation_of(finding_dict)
         pkg = package_finding(finding_dict)
         return {
             "finding": finding_dict,
@@ -1864,9 +2026,10 @@ def create_app() -> FastAPI:
         media = {
             "html": "text/html", "markdown": "text/markdown", "csv": "text/csv",
             "json": "application/json", "sarif": "application/json",
+            "junit": "application/xml",
             "burp": "application/xml", "proxy-jsonl": "application/x-ndjson",
         }
-        ext = {"markdown": "md", "proxy-jsonl": "jsonl"}
+        ext = {"markdown": "md", "proxy-jsonl": "jsonl", "junit": "xml"}
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", eng_name)[:60] or "engagement"
         try:
             if fmt == "pdf":
@@ -1910,8 +2073,11 @@ def create_app() -> FastAPI:
             elif fmt == "json":
                 body = json.dumps(findings, indent=2, default=str)
             elif fmt == "sarif":
-                from heaven.devsecops.aggregator import export_sarif
-                body = json.dumps(export_sarif({"vulnerabilities": findings}), indent=2)
+                from heaven.devsecops.ci_export import findings_to_sarif_str
+                body = findings_to_sarif_str(findings, engagement_name=eng_name)
+            elif fmt == "junit":
+                from heaven.devsecops.ci_export import findings_to_junit
+                body = findings_to_junit(findings, engagement_name=eng_name)
             elif fmt == "burp":
                 from heaven.devsecops.burp_export import export_burp_xml
                 body = export_burp_xml(findings, engagement_name=eng_name)
@@ -2018,13 +2184,20 @@ def create_app() -> FastAPI:
             reset_gateway()  # pick up any just-saved key
             gw = LLMGateway()
             if not gw.available:
+                # Provider-aware reason: a keyless local provider that isn't
+                # configured/reachable must not report "no key". gw._init_error
+                # already carries the precise local reason (endpoint/model).
+                if gw._init_error:
+                    reason = gw._init_error
+                elif not gw.provider:
+                    reason = "no provider configured — add a key or run `heaven ai setup`"
+                elif not (gw.api_key or getattr(gw, "_is_local", False)):
+                    reason = "no API key configured for this provider"
+                else:
+                    reason = "provider SDK not installed (pip install the provider extra)"
                 return {
                     "provider": gw.provider or None, "model": gw.model or None,
-                    "available": False,
-                    "reason": (
-                        "no provider/key configured" if not (gw.provider and gw.api_key)
-                        else "provider SDK not installed (pip install the provider extra)"
-                    ),
+                    "available": False, "reason": reason,
                 }
             resp = await gw.acomplete(LLMRequest(
                 prompt="Reply with exactly the word: OK", max_tokens=16, temperature=0,
@@ -2056,6 +2229,259 @@ def create_app() -> FastAPI:
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "has_key": False, "status_code": None,
                     "sample_results": None, "reason": f"error: {e}"}
+
+    @app.get("/api/ai/local/status")
+    async def ai_local_status(user: User = Depends(require_permission("config.modify"))):
+        """Local-LLM runtime status for the Settings 'Local AI' card + Health:
+        is Ollama installed / reachable, which models are pulled, the recommended
+        default. Read-only; heavy pulls stay on the CLI (`heaven ai pull`)."""
+        from heaven.ai import local_llm
+        provider = (os.environ.get("HEAVEN_LLM_PROVIDER") or "").lower()
+        base = os.environ.get("HEAVEN_LLM_BASE_URL", "") if provider == "local" else ""
+        try:
+            return local_llm.local_status(provider="local" if provider == "local" else "ollama",
+                                          base_url=base)
+        except Exception as e:  # noqa: BLE001 — status must never 500
+            return {"provider": provider or "ollama", "installed": None,
+                    "reachable": False, "host": "", "models": [],
+                    "default_model": local_llm.DEFAULT_OLLAMA_MODEL, "recommended": [],
+                    "error": str(e)}
+
+    @app.post("/api/ai/local/configure")
+    async def ai_local_configure(
+        request: Request, user: User = Depends(require_permission("config.modify")),
+    ):
+        """Point HEAVEN's LLM at a local model in one click (Settings wizard).
+
+        Body: {provider:'ollama'|'local', model?, host?, base_url?}. Persists the
+        config via the same settings pipeline the CLI uses (so it's live
+        everywhere and survives restart), resets the gateway, then makes one tiny
+        real completion so the UI can confirm 'Local AI is live' rather than just
+        'saved'. Never installs or pulls here — pulls stream over the WS below.
+        """
+        from heaven.ai import local_llm
+        from heaven.settings_catalog import apply_settings
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        provider = str((body or {}).get("provider") or "ollama").lower()
+        if provider not in ("ollama", "local"):
+            raise HTTPException(422, "provider must be 'ollama' or 'local'")
+        model = str((body or {}).get("model") or "").strip()
+        updates: dict[str, str] = {"HEAVEN_LLM_PROVIDER": provider}
+        if provider == "ollama":
+            model = model or local_llm.DEFAULT_OLLAMA_MODEL
+            host = str((body or {}).get("host") or local_llm.ollama_host()).strip()
+            updates["HEAVEN_LLM_MODEL"] = model
+            updates["HEAVEN_OLLAMA_HOST"] = host
+        else:  # local / OpenAI-compatible
+            base_url = str((body or {}).get("base_url") or "").strip()
+            if not base_url:
+                raise HTTPException(422, "base_url is required for provider 'local'")
+            if not model:
+                raise HTTPException(422, "model is required for provider 'local'")
+            updates["HEAVEN_LLM_BASE_URL"] = base_url
+            updates["HEAVEN_LLM_MODEL"] = model
+        try:
+            apply_settings(updates)  # writes .env + os.environ, resets the gateway
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        # Live self-test so setup ends with proof, not just a saved file.
+        test: dict[str, Any] = {"available": False, "reason": ""}
+        try:
+            from heaven.ai.llm_gateway import LLMGateway, LLMRequest, reset_gateway
+            reset_gateway()
+            gw = LLMGateway()
+            if not gw.available:
+                test["reason"] = gw._init_error or "gateway not ready"
+            else:
+                resp = await gw.acomplete(LLMRequest(
+                    prompt="Reply with exactly the word: OK", max_tokens=16, temperature=0))
+                test = {"available": bool(resp.ok()),
+                        "reason": (f"live reply in {resp.latency_ms:.0f}ms" if resp.ok()
+                                   else (resp.error or "empty response")),
+                        "latency_ms": resp.latency_ms}
+        except Exception as e:  # noqa: BLE001 — a failed test must not fail the save
+            test = {"available": False, "reason": f"error: {e}"}
+        provider_for_status = "local" if provider == "local" else "ollama"
+        base = updates.get("HEAVEN_LLM_BASE_URL", "")
+        return {"ok": True, "provider": provider, "model": model, "test": test,
+                "status": local_llm.local_status(provider=provider_for_status, base_url=base)}
+
+    @app.websocket("/api/ai/local/pull")
+    async def ai_local_pull(websocket: WebSocket, token: Optional[str] = Query(None)):
+        """Stream an Ollama model pull to the Settings wizard so a user can get a
+        local model entirely from the browser — no terminal.
+
+        Auth via `token` query param (browsers can't set WS headers). Client sends
+        {model}; server relays Ollama's native streaming ``/api/pull`` as
+        {type:'progress', status, percent, completed, total} frames, then
+        {type:'done', ok, models}. A dead/absent Ollama server fails fast with a
+        friendly {type:'error'} instead of hanging.
+        """
+        if not _auth_disabled():
+            auth = get_auth_manager()
+            if not token or token not in auth._sessions:
+                await websocket.close(code=4401, reason="Unauthorized")
+                return
+            session = auth._sessions[token]
+            if session.expires_at < time.time():
+                await websocket.close(code=4401, reason="Token expired")
+                return
+        await websocket.accept()
+        from heaven.ai import local_llm
+        try:
+            raw = await websocket.receive_json()
+        except Exception:
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"type": "error", "error": "expected {model}"})
+                await websocket.close()
+            return
+        model = str((raw or {}).get("model") or "").strip()
+        if not model:
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"type": "error", "error": "no model specified"})
+                await websocket.close()
+            return
+        host = local_llm.ollama_host()
+        ok = False
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=None)) as client:
+                async with client.stream("POST", f"{host}/api/pull",
+                                         json={"model": model, "stream": True}) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(f"Ollama returned HTTP {resp.status_code}")
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except ValueError:
+                            continue
+                        frame = local_llm.pull_progress_frame(data)
+                        if frame["error"]:
+                            with contextlib.suppress(Exception):
+                                await websocket.send_json({"type": "error", "error": frame["error"]})
+                            break
+                        await websocket.send_json({"type": "progress", **frame})
+                        if frame["done"] and frame["status"].lower() == "success":
+                            ok = True
+        except WebSocketDisconnect:
+            return
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
+                httpx.PoolTimeout):
+            with contextlib.suppress(Exception):
+                await websocket.send_json({
+                    "type": "error",
+                    "error": f"Ollama not reachable at {host} — is it running? "
+                             "(open the Ollama app, or run `ollama serve`)"})
+        except Exception as e:  # noqa: BLE001 — never crash the socket worker
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"type": "error", "error": str(e)})
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "done", "ok": ok,
+                                       "models": local_llm.list_models()})
+            await websocket.close()
+
+    # ══════════════════════════════════════════════════════════════════
+    # AI security assistant (chatbot) — local or cloud, engagement-grounded
+    # ══════════════════════════════════════════════════════════════════
+
+    @app.post("/api/chat")
+    async def chat_reply(
+        request: Request, user: User = Depends(require_permission("vuln.view")),
+    ):
+        """One grounded reply from the AI security assistant.
+
+        Body: {messages:[{role,content}], engagement?, grounded?:bool, max_tokens?}.
+        Works with any configured provider (local Ollama / OpenAI-compatible /
+        cloud). Returns {skipped: reason} when no LLM is configured so the UI can
+        show a friendly 'set up local AI' hint instead of erroring.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        messages = body.get("messages") or []
+        if not isinstance(messages, list) or not messages:
+            raise HTTPException(422, "expected non-empty 'messages': [{role, content}]")
+        grounded = bool(body.get("grounded", True))
+        from heaven.ai.chat_assistant import ChatAssistant
+        assistant = ChatAssistant()
+        if not assistant.available:
+            gw = assistant.gateway
+            return {"skipped": gw._init_error or
+                    "no LLM configured — add a key or run `heaven ai setup`",
+                    "provider": gw.provider or None, "model": gw.model or None}
+        store = _read_store(body.get("engagement")) if grounded else None
+        resp = await asyncio.to_thread(
+            assistant.reply, messages, store=store, include_context=grounded,
+            max_tokens=int(body.get("max_tokens") or 1024),
+        )
+        if not resp.ok():
+            return {"skipped": resp.error or "the model returned no text",
+                    "provider": resp.provider, "model": resp.model}
+        return {"reply": resp.text, "provider": resp.provider, "model": resp.model,
+                "grounded": bool(store is not None), "latency_ms": resp.latency_ms}
+
+    @app.websocket("/api/chat/stream")
+    async def chat_stream(websocket: WebSocket, token: Optional[str] = Query(None)):
+        """Streaming AI assistant. Auth via `token` query param (browsers can't
+        set WS headers). Client sends one JSON {messages, engagement?, grounded?,
+        max_tokens?}; server streams {type:'delta', text} frames, then 'done'."""
+        if not _auth_disabled():
+            auth = get_auth_manager()
+            if not token or token not in auth._sessions:
+                await websocket.close(code=4401, reason="Unauthorized")
+                return
+            session = auth._sessions[token]
+            if session.expires_at < time.time():
+                await websocket.close(code=4401, reason="Token expired")
+                return
+        await websocket.accept()
+        try:
+            raw = await websocket.receive_json()
+        except Exception:
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"type": "error", "error": "expected a JSON message"})
+                await websocket.close()
+            return
+        messages = raw.get("messages") or []
+        grounded = bool(raw.get("grounded", True))
+        from heaven.ai.chat_assistant import ChatAssistant
+        assistant = ChatAssistant()
+        gw = assistant.gateway
+        if not assistant.available:
+            with contextlib.suppress(Exception):
+                await websocket.send_json({
+                    "type": "skipped",
+                    "error": gw._init_error or
+                    "no LLM configured — add a key or run `heaven ai setup`",
+                    "provider": gw.provider or None, "model": gw.model or None})
+                await websocket.close()
+            return
+        store = _read_store(raw.get("engagement")) if grounded else None
+        got = False
+        try:
+            await websocket.send_json({"type": "start", "provider": gw.provider,
+                                       "model": gw.model, "grounded": bool(store is not None)})
+            async for piece in assistant.astream(
+                messages, store=store, include_context=grounded,
+                max_tokens=int(raw.get("max_tokens") or 1024),
+            ):
+                got = True
+                await websocket.send_json({"type": "delta", "text": piece})
+        except WebSocketDisconnect:
+            return
+        except Exception as e:  # noqa: BLE001 — never crash the socket worker
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"type": "error", "error": str(e)})
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "done", "empty": not got})
+            await websocket.close()
 
     # ══════════════════════════════════════════════════════════════════
     # "Fix this first" — highest-risk findings + remediation
@@ -2106,6 +2532,7 @@ def create_app() -> FastAPI:
                 "target": getattr(f, "target", ""),
                 "risk_score": getattr(f, "risk_score", 0),
                 "confidence": getattr(f, "confidence", 0),
+                "confirmation": _confirmation_of(f),
                 "remediation": remediation,
             })
         return {"findings": top, "total": len(results)}
@@ -2212,17 +2639,19 @@ def create_app() -> FastAPI:
                     ("Reconnaissance", 20), ("Crawling endpoints", 45),
                     ("Injection testing", 70), ("Risk scoring + reporting", 90),
                 ]
-                for label, pct in phases:
+                for i, (label, pct) in enumerate(phases):
                     await asyncio.sleep(phase_delay)
                     if active_scans.get(scan_id, {}).get("status") == "cancelled":
                         return
                     active_scans[scan_id]["phase"] = label
                     active_scans[scan_id]["progress_pct"] = pct
+                    # Remaining phases × per-phase delay → a real time-to-complete.
+                    active_scans[scan_id]["eta_s"] = round((len(phases) - i - 1) * phase_delay)
                 res = insert_findings(store, scan_id)
                 store.record_scan_complete(scan_id, res["summary"])
                 active_scans[scan_id].update(
                     status="completed", progress_pct=100, phase="Done",
-                    findings_count=res["findings"],
+                    eta_s=0, findings_count=res["findings"],
                 )
             except Exception as e:  # noqa: BLE001
                 logger.warning("Demo scan failed: %s", e)
@@ -2337,16 +2766,24 @@ def create_app() -> FastAPI:
         external_callback_url: Optional[str] = Query(None),
         user: User = Depends(require_permission("vuln.validate")),
     ):
-        """Run the exploit-proof dispatcher on one finding.
+        """Actively confirm one finding via the unified confirmation dispatcher.
 
-        Adds proof artifacts to finding.evidence.exploit_proof[].
-        Refuses to run without vuln.validate permission AND an authorized=True flag
-        (auth gating is built into the prover, the permission check is the second).
+        Runs the best available SAFE, read-only proof for the finding's class —
+        an exploitation canary (injection), a behavioural CVE probe, an HTTP
+        re-check (headers / exposed file / CORS / redirect / directory listing),
+        a fresh TLS handshake, or a TCP-reachability connect — and returns a
+        structured, honest verdict (see ``heaven.vulnscan.confirm``). A class with
+        no safe automated proof returns ``not_applicable`` with a manual next step
+        rather than a misleading "not proven".
+
+        The ``vuln.validate`` permission gate IS the operator's authorization, so
+        ``authorized=True`` is passed through. On a fresh proof the finding is
+        promoted to Confirmed and persisted.
         """
         try:
-            from heaven.vulnscan.exploit_proof import prove_finding
+            from heaven.vulnscan.confirm import confirm_finding
         except Exception as e:
-            raise HTTPException(500, f"exploit_proof not importable: {e}")
+            raise HTTPException(500, f"confirm module not importable: {e}")
 
         store = _engagement_store_factory(engagement)
         f = store.get_finding(finding_id)
@@ -2355,18 +2792,30 @@ def create_app() -> FastAPI:
         finding_dict = {
             "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
             "title": f.title, "severity": f.severity, "confidence": f.confidence,
+            "cve_id": getattr(f, "cve_id", "") or "",
             "evidence": f.evidence or {},
         }
-        # The permission gate above is the operator's authorization — pass through
-        out = await prove_finding(
+        out = await confirm_finding(
             finding_dict, authorized=True,
             external_callback_url=external_callback_url or "",
         )
-        store.upsert_finding(scan_id=f.scan_id, finding=out)
+        confirmed_finding = out.pop("finding", finding_dict)
+        # Persist any promotion / recorded confirmation history.
+        store.upsert_finding(scan_id=f.scan_id, finding=confirmed_finding)
         return {
             "finding_id": finding_id,
+            # Structured verdict the UI renders directly.
+            "status": out.get("status"),
             "proved": bool(out.get("proved", False)),
-            "exploit_proof": out.get("evidence", {}).get("exploit_proof", []),
+            "method": out.get("method"),
+            "technique": out.get("technique"),
+            "family": out.get("family"),
+            "summary": out.get("summary"),
+            "detail": out.get("detail"),
+            "reprobed": bool(out.get("reprobed", False)),
+            "evidence": out.get("evidence", []),
+            # Back-compat: older clients read exploit_proof[] directly.
+            "exploit_proof": (confirmed_finding.get("evidence", {}) or {}).get("exploit_proof", []),
         }
 
     @app.post("/api/findings/{finding_id}/remediation")
@@ -2762,6 +3211,56 @@ def create_app() -> FastAPI:
             "note": "No benchmark results yet. Generate the built-in one with: heaven benchmark",
         }
 
+    @app.post("/api/benchmark/run")
+    async def run_benchmark(
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Regenerate the native, Docker-free benchmark and return fresh numbers.
+
+        Backs the Benchmark page's "Re-run" button so a web-only operator gets
+        genuinely current precision / recall / F1 without shelling into the
+        server — it runs the exact in-process reproduction ``heaven benchmark``
+        uses. Needs the benchmark extras (flask / bs4 / pyyaml); if they're
+        missing it returns a clear 503 and the page keeps showing the last
+        cached report. The run is CPU-bound and self-contained (~1–20 s), so it
+        executes off the event loop in a worker thread.
+        """
+        from datetime import datetime, timezone
+
+        # The native runner lives under tests/ (shipped with the source tree but
+        # not importable unless the repo root is on sys.path). Derive the root
+        # from this module so it works regardless of the server's cwd — memory
+        # notes `heaven serve` is often launched from outside the repo.
+        repo_root = Path(__file__).parent.parent.parent
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        try:
+            from tests.benchmarks.native.runner import run_native_benchmark
+        except Exception as e:  # noqa: BLE001 — missing optional benchmark deps
+            raise HTTPException(
+                503,
+                "Benchmark runner unavailable — install the benchmark extras "
+                f"(flask/bs4/pyyaml) or run `heaven benchmark` on the server. ({e})",
+            )
+        try:
+            run = await asyncio.to_thread(run_native_benchmark, write_report=True)
+        except Exception as e:  # noqa: BLE001 — surface the failure to the UI
+            logger.exception("Native benchmark run failed")
+            raise HTTPException(500, f"Benchmark run failed: {e}")
+
+        md = run.markdown
+        logger.info("Native benchmark re-run by %s", user.username)
+        return {
+            "available": True,
+            "source": "native-controlled",
+            "label": "Native controlled target — Docker-free, always current",
+            "target": "heaven-native-vuln-app",
+            "markdown": md,
+            "metrics": _parse_benchmark_metrics(md),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "size_bytes": len(md.encode("utf-8")),
+        }
+
     # ══════════════════════════════════════════════════════════════════
     # CLI ↔ API sync — every backend capability has a UI-reachable route
     # ══════════════════════════════════════════════════════════════════
@@ -2948,6 +3447,271 @@ def create_app() -> FastAPI:
                 subs.discard(queue)
                 if not subs:
                     _autonomous_subscribers.pop(job_id, None)
+            try:
+                await websocket.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+
+    # ── Watch mode (heaven watch equivalent) ──
+    @app.get("/api/watch/channels")
+    async def watch_channels(user: User = Depends(require_permission("scan.view"))):
+        """Which outgoing alert channels are actually configured (env-driven).
+
+        Drives the Watch page's channel tiles honestly — a channel shows
+        "active" only when its env vars are set, not just because the page
+        loaded.
+        """
+        from heaven.devsecops.alerting import (
+            SIEMNotifier, TicketingDispatcher, WebhookAlerter,
+        )
+        return {
+            "webhook_active": bool(WebhookAlerter().webhook_url),
+            "siem_backends_active": SIEMNotifier().configured_backends,
+            "ticketing_backends": TicketingDispatcher().configured_backends,
+        }
+
+    @app.post("/api/watch/start")
+    async def watch_start(
+        request: Request,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Launch a continuous watch loop as a BACKGROUND job.
+
+        Body JSON:
+          {"engagement": "prod-monitor", "ips": [...], "urls": [...],
+           "interval_s": 1800, "max_iterations": 6, "mode": "web",
+           "jitter": 0.1, "heartbeat": false, "auto_tickets": false,
+           "ports": "1-1024", "stealth_level": "normal"}
+
+        Returns {"job_id", "status": "running"} immediately. The loop scans on
+        the interval, diffs each run against the previous, and only alerts when
+        a NEW or REGRESSED finding appears (or every run when heartbeat is on).
+        Poll GET /api/watch/jobs/{id} or subscribe to the WS stream for live
+        per-iteration progress; POST /api/watch/jobs/{id}/stop to end it early.
+
+        A web-launched watch is BOUNDED (max_iterations 1..500, interval
+        15s..24h) so a browser click can't spawn an unkillable infinite loop —
+        the CLI (`heaven watch`) remains the tool for a truly endless monitor.
+        """
+        from heaven.cli._helpers import _engagement_db_path
+        from heaven.config import ScanMode
+        from heaven.config import get_config as _get_config
+        from heaven.utils.watcher import WatchConfig, run_watch
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        engagement = str(body.get("engagement") or "").strip()
+        if not engagement:
+            raise HTTPException(422, "engagement is required — a watch loop "
+                                     "persists every run into an engagement")
+        db_path = _engagement_db_path(engagement)
+        if not db_path.exists():
+            raise HTTPException(404, f"engagement '{engagement}' not found — "
+                                     f"create it first (Dashboard → New engagement)")
+
+        ips = [str(x).strip() for x in (body.get("ips") or []) if str(x).strip()]
+        urls = [str(x).strip() for x in (body.get("urls") or []) if str(x).strip()]
+        if not (ips or urls):
+            raise HTTPException(422, "need at least one target ip or url")
+        for u in urls:
+            if not _URL_REGEX.match(u):
+                raise HTTPException(422, f"invalid url: {u}")
+
+        # Note: parse with an explicit None-check, not `or`, so an explicit 0
+        # is honoured (0 iterations must be REJECTED, not silently defaulted;
+        # jitter 0.0 means "no jitter", not "use the default").
+        _iv = body.get("interval_s")
+        interval_s = max(15, min(int(_iv if _iv is not None else 3600), 86400))
+        _mi = body.get("max_iterations")
+        max_iterations = int(_mi if _mi is not None else 6)
+        if max_iterations < 1:
+            raise HTTPException(422, "max_iterations must be ≥ 1 for a "
+                                     "web-launched watch (use the CLI for ∞)")
+        max_iterations = min(max_iterations, 500)
+        _jt = body.get("jitter")
+        jitter = max(0.0, min(float(_jt if _jt is not None else 0.1), 0.5))
+        try:
+            scan_mode = ScanMode(str(body.get("mode") or "web").lower())
+        except ValueError:
+            scan_mode = ScanMode.WEB
+        heartbeat = bool(body.get("heartbeat", False))
+        auto_tickets = bool(body.get("auto_tickets", False))
+
+        targets = {
+            "ips": ips, "urls": urls,
+            "repositories": [], "cloud_providers": [],
+            "ports": str(body.get("ports") or "1-1024"),
+            "stealth_level": str(body.get("stealth_level") or "normal"),
+            "ad_domain": "", "ad_dc": "",
+            "enable_iot": False, "enable_api_scan": False,
+            "enable_container": False, "enable_mitre": True,
+            "auto_prove": False, "autonomous": False,
+        }
+
+        cfg = _get_config()
+        cfg.scan_mode = scan_mode
+        wc = WatchConfig(
+            targets=targets, engagement_name=engagement,
+            interval_s=interval_s, jitter_pct=jitter,
+            max_iterations=max_iterations,
+            alert_on_heartbeat=heartbeat, auto_create_tickets=auto_tickets,
+        )
+
+        job_id = uuid.uuid4().hex[:12]
+        job: dict = {
+            "job_id": job_id,
+            "status": "running",           # running | done | stopped | error
+            "engagement": engagement,
+            "targets": {"ips": ips, "urls": urls},
+            "mode": scan_mode.value,
+            "interval_s": interval_s,
+            "jitter": jitter,
+            "max_iterations": max_iterations,
+            "heartbeat": heartbeat,
+            "auto_tickets": auto_tickets,
+            "started_by": user.username,
+            "started_at": time.time(),
+            "ended_at": None,
+            "stop_requested": False,
+            "result": None,
+            "error": None,
+            "progress": [],                # accumulates per-iteration dicts
+        }
+        watch_jobs[job_id] = job
+
+        # Bound the registry so it can't grow without limit.
+        if len(watch_jobs) > 30:
+            for old in sorted(watch_jobs.values(),
+                              key=lambda j: j["started_at"])[:-30]:
+                watch_jobs.pop(old["job_id"], None)
+                _watch_subscribers.pop(old["job_id"], None)
+
+        def _on_iteration(it) -> None:
+            data = it.to_dict()
+            job["progress"].append(data)
+            _watch_broadcast(job_id, {"type": "iteration", "data": data})
+
+        async def _runner() -> None:
+            try:
+                summary = await run_watch(wc, cfg, on_iteration=_on_iteration)
+                job["result"] = summary.to_dict()
+                stopped = (job["stop_requested"]
+                           or summary.stop_reason == "operator_interrupt")
+                job["status"] = "stopped" if stopped else "done"
+            except asyncio.CancelledError:
+                # run_watch normally swallows cancellation and returns, but guard
+                # the case where it propagates (e.g. cancelled before the loop).
+                job["status"] = "stopped"
+                job["ended_at"] = time.time()
+                _watch_broadcast(job_id, {"type": "done", "job": job})
+                raise
+            except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+                job["error"] = str(e)
+                job["status"] = "error"
+                logger.exception("Watch job %s failed", job_id)
+            finally:
+                if job["ended_at"] is None:
+                    job["ended_at"] = time.time()
+                    _watch_broadcast(job_id, {"type": "done", "job": job})
+
+        def _drop_task(_task: Any) -> None:
+            _watch_tasks.pop(job_id, None)
+
+        task = asyncio.create_task(_runner())
+        _watch_tasks[job_id] = task
+        task.add_done_callback(_drop_task)
+
+        return {"job_id": job_id, "status": "running"}
+
+    @app.get("/api/watch/jobs")
+    async def watch_jobs_list(user: User = Depends(require_permission("scan.view"))):
+        """Most-recent-first list of watch jobs this server has launched."""
+        return {
+            "jobs": sorted(watch_jobs.values(),
+                           key=lambda j: j["started_at"], reverse=True),
+        }
+
+    @app.get("/api/watch/jobs/{job_id}")
+    async def watch_job_get(
+        job_id: str, user: User = Depends(require_permission("scan.view")),
+    ):
+        """Status + progress (+ final summary once finished) for one watch job."""
+        job = watch_jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, "no such watch job")
+        return job
+
+    @app.post("/api/watch/jobs/{job_id}/stop")
+    async def watch_job_stop(
+        job_id: str, user: User = Depends(require_permission("scan.cancel")),
+    ):
+        """Stop a running watch loop. It finishes the current iteration's scan,
+        then exits cleanly (state is already persisted per-iteration)."""
+        job = watch_jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, "no such watch job")
+        if job["status"] != "running":
+            return {"ok": True, "status": job["status"], "note": "already ended"}
+        job["stop_requested"] = True
+        task = _watch_tasks.get(job_id)
+        if task:
+            task.cancel()
+        return {"ok": True, "status": "stopping"}
+
+    @app.websocket("/api/watch/jobs/{job_id}/stream")
+    async def watch_stream(
+        websocket: WebSocket, job_id: str, token: Optional[str] = Query(None),
+    ):
+        """Live per-iteration progress for a watch job. Sends a `snapshot`
+        (status + progress so far), then `iteration` frames, then a final
+        `done`. Auth via the `token` query param (WS handshakes can't set
+        headers). Polling GET /api/watch/jobs/{id} is a complete fallback."""
+        if not _auth_disabled():
+            auth = get_auth_manager()
+            if not token or token not in auth._sessions:
+                await websocket.close(code=4401, reason="Unauthorized")
+                return
+            session = auth._sessions[token]
+            if session.expires_at < time.time():
+                await websocket.close(code=4401, reason="Token expired")
+                return
+
+        job = watch_jobs.get(job_id)
+        if not job:
+            await websocket.close(code=4404, reason="No such job")
+            return
+
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "snapshot", "status": job["status"],
+            "progress": list(job.get("progress", [])),
+        })
+        if job["status"] != "running":
+            await websocket.send_json({"type": "done", "job": job})
+            await websocket.close()
+            return
+
+        queue: asyncio.Queue = asyncio.Queue()
+        _watch_subscribers.setdefault(job_id, set()).add(queue)
+        try:
+            while True:
+                msg = await queue.get()
+                await websocket.send_json(msg)
+                if msg.get("type") == "done":
+                    break
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:  # noqa: BLE001 — never let a socket error crash the worker
+            logger.debug("watch stream error for %s: %s", job_id, e)
+        finally:
+            subs = _watch_subscribers.get(job_id)
+            if subs is not None:
+                subs.discard(queue)
+                if not subs:
+                    _watch_subscribers.pop(job_id, None)
             try:
                 await websocket.close()
             except Exception:  # noqa: BLE001
@@ -3314,6 +4078,58 @@ def create_app() -> FastAPI:
             out["unchanged"] = [_row_dict(r) for r in report.unchanged]
         return out
 
+    @app.get("/api/scans/{scan_id}/retest")
+    async def scan_retest(
+        scan_id: str,
+        baseline: str = Query(..., description="baseline scan id"),
+        engagement: Optional[str] = Query(None),
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Remediation-retest posture for a re-scan vs. a baseline scan.
+
+        Returns the remediation rate and the Fixed / Still-open / Reintroduced /
+        Newly-introduced counts plus the bucketed diff — the data behind the
+        client-facing retest report.
+        """
+        try:
+            from heaven.devsecops.diff_finder import compute_diff
+            from heaven.devsecops.retest_report import retest_posture
+        except Exception as e:
+            raise HTTPException(500, f"retest unavailable: {e}")
+        store = _engagement_store_factory(engagement)
+        try:
+            report = compute_diff(store, baseline, scan_id)
+        except ValueError as e:
+            raise HTTPException(
+                400,
+                f"{e}. Both scans must belong to the engagement you're viewing.",
+            )
+        return {"posture": retest_posture(report), "diff": report.to_dict()}
+
+    @app.get("/api/scans/{scan_id}/retest.html", response_class=HTMLResponse)
+    async def scan_retest_html(
+        scan_id: str,
+        baseline: str = Query(..., description="baseline scan id"),
+        engagement: Optional[str] = Query(None),
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Rendered, self-contained HTML remediation-retest report (downloadable)."""
+        try:
+            from heaven.devsecops.diff_finder import compute_diff
+            from heaven.devsecops.retest_report import render_retest_html
+        except Exception as e:
+            raise HTTPException(500, f"retest unavailable: {e}")
+        store = _engagement_store_factory(engagement)
+        try:
+            report = compute_diff(store, baseline, scan_id)
+        except ValueError as e:
+            raise HTTPException(400, f"{e}. Both scans must belong to this engagement.")
+        eng = store.get_engagement()
+        html_text = render_retest_html(
+            report, engagement_name=eng.name if eng else "",
+            baseline_label=baseline[:8], current_label=scan_id[:8])
+        return HTMLResponse(content=html_text)
+
     # ── Ticketing (Jira / Linear) ──
     @app.get("/api/tickets/status")
     async def tickets_status(
@@ -3611,6 +4427,7 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         "cloud_providers": req.cloud_providers,
         "ports": req.ports,
         "stealth_level": stealth_name,
+        "evade": bool(req.evade),
     }
 
     # Engagement store — always open one (defaults to "default" engagement)
@@ -3694,8 +4511,9 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             scan_mode=_mode,
         )
 
-        # Track which findings we've already persisted to avoid duplicates
-        persisted_finding_keys: set[str] = set()
+        # Remembers the size of the raw finding union at the last live reconcile,
+        # so a pure progress heartbeat (no new findings) skips the dedup/prune work.
+        _live_reconcile = {"union_size": -1}
 
         async def progress_update(progress):
             pct = getattr(progress, "progress_pct", None)
@@ -3703,6 +4521,11 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                 # Keep one decimal so the fine-grained, time-based advances the
                 # orchestrator now emits aren't rounded away into visible steps.
                 active_scans[scan_id]["progress_pct"] = round(pct, 1)
+            # Surface the estimated time-to-complete at the top level so the
+            # scans list can render "~2m left" without digging into the nested
+            # progress blob. None until there's enough signal to estimate.
+            _eta = getattr(progress, "eta_seconds", None)
+            active_scans[scan_id]["eta_s"] = round(_eta) if _eta is not None else None
             active_scans[scan_id]["progress"] = progress.to_dict() if hasattr(progress, "to_dict") else {}
             for ws in list(ws_connections):
                 try:
@@ -3710,27 +4533,47 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
                 except Exception:
                     logger.debug("suppressed non-fatal exception", exc_info=True)
 
-            # Flush any new findings to the engagement store in real time
+            # Flush the LIVE finding set to the engagement store in real time.
+            # This mirrors the finalizer (heaven/orchestrator.py :: run()) exactly
+            # — same source keys + dedup_findings + a store reconcile — so the live
+            # count tracks the AUTHORITATIVE deduped + junk-dropped + FP-suppressed
+            # set, not the raw candidate stream. Without this the store just
+            # accumulated every raw candidate a completed task emitted, so the count
+            # ballooned (e.g. 65 → 346) as noisy candidates surfaced and only
+            # collapsed back to the real ~66 when the final prune ran at completion.
+            # By carrying each task's suppressed_findings into the same dedup, a
+            # candidate is dropped the moment its validator emits the matching
+            # false-positive twin — the number converges as verdicts land instead of
+            # snapping down at the very end.
             if store:
                 try:
-                    for tid, res in orch.results.items():
+                    union: list[dict] = []
+                    for res in orch.results.values():
                         if res.state != "completed" or not res.data:
                             continue
                         data = res.data if isinstance(res.data, dict) else {}
-                        # Flush validated findings for a live view only — NOT raw
-                        # "candidates", which are pre-validation and often false
-                        # positives. The authoritative set is reconciled at
-                        # completion, so anything shown early that the final
-                        # dedup/FP-suppression drops is removed again.
-                        for key in ("vulnerabilities", "findings", "validated_findings"):
-                            for f in data.get(key, []):
-                                fkey = f"{f.get('target','')}:{f.get('vuln_type','')}:{f.get('title','')}"
-                                if fkey not in persisted_finding_keys:
-                                    persisted_finding_keys.add(fkey)
-                                    try:
-                                        store.upsert_finding(scan_id, f)
-                                    except Exception:
-                                        logger.debug("suppressed non-fatal exception", exc_info=True)
+                        for key in ("vulnerabilities", "findings", "candidates",
+                                    "validated_findings", "suppressed_findings"):
+                            union.extend(data.get(key, []) or [])
+                    # A pure progress heartbeat (no task completed since the last
+                    # tick) adds no findings — skip the dedup/upsert/prune work.
+                    if len(union) != _live_reconcile["union_size"]:
+                        _live_reconcile["union_size"] = len(union)
+                        live = _dedup_findings(union)
+                        keep_ids: set[str] = set()
+                        for f in live:
+                            try:
+                                keep_ids.add(store.upsert_finding(scan_id, f))
+                            except Exception:
+                                logger.debug("suppressed non-fatal exception", exc_info=True)
+                        # Reconcile the store to the deduped survivors so a candidate
+                        # that a later verdict suppressed is removed live, not just
+                        # at completion.
+                        try:
+                            store.prune_scan_findings(scan_id, keep_ids)
+                        except Exception:
+                            logger.debug("suppressed non-fatal exception pruning live findings",
+                                         exc_info=True)
                     # Live count = real deduped rows in the store, so the scan
                     # list and the engagement view never disagree.
                     active_scans[scan_id]["findings_count"] = store.count_findings(scan_id)

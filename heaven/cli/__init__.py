@@ -12,6 +12,7 @@ the user at the install command — same behaviour as the old main.py.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Optional
 
 from heaven import __banner__, __version__
@@ -128,6 +129,13 @@ if HAS_CLICK:
                 logger.warning("python-dotenv not installed — .env file ignored")
         reload_config()
 
+        # Turn any *native* (C-level) crash into a Python traceback instead of a
+        # silent "quit unexpectedly". Cheap and never imports asyncssh; the
+        # crash-prone UMAC/Nettle SSH MACs are stripped lazily by ssh_safe.connect.
+        with contextlib.suppress(Exception):  # a safety shim must never block the CLI
+            from heaven.utils.ssh_safe import enable_crash_dumps
+            enable_crash_dumps()
+
         # --json implies --quiet so log lines never pollute the JSON on stdout.
         from heaven.cli._helpers import set_json_output
         set_json_output(json_out)
@@ -153,8 +161,9 @@ if HAS_CLICK:
 
     # Wire up every subcommand module
     from heaven.cli import (
+        ai as ai_module,
         assets as assets_module,
-        audit, autonomous, benchmark as benchmark_module, cloud, completion,
+        audit, autonomous, benchmark as benchmark_module, chat as chat_module, cloud, completion,
         config_cmd, coverage, cve as cve_module,
         db, demo as demo_module,
         diff, dns as dns_module, engage, exploitdb, findings, info, init as init_module,
@@ -165,10 +174,12 @@ if HAS_CLICK:
         status as status_module, tickets,
         train, update as update_module, use as use_module, watch,
     )
+    ai_module.register(cli)
     assets_module.register(cli)
     audit.register(cli)
     autonomous.register(cli)
     benchmark_module.register(cli)
+    chat_module.register(cli)
     cloud.register(cli)
     completion.register(cli)
     cve_module.register(cli)

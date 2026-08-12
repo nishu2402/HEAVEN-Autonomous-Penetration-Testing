@@ -118,9 +118,19 @@ export default function Findings() {
     });
   })() : [];
 
-  const renderRow = (f) => (
+  const renderRow = (f) => {
+    const conf = f.confirmation || "Confirmed";
+    return (
     <tr key={f.id} className="animate-in">
       <td><span className={`sev-pill sev-${f.severity}`}>{f.severity}</span></td>
+      <td>
+        <span className={`conf-badge conf-${conf.toLowerCase()}`}
+          title={conf === "Potential"
+            ? "Inferred from a service version banner — not confirmed from the outside. Verify the running version before treating as present."
+            : "Proven by direct observation or active validation."}>
+          {conf}
+        </span>
+      </td>
       <td><code style={{ fontSize: 11 }}>{f.vuln_type}</code></td>
       <td className="ellipsis" title={f.target}>{f.target}</td>
       <td>
@@ -135,7 +145,8 @@ export default function Findings() {
       <td className="dim">{(f.last_seen_at || "").slice(0, 10)}</td>
       <td><Link to={`/findings/${f.id}`} className="btn-small">Detail</Link></td>
     </tr>
-  );
+    );
+  };
 
   const findingsTable = (rows, sortable) => {
     const Head = sortable
@@ -146,6 +157,7 @@ export default function Findings() {
         <thead>
           <tr>
             <Head col="severity">Sev</Head>
+            <th style={{ whiteSpace: "nowrap" }}>Confirm</th>
             <Head col="vuln_type">Type</Head>
             <Head col="target">Target</Head>
             <Head col="confidence">Conf</Head>
@@ -157,7 +169,7 @@ export default function Findings() {
         <tbody>
           {rows.map(renderRow)}
           {rows.length === 0 && (
-            <tr><td colSpan="7">
+            <tr><td colSpan="8">
               <div className="info-state"><div>No findings match the current filters</div></div>
             </td></tr>
           )}

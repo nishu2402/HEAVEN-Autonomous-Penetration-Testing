@@ -110,13 +110,18 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
                                     evidence={"method": "TRACE", "status": r.status,
                                               "canary_echoed": True, "echo": body[:400]},
                                 ))
-                        elif method in ("PUT", "DELETE"):
+                        elif method in ("PUT", "DELETE") and r.status in (200, 201, 204, 207):
+                            # Only a genuine SUCCESS proves the method is honoured.
+                            # A 404/403/401/400 (all < 405) means the request was
+                            # routed but denied / had no target — benign, and the
+                            # old ``r.status < 405`` gate flagged those as
+                            # "dangerous method accepted" (a 404 to DELETE fired).
                             findings.append(_finding(
                                 url, "dangerous_http_method", "high",
                                 f"Dangerous HTTP Method Accepted: {method}",
-                                f"Server returns HTTP {r.status} for {method} at {url}. "
-                                f"This may allow unauthorized file modification or deletion "
-                                f"(WebDAV, REST API misconfiguration).",
+                                f"Server returns HTTP {r.status} (success) for {method} at "
+                                f"{url}. This may allow unauthorized file modification or "
+                                f"deletion (WebDAV, REST API misconfiguration).",
                                 confidence=0.80,
                                 evidence={"method": method, "status": r.status},
                             ))
@@ -448,7 +453,13 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
     except Exception:
         return findings  # can't establish a baseline → can't judge an anomaly
 
-    _REJECT = (400, 501, 505)
+    # A server that answers the ambiguous request with a 4xx/5xx is *rejecting*
+    # it — the correct, hardened behaviour, and NOT a smuggling indicator. Only a
+    # normal (2xx/3xx) answer that also *differs* from the baseline is a weak
+    # signal. The old ``status not in (400,501,505)`` gate let a 406/403/etc.
+    # from a WAF trip the check on nearly every protected site.
+    def _is_normal(code: int) -> bool:
+        return 200 <= code < 400
 
     # CL.TE: send both Content-Length and Transfer-Encoding. RFC 7230 requires CL
     # to be dropped when TE is present; a server that instead answers the
@@ -459,7 +470,7 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
         async with session.post(url, data=body, headers=te_headers,
                                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
             status = resp.status
-            if status not in _REJECT and status != baseline_status:
+            if _is_normal(status) and _is_normal(baseline_status) and status != baseline_status:
                 findings.append(_finding(
                     url, "http_smuggling_indicator", "low",
                     "Possible HTTP Request Smuggling Indicator (CL.TE)",
@@ -470,7 +481,6 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
                     confidence=0.35,
                     evidence={"status": status, "baseline_status": baseline_status,
                               "note": "manual verification required"},
-                    cve="CVE-2019-16278",
                 ))
     except Exception:
         logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -484,7 +494,8 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
         }
         async with session.post(url, headers=obf_headers, data=b"0\r\n\r\n",
                                 timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status not in _REJECT and resp.status != baseline_status:
+            if (_is_normal(resp.status) and _is_normal(baseline_status)
+                    and resp.status != baseline_status):
                 findings.append(_finding(
                     url, "http_smuggling_te_obfuscation", "low",
                     "Possible HTTP Request Smuggling — TE Header Obfuscation",
@@ -728,17 +739,36 @@ async def _fuzz_content_type(session: "aiohttp.ClientSession",
                         "Server processed XML and expanded our test entity. "
                         "External entities may allow reading server files and SSRF.",
                         confidence=0.90,
-                        evidence={"reflected_entity": "heaven_probe"},
+                        evidence={"reflected_entity": "heaven_probe", "status": resp.status},
                     ))
                 else:
-                    findings.append(_finding(
-                        url, "xml_accepted", "low",
-                        "Endpoint Accepts XML Input",
-                        "Server accepted XML Content-Type. Test for XXE injection "
-                        "with external entity pointing to internal resources.",
-                        confidence=0.65,
-                        evidence={"status": resp.status},
-                    ))
+                    # A 200 alone proves nothing — almost every endpoint returns
+                    # 200 to a POST while ignoring the XML body entirely (a static
+                    # homepage did, producing a bogus "XXE" High). Only treat the
+                    # endpoint as an *XML-processing* surface when the response is
+                    # actually XML/SOAP or shows an XML parser error — the only
+                    # signals that the body was parsed at all.
+                    resp_ctype = resp.headers.get("Content-Type", "").lower()
+                    xml_error_sigs = (
+                        "saxparse", "not well-formed", "xml parsing error",
+                        "xmlexception", "org.xml.sax", "premature end of file",
+                        "expected '>'", "<?xml",
+                    )
+                    processes_xml = (
+                        "xml" in resp_ctype or "soap" in resp_ctype
+                        or any(sig in body.lower() for sig in xml_error_sigs)
+                    )
+                    if processes_xml:
+                        findings.append(_finding(
+                            url, "xml_accepted", "low",
+                            "Endpoint Accepts and Parses XML Input",
+                            "Server parses XML request bodies (XML/SOAP response or "
+                            "XML parser error observed). Test for XXE injection with an "
+                            "external entity pointing to internal resources.",
+                            confidence=0.55,
+                            evidence={"status": resp.status,
+                                      "response_content_type": resp_ctype or "unknown"},
+                        ))
     except Exception:
         logger.debug("suppressed non-fatal exception", exc_info=True)
 

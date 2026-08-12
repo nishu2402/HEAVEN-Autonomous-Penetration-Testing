@@ -1,7 +1,16 @@
 """HEAVEN — methodology coverage (single source of truth for CLI / API / UI).
 
-The three methodology docs (``docs/methodology/*.md``) map every OWASP WSTG /
-NIST SP 800-115 / PTES test to the HEAVEN detector module that automates it.
+The docs under ``docs/methodology/*.md`` map every control or test of an
+industry standard to the HEAVEN detector module that provides evidence for it.
+Two families are covered by the exact same machinery:
+
+  • **Pen-test methodologies** — OWASP WSTG, NIST SP 800-115, PTES — mapped
+    per test ID.
+  • **Compliance / control frameworks** — Cyber Essentials (+ Plus),
+    ISO/IEC 27001:2022, PCI DSS v4.0.1, CIS Controls v8.1, NIST CSF 2.0,
+    SOC 2 — mapped per control, with governance/physical controls a remote
+    scanner cannot evidence honestly marked ``(organizational)`` / ``(manual)``.
+
 Historically the web UI just dumped that Markdown, so the page was static — the
 same reference table regardless of what you actually scanned.
 
@@ -36,9 +45,19 @@ DOCS_DIR = Path(__file__).resolve().parent.parent / "docs" / "methodology"
 
 # Human-facing metadata per doc stem (title + short subtitle for the UI selector).
 STANDARD_META: dict[str, dict[str, str]] = {
+    # Pen-test methodologies (per-test-ID coverage).
     "owasp_testing_guide": {"title": "OWASP Testing Guide", "sub": "WSTG v4.2"},
     "nist_800_115": {"title": "NIST SP 800-115", "sub": "Technical assessment"},
     "ptes": {"title": "PTES", "sub": "Execution standard"},
+    # Compliance / control frameworks (per-control coverage — a control lights
+    # up when the HEAVEN detector that provides external evidence for it fired).
+    "cyber_essentials": {"title": "Cyber Essentials", "sub": "NCSC v3.3 · 5 controls"},
+    "cyber_essentials_plus": {"title": "Cyber Essentials Plus", "sub": "NCSC v3.3 · hands-on audit"},
+    "iso_27001": {"title": "ISO/IEC 27001:2022", "sub": "Annex A · Amd 1:2024"},
+    "pci_dss": {"title": "PCI DSS v4.0.1", "sub": "12 requirements"},
+    "cis_controls_v8": {"title": "CIS Controls v8.1", "sub": "18 safeguards"},
+    "nist_csf": {"title": "NIST CSF 2.0", "sub": "6 functions"},
+    "soc2": {"title": "SOC 2", "sub": "TSC 2017 (rev. 2022)"},
 }
 
 # ── Finding → detector module token ──────────────────────────────────────────
@@ -122,14 +141,97 @@ VULN_MODULE: dict[str, tuple[str, ...]] = {
     "subdomain_takeover": ("dns_recon",),
     # Anomaly
     "format_string": ("anomaly_probe",),
+    # ── Vulnerability & patch management (CVE / EOL / dependencies) ───────────
+    # These light the "security update management" / "vulnerability management"
+    # controls the compliance frameworks (Cyber Essentials, ISO 27001 A.8.8,
+    # PCI 6/11, CIS 7) hinge on. Every slug here is emitted by a real scanner.
+    "vulnerable_service": ("cve_mapper",),
+    "potential_vulnerable_service": ("cve_mapper",),
+    "nuclei": ("cve_mapper",),
+    "unsupported_software": ("eol_scanner",),
+    "vulnerable_dependency": ("sca_scanner",),
+    # ── Network boundary / exposed services (firewalls & segmentation) ───────
+    "telnet": ("network_exposure",),
+    "cleartext_service": ("network_exposure",),
+    "database_exposed": ("network_exposure",),
+    "ipmi_exposed": ("network_exposure",),
+    "snmp_exposed": ("network_exposure",),
+    "snmp_default_community": ("network_exposure",),
+    "snmp_amplification": ("network_exposure",),
+    "ssh_hardening": ("network_exposure",),
+    # ── Content & config exposure (secure configuration) ─────────────────────
+    "sensitive_file": ("dir_fuzzer", "exposure_scanner"),
+    "exposed_secret": ("dir_fuzzer", "exposure_scanner"),
+    "security_headers": ("web_crawler",),
+    # ── Broken access control (authorization) ────────────────────────────────
+    "broken_access_control": ("access_control", "idor_scanner"),
+    "bola": ("access_control", "api_scanner"),
+    "mass_assignment": ("access_control", "api_scanner"),
+    "race_condition": ("access_control",),
+    # ── Injection aliases the scanners actually emit ─────────────────────────
+    "sqli_confirmed": ("injection_scanner",),
+    "lfi": ("injection_scanner", "safe_validator"),
+    "rfi": ("injection_scanner", "safe_validator"),
+    "cors": ("advanced_attacks",),
+    # ── API security ─────────────────────────────────────────────────────────
+    "api_actuator_exposed": ("api_scanner",),
+    "api_broken_auth": ("api_scanner",),
+    "api_key_leakage": ("api_scanner",),
+    "graphql_batching": ("api_scanner",),
+    "graphql_complexity": ("api_scanner",),
+    # ── CMS ──────────────────────────────────────────────────────────────────
+    "wordpress_version_disclosure": ("cms_scanner",),
+    "wordpress_user_enumeration": ("cms_scanner",),
+    # ── Cloud / container / k8s (secure configuration of cloud estate) ───────
+    "docker_api_exposed": ("container_scanner",),
+    "cadvisor_exposed": ("container_scanner",),
+    "etcd_exposed": ("container_scanner",),
+    "kubelet_exposed": ("container_scanner",),
+    "registry_exposed": ("container_scanner",),
+    "privileged_container": ("container_scanner",),
+    "dangerous_mount": ("container_scanner",),
+    "k8s_secrets_exposed": ("container_scanner",),
+    "azure_ad_tenant_exposed": ("azure_tenant",),
+    "adfs_idp_signon_enabled": ("azure_tenant",),
+    "federation_sts_exposed": ("azure_tenant",),
+    # ── Email / DNS hardening ────────────────────────────────────────────────
+    "smtp_open_relay": ("dns_recon",),
+    "mta_sts_missing": ("dns_recon",),
+    "spf_analysis": ("dns_recon",),
+    "dmarc_analysis": ("dns_recon",),
+    "mx_enumeration": ("dns_recon",),
+    # ── Wireless management-plane exposure ───────────────────────────────────
+    "wireless_mgmt_exposed": ("wireless_posture",),
+    "wireless_mgmt_unauthenticated": ("wireless_posture",),
 }
+
+# Open-ended finding families whose exact slug is generated at runtime (e.g.
+# SAST emits ``sast_<rule>``), so a fixed dict can't enumerate them. Matched by
+# prefix only after an exact ``VULN_MODULE`` lookup misses — each maps to a
+# single real detector, so there is no over-claim.
+_PREFIX_MODULE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("sast_", ("sast_runner",)),
+    ("wordpress_", ("cms_scanner",)),
+    ("graphql_", ("api_scanner",)),
+    ("api_", ("api_scanner",)),
+    ("snmp", ("network_exposure",)),
+    ("ics_", ("iot_scanner",)),
+    ("iot_", ("iot_scanner",)),
+)
 
 
 def modules_for_vuln(vuln_type: str) -> tuple[str, ...]:
     """Detector module token(s) that produce a given finding vuln_type."""
     if not vuln_type:
         return ()
-    return VULN_MODULE.get(vuln_type.strip().lower(), ())
+    vt = vuln_type.strip().lower()
+    exact = VULN_MODULE.get(vt)
+    if exact:
+        return exact
+    for prefix, toks in _PREFIX_MODULE:
+        if vt.startswith(prefix):
+            return toks
+    return ()
 
 
 # ── Doc parsing ──────────────────────────────────────────────────────────────
@@ -296,8 +398,13 @@ def load_standards(docs_dir: Optional[Path] = None) -> list[dict[str, Any]]:
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
-    # Stable, meaningful order: OWASP, NIST, PTES, then anything else.
-    order = {"owasp_testing_guide": 0, "nist_800_115": 1, "ptes": 2}
+    # Stable, meaningful order: the three pen-test methodologies first, then the
+    # compliance/control frameworks, then anything else alphabetically.
+    order = {
+        "owasp_testing_guide": 0, "nist_800_115": 1, "ptes": 2,
+        "cyber_essentials": 3, "cyber_essentials_plus": 4, "iso_27001": 5,
+        "pci_dss": 6, "cis_controls_v8": 7, "nist_csf": 8, "soc2": 9,
+    }
     out.sort(key=lambda s: (order.get(s["name"], 99), s["name"]))
     return out
 

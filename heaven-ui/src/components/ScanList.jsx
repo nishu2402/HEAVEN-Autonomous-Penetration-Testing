@@ -58,6 +58,20 @@ function fmtDuration(s, now) {
   return `${sec}s`;
 }
 
+// Human "time left" from a seconds estimate the backend supplies. Null until the
+// backend has enough signal to estimate honestly (early in a scan), so we simply
+// render nothing rather than a fabricated countdown.
+function fmtEta(sec) {
+  if (sec == null || !Number.isFinite(sec)) return null;
+  const s = Math.max(0, Math.round(sec));
+  if (s < 5) return "almost done";
+  if (s < 90) return `~${s}s left`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `~${m}m left`;
+  const h = Math.floor(m / 60);
+  return `~${h}h ${m % 60}m left`;
+}
+
 // Targets a scan ran against (only present for in-session scans via their config).
 function scanTargets(s) {
   const c = s.config || {};
@@ -266,7 +280,10 @@ export default function ScanList({
                           ? <div className="progress-fill" style={{ width: "40%" }} />
                           : <ProgressFill target={progress} />}
                       </div>
-                      {progress !== null && <span className="scan-progress-pct">{Math.round(progress)}%</span>}
+                      <div className="scan-progress-meta">
+                        {progress !== null && <span className="scan-progress-pct">{Math.round(progress)}%</span>}
+                        {fmtEta(s.eta_s) && <span className="scan-progress-eta">{fmtEta(s.eta_s)}</span>}
+                      </div>
                     </div>
                   ) : (
                     <span className={"scan-findings-chip" + (fc > 0 ? " has-findings" : "")}>

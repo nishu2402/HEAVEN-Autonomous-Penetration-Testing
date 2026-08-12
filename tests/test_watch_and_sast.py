@@ -80,6 +80,128 @@ class TestWatchIterationDTO:
         assert s.total_alerts == 2
         assert s.total_tickets == 3
 
+    def test_iteration_to_dict_shape(self):
+        from heaven.utils.watcher import WatchIteration
+        it = WatchIteration(
+            n=2, started_at=1.0, new=1, regressed=0, baseline=False,
+            scan_id="abcdef1234", findings_total=7,
+            changes=[{"kind": "new", "severity": "high", "vuln_type": "xss",
+                      "target": "h", "title": "XSS"}],
+        )
+        d = it.to_dict()
+        assert d["n"] == 2 and d["new"] == 1 and d["changed"] is True
+        assert d["changes"][0]["kind"] == "new"
+        # Every field the UI/API reads must be present.
+        for key in ("scan_id", "resolved", "alert_dispatched", "baseline",
+                    "findings_total", "error"):
+            assert key in d
+
+    def test_summary_to_dict_counts_changes(self):
+        from heaven.utils.watcher import WatchSummary, WatchIteration
+        s = WatchSummary()
+        s.iterations.append(WatchIteration(n=0, started_at=0, baseline=True))
+        s.iterations.append(WatchIteration(n=1, started_at=1, new=2))   # changed
+        s.iterations.append(WatchIteration(n=2, started_at=2))          # unchanged
+        d = s.to_dict()
+        assert d["changes_detected"] == 1
+        assert d["last_iteration"]["n"] == 2
+
+
+# A tiny stand-in for diff_finder's DiffReport so the alerting hooks can be
+# exercised without running a real scan.
+class _Row:
+    def __init__(self, severity="medium", vuln_type="vt", title="T", target="h"):
+        self.id = "x"
+        self.severity = severity
+        self.vuln_type = vuln_type
+        self.title = title
+        self.target = target
+        self.confidence = 0.5
+
+
+class _Diff:
+    def __init__(self, new=None, regressed=None, resolved=None):
+        self.new = new or []
+        self.regressed = regressed or []
+        self.resolved = resolved or []
+
+    @property
+    def critical_new(self):
+        return sum(1 for r in self.new if r.severity == "critical")
+
+    @property
+    def regressed_critical_or_high(self):
+        return sum(1 for r in self.regressed if r.severity in ("critical", "high"))
+
+
+class TestSummarizeChanges:
+    def test_caps_and_labels(self):
+        from heaven.utils.watcher import _summarize_changes
+        diff = _Diff(new=[_Row(severity="high") for _ in range(10)],
+                     regressed=[_Row(severity="critical")])
+        out = _summarize_changes(diff, cap=5)
+        assert len(out) == 5                      # cap honoured
+        assert all(c["kind"] in ("new", "regressed") for c in out)
+
+    def test_includes_both_kinds_when_room(self):
+        from heaven.utils.watcher import _summarize_changes
+        out = _summarize_changes(_Diff(new=[_Row()], regressed=[_Row(severity="critical")]))
+        assert {c["kind"] for c in out} == {"new", "regressed"}
+
+
+class TestWatchAlerting:
+    """The core bug this feature had: a *change* that was only medium/low never
+    actually pinged the webhook (send_alert_async short-circuits on 0 crit/high),
+    and --heartbeat never sent at all. These prove the watch path now sends."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_alerts_sends_on_medium_only_change(self, monkeypatch):
+        from heaven.utils import watcher
+        from heaven.devsecops import alerting
+        posted: list[dict] = []
+
+        async def fake_post(self, payload):
+            posted.append(payload)
+            return True
+
+        monkeypatch.setenv("WEBHOOK_URL", "https://hooks.example/test")
+        monkeypatch.setattr(alerting.WebhookAlerter, "_post_async", fake_post)
+
+        diff = _Diff(new=[_Row(severity="medium")])
+        it = watcher.WatchIteration(n=1, started_at=0.0, new=1,
+                                    findings_total=5, scan_id="abcdef12")
+        cfg = watcher.WatchConfig(targets={}, engagement_name="eng")
+        ok = await watcher._dispatch_alerts(diff, it, cfg, heartbeat=False)
+        assert ok is True
+        assert posted, "webhook MUST POST for a medium-only change"
+        body = posted[0]["text"]
+        assert "New: 1" in body and "eng" in body
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_first_run_sends(self, monkeypatch):
+        from heaven.utils import watcher
+        from heaven.devsecops import alerting
+        posted: list[dict] = []
+
+        async def fake_post(self, payload):
+            posted.append(payload)
+            return True
+
+        monkeypatch.setenv("WEBHOOK_URL", "https://hooks.example/test")
+        monkeypatch.setattr(alerting.WebhookAlerter, "_post_async", fake_post)
+
+        cfg = watcher.WatchConfig(targets={}, engagement_name="eng")
+        ok = await watcher._heartbeat(cfg)
+        assert ok is True and posted
+        assert "started" in posted[0]["text"].lower()
+
+    @pytest.mark.asyncio
+    async def test_watch_alert_no_webhook_returns_false(self, monkeypatch):
+        monkeypatch.delenv("WEBHOOK_URL", raising=False)
+        from heaven.devsecops.alerting import WebhookAlerter
+        w = WebhookAlerter()
+        assert await w.send_watch_alert_async({"new": 1}) is False
+
 
 # ═══════════════════════════════════════════
 # SAST — result normaliser

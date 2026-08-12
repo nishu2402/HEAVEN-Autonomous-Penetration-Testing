@@ -812,6 +812,34 @@ _KB: dict[str, dict[str, Any]] = {
             "https://owasp.org/www-community/vulnerabilities/Deserialization_of_untrusted_data",
         ],
     },
+    "xml_input_accepted": {
+        "title": "XML Input Accepted (XXE Attack Surface)",
+        "cwe": "CWE-611",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 3.7,
+        "description": (
+            "The endpoint parses XML request bodies (an XML/SOAP response or an "
+            "XML parser error was observed). This is attack surface, not a "
+            "confirmed XXE — the test entity was NOT expanded. It should be "
+            "manually tested for external-entity resolution."
+        ),
+        "impact": (
+            "None on its own. Marks where to test for XXE (local file disclosure, "
+            "SSRF, DoS) if external entities turn out to be resolved."
+        ),
+        "remediation": (
+            "1. Disable DTDs and external entity resolution in the XML parser "
+            "(Python: defusedxml; Java: disallow-doctype-decl).\n"
+            "2. Prefer JSON where XML isn't required.\n"
+            "3. Manually verify whether external entities resolve before treating "
+            "this as a confirmed XXE."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html",
+            "https://cwe.mitre.org/data/definitions/611.html",
+        ],
+    },
     "xxe": {
         "title": "XML External Entity (XXE) Injection",
         "cwe": "CWE-611",
@@ -1903,6 +1931,44 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://attack.mitre.org/techniques/T1040/"],
     },
+    "perimeter_defense": {
+        "title": "Perimeter Defense Detected (Firewall / IDS-IPS)",
+        # Not a weakness — a firewall/IPS is good posture. This is an
+        # informational assessment observation, so it carries no CWE/OWASP
+        # bucket; it explains why results on the affected host may be limited and
+        # records the evasion HEAVEN used to still enumerate through it.
+        "cwe": "",
+        "owasp": "",
+        "mitre": "T1046 — Network Service Discovery (perimeter-impeded)",
+        "typical_cvss": 0.0,
+        "description": (
+            "A packet-filtering firewall, an active IDS/IPS, or a tarpit was "
+            "detected in front of this host: probes to most ports were silently "
+            "dropped (filtered) rather than refused, or connections were rate-"
+            "blocked mid-scan. This is expected on hardened / internal targets and "
+            "is not itself a vulnerability."
+        ),
+        "impact": "Scan visibility on this host is reduced — services hidden behind "
+                  "the filter may not appear in a naive scan, which is how a "
+                  "genuinely-vulnerable host can look empty.",
+        "remediation": (
+            "For the assessment (not a defect to fix on the target):\n"
+            "1. Re-run with evasion — `heaven scan --evade` (or `--stealth stealth "
+            "/ paranoid`) fragments and pads probes and sources them from a trusted "
+            "port. HEAVEN already auto-runs a bounded evasion re-probe of the "
+            "high-value ports on a filtered host.\n"
+            "2. Scan from an in-scope network segment closer to the target, inside "
+            "the firewall boundary where possible.\n"
+            "3. Coordinate a tester-IP allowlist with the firewall/IPS owner so the "
+            "assessment sees the true service exposure.\n"
+            "4. Confirm the intended allowed ports against the firewall policy — an "
+            "unexpectedly-open port through the filter is itself worth reporting."
+        ),
+        "references": [
+            "https://nmap.org/book/man-bypass-firewalls-ids.html",
+            "https://attack.mitre.org/techniques/T1046/",
+        ],
+    },
     "snmp_exposed": {
         "title": "SNMP Service Exposed",
         "cwe": "CWE-200",
@@ -2313,8 +2379,11 @@ _ALIASES: dict[str, str] = {
     "no_rate_limiting": "no_rate_limit",
     "rate_limit": "no_rate_limit",
     "api_no_rate_limit": "no_rate_limit",
-    "xml_accepted": "xxe",
-    "xml_input_accepted": "xxe",
+    # Merely accepting/parsing XML is an XXE *surface indicator*, NOT a confirmed
+    # XXE — it must keep its own low-severity class so reconcile_severity can't
+    # inflate a "low" surface note into the High XXE class. Only the *confirmed*
+    # entity-expansion spellings map to the real xxe class (below).
+    "xml_accepted": "xml_input_accepted",
     # DNS / email authentication posture
     "spf_analysis": "spf_missing",
     "spf_weak": "spf_missing",
@@ -2348,6 +2417,12 @@ _ALIASES: dict[str, str] = {
     "known_vulnerable_version": "vulnerable_component",
     "outdated_component": "vulnerable_component",
     "vulnerable_dependency": "vulnerable_component",
+    # Version-undetermined service: the banner named a product but not its exact
+    # version, so CVE applicability is UNVERIFIED. Same weakness class as a
+    # confirmed vulnerable component for taxonomy, but the finding itself carries
+    # low severity + "potential" naming so reconcile_severity keeps it in the low
+    # band and it never inflates the confirmed Critical/High count.
+    "potential_vulnerable_service": "vulnerable_component",
     "graphql_batching": "graphql_dos",
     "graphql_complexity": "graphql_dos",
     "graphql_alias_overloading": "graphql_dos",
@@ -2448,7 +2523,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "sql_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "rce": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "command_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-    "ssti": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "ssti": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "ssrf": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
     "ssrf_cloud_metadata": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
     "exposed_storage_bucket": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
@@ -2459,7 +2534,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "auth_bypass": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "default_credentials": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "exposed_database": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
-    "file_inclusion": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "file_inclusion": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "path_traversal": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "nosql_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
     "ldap_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
@@ -2474,7 +2549,9 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "websocket_hijacking": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N",
     "websocket_cleartext": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:L/A:N",
     "insecure_deserialization": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
-    "xxe": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:L",
+    "xxe": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:L",
+    # Surface indicator only — low band, so it never renders as a High XXE.
+    "xml_input_accepted": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "open_redirect": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "cors_misconfig": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N",
     "insecure_cookie": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N",
@@ -2483,55 +2560,55 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "jwt_none_algorithm": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "crlf_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
     "request_smuggling": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:N",
-    "subdomain_takeover": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "subdomain_takeover": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:L/A:N",
     "docker_socket_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-    "exposed_rdp": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "exposed_rdp": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:H",
     "weak_tls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "certificate_issue": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
-    "no_forward_secrecy": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
-    "missing_security_headers": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
-    "csp_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
-    "clickjacking": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "no_forward_secrecy": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:L",
+    "missing_security_headers": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
+    "csp_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "clickjacking": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N",
     "hsts_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "x_content_type_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
     "referrer_policy_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
     "permissions_policy_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
-    "dangerous_http_method": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:L",
-    "version_disclosure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "dangerous_http_method": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:L",
+    "version_disclosure": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "info_disclosure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
-    "verbose_errors": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "verbose_errors": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "no_rate_limit": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
-    "spf_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N",
-    "dmarc_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N",
+    "spf_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:N/I:H/A:N",
+    "dmarc_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:N/I:H/A:N",
     "dkim_missing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
     "dnssec_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
-    "csp_unsafe_inline": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "csp_unsafe_inline": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N",
     "oauth_pkce_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N",
-    "sensitive_file_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "sensitive_file_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "directory_listing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
-    "mass_assignment": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    "mass_assignment": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N",
     "race_condition": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
-    "vulnerable_component": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "vulnerable_component": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "graphql_introspection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
-    "graphql_dos": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+    "graphql_dos": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
     "secret_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",  # nosec B105
     "smtp_no_starttls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "ssh_hardening": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
-    "container_escape_risk": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
-    "k8s_misconfiguration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:L",
+    "container_escape_risk": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:H",
+    "k8s_misconfiguration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:L",
     "k8s_secrets_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
     "privilege_escalation": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H",
     "csrf": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:H/A:N",
     "session_fixation": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N",
-    "weak_session_management": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "weak_session_management": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
     "host_header_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
-    "http_parameter_pollution": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "http_parameter_pollution": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
     "web_cache_poisoning": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:N",
     "web_cache_deception": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N",
     "open_mail_relay": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
     "mta_sts_missing": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
-    "weak_password_policy": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
-    "missing_account_lockout": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "weak_password_policy": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+    "missing_account_lockout": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
     "dns_zone_transfer": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "cleartext_service": "CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
     "snmp_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
@@ -2545,12 +2622,12 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "admin_panel_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
     "xmlrpc_enabled": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
     "wordpress_user_enumeration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
-    "unsupported_software": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
+    "unsupported_software": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:H",
     "api_docs_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "api_actuator_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "api_broken_auth": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
-    "wireless_mgmt_exposed": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L",
-    "wireless_mgmt_unauthenticated": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "wireless_mgmt_exposed": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N",
+    "wireless_mgmt_unauthenticated": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:N/I:N/A:H",
     "anonymous_ldap_enumeration": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "azure_ad_tenant_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "adfs_idp_signon_enabled": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",

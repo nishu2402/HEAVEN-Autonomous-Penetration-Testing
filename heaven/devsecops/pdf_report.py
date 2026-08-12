@@ -32,6 +32,7 @@ from typing import Any, Optional
 from xml.sax.saxutils import escape as _xml_escape  # nosec B406 -- escape() is OUTPUT encoding (a security control), not XML parsing
 
 from heaven.devsecops.compliance_report import SEVERITY_META, ComplianceReportGenerator
+from heaven.utils.cvss import is_confirmed_finding as _is_confirmed
 from heaven.utils.logger import get_logger
 
 logger = get_logger("devsecops.pdf")
@@ -97,6 +98,12 @@ def _logo_drawing(size_pt: float = 46.0):
 def _sev_of(f: dict) -> str:
     s = (f.get("severity") or "info").lower()
     return s if s in SEVERITY_META else "info"
+
+
+def _conf_of(f: dict) -> str:
+    """Confirmation status — 'Confirmed' (proven) or 'Potential' (inferred from a
+    version banner / heuristic). Single source of truth in heaven.utils.cvss."""
+    return "Confirmed" if _is_confirmed(f) else "Potential"
 
 
 def _esc(value: Any) -> str:
@@ -181,10 +188,19 @@ class PDFReportGenerator:
 
         eng = self._engagement(data)
         findings = self._findings(data)
+        # Full severity breakdown plus a confirmed-only tally. Overall Risk is
+        # driven by confirmed findings so unauthenticated, version-based
+        # "potential" matches never inflate the headline (they still appear).
         counts = {k: 0 for k in SEVERITY_META}
+        confirmed_counts = {k: 0 for k in SEVERITY_META}
         for f in findings:
-            counts[_sev_of(f)] += 1
-        overall = self._overall(counts)
+            sev = _sev_of(f)
+            counts[sev] += 1
+            if _is_confirmed(f):
+                confirmed_counts[sev] += 1
+        confirmed_total = sum(confirmed_counts.values())
+        potential_total = len(findings) - confirmed_total
+        overall = self._overall(confirmed_counts)
         scope = data.get("scope") or sorted({str(f.get("target")) for f in findings if f.get("target")})
         from heaven.devsecops.inventory import inventory_totals, normalize_assets
         inventory = normalize_assets(data.get("assets"))
@@ -300,6 +316,9 @@ class PDFReportGenerator:
         meta = [
             ["Findings", f"{len(findings)}  ({counts['critical']} critical, {counts['high']} high, "
                          f"{counts['medium']} medium, {counts['low']} low)"],
+            ["Confirmed vs potential",
+             f"{confirmed_total} confirmed"
+             + (f", {potential_total} potential (unverified)" if potential_total else "")],
             ["Targets in scope", str(len(scope))],
             ["Report date", gen_date],
             ["Version", version],
@@ -362,8 +381,10 @@ class PDFReportGenerator:
 
         # ── 5. Executive Summary ──
         story.append(heading("1.", "Executive Summary"))
-        story.append(Paragraph(self._posture(eng, counts, len(findings), overall, len(scope)),
-                               styles["body"]))
+        story.append(Paragraph(
+            self._posture(eng, counts, len(findings), overall, len(scope),
+                          confirmed_counts, potential_total),
+            styles["body"]))
         # KPI row
         kpi_cells = []
         for sev in ("critical", "high", "medium", "low", "info"):
@@ -383,18 +404,26 @@ class PDFReportGenerator:
         # Severity distribution bar
         story.append(Paragraph("Severity Distribution", styles["h3"]))
         story.append(self._sev_bar(findings, counts, cw, styles))
+        # Confirmed vs potential note
+        story.append(Paragraph(
+            f"Of these, <b>{confirmed_total}</b> finding(s) are <b>Confirmed</b> (proven by direct "
+            f"observation or active validation) and <b>{potential_total}</b> are <b>Potential</b> "
+            "(inferred from a service version banner and not confirmed from the outside — vendors "
+            "routinely backport fixes without bumping the banner). The Overall Risk rating counts "
+            "confirmed findings only.", styles["small"]))
         # Key findings
         story.append(Paragraph("Key Findings", styles["h3"]))
-        kf = [[Paragraph("Severity", styles["th"]), Paragraph("Finding", styles["th"]),
-               Paragraph("Target", styles["th"])]]
+        kf = [[Paragraph("Severity", styles["th"]), Paragraph("Confirmation", styles["th"]),
+               Paragraph("Finding", styles["th"]), Paragraph("Target", styles["th"])]]
         for f in findings[:5]:
             kf.append([pill(_sev_of(f)),
+                       Paragraph(_esc(_conf_of(f)), styles["small"]),
                        Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
                        Paragraph(_esc(f.get("target") or "—"), styles["small"])])
         if len(kf) == 1:
-            kf.append([Paragraph("—", styles["cell"]), Paragraph("No findings.", styles["cell"]),
-                       Paragraph("", styles["cell"])])
-        story.append(table(kf, [30 * mm, cw - 90 * mm, 60 * mm]))
+            kf.append([Paragraph("—", styles["cell"]), Paragraph("—", styles["cell"]),
+                       Paragraph("No findings.", styles["cell"]), Paragraph("", styles["cell"])])
+        story.append(table(kf, [24 * mm, 24 * mm, cw - 108 * mm, 60 * mm]))
         story.append(PageBreak())
 
         # ── 6. Scope & Methodology ──
@@ -435,10 +464,31 @@ class PDFReportGenerator:
                 f"<b>{inv_totals['distinct_services']}</b> distinct service(s). Ports, service "
                 "versions and operating systems are reported exactly as observed by the scanner. "
                 "An OS marked <i>(heuristic — unconfirmed)</i> was inferred from a TTL value, not a "
-                "full stack fingerprint, and should be treated as indicative only.", styles["body"]))
+                "full stack fingerprint, and should be treated as indicative only. Where observed, "
+                "a host's device name, device type and MAC address are shown; a MAC address appears "
+                "only for a host on the same local segment scanned with sufficient privileges.",
+                styles["body"]))
+            from heaven.devsecops.inventory import (
+                device_name_label as _dn_label,
+            )
+            from heaven.devsecops.inventory import (
+                device_type_label as _dt_label,
+            )
+            from heaven.devsecops.inventory import (
+                mac_label as _m_label,
+            )
             for h in inventory:
                 os_txt = h.get("os_label") or "OS not determined"
                 story.append(Paragraph(f'{_esc(h.get("host"))} — {_esc(os_txt)}', styles["h3"]))
+                meta_bits = []
+                if _dn_label(h):
+                    meta_bits.append(f"Device: {_dn_label(h)}")
+                if _dt_label(h):
+                    meta_bits.append(f"Type: {_dt_label(h)}")
+                if _m_label(h):
+                    meta_bits.append(f"MAC: {_m_label(h)}")
+                if meta_bits:
+                    story.append(Paragraph(_esc(" · ".join(meta_bits)), styles["small"]))
                 ports = h.get("ports") or []
                 if not ports:
                     story.append(Paragraph("No open ports observed.", styles["small"]))
@@ -512,17 +562,18 @@ class PDFReportGenerator:
         story.append(heading("4.", "Findings Summary"))
         if findings:
             fs = [[Paragraph(h, styles["th"]) for h in
-                   ("#", "Finding", "Severity", "CVSS", "Ctx", "Target", "Status")]]
+                   ("#", "Finding", "Severity", "Confirmation", "CVSS", "Ctx", "Target")]]
             for i, f in enumerate(findings, 1):
                 cvss = _OWASP._finding_cvss(f)
                 ctx = _OWASP._finding_contextual_cvss(f)
                 fs.append([Paragraph(str(i), styles["cell"]),
                            Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
-                           pill(_sev_of(f)), Paragraph(_esc(cvss), styles["small"]),
+                           pill(_sev_of(f)),
+                           Paragraph(_esc(_conf_of(f)), styles["small"]),
+                           Paragraph(_esc(cvss), styles["small"]),
                            Paragraph(_esc(ctx), styles["small"]),
-                           Paragraph(_esc(f.get("target") or "—"), styles["small"]),
-                           Paragraph(_esc((f.get("status") or "open").title()), styles["small"])])
-            story.append(table(fs, [9 * mm, cw - 135 * mm, 26 * mm, 14 * mm, 16 * mm, 50 * mm, 20 * mm]))
+                           Paragraph(_esc(f.get("target") or "—"), styles["small"])])
+            story.append(table(fs, [9 * mm, cw - 137 * mm, 24 * mm, 24 * mm, 12 * mm, 12 * mm, 56 * mm]))
         else:
             story.append(Paragraph("No findings recorded.", styles["small"]))
         story.append(PageBreak())
@@ -675,18 +726,26 @@ class PDFReportGenerator:
         return "#1f6feb"
 
     @staticmethod
-    def _posture(eng, counts, total, overall, scope_n) -> str:
-        crit, high = counts["critical"], counts["high"]
+    def _posture(eng, counts, total, overall, scope_n,
+                 confirmed_counts=None, potential_total=0) -> str:
+        # Posture is driven by *confirmed* findings so a version-based match that
+        # can't be proven from the outside never drives the headline.
+        cc = confirmed_counts if confirmed_counts is not None else counts
+        crit, high = cc["critical"], cc["high"]
         if crit or high:
-            tail = (f"The assessment identified <b>{crit} critical</b> and <b>{high} high</b>-severity "
+            tail = (f"The assessment confirmed <b>{crit} critical</b> and <b>{high} high</b>-severity "
                     "issues that require prompt remediation; exploitation could lead to unauthorised "
                     "access, data exposure, or full system compromise.")
-        elif counts["medium"]:
-            tail = ("No critical or high-severity issues were identified. The medium-severity findings "
-                    "should be remediated to reduce residual risk.")
+        elif cc["medium"]:
+            tail = ("No confirmed critical or high-severity issues were identified. The medium-severity "
+                    "findings should be remediated to reduce residual risk.")
         else:
-            tail = ("No significant vulnerabilities were identified; the environment demonstrated a "
-                    "strong security posture.")
+            tail = ("No confirmed high-impact vulnerabilities were identified; the environment "
+                    "demonstrated a strong security posture.")
+        if potential_total:
+            tail += (f" A further <b>{potential_total}</b> potential finding(s) — inferred from "
+                     "service version banners and not confirmed from the outside — are listed "
+                     "separately; verify the running versions before treating them as present.")
         return (f"This report presents the results of a penetration test of <b>{_esc(eng)}</b>, "
                 f"covering <b>{scope_n}</b> in-scope target(s). A total of <b>{total}</b> finding(s) "
                 f"were identified, yielding an overall risk rating of <b>{_esc(overall)}</b>. {tail}")
@@ -741,6 +800,7 @@ class PDFReportGenerator:
 
         meta_pairs = [
             ("Target", f.get("target") or "—"), ("Severity", m["label"]),
+            ("Confirmation", _conf_of(f)),
             ("CVSS base (class)", cvss),
             ("Contextual CVSS (temporal+environmental)", contextual),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),

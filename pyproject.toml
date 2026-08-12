@@ -123,8 +123,9 @@ dev = [
     # pypdf backs the PDF-report regression test (tests/test_integrations.py),
     # which reads the generated PDF back to assert its sections are present.
     # TEST-ONLY: no runtime code imports pypdf (reportlab does the writing), so it
-    # belongs here, not in requirements.txt. Floor pinned for GHSA-jm82-fx9c-mx94.
-    "pypdf>=6.13.3",
+    # belongs here, not in requirements.txt. Floor pinned past the parser-DoS
+    # advisories CVE-2026-71852 / CVE-2026-71870 (fixed 6.15.0), GHSA-jm82-fx9c-mx94.
+    "pypdf>=6.15.0",
 ]
 # Heavyweight cloud-provider SDKs (opt-in). Each extra carries both the resource
 # SDKs (compute/storage recon) and the identity/IAM SDKs the authenticated

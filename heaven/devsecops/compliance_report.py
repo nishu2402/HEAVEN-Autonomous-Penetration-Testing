@@ -33,8 +33,12 @@ from typing import Any, Optional
 from heaven.devsecops import frameworks as _fw
 from heaven.devsecops.dns_inventory import dns_totals as _dns_totals
 from heaven.devsecops.dns_inventory import normalize_dns as _normalize_dns
+from heaven.devsecops.inventory import device_name_label as _device_name_label
+from heaven.devsecops.inventory import device_type_label as _device_type_label
 from heaven.devsecops.inventory import inventory_totals as _inventory_totals
+from heaven.devsecops.inventory import mac_label as _mac_label
 from heaven.devsecops.inventory import normalize_assets as _normalize_assets
+from heaven.utils.cvss import is_confirmed_finding as _is_confirmed
 
 # Severity → presentation. Colours are chosen to print cleanly on white paper.
 SEVERITY_META: dict[str, dict[str, Any]] = {
@@ -85,6 +89,24 @@ def _esc(value: Any) -> str:
 def _sev_of(f: dict) -> str:
     s = (f.get("severity") or "info").lower()
     return s if s in SEVERITY_META else "info"
+
+
+def _conf_of(f: dict) -> str:
+    """Confirmation status label for a finding — 'Confirmed' or 'Potential'.
+
+    Confirmed = proven by direct observation / active validation; Potential =
+    inferred from a version banner or a heuristic indicator (never suppressed,
+    but excluded from the confirmed-risk headline). Single source of truth in
+    ``heaven.utils.cvss``.
+    """
+    return "Confirmed" if _is_confirmed(f) else "Potential"
+
+
+def _conf_pill(f: dict) -> str:
+    """A small coloured pill for a finding's confirmation status."""
+    label = _conf_of(f)
+    cls = "conf-confirmed" if label == "Confirmed" else "conf-potential"
+    return f'<span class="confpill {cls}">{label}</span>'
 
 
 def _wrap_tables(body: str) -> str:
@@ -238,11 +260,22 @@ class ComplianceReportGenerator:
             self.SEV_ORDER.get(_sev_of(f), 4),
             -float(f.get("risk_score") or 0),
         ))
+        # Two tallies: the full severity breakdown (every finding) and the
+        # *confirmed-only* breakdown. Overall Risk is driven by confirmed
+        # findings so that unauthenticated, version-based "potential" matches
+        # (which can't be proven from the outside) never inflate the headline —
+        # yet every potential finding still appears in full below.
         counts = {k: 0 for k in SEVERITY_META}
+        confirmed_counts = {k: 0 for k in SEVERITY_META}
         for f in findings:
-            counts[_sev_of(f)] += 1
+            sev = _sev_of(f)
+            counts[sev] += 1
+            if _is_confirmed(f):
+                confirmed_counts[sev] += 1
+        confirmed_total = sum(confirmed_counts.values())
+        potential_total = len(findings) - confirmed_total
 
-        overall = self._overall_risk(counts)
+        overall = self._overall_risk(confirmed_counts)
         scope = meta.get("scope") or sorted(
             {str(f.get("target")) for f in findings if f.get("target")}
         )
@@ -258,11 +291,14 @@ class ComplianceReportGenerator:
         sections = [
             self._styles(),
             self._toolbar(),
-            self._cover(eng, overall, counts, len(findings), len(scope), generated, version),
+            self._cover(eng, overall, counts, len(findings), len(scope),
+                        generated, version, confirmed_total, potential_total),
             self._confidentiality(eng),
             self._doc_control(eng, assessor, version, generated, len(scope), len(findings), overall),
             self._toc(bool(inventory), has_api, has_iot, has_ot, bool(dns_inv)),
-            self._exec_summary(eng, counts, len(findings), overall, ordered, len(scope)),
+            self._exec_summary(eng, counts, len(findings), overall, ordered,
+                               len(scope), confirmed_counts, confirmed_total,
+                               potential_total),
             self._scope_methodology(scope),
             self._inventory(inventory),
             self._dns_enumeration(dns_inv),
@@ -336,6 +372,11 @@ class ComplianceReportGenerator:
         .muted{color:var(--muted);} .small{font-size:12px;}
         .pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;
               font-weight:700;color:#fff;letter-spacing:.02em;}
+        /* Confirmation status: Confirmed (solid emerald) vs Potential (amber outline). */
+        .confpill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:10.5px;
+                  font-weight:700;letter-spacing:.02em;border:1px solid transparent;white-space:nowrap;}
+        .conf-confirmed{background:#e7f7ef;color:#0f7a4d;border-color:#9fe0c1;}
+        .conf-potential{background:#fdf3e0;color:#9a6a12;border-color:#f0d08a;}
         .kpis{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0;}
         .kpi{flex:1;min-width:110px;border:1px solid var(--line);border-radius:10px;
              padding:14px;text-align:center;background:#fcfdff;}
@@ -387,9 +428,14 @@ class ComplianceReportGenerator:
                 "</div>")
 
     def _cover(self, eng: str, overall: str, counts: dict, total: int,
-               scope_n: int, generated: str, version: str) -> str:
+               scope_n: int, generated: str, version: str,
+               confirmed_total: int = 0, potential_total: int = 0) -> str:
         col = next((m["color"] for m in SEVERITY_META.values()
                     if m["label"] == overall), _BRAND)
+        # The headline reflects confirmed risk; potential (version-based /
+        # unverified) findings are called out so nothing is hidden.
+        pot_note = (f' &nbsp;·&nbsp; {potential_total} potential (unverified)'
+                    if potential_total else "")
         return f"""<div class="page"><div class="cover">
           <div class="brandbar">{_LOGO_SVG}
             <div><div class="bn">HEAVEN</div>
@@ -399,10 +445,14 @@ class ComplianceReportGenerator:
           <h1>Penetration Test Report</h1>
           <div class="sub">{_esc(eng)}</div>
           <div class="riskbadge" style="background:{col}">Overall Risk: {_esc(overall)}</div>
+          <div class="small muted" style="margin-top:8px">Overall risk is rated
+            from confirmed findings; potential findings are verified separately.</div>
           <div style="margin-top:40px;color:var(--muted);font-size:13px;line-height:2">
             <div><strong style="color:var(--ink)">Findings:</strong> {total}
                &nbsp;·&nbsp; {counts['critical']} critical, {counts['high']} high,
                {counts['medium']} medium, {counts['low']} low</div>
+            <div><strong style="color:var(--ink)">Confirmed vs potential:</strong>
+               {confirmed_total} confirmed{pot_note}</div>
             <div><strong style="color:var(--ink)">Targets in scope:</strong> {scope_n}</div>
             <div><strong style="color:var(--ink)">Report date:</strong> {_esc(generated)}</div>
             <div><strong style="color:var(--ink)">Version:</strong> {_esc(version)}</div>
@@ -473,19 +523,33 @@ class ComplianceReportGenerator:
         lis = "".join(f'<li><a href="#{i}">{_esc(t)}</a></li>' for i, t in items)
         return f'<div class="page section"><h2>Table of Contents</h2><div class="toc"><ol>{lis}</ol></div></div>'
 
-    def _exec_summary(self, eng, counts, total, overall, ordered, scope_n) -> str:
-        crit, high = counts["critical"], counts["high"]
+    def _exec_summary(self, eng, counts, total, overall, ordered, scope_n,
+                      confirmed_counts=None, confirmed_total=0,
+                      potential_total=0) -> str:
+        # Posture (and Overall Risk) is driven by *confirmed* findings — those
+        # proven by direct observation or active validation — so an
+        # unauthenticated, version-based match that can't be confirmed from the
+        # outside never drives the headline. Falls back to the full counts when a
+        # caller doesn't supply the confirmed breakdown.
+        cc = confirmed_counts if confirmed_counts is not None else counts
+        crit, high = cc["critical"], cc["high"]
         if crit or high:
-            posture = (f"The assessment identified <strong>{crit} critical</strong> and "
+            posture = (f"The assessment confirmed <strong>{crit} critical</strong> and "
                        f"<strong>{high} high</strong>-severity issues that require prompt "
                        "remediation. Exploitation of these could lead to unauthorised access, "
                        "data exposure, or full system compromise.")
-        elif counts["medium"]:
-            posture = ("No critical or high-severity issues were identified. The medium-severity "
-                       "findings below should be remediated to reduce residual risk.")
+        elif cc["medium"]:
+            posture = ("No confirmed critical or high-severity issues were identified. The "
+                       "medium-severity findings below should be remediated to reduce residual risk.")
         else:
-            posture = ("No significant vulnerabilities were identified during this assessment. "
-                       "The environment demonstrated a strong security posture.")
+            posture = ("No confirmed high-impact vulnerabilities were identified during this "
+                       "assessment. The environment demonstrated a strong security posture.")
+        if potential_total:
+            posture += (f" A further <strong>{potential_total}</strong> potential "
+                        "finding(s) — inferred from service version banners and not "
+                        "confirmed from the outside — are listed separately; verify the "
+                        "running versions (authenticated check or vendor advisory) before "
+                        "treating them as present.")
 
         # severity distribution bar
         bar = ""
@@ -501,10 +565,11 @@ class ComplianceReportGenerator:
         top_rows = "".join(
             f'<tr><td><span class="pill" style="background:{SEVERITY_META[_sev_of(f)]["color"]}">'
             f'{SEVERITY_META[_sev_of(f)]["label"]}</span></td>'
+            f'<td>{_conf_pill(f)}</td>'
             f'<td>{_esc(f.get("title") or f.get("vuln_type") or "Finding")}</td>'
             f'<td class="small">{_esc(f.get("target") or "—")}</td></tr>'
             for f in top
-        ) or '<tr><td colspan="3" class="muted">No findings.</td></tr>'
+        ) or '<tr><td colspan="4" class="muted">No findings.</td></tr>'
 
         return f"""<div class="page section" id="exec"><h2>Executive Summary</h2>
           <p>This report presents the results of a penetration test of <strong>{_esc(eng)}</strong>,
@@ -521,8 +586,15 @@ class ComplianceReportGenerator:
           <h3>Severity Distribution</h3>
           <div class="bar">{bar}</div>
           <div class="legend">{legend}</div>
+          <p class="small muted" style="margin-top:10px">Of these, <strong>{confirmed_total}</strong>
+            finding(s) are <span class="confpill conf-confirmed">Confirmed</span> (proven by direct
+            observation or active validation) and <strong>{potential_total}</strong> are
+            <span class="confpill conf-potential">Potential</span> (inferred from a service version
+            banner — the "backport" caveat applies — and not confirmed from the outside). The Overall
+            Risk rating above counts confirmed findings only.</p>
           <h3>Key Findings</h3>
-          <table><tr><th style="width:90px">Severity</th><th>Finding</th><th>Target</th></tr>{top_rows}</table>
+          <table><tr><th style="width:90px">Severity</th><th style="width:88px">Confirmation</th>
+            <th>Finding</th><th>Target</th></tr>{top_rows}</table>
         </div>"""
 
     def _scope_methodology(self, scope: list[str]) -> str:
@@ -579,9 +651,18 @@ class ComplianceReportGenerator:
                        f'<th>Version</th><th>CPE</th></tr>{rows}</table>')
             else:
                 tbl = '<p class="muted small">No open ports observed.</p>'
+            meta_bits: list[str] = []
+            if _device_name_label(h):
+                meta_bits.append(f'Device: {_esc(_device_name_label(h))}')
+            if _device_type_label(h):
+                meta_bits.append(f'Type: {_esc(_device_type_label(h))}')
+            if _mac_label(h):
+                meta_bits.append(f'MAC: {_esc(_mac_label(h))}')
+            meta_html = (f'<p class="muted small">{" &middot; ".join(meta_bits)}</p>'
+                         if meta_bits else "")
             host_blocks.append(
                 f'<h3>{_esc(h.get("host"))} '
-                f'<span class="muted small">— {_esc(os_txt)}</span></h3>{tbl}'
+                f'<span class="muted small">— {_esc(os_txt)}</span></h3>{meta_html}{tbl}'
             )
         return f"""<div class="page section" id="inventory"><h2>Host &amp; Service Inventory</h2>
           <p>The network scan mapped <strong>{tot['hosts']}</strong> host(s) exposing
@@ -589,7 +670,10 @@ class ComplianceReportGenerator:
           <strong>{tot['distinct_services']}</strong> distinct service(s). Ports, service
           versions and operating systems are reported exactly as observed by the scanner.
           An OS marked <em>(heuristic — unconfirmed)</em> was inferred from a TTL value, not a
-          full stack fingerprint, and should be treated as indicative only.</p>
+          full stack fingerprint, and should be treated as indicative only. Where the scan
+          observed them, a host's device name, device type and MAC address are shown; a MAC
+          address appears only for a host on the same local segment scanned with sufficient
+          privileges (it is an ARP fact, so routed/remote hosts have none).</p>
           {''.join(host_blocks)}
         </div>"""
 
@@ -672,21 +756,26 @@ class ComplianceReportGenerator:
             rows += (f'<tr><td class="small">{i}</td>'
                      f'<td><a href="#f{i}">{_esc(f.get("title") or f.get("vuln_type") or "Finding")}</a></td>'
                      f'<td><span class="pill" style="background:{m["color"]}">{m["label"]}</span></td>'
+                     f'<td>{_conf_pill(f)}</td>'
                      f'<td class="small">{_esc(cvss)}</td>'
                      f'<td class="small">{_esc(ctx)}</td>'
-                     f'<td class="small">{_esc(f.get("target") or "—")}</td>'
-                     f'<td class="small">{_esc((f.get("status") or "open").title())}</td></tr>')
+                     f'<td class="small">{_esc(f.get("target") or "—")}</td></tr>')
         return f"""<div class="page section" id="summary"><h2>Findings Summary</h2>
-          <p class="muted small">The <b>CVSS</b> column is the standards base score for the
-          finding's weakness class — reduced for a detection the scanner flags as unconfirmed or
-          low-confidence, so it never over-states a heuristic "indicator". <b>Contextual</b> is the
-          per-finding CVSS Temporal + Environmental score, adjusted for this finding's exploit
-          maturity (EPSS / public exploit / CISA KEV), detection confidence and the asset's
-          criticality &amp; exposure. Severity always matches the score band.</p>
+          <p class="muted small">The <b>Confirmation</b> column separates
+          <span class="confpill conf-confirmed">Confirmed</span> findings (proven by direct
+          observation or active validation) from <span class="confpill conf-potential">Potential</span>
+          ones (inferred from a service version banner and not confirmed from the outside — vendors
+          routinely backport fixes without bumping the banner). The <b>CVSS</b> column is the
+          standards base score for the finding's weakness class — reduced for a detection the scanner
+          flags as unconfirmed or low-confidence, so it never over-states a heuristic "indicator".
+          <b>Contextual</b> is the per-finding CVSS Temporal + Environmental score, adjusted for this
+          finding's exploit maturity (EPSS / public exploit / CISA KEV), detection confidence and the
+          asset's criticality &amp; exposure. Severity always matches the score band.</p>
           <table>
             <tr><th style="width:40px">#</th><th>Finding</th><th style="width:90px">Severity</th>
+                <th style="width:88px">Confirmation</th>
                 <th style="width:56px">CVSS</th><th style="width:74px">Contextual</th>
-                <th>Target</th><th style="width:80px">Status</th></tr>
+                <th>Target</th></tr>
             {rows}
           </table>
         </div>"""
@@ -720,6 +809,7 @@ class ComplianceReportGenerator:
         meta_rows = [
             ("Target", f.get("target") or "—", False),
             ("Severity", m["label"], False),
+            ("Confirmation", _conf_pill(f), True),
             ("CVSS base (class)", cvss, False),
             ("Contextual CVSS (temporal+environmental)", contextual, False),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—", False),

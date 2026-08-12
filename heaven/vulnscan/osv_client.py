@@ -126,6 +126,21 @@ def _extract_cwes(record: dict) -> list[str]:
     return [str(c) for c in cwes if str(c).upper().startswith("CWE-")]
 
 
+def _record_has_severity(record: dict) -> bool:
+    """Whether an OSV record carries any severity signal we can score from.
+
+    GitHub/NVD enrich an advisory's CVSS vector + CWE *after* first publication,
+    so a record cached in an advisory's first hours can be severity-less. Such a
+    stale cache is what makes a finding fall back to its generic vuln-class CVSS
+    (a Critical-shaped class vector) instead of the advisory's real — often far
+    lower — score. Treat "no CVSS entry AND no qualitative label" as incomplete
+    so :meth:`OSVClient._fetch_detail` knows to attempt a refresh.
+    """
+    if record.get("severity"):
+        return True
+    return bool((record.get("database_specific") or {}).get("severity"))
+
+
 class OSVClient:
     """Async OSV.dev client with on-disk per-advisory caching."""
 
@@ -167,7 +182,13 @@ class OSVClient:
 
     async def _fetch_detail(self, client: Any, osv_id: str) -> Optional[dict]:
         cached = self._load_cached(osv_id)
-        if cached is not None:
+        # A complete cached record is authoritative (OSV records are immutable by
+        # id). But a record cached *before* its advisory was scored is severity-
+        # less — refresh it so a re-scan picks up the CVSS/CWE that GitHub/NVD
+        # have since added, instead of permanently pinning the stale class-CVSS
+        # fallback. Offline, we keep the incomplete cached copy rather than drop
+        # the advisory entirely.
+        if cached is not None and _record_has_severity(cached):
             return cached
         try:
             r = await client.get(f"{OSV_VULN_URL}{osv_id}")
@@ -178,7 +199,7 @@ class OSVClient:
             logger.debug(f"OSV detail {osv_id} → HTTP {r.status_code}")
         except Exception as e:  # noqa: BLE001 - network must never break a scan
             logger.debug(f"OSV detail fetch failed for {osv_id}: {e}")
-        return None
+        return cached
 
     # ── batch query ──
 

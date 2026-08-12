@@ -100,6 +100,40 @@ _MGMT_PORTS: dict[int, tuple[str, str, str, str, tuple[str, ...]]] = {
           ("ipmi", "asf-rmcp")),
 }
 
+# ── Directly-exposed database services ───────────────────────────────────────
+# A database reachable from an untrusted network is a serious exposure (data
+# theft, and several engines ship with NO authentication by default). Keyed by
+# canonical port; service_names matches when the DB runs on a non-standard port.
+_DATABASE_PORTS: dict[int, tuple[str, tuple[str, ...]]] = {
+    3306:  ("MySQL / MariaDB", ("mysql", "mariadb")),
+    5432:  ("PostgreSQL", ("postgresql", "postgres")),
+    1433:  ("Microsoft SQL Server", ("ms-sql", "mssql", "ms-sql-s")),
+    1521:  ("Oracle Database", ("oracle", "oracle-tns")),
+    27017: ("MongoDB", ("mongodb", "mongod")),
+    6379:  ("Redis", ("redis",)),
+    9200:  ("Elasticsearch", ("elasticsearch",)),
+    5984:  ("CouchDB", ("couchdb",)),
+    11211: ("Memcached", ("memcached", "memcache")),
+    9042:  ("Apache Cassandra", ("cassandra",)),
+}
+# Engines that historically bind with no authentication by default → exposure is
+# especially dangerous (direct unauthenticated read/write to all data).
+_NOAUTH_DEFAULT_DB = frozenset({6379, 27017, 9200, 5984, 11211, 9042})
+
+
+def _is_public_host(host: str) -> bool:
+    """True when *host* is a public / routable address (or a hostname, assumed
+    internet-facing). Private, loopback, link-local and reserved IPs return False
+    so internal-range (/24) scans don't raise "exposed to untrusted network"
+    database findings — internal DB reachability is expected, not a finding."""
+    import ipaddress
+    h = (host or "").split("%", 1)[0].strip()
+    try:
+        return ipaddress.ip_address(h).is_global
+    except ValueError:
+        return bool(h)  # a hostname target — treat as internet-facing
+
+
 SYS_DESCR_OID = bytes([0x2B, 6, 1, 2, 1, 1, 1, 0])  # 1.3.6.1.2.1.1.1.0
 _SNMP_COMMUNITIES = ("public", "private")
 
@@ -491,6 +525,17 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
     findings: list[dict] = []
     snmp_hosts: list[str] = []
 
+    # Perimeter-defence observations (firewall / IDS-IPS / tarpit) surfaced by the
+    # network scanner's adaptive pass. Informational — a firewall is good posture;
+    # the value is telling the operator WHY results may be thin and how HEAVEN
+    # already tried to get through it (evasion re-probe). Empty when nothing was
+    # detected, so a clean scan adds no noise.
+    try:
+        from heaven.recon.firewall_detector import build_perimeter_findings
+        findings.extend(build_perimeter_findings(net_data))
+    except Exception:
+        logger.debug("perimeter-finding synthesis failed", exc_info=True)
+
     for host in hosts:
         ip = host.get("ip") or host.get("host") or ""
         if not ip:
@@ -519,6 +564,35 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     confidence=0.85,
                     evidence={"port": port, "service": svc or label.lower(),
                               "protocol": label},
+                ))
+
+        # 1b) Directly-exposed database services (public/routable hosts only).
+        if _is_public_host(ip):
+            for real_port, svc in pairs:
+                db_spec = _DATABASE_PORTS.get(real_port)
+                if not db_spec and svc:
+                    for db_cand in _DATABASE_PORTS.values():
+                        if svc in db_cand[1]:
+                            db_spec = db_cand
+                            break
+                if not db_spec:
+                    continue
+                label = db_spec[0]
+                noauth = real_port in _NOAUTH_DEFAULT_DB
+                extra = (" This engine historically binds with no authentication "
+                         "by default, so exposure can mean direct, unauthenticated "
+                         "read/write access to all data." if noauth else "")
+                findings.append(_finding(
+                    f"{ip}:{real_port}", "database_exposed", "high",
+                    f"Database Exposed to Untrusted Network: {label} (port {real_port})",
+                    f"A {label} service is reachable on a public/routable address. "
+                    "Databases must never be directly exposed to untrusted networks — "
+                    "bind to localhost or a private management network, require "
+                    "authentication and TLS, and firewall the port to known "
+                    f"application hosts only.{extra}",
+                    confidence=0.8,
+                    evidence={"port": real_port, "service": svc or label.lower(),
+                              "product": label, "no_auth_by_default": noauth},
                 ))
 
         # 2) High-risk appliance management planes

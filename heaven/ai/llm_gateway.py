@@ -29,7 +29,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional, Type
+from typing import Any, AsyncIterator, Iterator, Optional, Type
 
 from heaven.utils.logger import get_logger
 
@@ -50,23 +50,67 @@ PROVIDER_DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-5",     # balanced default; Opus 4.8 / Haiku 4.5 also valid
     "openai": "gpt-4o",
     "gemini": "gemini-flash-latest",    # rolling alias → current Flash; gemini-pro-latest for deeper reasoning
+    # Local runtimes (no API key, no rate limits — see LOCAL_PROVIDERS below).
+    # `ollama` defaults to a fast, accurate 7B: qwen2.5 follows instructions and
+    # emits clean JSON, which is what HEAVEN's structured AI layers (FP review,
+    # hypotheses, coverage) need. Override any time with HEAVEN_LLM_MODEL
+    # (e.g. llama3.1:8b, qwen2.5:14b). `local` (a generic OpenAI-compatible
+    # server: LM Studio / llama.cpp / vLLM / LocalAI) has no universal default —
+    # the operator pins their served model id via HEAVEN_LLM_MODEL.
+    "ollama": "qwen2.5:7b",
+    "local": "",
 }
 
 PROVIDER_KEY_ENVS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    # Local runtimes: Ollama is keyless (""). A self-hosted OpenAI-compatible
+    # endpoint may take an optional bearer token via HEAVEN_LLM_API_KEY.
+    "ollama": "",
+    "local": "HEAVEN_LLM_API_KEY",
 }
 
 # pip package name per provider — NOT always the provider name. In particular
 # Gemini's SDK is `google-genai` (the current SDK; the older
 # `google-generativeai` is deprecated but still accepted as a fallback), so
-# "pip install gemini" is wrong.
+# "pip install gemini" is wrong. The local providers speak plain HTTP over
+# `httpx` (already a base dependency), so no SDK is required for them.
 PROVIDER_PIP_PACKAGES = {
     "anthropic": "anthropic",
     "openai": "openai",
     "gemini": "google-genai",
+    "ollama": "httpx",
+    "local": "httpx",
 }
+
+# ═══════════════════════════════════════════
+# LOCAL LLM PROVIDERS (Ollama + generic OpenAI-compatible)
+# ═══════════════════════════════════════════
+#
+# Cloud keys rate-limit; a local model does not. These two providers let HEAVEN
+# run its whole AI layer against a model on the operator's own machine — fast,
+# private (findings never leave the host), and free of quotas — with ZERO new
+# Python dependencies (the transport is `httpx`, already in the base install).
+# Both speak the OpenAI-compatible `/v1/chat/completions` schema, so a single
+# `_call_local` dispatch covers Ollama, LM Studio, llama.cpp, vLLM and LocalAI.
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+LOCAL_PROVIDERS = frozenset({"ollama", "local"})
+
+
+def _local_base_url(provider: str) -> str:
+    """OpenAI-compatible base URL for a local provider (no trailing slash).
+
+    ollama → ``HEAVEN_OLLAMA_HOST`` (default localhost:11434) + ``/v1``.
+    local  → ``HEAVEN_LLM_BASE_URL`` verbatim (operator supplies the full base,
+             e.g. ``http://localhost:1234/v1``).
+    """
+    if provider == "ollama":
+        host = (os.environ.get("HEAVEN_OLLAMA_HOST") or DEFAULT_OLLAMA_HOST).strip().rstrip("/")
+        return f"{host}/v1"
+    if provider == "local":
+        return (os.environ.get("HEAVEN_LLM_BASE_URL") or "").strip().rstrip("/")
+    return ""
 
 # Per-call network timeout (seconds) applied to every provider client. Without
 # this a slow/hung provider call can run for minutes (observed 176s from a
@@ -81,6 +125,77 @@ def _llm_timeout_s() -> float:
         return max(5.0, float(os.environ.get("HEAVEN_LLM_TIMEOUT", DEFAULT_LLM_TIMEOUT_S)))
     except (TypeError, ValueError):
         return DEFAULT_LLM_TIMEOUT_S
+
+
+# ═══════════════════════════════════════════
+# RATE-LIMIT CIRCUIT BREAKER
+# ═══════════════════════════════════════════
+#
+# A single scan fans a LOT of LLM calls out sequentially — per-finding FP review,
+# vuln hypotheses, coverage grading, per-finding remediation. If the operator's
+# key is rate-limited/out-of-quota, EVERY one of those calls 429s. Without a
+# breaker each call still makes a full doomed round-trip (and, with provider-SDK
+# internal retries, each stalls further honoring the 429's multi-second
+# Retry-After) — turning a scan into minutes of sequential rate-limit waits
+# (the observed ~8-minute DVWA drag). Two bounds fix this:
+#   1. provider-SDK internal retries are disabled at client init (see
+#      _init_client) so the gateway is the SOLE retry controller;
+#   2. on the FIRST quota/429 error the gateway enters a short cooldown; further
+#      calls during that window short-circuit straight to their non-LLM fallback
+#      instead of round-tripping. Cooldown is sized from the server's own
+#      Retry-After hint when present, else a bounded default, and always clamped.
+# The window self-clears; a new key (env change) rebuilds the gateway and resets
+# it. Set HEAVEN_LLM_RATELIMIT_COOLDOWN=0 to disable the breaker entirely.
+DEFAULT_RATELIMIT_COOLDOWN_S = 20.0
+MAX_RATELIMIT_COOLDOWN_S = 120.0
+
+
+def _ratelimit_cooldown_s() -> float:
+    """Default cooldown floor after a rate-limit error. 0 disables the breaker."""
+    try:
+        v = float(os.environ.get("HEAVEN_LLM_RATELIMIT_COOLDOWN", DEFAULT_RATELIMIT_COOLDOWN_S))
+    except (TypeError, ValueError):
+        return DEFAULT_RATELIMIT_COOLDOWN_S
+    return max(0.0, v)
+
+
+# Retry-After hints appear in provider error strings in several shapes:
+#   Gemini:   "... retry in 39.2s"  /  "retryDelay: '40s'"
+#   OpenAI:   "Please try again in 20s"  /  "retry-after: 30"
+#   Anthropic:"... retry_after: 15"
+# Best-effort parse of the first plausible seconds value; None if none found.
+_RETRY_AFTER_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"retry[_\- ]?after['\":=\s]+(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"retrydelay['\":=\s]+(\d+(?:\.\d+)?)\s*s", re.IGNORECASE),
+    re.compile(r"retry(?:ing)?\s+in\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds)", re.IGNORECASE),
+    re.compile(r"try\s+again\s+in\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds)", re.IGNORECASE),
+)
+
+
+def _parse_retry_after(text: str) -> Optional[float]:
+    for pat in _RETRY_AFTER_PATTERNS:
+        m = pat.search(text)
+        if m:
+            try:
+                return float(m.group(1))
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+# Error-string tokens, split so the retry classifier and the rate-limit breaker
+# share one source of truth and can't drift apart. Rate-limit/quota errors arm
+# the cooldown; auth/bad-request errors are non-retryable but cheap (they fail
+# instantly with no Retry-After backoff), so they don't arm the breaker.
+_RATELIMIT_ERROR_TOKENS = (
+    "resource_exhausted", "quota", "insufficient_quota",
+    "rate limit", "rate_limit", "429", "too many requests",
+)
+_AUTH_ERROR_TOKENS = (
+    "unauthorized", "401", "403", "permission denied",
+    "api key not valid", "invalid api key", "invalid_api_key",
+    "authentication", "invalid_request_error",
+)
 
 
 # ═══════════════════════════════════════════
@@ -196,6 +311,8 @@ class LLMGateway:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
+        *,
+        allow_fallback: bool = True,
     ):
         self.provider = (provider or os.environ.get("HEAVEN_LLM_PROVIDER") or "").lower()
         if not self.provider:
@@ -209,8 +326,34 @@ class LLMGateway:
         self._client: Any = None
         self._init_error: Optional[str] = None
         self._gemini_sdk: Optional[str] = None  # "new" (google-genai) | "legacy"
+        self._is_local = self.provider in LOCAL_PROVIDERS
+        self._local_base: str = ""
 
-        if self.provider and self.api_key:
+        # Rate-limit circuit breaker state (see the module-level note). Monotonic
+        # deadline until which calls short-circuit; guarded by a lock because the
+        # threaded API server runs acomplete() concurrently on this singleton.
+        self._ratelimited_until: float = 0.0
+        self._ratelimit_reason: str = ""
+        self._ratelimit_lock = threading.Lock()
+
+        # Hybrid fallback: if the PRIMARY provider is unavailable or returns
+        # nothing, transparently retry once on HEAVEN_LLM_FALLBACK_PROVIDER
+        # (which needs its own key/endpoint). This lets a local-first setup keep
+        # a cloud safety net, or a cloud-first setup fall back to a
+        # no-rate-limit local model. The secondary gateway is built with
+        # allow_fallback=False so it can never recurse.
+        self._allow_fallback = allow_fallback
+        self.fallback_provider = (
+            (os.environ.get("HEAVEN_LLM_FALLBACK_PROVIDER") or "").lower()
+            if allow_fallback else ""
+        )
+        if self.fallback_provider == self.provider:
+            self.fallback_provider = ""  # a provider can't fall back to itself
+        self._fallback_gw: Optional["LLMGateway"] = None
+
+        # Cloud providers need a key; local runtimes are keyless (Ollama) or take
+        # an optional token, so they initialize on provider alone.
+        if self.provider and (self.api_key or self._is_local):
             self._init_client()
 
     @property
@@ -221,9 +364,17 @@ class LLMGateway:
 
     @staticmethod
     def _auto_detect_provider() -> str:
-        for name, env in PROVIDER_KEY_ENVS.items():
-            if os.environ.get(env):
+        # Cloud keys win first (an explicit key = intent to use that provider).
+        for name in ("anthropic", "openai", "gemini"):
+            if os.environ.get(PROVIDER_KEY_ENVS[name]):
                 return name
+        # Then a configured local runtime. Keyless, so we key off the endpoint
+        # config rather than a secret; reachability is verified at call time /
+        # by `heaven ai test`, never probed here (keeps gateway init cheap).
+        if os.environ.get("HEAVEN_OLLAMA_HOST"):
+            return "ollama"
+        if os.environ.get("HEAVEN_LLM_BASE_URL"):
+            return "local"
         return ""
 
     def _init_client(self) -> None:
@@ -231,10 +382,19 @@ class LLMGateway:
         try:
             if self.provider == "anthropic":
                 import anthropic  # type: ignore[import-not-found]
-                self._client = anthropic.Anthropic(api_key=self.api_key, timeout=timeout_s)
+                # max_retries=0: the gateway is the SOLE retry controller. The
+                # SDK default (2) retries 429s internally, honoring multi-second
+                # Retry-After headers BEFORE we ever see the error — exactly the
+                # hidden per-call stall that dragged rate-limited scans out.
+                self._client = anthropic.Anthropic(
+                    api_key=self.api_key, timeout=timeout_s, max_retries=0,
+                )
             elif self.provider == "openai":
                 import openai  # type: ignore[import-not-found]
-                self._client = openai.OpenAI(api_key=self.api_key, timeout=timeout_s)
+                # See the anthropic note — disable the SDK's own 429 retry loop.
+                self._client = openai.OpenAI(
+                    api_key=self.api_key, timeout=timeout_s, max_retries=0,
+                )
             elif self.provider == "gemini":
                 # Prefer the current SDK (`google-genai`, imported as
                 # `from google import genai`); fall back to the deprecated
@@ -246,10 +406,16 @@ class LLMGateway:
                     client_kwargs: dict[str, Any] = {"api_key": self.api_key}
                     try:
                         from google.genai import types as _genai_types  # type: ignore[import-not-found]
-                        client_kwargs["http_options"] = _genai_types.HttpOptions(
-                            timeout=int(timeout_s * 1000),
-                        )
-                    except Exception:  # noqa: BLE001 — no HttpOptions/timeout support
+                        http_kwargs: dict[str, Any] = {"timeout": int(timeout_s * 1000)}
+                        # attempts=1 disables the SDK's own retry loop (which
+                        # otherwise retries 429s honoring their Retry-After) so
+                        # the gateway is the sole retry controller. Guarded: not
+                        # all SDK versions ship HttpRetryOptions.
+                        _retry_opts = getattr(_genai_types, "HttpRetryOptions", None)
+                        if _retry_opts is not None:
+                            http_kwargs["retry_options"] = _retry_opts(attempts=1)
+                        client_kwargs["http_options"] = _genai_types.HttpOptions(**http_kwargs)
+                    except Exception:  # noqa: BLE001 — no HttpOptions/timeout/retry support
                         logger.debug("suppressed non-fatal exception", exc_info=True)
                     self._client = google_genai.Client(**client_kwargs)
                     self._gemini_sdk = "new"
@@ -258,6 +424,30 @@ class LLMGateway:
                     legacy_genai.configure(api_key=self.api_key)
                     self._client = legacy_genai.GenerativeModel(self.model)
                     self._gemini_sdk = "legacy"
+            elif self.provider in LOCAL_PROVIDERS:
+                # Local runtimes speak the OpenAI-compatible HTTP schema — no SDK,
+                # just httpx (a base dependency). We keep the resolved base URL on
+                # the instance and POST absolute URLs (avoids httpx base_url path-
+                # join surprises where "/chat/completions" would drop "/v1").
+                import httpx
+                base = _local_base_url(self.provider)
+                if not base:
+                    self._init_error = (
+                        "no local LLM endpoint configured — set HEAVEN_LLM_BASE_URL "
+                        "for provider 'local' (e.g. http://localhost:1234/v1)"
+                    )
+                    return
+                if self.provider == "local" and not self.model:
+                    self._init_error = (
+                        "no model set for provider 'local' — set HEAVEN_LLM_MODEL "
+                        "to your served model id"
+                    )
+                    return
+                headers: dict[str, str] = {}
+                if self.api_key:  # optional bearer for a secured local endpoint
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+                self._local_base = base
+                self._client = httpx.Client(timeout=timeout_s, headers=headers)
             else:
                 self._init_error = f"unknown provider '{self.provider}'"
         except ImportError as e:
@@ -277,11 +467,33 @@ class LLMGateway:
     # ── public completion API ─────────────────────────────────────────────
 
     def complete(self, req: LLMRequest) -> LLMResponse:
-        """Synchronous completion with retries, redaction, and audit logging."""
+        """Synchronous completion with retries, redaction, audit logging, and
+        (optional) hybrid fallback to HEAVEN_LLM_FALLBACK_PROVIDER.
+
+        If the primary provider is unavailable or returns nothing and a fallback
+        provider is configured & available, one retry is made on the fallback —
+        so a local-first setup keeps a cloud safety net (and vice-versa)."""
+        resp = self._complete_once(req)
+        if resp.ok() or not self._should_fallback(resp):
+            return resp
+        fb = self._fallback_complete(req)
+        return fb if (fb is not None and fb.ok()) else resp
+
+    def _complete_once(self, req: LLMRequest) -> LLMResponse:
+        """One completion against THIS gateway's own provider (no fallback)."""
         if not self.available:
             return LLMResponse(
                 text="", provider=self.provider, model=self.model,
                 error=self._init_error or "gateway not initialized",
+            )
+
+        # Circuit breaker: a recent 429 means the key is rate-limited — don't
+        # round-trip a doomed call, fall back immediately (see module note).
+        gate = self._ratelimit_gate()
+        if gate is not None:
+            logger.debug(f"LLM call short-circuited by rate-limit cooldown: {gate}")
+            return LLMResponse(
+                text="", provider=self.provider, model=self.model, error=gate,
             )
 
         prompt, system, redactions = self._prepare(req)
@@ -306,7 +518,17 @@ class LLMGateway:
                 # attempts before failing — worse than failing fast and letting
                 # the caller fall back (e.g. remediation → knowledge base). Only
                 # retry genuinely transient server/network errors.
+                # A local endpoint that isn't up won't come up on a 1s backoff —
+                # fail fast so we fall back (to non-LLM, or the hybrid provider)
+                # instead of burning the retry budget.
+                if getattr(self, "_is_local", False) and self._is_local_unreachable(e):
+                    logger.warning(f"local LLM unreachable, not retrying: {e}")
+                    break
                 if not self._is_retryable(e):
+                    # Arm the cooldown on a rate-limit/quota error so the rest of
+                    # the scan's LLM calls skip the network and fall back fast.
+                    if self._is_ratelimit_error(e):
+                        self._arm_ratelimit_cooldown(e)
                     logger.warning(f"LLM call failed (non-retryable, not retrying): {e}")
                     break
                 if attempt < self.MAX_RETRIES - 1:
@@ -335,6 +557,160 @@ class LLMGateway:
         """Async wrapper — runs the sync provider call in a thread."""
         import asyncio
         return await asyncio.to_thread(self.complete, req)
+
+    # ── streaming (for the chat assistant) ────────────────────────────────
+
+    def stream(self, req: LLMRequest) -> Iterator[str]:
+        """Yield answer text incrementally.
+
+        Every provider 'streams': native token streaming where supported, else a
+        single chunk (the full completion). Honors the rate-limit breaker and the
+        hybrid fallback exactly like `complete()` (both routed through it)."""
+        if not self.available or self._ratelimit_gate() is not None:
+            resp = self.complete(req)  # init-error / short-circuit / fallback path
+            if resp.text:
+                yield resp.text
+            return
+        prompt, system, _ = self._prepare(req)
+        try:
+            produced = False
+            for piece in self._dispatch_stream(prompt, system, req):
+                if piece:
+                    produced = True
+                    yield piece
+            if produced:
+                return
+        except Exception as e:  # noqa: BLE001 — any streaming failure → non-stream fallback
+            logger.warning(f"LLM streaming failed ({e}); falling back to non-streaming")
+            if self._is_ratelimit_error(e):
+                self._arm_ratelimit_cooldown(e)
+        # Non-streaming fallback: covers an empty/failed stream AND the hybrid
+        # cloud/local fallback (complete() applies it).
+        resp = self.complete(req)
+        if resp.text:
+            yield resp.text
+
+    async def astream(self, req: LLMRequest) -> AsyncIterator[str]:
+        """Async token stream — bridges the sync generator to asyncio via a
+        background thread + queue, so the WS chat endpoint streams without
+        blocking the event loop."""
+        import asyncio
+        import threading as _threading
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        sentinel = object()
+
+        def _produce() -> None:
+            try:
+                for piece in self.stream(req):
+                    loop.call_soon_threadsafe(queue.put_nowait, piece)
+            except Exception as e:  # noqa: BLE001 — surface, never hang the consumer
+                loop.call_soon_threadsafe(queue.put_nowait, f"[stream error: {e}]")
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+        _threading.Thread(target=_produce, name="llm-astream", daemon=True).start()
+        while True:
+            item = await queue.get()
+            if item is sentinel:
+                break
+            yield item
+
+    def _dispatch_stream(self, prompt: str, system: Optional[str],
+                         req: LLMRequest) -> Iterator[str]:
+        """Provider-native token stream. Raises for providers that can't stream
+        (the caller catches and falls back to a single-chunk completion)."""
+        if self.provider in LOCAL_PROVIDERS:
+            yield from self._stream_local(prompt, system, req)
+            return
+        if self.provider == "openai":
+            messages: list[dict[str, str]] = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            stream = self._client.chat.completions.create(
+                model=self.model, messages=messages, stream=True,
+                max_tokens=req.max_tokens, temperature=req.temperature,
+            )
+            for chunk in stream:
+                choice = chunk.choices[0] if chunk.choices else None
+                delta = getattr(choice, "delta", None) if choice else None
+                piece = getattr(delta, "content", None) if delta else None
+                if piece:
+                    yield piece
+            return
+        if self.provider == "anthropic":
+            kwargs: dict[str, Any] = {
+                "model": self.model, "max_tokens": req.max_tokens,
+                "temperature": req.temperature,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if system:
+                kwargs["system"] = system
+            with self._client.messages.stream(**kwargs) as s:
+                for piece in s.text_stream:
+                    if piece:
+                        yield piece
+            return
+        if self.provider == "gemini" and self._gemini_sdk == "new":
+            from google.genai import types  # type: ignore[import-not-found]
+            cfg_kwargs: dict[str, Any] = dict(
+                max_output_tokens=req.max_tokens, temperature=req.temperature,
+                system_instruction=system or None,
+            )
+            thinking = getattr(types, "ThinkingConfig", None)
+            config = (
+                types.GenerateContentConfig(thinking_config=thinking(thinking_budget=0), **cfg_kwargs)
+                if thinking is not None else types.GenerateContentConfig(**cfg_kwargs)
+            )
+            for ev in self._client.models.generate_content_stream(
+                model=self.model, contents=prompt, config=config,
+            ):
+                piece = getattr(ev, "text", "") or ""
+                if piece:
+                    yield piece
+            return
+        raise LLMProviderError(f"streaming not supported for provider '{self.provider}'")
+
+    def _stream_local(self, prompt: str, system: Optional[str],
+                      req: LLMRequest) -> Iterator[str]:
+        """SSE token stream from an OpenAI-compatible local endpoint."""
+        import json as _json
+        import httpx
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload: dict[str, Any] = {
+            "model": self.model, "messages": messages,
+            "temperature": req.temperature, "max_tokens": req.max_tokens,
+            "stream": True,
+        }
+        url = f"{self._local_base}/chat/completions"
+        try:
+            with self._client.stream("POST", url, json=payload) as r:
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data:"):   # strip the SSE prefix
+                        line = line[5:].strip()
+                    if not line or line == "[DONE]":
+                        continue
+                    try:
+                        obj = _json.loads(line)
+                    except ValueError:
+                        continue
+                    choices = obj.get("choices") or []
+                    delta = (choices[0].get("delta") if choices else {}) or {}
+                    piece = delta.get("content")
+                    if piece:
+                        yield piece
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
+                httpx.PoolTimeout) as e:
+            raise LLMProviderError(
+                f"local LLM unreachable at {self._local_base}: {e}"
+            ) from e
 
     # ── internals ────────────────────────────────────────────────────────
 
@@ -392,6 +768,8 @@ class LLMGateway:
             return self._call_openai(prompt, system, req)
         if self.provider == "gemini":
             return self._call_gemini(prompt, system, req)
+        if self.provider in LOCAL_PROVIDERS:
+            return self._call_local(prompt, system, req)
         raise LLMProviderError(f"no dispatcher for provider '{self.provider}'")
 
     def _call_anthropic(self, prompt: str, system: Optional[str], req: LLMRequest) -> LLMResponse:
@@ -552,6 +930,61 @@ class LLMGateway:
             error=err,
         )
 
+    def _call_local(self, prompt: str, system: Optional[str], req: LLMRequest) -> LLMResponse:
+        """Call an OpenAI-compatible local endpoint (Ollama / LM Studio /
+        llama.cpp / vLLM / LocalAI) over plain HTTP.
+
+        Structured output rides the existing schema-hint-in-system +
+        JSON-parse path (see `_prepare`/`_parse_structured`) — no provider-native
+        JSON mode, so this one code path works across every local server. A dead
+        endpoint raises a distinct 'unreachable' error so `complete()` fails fast
+        (and falls back) instead of retrying."""
+        import httpx
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": req.temperature,
+            "max_tokens": req.max_tokens,
+            "stream": False,
+        }
+        url = f"{self._local_base}/chat/completions"
+        try:
+            r = self._client.post(url, json=payload)
+            r.raise_for_status()
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
+                httpx.PoolTimeout) as e:
+            raise LLMProviderError(
+                f"local LLM unreachable at {self._local_base} — is the server "
+                f"running? (start Ollama, or run `heaven ai setup`): {e}"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            body = ""
+            try:
+                body = e.response.text[:300]
+            except Exception:  # noqa: BLE001 — best-effort error body
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+            raise LLMProviderError(f"local LLM HTTP {e.response.status_code}: {body}") from e
+        data = r.json()
+        choices = data.get("choices") or []
+        message = (choices[0].get("message") if choices else {}) or {}
+        text = (message.get("content") or "").strip()
+        usage = data.get("usage") or {}
+        err: Optional[str] = None
+        if not text:
+            finish = choices[0].get("finish_reason") if choices else None
+            err = (f"empty response from local model (finish_reason={finish})"
+                   if finish else "empty response from local model")
+        return LLMResponse(
+            text=text, provider=self.provider, model=self.model,
+            input_tokens=int(usage.get("prompt_tokens", 0) or 0),
+            output_tokens=int(usage.get("completion_tokens", 0) or 0),
+            error=err,
+        )
+
     @staticmethod
     def _gemini_empty_reason(result: Any) -> str:
         """Best-effort explanation for an empty Gemini response."""
@@ -583,14 +1016,105 @@ class LLMGateway:
         wasted retries.
         """
         msg = str(exc).lower()
-        non_retryable = (
-            "resource_exhausted", "quota", "insufficient_quota",
-            "rate limit", "rate_limit", "429", "too many requests",
-            "unauthorized", "401", "403", "permission denied",
-            "api key not valid", "invalid api key", "invalid_api_key",
-            "authentication", "invalid_request_error",
+        return not any(
+            tok in msg for tok in (_RATELIMIT_ERROR_TOKENS + _AUTH_ERROR_TOKENS)
         )
-        return not any(tok in msg for tok in non_retryable)
+
+    @staticmethod
+    def _is_ratelimit_error(exc: Exception) -> bool:
+        """Whether an error is a quota/rate-limit (429) — the class that arms the
+        cooldown breaker. A subset of the non-retryable set (auth errors are
+        non-retryable too, but fail instantly, so they don't warrant a cooldown)."""
+        msg = str(exc).lower()
+        return any(tok in msg for tok in _RATELIMIT_ERROR_TOKENS)
+
+    @staticmethod
+    def _is_local_unreachable(exc: Exception) -> bool:
+        """Whether an error means a LOCAL endpoint isn't answering (server down,
+        connection refused, timed out). Used only on the local path to fail fast
+        rather than retry a server that won't come up in a second."""
+        msg = str(exc).lower()
+        return any(tok in msg for tok in (
+            "unreachable", "connection refused", "connecterror", "connecttimeout",
+            "failed to establish", "no route to host", "connection reset",
+            "timed out", "read timeout", "name or service not known",
+            "nodename nor servname", "all connection attempts failed",
+        ))
+
+    # ── hybrid fallback ──────────────────────────────────────────────────────
+
+    def _should_fallback(self, resp: LLMResponse) -> bool:
+        """Fall back only when this gateway allows it, a fallback provider is
+        configured, and the primary result is not usable."""
+        if resp.ok():
+            return False
+        if not getattr(self, "_allow_fallback", False):
+            return False
+        return bool(getattr(self, "fallback_provider", ""))
+
+    def _get_fallback_gateway(self) -> Optional["LLMGateway"]:
+        """Lazily build (and cache) the secondary gateway. Built with
+        allow_fallback=False so it can never recurse into another fallback."""
+        if getattr(self, "_fallback_gw", None) is not None:
+            return self._fallback_gw
+        prov = getattr(self, "fallback_provider", "")
+        if not prov:
+            return None
+        try:
+            gw = LLMGateway(provider=prov, allow_fallback=False)
+        except Exception:  # noqa: BLE001 — a broken fallback must never crash the primary
+            logger.debug("fallback gateway init failed", exc_info=True)
+            return None
+        self._fallback_gw = gw
+        return gw
+
+    def _fallback_complete(self, req: LLMRequest) -> Optional[LLMResponse]:
+        gw = self._get_fallback_gateway()
+        if gw is None or not gw.available:
+            return None
+        logger.info(f"LLM falling back to '{gw.provider}' ({gw.model})")
+        return gw.complete(req)
+
+    # ── rate-limit circuit breaker ────────────────────────────────────────
+
+    def _ratelimit_gate(self) -> Optional[str]:
+        """If a rate-limit cooldown is active, return the short-circuit message
+        (so the caller falls back immediately); otherwise None. Read defensively
+        so gateways built via ``__new__`` in tests never AttributeError."""
+        until = getattr(self, "_ratelimited_until", 0.0)
+        if until <= 0.0:
+            return None
+        remaining = until - time.monotonic()
+        if remaining <= 0.0:
+            return None
+        reason = getattr(self, "_ratelimit_reason", "") or "rate limited"
+        return (f"rate-limited: skipping LLM call for {remaining:.0f}s "
+                f"(cooldown after: {reason})")
+
+    def _arm_ratelimit_cooldown(self, exc: Exception) -> None:
+        """Enter a cooldown after a rate-limit error so the rest of a scan's
+        LLM calls short-circuit instead of each round-tripping a doomed 429.
+        Window = server Retry-After hint when present, else the default floor,
+        always clamped to MAX_RATELIMIT_COOLDOWN_S. HEAVEN_LLM_RATELIMIT_COOLDOWN=0
+        disables the breaker."""
+        cooldown = _ratelimit_cooldown_s()
+        if cooldown <= 0.0:
+            return
+        hint = _parse_retry_after(str(exc))
+        window = min(hint if hint is not None else cooldown, MAX_RATELIMIT_COOLDOWN_S)
+        window = max(window, 1.0)
+        lock = getattr(self, "_ratelimit_lock", None)
+        if lock is not None:
+            with lock:
+                self._ratelimited_until = time.monotonic() + window
+                self._ratelimit_reason = str(exc)[:200]
+        else:  # __new__-built test double without a lock
+            self._ratelimited_until = time.monotonic() + window
+            self._ratelimit_reason = str(exc)[:200]
+        logger.warning(
+            f"LLM rate-limited — pausing LLM calls for {window:.0f}s "
+            f"(further calls fall back to non-LLM paths): {exc}"
+        )
 
     def _audit(self, req: LLMRequest, resp: LLMResponse) -> None:
         """Emit one structured log line per call — picked up by the audit handler."""
@@ -622,7 +1146,12 @@ class LLMGateway:
 _GATEWAY_ENV_KEYS = (
     "HEAVEN_LLM_PROVIDER",
     "HEAVEN_LLM_MODEL",
-    *PROVIDER_KEY_ENVS.values(),  # ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+    "HEAVEN_OLLAMA_HOST",           # local: Ollama endpoint
+    "HEAVEN_LLM_BASE_URL",          # local: generic OpenAI-compatible endpoint
+    "HEAVEN_LLM_FALLBACK_PROVIDER", # hybrid fallback target
+    # Cloud keys + HEAVEN_LLM_API_KEY (local bearer). The "" for keyless Ollama
+    # is filtered out — it's not a real env var.
+    *(e for e in PROVIDER_KEY_ENVS.values() if e),
 )
 
 _gateway: Optional[LLMGateway] = None

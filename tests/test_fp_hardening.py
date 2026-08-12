@@ -643,8 +643,18 @@ async def test_smuggling_flagged_when_ambiguous_framing_deviates():
     # well-formed POST is a genuine (weak) smuggling indicator — must still fire.
     from heaven.vulnscan.web_fuzzer import _fuzz_request_smuggling
 
-    sess = _SmugSession(normal_post=200, ambiguous_post=405)
+    # The ambiguous request must be answered with a *normal* (2xx/3xx) status
+    # that differs from the baseline — genuine divergent handling. A 4xx/5xx
+    # answer is the server *rejecting* the malformed request (hardened, not a
+    # smuggling signal) and is asserted separately to NOT fire.
+    sess = _SmugSession(normal_post=200, ambiguous_post=301)
     findings = await _fuzz_request_smuggling(sess, "http://t/api")
     kinds = {f["vuln_type"] for f in findings}
     assert "http_smuggling_indicator" in kinds
     assert "http_smuggling_te_obfuscation" in kinds
+    # Weak indicators must never carry the unrelated nostromo RCE CVE.
+    assert "CVE-2019-16278" not in repr(findings)
+
+    # A WAF answering the malformed request with 4xx is NOT an indicator.
+    sess_waf = _SmugSession(normal_post=200, ambiguous_post=406)
+    assert await _fuzz_request_smuggling(sess_waf, "http://t/api") == []

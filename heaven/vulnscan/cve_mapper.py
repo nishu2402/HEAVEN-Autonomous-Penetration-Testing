@@ -699,6 +699,63 @@ def _version_in_range(version: str, spec: str) -> bool:
         return False
 
 
+def specs_match_version(version: str, specs: list[str]) -> bool:
+    """True when *version* satisfies a CVE record's ``affected_versions`` list.
+
+    A record's spec list is **not** a flat OR. A ``>=``/``>`` lower bound and a
+    ``<=``/``<`` upper bound describe a *bounded window* that must hold jointly
+    (AND). Treating the list as an OR — the historical behaviour — made a record
+    like ``['<=9.7p1', '>=8.5p1']`` (OpenSSH regreSSHion, affected 8.5p1–9.7p1)
+    match ANY version ≥ 8.5p1, so a **patched** OpenSSH 9.9 was flagged as
+    vulnerable. The same over-match hit every bounded record (Log4Shell on a
+    patched 2.17, GitLab/Confluence/Struts above their fixed ceiling, …).
+
+    Semantics, chosen to fix the over-match without ever under-matching relative
+    to the old behaviour:
+
+    * standalone clauses — exact versions, ``lo-hi`` dash ranges and ``all*``
+      markers — are independent **OR** clauses (a match on any is a match);
+    * when the record is bounded on **both** sides, the version must satisfy at
+      least one lower bound **AND** at least one upper bound (so a version above
+      the top ceiling no longer matches);
+    * a one-sided record (only ``<=`` branch ceilings, or only ``>=``) stays an
+      **OR** across that side, exactly as before.
+    """
+    if not specs:
+        return False
+    lowers = [s for s in specs if s.strip().startswith(">")]
+    uppers = [s for s in specs if s.strip().startswith("<")]
+    others = [s for s in specs if not s.strip().startswith((">", "<"))]
+    # Independent OR clauses first (exact / dash-range / "all*").
+    if any(_version_in_range(version, s) for s in others):
+        return True
+    if lowers and uppers:
+        lo_ok = any(_version_in_range(version, s) for s in lowers)
+        hi_ok = any(_version_in_range(version, s) for s in uppers)
+        return lo_ok and hi_ok
+    return any(_version_in_range(version, s) for s in lowers + uppers)
+
+
+# Human-readable product names for the version-undetermined "potential" finding,
+# so it reads "Apache HTTP Server" rather than the internal ``apache_http_server``
+# key. Any product not listed falls back to a title-cased key.
+_PRODUCT_LABELS: dict[str, str] = {
+    "apache_http_server": "Apache HTTP Server",
+    "microsoft_iis": "Microsoft IIS",
+    "mariadb_server": "MariaDB Server",
+    "weblogic_server": "Oracle WebLogic Server",
+    "apache_struts": "Apache Struts",
+    "apache_shiro": "Apache Shiro",
+    "spring_framework": "Spring Framework",
+    "openssh": "OpenSSH",
+    "nginx": "nginx",
+    "dovecot": "Dovecot",
+    "postgresql": "PostgreSQL",
+    "nodejs": "Node.js",
+    "phpmyadmin": "phpMyAdmin",
+}
+
+
 _CVE_INDEX: dict[str, CVERecord] = {}
 
 
@@ -724,17 +781,21 @@ def published_cvss_for(cve_id: Optional[str]) -> Optional[float]:
 
 
 def lookup_inline_cves(product_key: str, version: str) -> list[CVERecord]:
-    """Return CVEs from INLINE_CVE_DB matching product and version."""
+    """Return CVEs from INLINE_CVE_DB matching product and version.
+
+    With **no version** the full record list is returned as *candidates* — this
+    is the accessor ``live_cve_feed.filter_by_version`` relies on to read every
+    record's affected ranges, and the accessor the ``map_vulnerabilities``
+    version-undetermined path uses to build a single consolidated "potential"
+    finding (rather than emitting each as a confirmed CVE). With a version, only
+    records whose affected-version window the version genuinely satisfies are
+    returned (see :func:`specs_match_version` — bounded ranges match jointly, so
+    a patched version above the fixed ceiling no longer over-matches)."""
     records = INLINE_CVE_DB.get(product_key, [])
     if not version:
-        return records  # no version → return all as candidates (lower confidence)
-    matched = []
-    for rec in records:
-        for spec in rec.affected_versions:
-            if _version_in_range(version, spec):
-                matched.append(rec)
-                break
-    return matched
+        return records  # no version → all records as candidates (see docstring)
+    return [rec for rec in records
+            if specs_match_version(version, rec.affected_versions)]
 
 
 # ── Zero-day heuristics ──
@@ -891,29 +952,89 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                 except Exception as e:
                     logger.debug("live CVE feed error for %s: %s", product_key, e)
 
-            for cve_rec in inline_cves:
-                rec_score, rec_sev = _score_and_severity(cve_rec.cvss, cve_rec.severity)
+            if version_str:
+                # A real version was observed → emit each matched CVE as its own
+                # finding with the genuine per-CVE score. These are true version
+                # matches (the window matcher already excluded patched versions).
+                for cve_rec in inline_cves:
+                    rec_score, rec_sev = _score_and_severity(cve_rec.cvss, cve_rec.severity)
+                    all_vulns.append({
+                        "host":             host.get("host", "unknown"),
+                        "port":             port_info.get("port", 0),
+                        # vuln_type drives report taxonomy — without it the finding
+                        # persists as "unknown". "vulnerable_service" aliases to the
+                        # "vulnerable_component" KB entry so an inline-DB CVE is
+                        # categorised the same as a live/NVD one.
+                        "vuln_type":        "vulnerable_service",
+                        "cve":              cve_rec.cve_id,
+                        "title":            cve_rec.title,
+                        # Severity follows the objective CVSS band; cvss_base carries
+                        # the real per-CVE score end-to-end (ML + report resolver).
+                        "severity":         rec_sev,
+                        "cvss":             cve_rec.cvss,
+                        "cvss_base":        rec_score,
+                        "cwe":              cve_rec.cwe,
+                        "product":          product_key,
+                        "version":          version_str,
+                        "exploit_available": cve_rec.exploit_available,
+                        "source":           "inline_db",
+                        "confidence":       0.9,
+                    })
+            elif inline_cves:
+                # No version could be read from the banner. Emitting every product
+                # CVE as a confirmed Critical/High/Open is the classic "outside-in"
+                # false positive: a *patched* host that still advertises a bare
+                # product name (e.g. Bluehost's "Server: Apache", no version) would
+                # light up red with a dozen CVEs it isn't actually vulnerable to,
+                # and distributions routinely backport fixes without bumping the
+                # banner. Collapse to ONE honest, low-severity POTENTIAL finding
+                # that names the candidate CVEs for manual verification instead of
+                # N speculative Criticals. `potential_vulnerable_service` is an
+                # "unconfirmed" type, so reconcile_severity caps its score to the
+                # low band and it never inflates the Critical/High count.
+                host_name = host.get("host", "unknown")
+                label = _PRODUCT_LABELS.get(
+                    product_key, product_key.replace("_", " ").title())
+                candidates = sorted({c.cve_id for c in inline_cves})
+                worst = max((c.cvss for c in inline_cves), default=0.0)
+                examples = [c.cve_id for c in
+                            sorted(inline_cves, key=lambda c: c.cvss, reverse=True)[:6]]
                 all_vulns.append({
-                    "host":             host.get("host", "unknown"),
-                    "port":             port_info.get("port", 0),
-                    # vuln_type drives report taxonomy — without it the finding
-                    # persists as "unknown". "vulnerable_service" aliases to the
-                    # "vulnerable_component" KB entry so an inline-DB CVE is
-                    # categorised the same as a live/NVD one.
-                    "vuln_type":        "vulnerable_service",
-                    "cve":              cve_rec.cve_id,
-                    "title":            cve_rec.title,
-                    # Severity follows the objective CVSS band; cvss_base carries
-                    # the real per-CVE score end-to-end (ML + report resolver).
-                    "severity":         rec_sev,
-                    "cvss":             cve_rec.cvss,
-                    "cvss_base":        rec_score,
-                    "cwe":              cve_rec.cwe,
-                    "product":          product_key,
-                    "version":          version_str,
-                    "exploit_available": cve_rec.exploit_available,
-                    "source":           "inline_db",
-                    "confidence":       0.9 if version_str else 0.5,
+                    "host":       host_name,
+                    "port":       port_info.get("port", 0),
+                    # A bare host target (no :port) so the same version-less service
+                    # seen on several ports collapses to one host-level finding.
+                    "target":     host_name,
+                    "vuln_type":  "potential_vulnerable_service",
+                    "title":      f"Potential vulnerable service: {label} "
+                                  f"(version undetermined)",
+                    "severity":   "low",
+                    "description": (
+                        f"{label} was identified on this host but its exact version "
+                        f"could not be confirmed from the banner, so CVE applicability "
+                        f"cannot be established from the outside. {len(candidates)} "
+                        f"CVEs are known for this product "
+                        f"(e.g. {', '.join(examples)}). These are UNVERIFIED "
+                        f"candidates — confirm the running version via an "
+                        f"authenticated check or vendor advisory before treating any "
+                        f"as present. Distributions frequently backport security "
+                        f"fixes while leaving the banner version unchanged."
+                    ),
+                    "product":    product_key,
+                    "confidence": 0.3,
+                    "source":     "inline_db",
+                    "evidence": {
+                        "product": label,
+                        "version": "undetermined",
+                        "candidate_cve_count": len(candidates),
+                        "candidate_cves": candidates,
+                        "highest_candidate_cvss": worst,
+                        "verification": (
+                            "Confirm the exact version (authenticated access or "
+                            "vendor advisory); unauthenticated banner matching "
+                            "cannot confirm these CVEs are present."
+                        ),
+                    },
                 })
 
             # 2. Generate CPEs for NVD lookup
@@ -960,6 +1081,54 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                     "source":     "heuristic",
                 })
 
+    # 4. Passively-observed CVEs from public internet-scan data (Shodan
+    #    InternetDB, merged into the host dict during recon). These are CVE IDs
+    #    the public record already ties to the host's internet-facing exposure —
+    #    surfaced so a vulnerability that is present on the target but absent from
+    #    our inline DB is never missed. They are UNVALIDATED from our vantage, so
+    #    they carry source="passive:internetdb" + low confidence; the
+    #    confirmation_status resolver keeps them "Potential" and they never inflate
+    #    the confirmed-only Overall Risk. Deduped against any CVE already found
+    #    actively on the same host.
+    _active_cves_by_host: dict[str, set[str]] = {}
+    for v in all_vulns:
+        cid = str(v.get("cve") or "").upper()
+        if cid.startswith("CVE-"):
+            _active_cves_by_host.setdefault(str(v.get("host") or ""), set()).add(cid)
+
+    for host in host_results:
+        host_name = host.get("host", "unknown")
+        seen_here = _active_cves_by_host.setdefault(host_name, set())
+        for cve_id in host.get("passive_cves", []) or []:
+            cid = str(cve_id).upper()
+            if not cid.startswith("CVE-") or cid in seen_here:
+                continue
+            seen_here.add(cid)
+            pub = published_cvss_for(cid)
+            score, sev = _score_and_severity(pub or 0.0, "medium")
+            all_vulns.append({
+                "host":        host_name,
+                "target":      host_name,
+                "port":        0,
+                "vuln_type":   "vulnerable_service",
+                "cve":         cid,
+                "title":       f"Publicly-reported vulnerability {cid}",
+                "severity":    sev,
+                "cvss":        pub or 0.0,
+                "cvss_base":   score,
+                "source":      "passive:internetdb",
+                "confidence":  0.5,
+                "description": (
+                    f"Shodan's public InternetDB associates {cid} with this host's "
+                    "internet-facing exposure. This is passive OSINT, UNVERIFIED "
+                    "from the scan origin — confirm the affected component and "
+                    "version (authenticated check or active exploitation) before "
+                    "treating it as exploitable."
+                ),
+                "evidence": {"source_feed": "shodan_internetdb",
+                             "validation": "passive-osint-unconfirmed"},
+            })
+
     # Attribute every CVE finding to the concrete host:port it came from. The
     # persistence layer synthesises target=host, but the raw findings (rendered
     # in the CLI end-of-scan table, the web progress feed and the kill chain)
@@ -974,11 +1143,19 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
         port_num = v.get("port") or 0
         v["target"] = f"{host_str}:{port_num}" if port_num else host_str
 
-    # Deduplicate by (host, port, cve)
+    # Deduplicate. A confirmed CVE is identified per (host, port, cve) so
+    # distinct CVEs — and the same CVE on genuinely different service ports —
+    # stay distinct. The consolidated version-undetermined "potential" finding is
+    # a property of the product on the host, so it collapses per (host, product):
+    # a service whose version is hidden but is reachable on several ports (Apache
+    # on 80 AND 443) is reported once, not once per port.
     seen: set[tuple] = set()
     unique: list[dict] = []
     for v in all_vulns:
-        key = (v.get("host"), v.get("port"), v.get("cve"))
+        if v.get("vuln_type") == "potential_vulnerable_service":
+            key = ("__potential__", v.get("host"), v.get("product"))
+        else:
+            key = (v.get("host"), v.get("port"), v.get("cve"))
         if key not in seen:
             seen.add(key)
             unique.append(v)

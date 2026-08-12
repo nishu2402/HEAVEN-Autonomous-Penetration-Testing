@@ -41,6 +41,8 @@ try:
 except ImportError:
     HAS_ASYNCSSH = False
 
+from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs before connect
+
 try:
     # impacket is optional — only needed for SMB / PsExec / pass-the-hash
     from impacket.smbconnection import SMBConnection  # type: ignore[import-not-found]
@@ -152,7 +154,7 @@ class SSHKeyReuseScanner:
                 import time
                 t0 = time.time()
                 try:
-                    async with asyncssh.connect(  # type: ignore[attr-defined]
+                    async with ssh_safe.connect(  # type: ignore[attr-defined]
                         host, port=port, username=user,
                         client_keys=[key_path],
                         known_hosts=None,

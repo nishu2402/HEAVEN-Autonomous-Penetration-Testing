@@ -536,3 +536,87 @@ def reconcile_severity(finding: dict[str, Any]) -> dict[str, Any]:
     elif label != score_band:
         finding["severity"] = score_band
     return finding
+
+
+# ── Confirmation status: Confirmed vs Potential ─────────────────────────────
+#
+# A professional penetration test separates what was *proven present* from what
+# is only *inferred*. HEAVEN carries this as a computed status (never a stored
+# column — resolved on read everywhere, one rule):
+#
+#   • Confirmed — established by direct observation or active validation: a
+#     missing security header actually seen in a live response, an open cleartext
+#     port, a payload that executed, an anonymous login that succeeded, a
+#     validator that returned "confirmed", or an authoritative version read from
+#     a dependency manifest (SCA).
+#   • Potential — inferred, not validated: a CVE mapped from a network service
+#     *version banner* (the backport problem — vendors patch without bumping the
+#     banner, so an unauthenticated banner match cannot confirm the flaw is
+#     present), or any heuristic "indicator / possible / potential" signal.
+#
+# Potential findings document real attack surface and stay fully in the report —
+# they are never suppressed — but they must NOT inflate the confirmed-risk
+# headline (Overall Risk / the Critical count). Severity is orthogonal: a finding
+# can be "Critical (Potential)" — critical *if* present, not yet proven present.
+
+# vuln_types that are inferred from a network *version banner* (or a zero-day
+# heuristic) rather than actively exploited — Potential until validated. SCA /
+# dependency matches (``vulnerable_dependency``, source ``osv``) are deliberately
+# excluded: their version is read authoritatively from a manifest, so the
+# vulnerable component genuinely *is* present (Confirmed-present).
+_BANNER_INFERRED_TYPES = frozenset({
+    "vulnerable_service", "potential_vulnerable_service",
+    "known_vulnerable_version", "outdated_service", "zero_day_heuristic",
+})
+
+# Finding ``source`` prefixes that denote a network/banner-inferred CVE match
+# (never active proof). ``osv`` (SCA) is intentionally absent.
+_BANNER_INFERRED_SOURCES = ("inline_db", "nvd", "live", "circl", "cve_feed",
+                            "heuristic")
+
+
+def _is_actively_validated(finding: dict[str, Any]) -> bool:
+    """True when a finding was *proven* — a probe executed, a payload fired, an
+    access actually succeeded — rather than merely matched against a banner.
+
+    ``version_confirmed`` does **not** count: it only means a version string fell
+    within a CVE's affected range, which is precisely the unauthenticated
+    inference this module treats as Potential.
+    """
+    if _finding_flag(finding, ("validated", "exploited", "verified", "proven")):
+        return True
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    result = str(
+        finding.get("validation") or ev.get("validation")
+        or ev.get("validation_result") or ev.get("result") or ""
+    ).strip().lower()
+    return result in {"confirmed", "exploited", "verified", "proven"}
+
+
+def is_confirmed_finding(finding: dict[str, Any]) -> bool:
+    """Whether a finding was established by direct observation / active
+    validation (**Confirmed**) rather than inferred from a network version banner
+    or a heuristic indicator (**Potential**). See the module note above."""
+    # Active validation always wins — even over an "indicator"-worded title.
+    if _is_actively_validated(finding):
+        return True
+    # Heuristic / indicator / possible / low-confidence-no-CVE → not confirmed.
+    if is_unconfirmed_finding(finding):
+        return False
+    vt = str(finding.get("vuln_type") or finding.get("type") or "").strip().lower()
+    if vt in _BANNER_INFERRED_TYPES:
+        return False
+    # A CVE from a network-banner source with no active validation is inferred.
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    source = str(finding.get("source") or ev.get("source") or "").strip().lower()
+    has_cve = bool(finding.get("cve") or finding.get("cve_id") or ev.get("cve"))
+    if has_cve and any(source.startswith(s) for s in _BANNER_INFERRED_SOURCES):
+        return False
+    # Everything else is a directly-observed posture / config / exposure finding
+    # (missing headers, weak TLS, cleartext protocol, anonymous access, SCA …).
+    return True
+
+
+def confirmation_status(finding: dict[str, Any]) -> str:
+    """Canonical label — ``"Confirmed"`` or ``"Potential"`` — for a finding."""
+    return "Confirmed" if is_confirmed_finding(finding) else "Potential"

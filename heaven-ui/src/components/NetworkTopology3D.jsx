@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState } from 'react'
+import { useRef, useMemo, useState, useEffect } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Html, Stars } from '@react-three/drei'
 import * as THREE from 'three'
@@ -11,6 +11,24 @@ const SEV_COLORS = {
 }
 const ACCENT = '#6D7CFF'
 const ACCENT_2 = '#A78BFA'
+
+// The scene draws to the GPU with literal colours (CSS vars can't reach it), so
+// the grid / starfield / node tooltip can't inherit the theme tokens. Track the
+// active theme and pick light-vs-dark literals so a dark wireframe never lands on
+// a white page. A MutationObserver on <html data-theme> keeps it live on toggle.
+function useThemeIsLight() {
+  const [isLight, setIsLight] = useState(
+    () => typeof document !== 'undefined' &&
+          document.documentElement.dataset.theme === 'light'
+  )
+  useEffect(() => {
+    const el = document.documentElement
+    const obs = new MutationObserver(() => setIsLight(el.dataset.theme === 'light'))
+    obs.observe(el, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [])
+  return isLight
+}
 
 // Highest-risk hosts win the limited node budget so a wide /24 sweep never
 // floods the view with dozens of low-signal spheres.
@@ -43,7 +61,7 @@ function Edge({ start, end, color }) {
   )
 }
 
-function HostNode({ host, position, severity, portCount, sizeScale, onClick }) {
+function HostNode({ host, position, severity, portCount, sizeScale, onClick, isLight }) {
   const mesh = useRef()
   const ring = useRef()
   const [hovered, setHovered] = useState(false)
@@ -88,18 +106,20 @@ function HostNode({ host, position, severity, portCount, sizeScale, onClick }) {
         <Html position={[position[0], position[1] + radius + 0.3, position[2]]}
               style={{ pointerEvents: 'none' }}>
           <div style={{
-            background: 'rgba(11,15,26,0.94)',
+            background: isLight ? 'rgba(255,255,255,0.96)' : 'rgba(11,15,26,0.94)',
             border: `1px solid ${color}`,
             borderRadius: 8,
-            color: '#ECEFF7',
+            color: isLight ? '#0F172A' : '#ECEFF7',
             padding: '7px 11px',
             fontSize: '11px',
             fontFamily: 'JetBrains Mono, monospace',
             whiteSpace: 'nowrap',
-            boxShadow: `0 8px 24px rgba(0,0,0,0.5), 0 0 16px ${color}55`,
+            boxShadow: isLight
+              ? `0 8px 24px rgba(15,23,42,0.18), 0 0 16px ${color}44`
+              : `0 8px 24px rgba(0,0,0,0.5), 0 0 16px ${color}55`,
           }}>
             <div style={{ color, fontWeight: 700 }}>{host.ip || host.host || 'unknown'}</div>
-            <div style={{ color: '#9BA7C0', fontSize: 10, marginTop: 2 }}>
+            <div style={{ color: isLight ? '#475569' : '#9BA7C0', fontSize: 10, marginTop: 2 }}>
               {severity?.toUpperCase()} · {portCount} port{portCount !== 1 ? 's' : ''}
             </div>
           </div>
@@ -109,13 +129,16 @@ function HostNode({ host, position, severity, portCount, sizeScale, onClick }) {
   )
 }
 
-function GridPlane() {
+function GridPlane({ isLight }) {
+  // Light theme: soft slate lines on the (transparent) white page. Dark theme:
+  // the original near-black grid.
+  const [line, cell] = isLight ? ['#C2CBDA', '#DCE3EE'] : ['#1b2336', '#141a28']
   return (
-    <gridHelper args={[20, 20, '#1b2336', '#141a28']} position={[0, -2, 0]} />
+    <gridHelper args={[20, 20, line, cell]} position={[0, -2, 0]} />
   )
 }
 
-function Scene({ hosts, onSelect }) {
+function Scene({ hosts, onSelect, isLight }) {
   // Key the layout on the actual host identities, not just the count — switching
   // to another engagement with the same number of hosts (but different IPs) must
   // still relayout so the topology reflects the engagement you're viewing.
@@ -169,11 +192,14 @@ function Scene({ hosts, onSelect }) {
 
   return (
     <>
-      <ambientLight intensity={0.12} />
+      <ambientLight intensity={isLight ? 0.5 : 0.12} />
       <pointLight position={[0, 5, 0]} intensity={0.6} color={ACCENT} />
       <pointLight position={[-5, -2, -5]} intensity={0.35} color={ACCENT_2} />
-      <Stars radius={30} depth={20} count={300} factor={2} saturation={0} fade speed={0.5} />
-      <GridPlane />
+      {/* A starfield only makes sense against a dark void — drop it in light mode. */}
+      {!isLight && (
+        <Stars radius={30} depth={20} count={300} factor={2} saturation={0} fade speed={0.5} />
+      )}
+      <GridPlane isLight={isLight} />
       {edges.map((e, i) => (
         <Edge key={i} start={e.start} end={e.end} />
       ))}
@@ -186,6 +212,7 @@ function Scene({ hosts, onSelect }) {
           portCount={host.open_ports?.length || 1}
           sizeScale={sizeScale}
           onClick={onSelect}
+          isLight={isLight}
         />
       ))}
       <OrbitControls
@@ -200,6 +227,7 @@ function Scene({ hosts, onSelect }) {
 
 export default function NetworkTopology3D({ hosts = [] }) {
   const [selected, setSelected] = useState(null)
+  const isLight = useThemeIsLight()
 
   // Rank by severity (then port count) and cap so large scans stay readable.
   const { shown, hiddenCount, total } = useMemo(() => {
@@ -244,7 +272,7 @@ export default function NetworkTopology3D({ hosts = [] }) {
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
       >
-        <Scene hosts={shown} onSelect={setSelected} />
+        <Scene hosts={shown} onSelect={setSelected} isLight={isLight} />
       </Canvas>
 
       {selected && (
@@ -266,14 +294,19 @@ export default function NetworkTopology3D({ hosts = [] }) {
         </div>
       )}
 
-      <div className="topology-legend">
-        {Object.entries(SEV_COLORS).slice(0, 5).map(([sev, col]) => (
-          <span key={sev}>
-            <span className="legend-dot" style={{ background: col }} />
-            {sev}
-          </span>
-        ))}
-      </div>
+      {/* The selected-host card anchors bottom-left/right; hide the legend while
+          a node is picked so the two never overlap (the card's own colour dot
+          conveys the selected host's severity). It returns on deselect. */}
+      {!selected && (
+        <div className="topology-legend">
+          {Object.entries(SEV_COLORS).slice(0, 5).map(([sev, col]) => (
+            <span key={sev}>
+              <span className="legend-dot" style={{ background: col }} />
+              {sev}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

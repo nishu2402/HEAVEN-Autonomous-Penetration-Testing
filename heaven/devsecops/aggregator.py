@@ -52,72 +52,21 @@ def compile_json_report(scan_data: dict, output_path: Optional[str] = None) -> d
     return report
 
 
-def export_sarif(scan_data: dict, output_path: str = "heaven-results.sarif") -> dict:
-    """Export findings in SARIF 2.1.0 format for GitHub Security tab."""
-    sarif: dict[str, Any] = {
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "HEAVEN",
-                    "version": "2.1.0",
-                    "organization": "Nisarg Chasmawala (Shroff)",
-                    "informationUri": "https://github.com/heaven-security",
-                    "rules": [],
-                }
-            },
-            "results": [],
-        }],
-    }
+def export_sarif(scan_data: dict, output_path: Optional[str] = None) -> dict:
+    """Export findings in SARIF 2.1.0 for GitHub/GitLab code scanning.
 
-    rules_seen = set()
-    run: dict[str, Any] = sarif["runs"][0]
-
-    for vuln in scan_data.get("vulnerabilities", []):
-        rule_id = vuln.get("cve_id") or vuln.get("title", "unknown")
-
-        if rule_id not in rules_seen:
-            rules_seen.add(rule_id)
-            run["tool"]["driver"]["rules"].append({
-                "id": rule_id,
-                "name": vuln.get("title", rule_id),
-                "shortDescription": {"text": vuln.get("title", "")},
-                "fullDescription": {"text": vuln.get("description", "")},
-                "defaultConfiguration": {
-                    "level": _severity_to_sarif_level(vuln.get("severity", "info"))
-                },
-                "properties": {
-                    "cvss": vuln.get("cvss_base", 0),
-                    "risk_score": vuln.get("risk_score", 0),
-                },
-            })
-
-        run["results"].append({
-            "ruleId": rule_id,
-            "level": _severity_to_sarif_level(vuln.get("severity", "info")),
-            "message": {"text": vuln.get("description", vuln.get("title", ""))},
-            "locations": [{
-                "physicalLocation": {
-                    "artifactLocation": {"uri": vuln.get("asset", "unknown")},
-                }
-            }],
-            "properties": {
-                "asset": vuln.get("asset", ""),
-                "port": vuln.get("port", 0),
-                "risk_score": vuln.get("risk_score", 0),
-                "validated": vuln.get("validated", False),
-            },
-        })
-
-    Path(output_path).write_text(json.dumps(sarif, indent=2))
-    logger.info(f"SARIF report written to {output_path}")
+    Delegates to :func:`heaven.devsecops.ci_export.findings_to_sarif`, which
+    emits correct ``artifactLocation`` URIs (the target), ``partialFingerprints``
+    and a numeric ``security-severity``. Writes to ``output_path`` only when one
+    is given — passing no path returns the dict with no side effects (the earlier
+    default silently wrote a stray ``heaven-results.sarif`` into the CWD).
+    """
+    from heaven.devsecops.ci_export import findings_to_sarif
+    sarif = findings_to_sarif(scan_data.get("vulnerabilities", []))
+    if output_path:
+        Path(output_path).write_text(json.dumps(sarif, indent=2, default=str))
+        logger.info(f"SARIF report written to {output_path}")
     return sarif
-
-
-def _severity_to_sarif_level(severity: str) -> str:
-    return {"critical": "error", "high": "error", "medium": "warning",
-            "low": "note", "info": "note"}.get(severity.lower(), "note")
 
 
 async def generate_report(scan_id: str = "", scan_data: Optional[dict[Any, Any]] = None, **kwargs) -> dict[str, Any]:

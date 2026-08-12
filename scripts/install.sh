@@ -48,19 +48,39 @@ fi
 # ── 1. Python check ───────────────────────────────────────────────────────────
 step "Step 1/9 — Checking Python..."
 
-if command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD="python3"
-elif command -v python >/dev/null 2>&1; then
-    PYTHON_CMD="python"
-else
-    fail "Python 3 is not installed. Install Python 3.11 or higher and re-run."
+# Prefer a stable, well-tested interpreter. HEAVEN's native security deps
+# (asyncssh↔Nettle, cryptography, numpy/scikit-learn) are only ABI-stable on
+# released Python lines; a brand-new major (e.g. 3.14 in its first months) can
+# segfault those C extensions. So pick the newest *known-good* python we can find
+# (3.13 → 3.12 → 3.11) before falling back to whatever `python3`/`python` is.
+PYTHON_CMD=""
+for _py in python3.13 python3.12 python3.11; do
+    if command -v "$_py" >/dev/null 2>&1; then PYTHON_CMD="$_py"; break; fi
+done
+if [ -z "$PYTHON_CMD" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON_CMD="python3"
+    elif command -v python >/dev/null 2>&1; then
+        PYTHON_CMD="python"
+    else
+        fail "Python 3 is not installed. Install Python 3.11-3.13 and re-run."
+    fi
 fi
 
 PY_OK=$($PYTHON_CMD -c 'import sys; print(1 if sys.version_info >= (3, 11) else 0)')
 PY_VER=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
+# 1 when the interpreter is newer than the newest line we test (3.13): usable,
+# but not yet vetted against our native security deps.
+PY_NEW=$($PYTHON_CMD -c 'import sys; print(1 if sys.version_info >= (3, 14) else 0)')
 
 if [ "$PY_OK" != "1" ]; then
     fail "Python 3.11+ required. Found: $PY_VER. Please upgrade Python."
+fi
+if [ "$PY_NEW" = "1" ]; then
+    warn "Python $PY_VER is newer than HEAVEN's tested range (3.11-3.13)."
+    warn "It should work, but native security libraries may not be ABI-stable"
+    warn "on it yet. If you hit a native crash, install Python 3.12 or 3.13 and"
+    warn "re-run this installer (delete '$INSTALL_DIR/venv' first to rebuild it)."
 fi
 ok "Python $PY_VER"
 
@@ -128,7 +148,36 @@ else
     warn "Playwright browser skipped  (enable later: playwright install chromium)"
 fi
 
-# ── 5. Install global 'heaven' command ────────────────────────────────────────
+# ── Optional: local AI (Ollama) — no API key, no rate limits ──────────────────
+# OPT-IN only (HEAVEN_WITH_OLLAMA=1): Ollama + a 7B model is a big download, so
+# the installer never pulls it unprompted. Without the flag we just point users
+# at the one-command setup. HEAVEN's AI layer works the moment a model is present
+# (or a cloud key is added) — the code degrades gracefully until then.
+if [ "${HEAVEN_WITH_OLLAMA:-0}" = "1" ]; then
+    if ! command -v ollama >/dev/null 2>&1; then
+        info "Installing Ollama (HEAVEN_WITH_OLLAMA=1)…"
+        if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+            brew install ollama >/dev/null 2>&1 && ok "Ollama installed (brew)" \
+                || warn "Ollama install failed — see https://ollama.com/download"
+        elif [ "$(uname -s)" = "Linux" ]; then
+            curl -fsSL https://ollama.com/install.sh | sh >/dev/null 2>&1 \
+                && ok "Ollama installed" || warn "Ollama install failed — https://ollama.com/download"
+        else
+            warn "Auto-install unsupported here — install Ollama: https://ollama.com/download"
+        fi
+    fi
+    if command -v ollama >/dev/null 2>&1; then
+        MODEL="${HEAVEN_OLLAMA_MODEL:-qwen2.5:7b}"
+        info "Pulling local model $MODEL (this can take a while)…"
+        ollama pull "$MODEL" >/dev/null 2>&1 && ok "Local model $MODEL ready" \
+            || warn "Model pull failed — run later: ollama pull $MODEL"
+    fi
+else
+    info "Local AI: run 'heaven ai setup' for a private, rate-limit-free model"
+    info "  (no API key needed) — or set HEAVEN_WITH_OLLAMA=1 to install it now."
+fi
+
+# ── 5. Install global 'heaven' command + Tab-completion ───────────────────────
 step "Step 5/9 — Installing global 'heaven' command..."
 
 # After 'pip install -e .' the venv already has a working heaven script.
@@ -188,6 +237,34 @@ if [ -z "$WRAPPER_PATH" ]; then
 fi
 
 ok "heaven command: $WRAPPER_PATH"
+
+# ── Tab-completion — so pressing <Tab> completes commands, options and values ──
+# This is the exact "Tab does nothing" pain point new users hit. `heaven
+# completion --install` writes the completion script and wires the shell rc
+# safely (idempotent, backed up, and — for zsh — compinit-ordering-aware so it
+# actually loads). Best-effort: a failure here never aborts the install. Opt out
+# with HEAVEN_SKIP_COMPLETION=1. Runs with HOME=$TARGET_HOME so a sudo'd install
+# still wires the invoking user's shell, not root's.
+case "$(basename "${SHELL:-}")" in
+    bash) HEAVEN_SHELL="bash" ;;
+    zsh)  HEAVEN_SHELL="zsh"  ;;
+    fish) HEAVEN_SHELL="fish" ;;
+    *)    HEAVEN_SHELL=""     ;;
+esac
+if [ "${HEAVEN_SKIP_COMPLETION:-0}" = "1" ]; then
+    info "HEAVEN_SKIP_COMPLETION=1 — skipping Tab-completion setup"
+    info "  Enable later:  heaven completion --install"
+elif [ -z "$HEAVEN_SHELL" ]; then
+    info "Tab-completion: run  ${BOLD}heaven completion --install${NC}  to enable it for your shell"
+else
+    info "Enabling Tab-completion for $HEAVEN_SHELL (commands, options and values)..."
+    if HOME="$TARGET_HOME" "$VENV_PYTHON" -m heaven.main --quiet \
+           completion --install "$HEAVEN_SHELL" >/dev/null 2>&1; then
+        ok "Tab-completion installed — open a new terminal, then press Tab after 'heaven '"
+    else
+        warn "Tab-completion setup skipped (enable later: heaven completion --install)"
+    fi
+fi
 
 # ── 6. External tools — install for full power ────────────────────────────────
 echo ""

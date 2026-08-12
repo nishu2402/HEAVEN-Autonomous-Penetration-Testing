@@ -125,6 +125,58 @@ def test_benchmark_metrics_parser_and_washout():
     assert _parse_benchmark_metrics("# just a heading\n") is None
 
 
+def test_benchmark_run_regenerates_and_returns_fresh(api_client, monkeypatch):
+    """POST /api/benchmark/run re-runs the native benchmark and returns fresh
+    numbers in the same shape as /results. ``run_native_benchmark`` is mocked so
+    the test is fast and independent of the in-process vuln-app fixture."""
+    import types
+
+    fake_md = (
+        "# Benchmark: HEAVEN v9.9.9 vs. heaven-native-vuln-app v1.0\n\n"
+        "| Precision (TP / TP+FP)    | 100.0% |\n"
+        "| Recall (required GT only) | 100.0% |\n"
+        "| F1                        | 100.0% |\n"
+    )
+    fake_run = types.SimpleNamespace(markdown=fake_md)
+
+    import tests.benchmarks.native.runner as runner_mod
+    monkeypatch.setattr(
+        runner_mod, "run_native_benchmark",
+        lambda *, write_report=True: fake_run,
+    )
+
+    r = api_client.post("/api/benchmark/run")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert body["source"] == "native-controlled"
+    assert body["metrics"] == {"precision": 1.0, "recall": 1.0, "f1": 1.0}
+    # HEAVEN's version is stamped into the header (removes the "which v1.0?"
+    # ambiguity — that v1.0 is the target app's, not HEAVEN's).
+    assert body["markdown"].splitlines()[0].startswith("# Benchmark: HEAVEN v")
+    assert body["generated_at"]
+
+
+def test_update_engagement_details_endpoint(api_client, monkeypatch):
+    """PATCH /api/engagement edits Client / SOW; omitted fields are preserved."""
+    monkeypatch.setenv("HEAVEN_ENGAGEMENT", "patchtest")
+
+    # Client-only edit — value is trimmed and internal whitespace collapsed.
+    r = api_client.patch("/api/engagement", json={"client": "  ACME   Corp "})
+    assert r.status_code == 200, r.text
+    assert r.json()["engagement"]["client"] == "ACME Corp"
+
+    # SOW-only edit leaves the client intact (partial PATCH).
+    r = api_client.patch("/api/engagement", json={"statement_of_work": "SOW-2026-001"})
+    assert r.status_code == 200, r.text
+    eng = r.json()["engagement"]
+    assert eng["client"] == "ACME Corp"
+    assert eng["statement_of_work"] == "SOW-2026-001"
+
+    # An empty body is rejected — nothing to change.
+    assert api_client.patch("/api/engagement", json={}).status_code == 422
+
+
 # ── Gap 6: AI layer triggers ────────────────────────────────────────────
 
 def test_ai_unknown_kind_returns_400(api_client):
@@ -275,6 +327,7 @@ def test_every_new_route_is_registered(api_client):
         "/api/siem/status",
         "/api/methodology",
         "/api/benchmark/results",
+        "/api/benchmark/run",
         # Sync-round-2 endpoints
         "/api/autonomous/run",
         "/api/coverage",

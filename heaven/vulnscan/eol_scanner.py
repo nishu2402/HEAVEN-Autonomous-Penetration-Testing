@@ -21,9 +21,16 @@ Extended Security Update (ESU) path exists, the finding says so.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from datetime import date
+from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
+
+try:
+    import aiohttp
+    _AIOHTTP = True
+except ImportError:  # pragma: no cover
+    _AIOHTTP = False
 
 logger = get_logger("vulnscan.eol")
 
@@ -102,6 +109,12 @@ _PRODUCT_EOL: list[tuple[str, str, Optional[tuple[int, ...]], str, str, str]] = 
      "supported 8.x branch."),
     ("MySQL", r"\bmysql\b", (8, 0), "2023-10-31", "medium",
      "MySQL branches before 8.0 (e.g. 5.7) reached end of life in 2023."),
+    ("PostgreSQL", r"postgre", (13, 0), "2021-11-11", "medium",
+     "PostgreSQL branches before 13 are end-of-life (9.6 reached EOL on "
+     "2021-11-11) and receive no further security fixes."),
+    ("ISC BIND", r"\bbind\b", (9, 18), "2023-03-31", "medium",
+     "ISC BIND branches before 9.18 are end-of-life (the 9.16 branch reached EOL "
+     "in 2023). Upgrade to a supported 9.18/9.20 branch."),
     ("OpenSSL", r"openssl", (3, 0), "2023-09-11", "medium",
      "OpenSSL 1.0.2/1.1.0/1.1.1 are all end-of-life; upgrade to the 3.x LTS line."),
     ("Microsoft IIS 6.0", r"iis[/ ]?6\b|microsoft-iis/6", None, "2015-07-14",
@@ -155,15 +168,174 @@ def _product_findings(target: str, product: str, version: str,
     return out
 
 
-async def scan_eol_from_net(net_data: dict) -> dict:
+# ── Dynamic EOL via the live endoflife.date feed ─────────────────────────────
+# The static tables above are curated, offline and precise but finite. The live
+# endoflife.date API (key-less) covers hundreds more products, so HEAVEN can flag
+# an EOL component that isn't in the hand-maintained list — the "if it's on the
+# target but not in our DB, don't miss it" case. A finding still fires ONLY on a
+# real, published EOL date (or an explicit ``eol:true``); "still supported" and
+# "unknown" never raise a finding. endoflife.date receives only a product SLUG
+# (e.g. "mysql"), never anything identifying the target.
+_EOL_API = "https://endoflife.date/api/{product}.json"
+_EOL_CACHE: dict[str, list[dict]] = {}
+_EOL_MAX_LOOKUPS = 16
+
+# Detected product string (regex) → endoflife.date product slug.
+_ENDOFLIFE_SLUGS: list[tuple[str, str]] = [
+    (r"nginx", "nginx"),
+    (r"apache|httpd", "apache"),
+    (r"tomcat", "tomcat"),
+    (r"\bphp\b", "php"),
+    (r"mariadb", "mariadb"),
+    (r"\bmysql\b", "mysql"),
+    (r"postgre", "postgresql"),
+    (r"mongodb|mongod", "mongodb"),
+    (r"\bredis\b", "redis"),
+    (r"elasticsearch", "elasticsearch"),
+    (r"\bbind\b|named", "bind"),
+    (r"openssl", "openssl"),
+    (r"openssh", "openssh"),
+    (r"\bexim\b", "exim"),
+    (r"postfix", "postfix"),
+    (r"dovecot", "dovecot"),
+    (r"proftpd", "proftpd"),
+    (r"pure-ftpd", "pure-ftpd"),
+    (r"varnish", "varnish"),
+    (r"haproxy", "haproxy"),
+    (r"node\.?js|nodejs", "nodejs"),
+    (r"python", "python"),
+    (r"\bperl\b", "perl"),
+    (r"\bruby\b", "ruby"),
+    (r"ubuntu", "ubuntu"),
+    (r"debian", "debian"),
+    (r"centos", "centos"),
+    (r"red\s*hat|rhel", "rhel"),
+    (r"almalinux", "almalinux"),
+    (r"rocky", "rocky-linux"),
+]
+
+
+def _endoflife_slug(product: str, banner: str) -> str:
+    hay = f"{product} {banner}".lower()
+    for pattern, slug in _ENDOFLIFE_SLUGS:
+        if re.search(pattern, hay):
+            return slug
+    return ""
+
+
+async def _endoflife_lookup(slug: str, *, session: Any = None,
+                            timeout: float = 8.0) -> list[dict]:
+    """Return endoflife.date release cycles for *slug*, cached; ``[]`` on error."""
+    if not _AIOHTTP or not slug:
+        return []
+    if slug in _EOL_CACHE:
+        return _EOL_CACHE[slug]
+    url = _EOL_API.format(product=slug)
+    cycles: list[dict] = []
+    own = session is None
+    try:
+        sess = session or aiohttp.ClientSession()
+        try:
+            async with sess.get(
+                url, timeout=aiohttp.ClientTimeout(total=timeout),
+                headers={"Accept": "application/json"},
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    if isinstance(data, list):
+                        cycles = [c for c in data if isinstance(c, dict)]
+        finally:
+            if own:
+                await sess.close()
+    except Exception as e:  # noqa: BLE001 - dynamic EOL is best-effort
+        logger.debug("endoflife.date lookup failed for %s: %s", slug, e)
+        cycles = []
+    _EOL_CACHE[slug] = cycles
+    return cycles
+
+
+def _cycle_status(cycle: dict) -> Optional[tuple[str, str, bool]]:
+    """(eol_date, cycle_label, is_eol) for one release cycle; None if unknown."""
+    label = str(cycle.get("cycle", ""))
+    eol = cycle.get("eol")
+    if eol is True:
+        return ("", label, True)
+    if eol is False:
+        return ("", label, False)
+    if isinstance(eol, str) and eol:
+        try:
+            d = date.fromisoformat(eol)
+        except ValueError:
+            return None
+        return (eol, label, d < date.today())
+    return None
+
+
+def _match_cycle(cycles: list[dict],
+                 version: tuple[int, ...]) -> Optional[tuple[str, str, bool]]:
+    """Find the release cycle covering *version* (e.g. 5.7.44 → cycle '5.7')."""
+    cands: list[str] = []
+    if len(version) >= 2:
+        cands.append(f"{version[0]}.{version[1]}")
+    cands.append(f"{version[0]}")
+    for cand in cands:
+        for c in cycles:
+            if str(c.get("cycle", "")) == cand:
+                return _cycle_status(c)
+    return None
+
+
+async def _dynamic_eol_finding(target: str, product: str, version: str,
+                               banner: str) -> Optional[dict]:
+    """Flag an EOL component via endoflife.date; None unless it's genuinely EOL."""
+    slug = _endoflife_slug(product, banner)
+    if not slug:
+        return None
+    v = _parse_version(version) or _parse_version(banner)
+    if v is None:
+        return None
+    cycles = await _endoflife_lookup(slug)
+    if not cycles:
+        return None
+    match = _match_cycle(cycles, v)
+    if not match:
+        return None
+    eol_date, cycle_label, is_eol = match
+    if not is_eol:
+        return None
+    display = (product or slug).strip() or slug
+    detected = ".".join(str(x) for x in v)
+    when = f" on {eol_date}" if eol_date else ""
+    return _finding(
+        target, "unsupported_software", "medium",
+        f"Unsupported / End-of-Life Software: {display} {cycle_label}".rstrip(),
+        f"{display} release {cycle_label} reached end-of-life{when} according to "
+        "endoflife.date and receives no further security patches. End-of-life "
+        "software leaves any newly disclosed vulnerability permanently "
+        "exploitable — inventory and upgrade all affected instances to a "
+        "vendor-supported release.",
+        0.8,
+        {"product": display, "detected_version": detected,
+         "kind": "software_component", "eol_date": eol_date or "vendor-marked EOL",
+         "cwe": "CWE-1104", "source_feed": "endoflife.date"})
+
+
+async def scan_eol_from_net(net_data: dict, *, dynamic: bool = True) -> dict:
     """Analyse a network-recon result for end-of-life OS and software.
 
-    ``net_data`` is the ``scan_network`` dict (``{"hosts": [...]}``). Returns the
-    standard scanner result shape.
+    ``net_data`` is the ``scan_network`` dict (``{"hosts": [...]}``). The static
+    tables above are checked first (curated, offline, precise); for any product
+    they don't cover, the live endoflife.date feed is consulted so a supported
+    fact-based EOL finding is still raised — never a guess. Returns the standard
+    scanner result shape.
     """
+    from heaven.recon.passive_intel import passive_intel_enabled
+
     hosts = net_data.get("hosts", []) if isinstance(net_data, dict) else []
     findings: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
+    use_dynamic = dynamic and _AIOHTTP and passive_intel_enabled()
+    live_used = 0
 
     for host in hosts:
         ip = host.get("ip") or host.get("host") or ""
@@ -184,12 +356,27 @@ async def scan_eol_from_net(net_data: dict) -> dict:
             banner = str(p.get("banner") or "")
             if not (product or banner):
                 continue
-            for f in _product_findings(f"{ip}:{port}", product, version, banner):
-                prod = f["evidence"]["product"]
-                key = (ip, prod.lower(), f["evidence"].get("detected_version", ""))
-                if key not in seen:
-                    seen.add(key)
-                    findings.append(f)
+            target = f"{ip}:{port}"
+            static_hits = _product_findings(target, product, version, banner)
+            if static_hits:
+                for f in static_hits:
+                    prod = f["evidence"]["product"]
+                    key = (ip, prod.lower(), f["evidence"].get("detected_version", ""))
+                    if key not in seen:
+                        seen.add(key)
+                        findings.append(f)
+                continue
+            # Gap-fill: nothing in the static table matched this product — ask the
+            # live feed (bounded per scan; cache dedups repeat products).
+            if use_dynamic and live_used < _EOL_MAX_LOOKUPS and product:
+                live_used += 1
+                dyn = await _dynamic_eol_finding(target, product, version, banner)
+                if dyn:
+                    prod = dyn["evidence"]["product"]
+                    key = (ip, prod.lower(), dyn["evidence"].get("detected_version", ""))
+                    if key not in seen:
+                        seen.add(key)
+                        findings.append(dyn)
 
     logger.info("EOL scan → %d unsupported-software finding(s) across %d host(s)",
                 len(findings), len(hosts))

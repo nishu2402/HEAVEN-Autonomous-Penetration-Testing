@@ -68,6 +68,32 @@ class WatchIteration:
     alert_dispatched: bool = False
     tickets_created: int = 0
     error: str = ""
+    baseline: bool = False              # first iteration — establishes the baseline
+    # Compact list of the notable changes this iteration (new + regressed),
+    # so the API/UI can show WHAT changed, not just how many.
+    changes: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.new or self.regressed)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "n": self.n,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "scan_id": self.scan_id,
+            "findings_total": self.findings_total,
+            "new": self.new,
+            "regressed": self.regressed,
+            "resolved": self.resolved,
+            "changed": self.changed,
+            "alert_dispatched": self.alert_dispatched,
+            "tickets_created": self.tickets_created,
+            "baseline": self.baseline,
+            "changes": self.changes,
+            "error": self.error,
+        }
 
 
 @dataclass
@@ -98,8 +124,9 @@ class WatchSummary:
             "alerts_dispatched": self.total_alerts,
             "tickets_created": self.total_tickets,
             "stop_reason": self.stop_reason,
+            "changes_detected": sum(1 for i in self.iterations if i.changed),
             "last_iteration": (
-                self.iterations[-1].__dict__ if self.iterations else None
+                self.iterations[-1].to_dict() if self.iterations else None
             ),
         }
 
@@ -163,12 +190,21 @@ async def run_watch(
                         store.upsert_finding(orch.scan_id, f)
                     except Exception:
                         logger.debug("suppressed non-fatal exception", exc_info=True)
-                store.record_scan_complete(orch.scan_id, scan_summary)
 
                 iteration.scan_id = orch.scan_id
                 iteration.findings_total = store.count_findings()
+                iteration.baseline = last_scan_id is None
 
-                # Diff against previous iteration's scan
+                # Diff against the previous iteration's scan. Computed BEFORE
+                # record_scan_complete so it can be folded into the persisted
+                # summary (which is how the web UI / a resumed run reads what
+                # changed — otherwise the whole "auto-diff" is invisible after
+                # the fact). compute_diff anchors on the current scan's
+                # started_at (already recorded), so completing it later is fine.
+                watch_meta: dict[str, Any] = {
+                    "iteration": iter_n, "baseline": iteration.baseline,
+                    "new": 0, "regressed": 0, "resolved": 0,
+                }
                 if last_scan_id:
                     try:
                         from heaven.devsecops.diff_finder import compute_diff
@@ -176,26 +212,43 @@ async def run_watch(
                         iteration.new = len(diff.new)
                         iteration.regressed = len(diff.regressed)
                         iteration.resolved = len(diff.resolved)
-
-                        should_alert = (
-                            iteration.new > 0
-                            or iteration.regressed > 0
-                            or config.alert_on_heartbeat
+                        iteration.changes = _summarize_changes(diff)
+                        watch_meta.update(
+                            new=iteration.new, regressed=iteration.regressed,
+                            resolved=iteration.resolved,
+                            critical_new=diff.critical_new,
+                            regressed_critical_or_high=diff.regressed_critical_or_high,
                         )
-                        if should_alert:
+
+                        # Alert on CHANGE (new / regressed) — or on every cycle
+                        # if the operator opted into a heartbeat.
+                        if iteration.new or iteration.regressed:
                             iteration.alert_dispatched = await _dispatch_alerts(
-                                diff, iteration, store,
+                                diff, iteration, config, heartbeat=False,
+                            )
+                        elif config.alert_on_heartbeat:
+                            iteration.alert_dispatched = await _dispatch_alerts(
+                                diff, iteration, config, heartbeat=True,
                             )
                         if config.auto_create_tickets and (iteration.new or iteration.regressed):
                             iteration.tickets_created = await _auto_ticket(
                                 diff, store,
                             )
                     except Exception as e:
+                        iteration.error = f"diff: {type(e).__name__}: {e}"
                         logger.warning(f"watch iter {iter_n} diff failed: {e}")
                 else:
                     # First iteration — no baseline yet. Optionally heartbeat.
                     if config.alert_on_heartbeat:
-                        iteration.alert_dispatched = await _heartbeat()
+                        iteration.alert_dispatched = await _heartbeat(config)
+
+                watch_meta["alert_dispatched"] = iteration.alert_dispatched
+                watch_meta["tickets_created"] = iteration.tickets_created
+                # Fold the diff into the persisted scan summary so the UI + a
+                # resumed run can show exactly what changed this iteration.
+                store.record_scan_complete(
+                    orch.scan_id, {**scan_summary, "watch": watch_meta},
+                )
 
                 last_scan_id = orch.scan_id
             except Exception as e:
@@ -239,53 +292,93 @@ async def run_watch(
 # ═══════════════════════════════════════════
 
 
-async def _dispatch_alerts(diff, iteration: WatchIteration, store) -> bool:
-    """Fire whichever alerters are configured (webhook + SIEM)."""
+def _summarize_changes(diff, cap: int = 12) -> list[dict[str, Any]]:
+    """Compact, JSON-safe list of what changed (new + regressed) this iter."""
+    out: list[dict[str, Any]] = []
+    for r in diff.new[:cap]:
+        out.append({
+            "kind": "new", "severity": r.severity, "vuln_type": r.vuln_type,
+            "target": r.target, "title": r.title or r.vuln_type,
+        })
+    for r in diff.regressed[: max(0, cap - len(out))]:
+        out.append({
+            "kind": "regressed", "severity": r.severity, "vuln_type": r.vuln_type,
+            "target": r.target, "title": r.title or r.vuln_type,
+        })
+    return out
+
+
+async def _dispatch_alerts(
+    diff, iteration: WatchIteration, config: "WatchConfig",
+    *, heartbeat: bool = False,
+) -> bool:
+    """Fire whichever alerters are configured (webhook + SIEM).
+
+    ``heartbeat=True`` means this cycle had NO change but the operator asked
+    for a per-run ping, so the message is a heartbeat rather than a change
+    alert. Watch alerts go out for *any* change — including medium/low — via
+    ``send_watch_alert_async`` (the scan-complete ``send_alert_async`` stays
+    silent unless critical/high, which is the wrong contract for watch mode).
+    """
     from heaven.devsecops.alerting import SIEMNotifier, WebhookAlerter
     ok = False
     summary = {
         "scan_id": iteration.scan_id,
+        "engagement": config.engagement_name,
         "watch_iteration": iteration.n,
         "new": iteration.new,
         "regressed": iteration.regressed,
+        "resolved": iteration.resolved,
         "critical_new": diff.critical_new,
         "regressed_critical_or_high": diff.regressed_critical_or_high,
         "total_assets": iteration.findings_total,
-        # WebhookAlerter format
+        # WebhookAlerter watch-message format
         "critical": diff.critical_new,
         "high": sum(1 for r in diff.new if r.severity == "high"),
     }
     try:
         webhook = WebhookAlerter()
         if webhook.webhook_url:
-            ok = await webhook.send_alert_async(summary) or ok
+            ok = await webhook.send_watch_alert_async(summary) or ok
     except Exception as e:
         logger.warning(f"webhook alert failed: {e}")
     try:
         siem = SIEMNotifier()
         if siem.configured_backends:
             # Emit a structured event for SOC
-            await siem.emit("watch.change", summary)
+            await siem.emit(
+                "watch.heartbeat" if heartbeat else "watch.change", summary,
+            )
             ok = True
     except Exception as e:
         logger.warning(f"SIEM emit failed: {e}")
     return ok
 
 
-async def _heartbeat() -> bool:
-    """First-iteration ping when --alert-on-heartbeat is set."""
-    from heaven.devsecops.alerting import WebhookAlerter
+async def _heartbeat(config: "WatchConfig") -> bool:
+    """First-iteration ping when --heartbeat is set (there is no baseline to
+    diff against yet, so this announces that monitoring has started)."""
+    from heaven.devsecops.alerting import SIEMNotifier, WebhookAlerter
+    payload = {
+        "engagement": config.engagement_name,
+        "watch_iteration": 0, "new": 0, "regressed": 0, "resolved": 0,
+        "total_assets": 0, "first_run": True,
+    }
+    ok = False
     w = WebhookAlerter()
-    if not w.webhook_url:
-        return False
+    if w.webhook_url:
+        try:
+            ok = await w.send_watch_alert_async(payload) or ok
+        except Exception as e:
+            logger.warning(f"heartbeat failed: {e}")
     try:
-        return await w.send_alert_async({
-            "critical": 0, "high": 0, "total_assets": 0,
-            "_heartbeat": "HEAVEN watch loop started",
-        })
+        siem = SIEMNotifier()
+        if siem.configured_backends:
+            await siem.emit("watch.start", payload)
+            ok = True
     except Exception as e:
-        logger.warning(f"heartbeat failed: {e}")
-        return False
+        logger.warning(f"SIEM heartbeat emit failed: {e}")
+    return ok
 
 
 async def _auto_ticket(diff, store) -> int:

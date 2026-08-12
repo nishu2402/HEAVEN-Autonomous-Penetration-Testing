@@ -18,6 +18,33 @@
   --border-strong: rgba(255, 255, 255, 0.15);
   --border-accent: rgba(109, 124, 255, 0.45);
 
+  /* ── Theme-aware overlays ──────────────────────────────────────────────
+     These are the ONE source of truth for the translucent "tint" fills the UI
+     paints on top of surfaces — button/badge/pill fills, row hovers, the
+     progress/skeleton track, the scrollbar, ::selection. In the dark theme
+     they are white-alpha (as before); the light theme flips them to slate-alpha
+     so a control never becomes an invisible white-on-white shape. Every
+     component references these instead of a raw rgba(255,255,255,…). */
+  --overlay-weak:          rgba(255, 255, 255, 0.03);
+  --overlay-med:           rgba(255, 255, 255, 0.05);
+  --overlay-strong:        rgba(255, 255, 255, 0.09);
+  --hover:                 rgba(255, 255, 255, 0.045);
+  --track:                 rgba(255, 255, 255, 0.06);
+  --scrollbar-thumb:       rgba(255, 255, 255, 0.10);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.20);
+  --selection-bg:          rgba(109, 124, 255, 0.32);
+  --selection-fg:          #fff;
+  /* Console / code surfaces — deliberately DARK in both themes (a terminal
+     reading dark inside a light app is the conventional, high-contrast look). */
+  --console-bg:     #0B0F1A;
+  --console-fg:     #9BA7C0;
+  --console-border: rgba(255, 255, 255, 0.08);
+  /* Elevated surfaces + semantic aliases referenced by inline component styles
+     (were undefined → fell back to hard-coded dark / vanished in both themes). */
+  --surface-1: rgba(20, 22, 30, 0.92);
+  --bg-elev:   rgba(255, 255, 255, 0.03);
+  --danger:    #FF4D6A;   /* = crit */
+
   /* ── Text ── */
   --text-0: #ECEFF7;  /* primary */
   --text-1: #9BA7C0;  /* secondary */
@@ -96,9 +123,64 @@
   --shadow-md:  0 4px 16px rgba(15,23,42,0.10);
   --shadow-lg:  0 12px 40px rgba(15,23,42,0.14);
   --glow:  0 0 0 1px rgba(79,70,229,0.18), 0 8px 30px rgba(15,23,42,0.12);
+
+  /* Flip the translucent overlays to slate-alpha so fills/hovers/tracks stay
+     visible on the light surfaces instead of disappearing white-on-white. */
+  --overlay-weak:          rgba(15, 23, 42, 0.035);
+  --overlay-med:           rgba(15, 23, 42, 0.06);
+  --overlay-strong:        rgba(15, 23, 42, 0.10);
+  --hover:                 rgba(15, 23, 42, 0.05);
+  --track:                 rgba(15, 23, 42, 0.08);
+  --scrollbar-thumb:       rgba(15, 23, 42, 0.20);
+  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.34);
+  --selection-bg:          rgba(79, 70, 229, 0.22);
+  --selection-fg:          #0F172A;
+  --surface-1: rgba(255, 255, 255, 0.92);
+  --bg-elev:   rgba(15, 23, 42, 0.03);
+
+  /* Severity + accent hues are vivid on the dark base but wash out as TEXT /
+     icons / dots on a light surface (emerald, cyan, amber, sky sit at ~1.5–2:1).
+     Deepen every one for light so token-coloured labels, counts, dots and hair-
+     line borders clear WCAG contrast. The pale tinted FILL backgrounds are
+     SEPARATE rgba() literals (e.g. rgba(52,229,163,0.12)), so a pill keeps its
+     soft wash while its text/ring darkens — deep-on-pale reads crisply. Dark
+     mode keeps the originals (these overrides live only in the light block). */
+  --crit:     #E11D48;
+  --high:     #C2410C;
+  --med:      #B45309;
+  --low:      #0284C7;
+  --info:     #64748B;
+  --brand:    #059669;
+  --cyan:     #0E7490;
+  --accent-2: #7C3AED;
+  --danger:   #E11D48;
+  /* Deeper wordmark / headline gradient (only .gradient-text uses --heat-grad),
+     so the emerald tail stops going invisible on white. */
+  --heat-grad: linear-gradient(135deg, #4F46E5, #7C3AED 45%, #0E9F6E);
+
+  /* Faintest text tier lifted off the 2.6:1 floor to a readable ~3.4:1. */
+  --text-3: #7C8AA1;
+
+  /* Consoles / code go LIGHT in light mode (they were dark in both themes). A
+     lone black panel on a white page read as odd, and text selected inside it
+     was invisible (dark selection-fg on a near-black surface). A light code
+     surface with dark text is the professional norm (GitHub / VS Code light),
+     and the standard light ::selection then reads correctly. Dark mode keeps its
+     dark consoles (these overrides are light-only). */
+  --console-bg:     #EAEEF6;
+  --console-fg:     #334155;
+  --console-border: rgba(15, 23, 42, 0.12);
 }
 /* Tone the aurora way down in light mode so text stays readable */
 :root[data-theme="light"] body::before { opacity: 0.4; }
+/* The dark bottom-vignette (body::after) is a grey smudge on a light page —
+   remove it in light mode. */
+:root[data-theme="light"] body::after { display: none; }
+/* Skeleton shimmer needs slate-alpha to read on light surfaces. */
+:root[data-theme="light"] .skeleton {
+  background: linear-gradient(90deg, rgba(15,23,42,0.05) 0%, rgba(15,23,42,0.10) 50%, rgba(15,23,42,0.05) 100%);
+  background-size: 200% 100%;
+}
 /* The sidebar + active nav item are hardcoded dark; flip them in light mode so
    the (now dark) token-coloured nav labels stay readable. */
 :root[data-theme="light"] .sidebar {
@@ -112,6 +194,12 @@
   box-shadow: inset 0 0 0 1px rgba(79,70,229,0.30);
 }
 :root[data-theme="light"] .sidebar-status { color: var(--text-2); }
+/* The wordmark gradient (bright emerald→cyan) is near-invisible on the white
+   light sidebar; deepen it so "HEAVEN" stays legible. */
+:root[data-theme="light"] .brand-title {
+  background: linear-gradient(135deg, #0E9F6E 0%, #0E7490 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 
 /* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -165,13 +253,13 @@ body::after {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.10);
+  background: var(--scrollbar-thumb);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20); background-clip: padding-box; }
-::selection { background: rgba(109,124,255,0.32); color: #fff; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
+::selection { background: var(--selection-bg); color: var(--selection-fg); }
 
 /* ── Typography helpers ── */
 h1,h2,h3,h4 { font-weight: 600; letter-spacing: -0.01em; color: var(--text-0); }
@@ -250,7 +338,7 @@ a:hover { color: var(--accent-2); }
   position: relative;
   transition: background 0.16s, color 0.16s, transform 0.16s;
 }
-.nav-item:hover { color: var(--text-0); background: rgba(255,255,255,0.05); }
+.nav-item:hover { color: var(--text-0); background: var(--hover); }
 .nav-item.active {
   color: #fff;
   background: linear-gradient(90deg, rgba(109,124,255,0.20), rgba(167,139,250,0.08));
@@ -297,13 +385,19 @@ a:hover { color: var(--accent-2); }
   backdrop-filter: blur(14px);
   font-size: 13px;
 }
-.header-left { display: flex; align-items: center; gap: 10px; flex: 1; overflow: hidden; }
+/* A query container so the chip degrades to the *actual* room it has, not the
+   viewport — the running-scan / task badges on the right shrink header-left, and
+   a viewport breakpoint can't see that. */
+.header-left {
+  display: flex; align-items: center; gap: 10px; flex: 1; overflow: hidden;
+  container-type: inline-size; container-name: headerbar;
+}
 .header-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 
 .eng-chip {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 5px 12px; border-radius: 999px; min-width: 0; max-width: 100%;
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  background: var(--overlay-med); border: 1px solid var(--border);
   white-space: nowrap;
 }
 .eng-label {
@@ -311,14 +405,31 @@ a:hover { color: var(--accent-2); }
   letter-spacing: 0.14em; font-weight: 600; flex-shrink: 0;
 }
 /* Name can be arbitrarily long ("certified hacker", a full URL, …) — keep it on
-   one line and ellipsize instead of wrapping/overflowing the header bar. */
+   one line and ellipsize instead of wrapping/overflowing the header bar. It is
+   the only shrinkable item in the chip, so it must keep a floor: without one it
+   collapses to nothing when the client + counts crowd the row (~1000px band). */
 .eng-name {
-  color: var(--text-0); font-weight: 600; min-width: 0;
+  color: var(--text-0); font-weight: 600; min-width: 4.5rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .eng-stats { color: var(--text-1); font-size: 12px; flex-shrink: 0; }
 .eng-warn { color: var(--med); font-size: 12.5px; }
 .header-clock { color: var(--text-2); font-size: 12px; font-family: var(--font-mono); letter-spacing: 0.04em; }
+
+/* Progressive disclosure inside the chip: the name always wins. As the chip's
+   real room shrinks (viewport OR the running-scan / task badges eating the row),
+   shed the least-important metadata first — counts, then client, then the
+   "ENGAGEMENT" label — so the name never gets crushed to an empty ellipsis.
+   Container-driven (not viewport) so it reacts to the badges too. */
+@container headerbar (max-width: 560px) {
+  .eng-counts { display: none; }
+}
+@container headerbar (max-width: 400px) {
+  .eng-client { display: none; }
+}
+@container headerbar (max-width: 250px) {
+  .eng-label { display: none; }
+}
 
 /* Dashboard engagement switcher — pick a row to switch, trash to delete. */
 .eng-switch-list { display: flex; flex-direction: column; gap: 4px; }
@@ -334,7 +445,7 @@ a:hover { color: var(--accent-2); }
   color: var(--text-0); font-family: var(--font-ui); font-size: 12.5px;
   text-align: left; min-width: 0;
 }
-.eng-switch-pick:hover:not(:disabled) { background: rgba(255,255,255,0.03); }
+.eng-switch-pick:hover:not(:disabled) { background: var(--overlay-weak); }
 .eng-switch-pick:disabled { cursor: default; }
 .eng-switch-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
@@ -376,7 +487,7 @@ a:hover { color: var(--accent-2); }
 .user-badge {
   color: var(--text-1); font-size: 11.5px; font-weight: 500;
   border: 1px solid var(--border); border-radius: 999px;
-  padding: 4px 11px; background: rgba(255,255,255,0.03);
+  padding: 4px 11px; background: var(--overlay-weak);
 }
 
 /* Signed-in identity: username (real, configurable via HEAVEN_ADMIN_USERNAME)
@@ -385,7 +496,7 @@ a:hover { color: var(--accent-2); }
 .user-identity {
   display: inline-flex; align-items: center; gap: 7px;
   border: 1px solid var(--border); border-radius: 999px;
-  padding: 3px 5px 3px 11px; background: rgba(255,255,255,0.03);
+  padding: 3px 5px 3px 11px; background: var(--overlay-weak);
 }
 .user-identity .user-name {
   color: var(--text-0); font-size: 11.5px; font-weight: 600;
@@ -475,7 +586,7 @@ a:hover { color: var(--accent-2); }
   vertical-align: middle; color: var(--text-0);
 }
 .findings-table tbody tr { transition: background 0.14s; }
-.findings-table tbody tr:hover td { background: rgba(255,255,255,0.025); }
+.findings-table tbody tr:hover td { background: var(--hover); }
 .findings-table tbody tr:last-child td { border-bottom: none; }
 .findings-table .ellipsis { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kv-table td { font-size: 13px; }
@@ -504,24 +615,33 @@ a:hover { color: var(--accent-2); }
 .sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: currentColor; box-shadow: 0 0 6px currentColor; vertical-align: middle; }
 
-.status-pill { background: rgba(255,255,255,0.04); box-shadow: inset 0 0 0 1px var(--border); }
+.status-pill { background: var(--overlay-med); box-shadow: inset 0 0 0 1px var(--border); }
 .status-pill.status-open           { color: var(--med); }
 .status-pill.status-verified       { color: var(--brand); }
 .status-pill.status-false_positive { color: var(--text-2); text-decoration: line-through; }
 .status-pill.status-accepted_risk  { color: var(--low); }
 .status-pill.status-fixed          { color: var(--brand); }
 
+/* Confirmation status: Confirmed (proven) vs Potential (version-inferred). */
+.conf-badge { display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: .01em; white-space: nowrap;
+  cursor: help; }
+.conf-badge.conf-confirmed { color: var(--brand); background: rgba(52,229,163,0.12);
+  box-shadow: inset 0 0 0 1px rgba(52,229,163,0.32); }
+.conf-badge.conf-potential { color: var(--med); background: rgba(255,197,61,0.12);
+  box-shadow: inset 0 0 0 1px rgba(255,197,61,0.32); }
+
 /* ── Buttons ── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  background: rgba(255,255,255,0.05);
+  background: var(--overlay-med);
   border: 1px solid var(--border-strong);
   color: var(--text-0);
   font-family: var(--font-ui); font-size: 13px; font-weight: 600;
   padding: 9px 18px; border-radius: var(--radius-md); cursor: pointer;
   transition: all 0.16s; white-space: nowrap;
 }
-.btn:hover { background: rgba(255,255,255,0.09); border-color: var(--border-strong); transform: translateY(-1px); }
+.btn:hover { background: var(--overlay-strong); border-color: var(--border-strong); transform: translateY(-1px); }
 .btn:active { transform: translateY(0); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
@@ -536,7 +656,7 @@ a:hover { color: var(--accent-2); }
 .btn-danger:hover { background: rgba(255,77,106,0.16); }
 .btn-small {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  background: var(--overlay-med); border: 1px solid var(--border);
   color: var(--text-1); font-family: var(--font-ui); font-size: 12px; font-weight: 500;
   padding: 5px 11px; border-radius: var(--radius-sm); cursor: pointer;
   text-decoration: none; transition: all 0.16s;
@@ -687,7 +807,7 @@ a:hover { color: var(--accent-2); }
   border-radius: 50%; font-size: 14px; line-height: 1; padding: 0;
   user-select: none;   /* keep the × glyph out of a copy of the chip */
 }
-.tag-remove:hover { background: rgba(255,255,255,0.12); color: var(--text-0); }
+.tag-remove:hover { background: var(--overlay-strong); color: var(--text-0); }
 .tags-input-field {
   flex: 1 1 140px; width: auto; min-width: 140px;
   border: none; background: transparent; box-shadow: none;
@@ -736,7 +856,7 @@ a:hover { color: var(--accent-2); }
 .data-table td.num, .data-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr.is-clickable { cursor: pointer; }
-.data-table tbody tr.is-clickable:hover td { background: rgba(255,255,255,0.03); }
+.data-table tbody tr.is-clickable:hover td { background: var(--hover); }
 
 /* ── Fieldset (Lateral credential groups) ── */
 .form-fieldset {
@@ -759,10 +879,10 @@ a:hover { color: var(--accent-2); }
 
 /* ── In-card CLI snippet block (token-based, wraps) ── */
 .cli-block {
-  background: var(--bg-1); border: 1px solid var(--border);
+  background: var(--console-bg); border: 1px solid var(--console-border);
   border-radius: var(--radius-md); padding: 14px 16px;
   font-family: var(--font-mono); font-size: 12px; line-height: 1.7;
-  color: var(--text-1); white-space: pre-wrap; overflow-x: auto;
+  color: var(--console-fg); white-space: pre-wrap; overflow-x: auto;
 }
 /* Segmented button group (module pickers, tabs) */
 .btn-small.active {
@@ -772,9 +892,9 @@ a:hover { color: var(--accent-2); }
 
 /* ── Code blocks ── */
 .code, pre.code {
-  background: var(--bg-1); border: 1px solid var(--border);
+  background: var(--console-bg); border: 1px solid var(--console-border);
   border-radius: var(--radius-md); padding: 14px 16px;
-  font-family: var(--font-mono); font-size: 12.5px; color: var(--text-1);
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--console-fg);
   overflow-x: auto; white-space: pre; line-height: 1.7;
 }
 
@@ -869,15 +989,16 @@ a:hover { color: var(--accent-2); }
 .launch-tile.is-tool { border-style: dashed; }
 
 /* ── Terminal pane ── */
-.terminal-pane { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+/* A console reads dark in BOTH themes (see --console-* tokens). */
+.terminal-pane { flex: 1; overflow: hidden; display: flex; flex-direction: column; background: var(--console-bg); }
 .terminal-header {
-  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  padding: 12px 16px; border-bottom: 1px solid var(--console-border);
   font-size: 10.5px; color: var(--text-2); letter-spacing: 0.1em; text-transform: uppercase;
   display: flex; align-items: center; justify-content: space-between; font-weight: 600;
 }
 .terminal-body {
   flex: 1; overflow-y: auto; padding: 12px 16px;
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.7; color: var(--text-1);
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.7; color: var(--console-fg);
 }
 .terminal-line { margin-bottom: 2px; }
 .terminal-line.info { color: var(--cyan); }
@@ -913,9 +1034,9 @@ a:hover { color: var(--accent-2); }
 
 /* ── Evidence block ── */
 .evidence-block {
-  background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--console-bg); border: 1px solid var(--console-border); border-radius: var(--radius-md);
   padding: 14px 16px; font-family: var(--font-mono); font-size: 12px;
-  overflow: auto; max-height: 340px; color: var(--text-1); line-height: 1.7;
+  overflow: auto; max-height: 340px; color: var(--console-fg); line-height: 1.7;
   white-space: pre-wrap; word-break: break-all;
 }
 
@@ -937,7 +1058,7 @@ a:hover { color: var(--accent-2); }
 .scan-status.failed { color: var(--crit); }
 .scan-status.paused { color: var(--med); }
 
-.progress-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.06); border-radius: 999px; position: relative; overflow: hidden; }
+.progress-bar { width: 100%; height: 6px; background: var(--track); border-radius: 999px; position: relative; overflow: hidden; }
 .progress-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-grad); border-radius: 999px; transition: width 0.4s ease; }
 .progress-indeterminate .progress-fill { width: 40% !important; animation: progress-slide 1.4s ease-in-out infinite; }
 @keyframes progress-slide { 0% { left: -40%; } 100% { left: 140%; } }
@@ -975,7 +1096,7 @@ a:hover { color: var(--accent-2); }
   display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
   padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
   text-transform: capitalize; letter-spacing: 0.02em;
-  border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--text-1);
+  border: 1px solid var(--border); background: var(--overlay-med); color: var(--text-1);
 }
 .scan-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .scan-badge-running   { color: var(--brand); border-color: rgba(52,229,163,0.40); background: rgba(52,229,163,0.10); }
@@ -1001,11 +1122,19 @@ a:hover { color: var(--accent-2); }
 .scan-row-sub { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-2); flex-wrap: wrap; }
 .scan-id-mini { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-2); }
 
-.scan-progress-wrap { display: flex; align-items: center; gap: 8px; width: 150px; flex-shrink: 0; }
+.scan-progress-wrap { display: flex; align-items: center; gap: 8px; width: 172px; flex-shrink: 0; }
 .scan-progress-wrap .progress-bar { flex: 1; }
+.scan-progress-meta {
+  display: flex; flex-direction: column; align-items: flex-end;
+  min-width: 62px; line-height: 1.2;
+}
 .scan-progress-pct {
   font-family: var(--font-mono); font-size: 11px; color: var(--brand); font-weight: 600;
-  min-width: 34px; text-align: right;
+  text-align: right;
+}
+.scan-progress-eta {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-3, var(--med));
+  text-align: right; white-space: nowrap;
 }
 
 .scan-findings-chip {
@@ -1038,7 +1167,7 @@ a:hover { color: var(--accent-2); }
 .scan-sev-strip { display: flex; gap: 7px; flex-wrap: wrap; }
 .scan-sev-pill {
   display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
-  padding: 3px 9px; border-radius: 999px; border: 1px solid; background: rgba(255,255,255,0.03);
+  padding: 3px 9px; border-radius: 999px; border: 1px solid; background: var(--overlay-weak);
   text-transform: capitalize;
 }
 .scan-sev-dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -1125,7 +1254,7 @@ a:hover { color: var(--accent-2); }
 .cmd-palette-empty { padding: 32px; text-align: center; color: var(--text-2); font-size: 13px; }
 .cmd-palette-footer { padding: 10px 18px; border-top: 1px solid var(--border); font-size: 10.5px; color: var(--text-2); display: flex; justify-content: space-between; }
 kbd {
-  display: inline-block; padding: 2px 7px; background: rgba(255,255,255,0.06);
+  display: inline-block; padding: 2px 7px; background: var(--overlay-med);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   font-size: 10.5px; font-family: var(--font-mono); color: var(--text-1);
 }
@@ -1167,7 +1296,7 @@ kbd {
 }
 .route-spinner {
   width: 30px; height: 30px; border-radius: 50%;
-  border: 2.5px solid rgba(255,255,255,0.10);
+  border: 2.5px solid var(--track);
   border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
 }
@@ -1186,7 +1315,7 @@ kbd {
 .divider { height: 1px; background: var(--border); margin: var(--space-md) 0; border: none; }
 .badge-soft {
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
-  font-size: 11.5px; font-weight: 600; background: rgba(255,255,255,0.05);
+  font-size: 11.5px; font-weight: 600; background: var(--overlay-med);
   border: 1px solid var(--border); color: var(--text-1);
 }
 
@@ -1219,7 +1348,7 @@ kbd {
 .login-cap-icon {
   width: 38px; height: 38px; border-radius: var(--radius-md); flex-shrink: 0;
   display: grid; place-items: center; font-size: 17px;
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  background: var(--overlay-med); border: 1px solid var(--border);
 }
 .login-cap-title { font-size: 13.5px; font-weight: 600; color: var(--text-0); }
 .login-cap-body { font-size: 12px; color: var(--text-2); line-height: 1.5; margin-top: 2px; }
@@ -1228,6 +1357,11 @@ kbd {
 .login-card {
   width: 100%; max-width: 420px; padding: 36px 34px;
   border-radius: var(--radius-xl); box-shadow: var(--shadow-lg);
+  /* Give the sign-in panel a real surface so it reads as a card on both the
+     dark and (especially) the light aurora background — without it the white
+     inputs sat on a white page with only hairline borders. */
+  background: var(--glass-strong); border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
 }
 .login-card-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
 .login-card-sub { color: var(--text-2); font-size: 13px; margin-bottom: 28px; }
@@ -1278,7 +1412,7 @@ kbd {
   color: var(--text-1); font-size: 13px; cursor: pointer; text-decoration: none;
   transition: border-color .15s, color .15s, background .15s;
 }
-.btn-ghost:hover { border-color: var(--border-accent); color: var(--text-0); background: rgba(255,255,255,0.04); }
+.btn-ghost:hover { border-color: var(--border-accent); color: var(--text-0); background: var(--overlay-med); }
 
 /* Header "scan running" indicator */
 .scan-running-badge {
@@ -1362,6 +1496,33 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
 .nav-backdrop { display: none; }
 
 /* ── Responsive: off-canvas sidebar on narrow screens ───────────────── */
+/* ── Dashboard stacks to a single column BEFORE the sidebar goes off-canvas
+   (860px). In the ~861–1100px band the fixed `1fr 360px` two-pane grid left too
+   little width for the four stat cards + the right rail, so the cards clipped
+   their labels ("CRITICAL" → "CRIT") and the header chip crowded. Stack the rail
+   under the map and drop the stat grid to two columns across that whole band, so
+   nothing is ever squeezed on a narrow laptop. ── */
+@media (max-width: 1100px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    height: auto; min-height: 0; overflow: visible;
+  }
+  .content > .dashboard-grid { flex: none; }
+  .dashboard-left { display: block; overflow: visible; min-height: 0; }
+  .dashboard-right {
+    overflow: visible; min-height: 0;
+    border-left: none; border-top: 1px solid var(--border);
+  }
+  .dashboard-right-scroll { overflow: visible; min-height: 0; }
+  .dashboard-right > .terminal-pane { height: auto; }
+  /* The 3D map takes its height from the grid `1fr` on desktop; once stacked it
+     has no intrinsic height, so pin one or it collapses to 0. */
+  .dashboard-topology { height: 300px; }
+  /* Two stat cards per row so labels never clip in the narrow band. */
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 14px; }
+}
+
 @media (max-width: 860px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
@@ -1376,34 +1537,6 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
   .nav-toggle { display: inline-flex; }
   .header { padding-left: 12px; padding-right: 12px; gap: 8px; }
   .header-clock { display: none; }   /* save space on small screens */
-
-  /* ── Dashboard: the two-pane grid (topology/stats + right rail) is a fixed
-     `1fr 360px` locked to one viewport height on desktop. On a phone that rail
-     can't sit beside the map — it must stack UNDER it, and the whole thing has
-     to grow with its content and scroll (the content pane owns the scroll),
-     instead of being clipped by `overflow: hidden`. ── */
-  .dashboard-grid {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto;
-    height: auto; min-height: 0; overflow: visible;
-  }
-  .content > .dashboard-grid { flex: none; }
-  .dashboard-left { display: block; overflow: visible; min-height: 0; }
-  .dashboard-right {
-    overflow: visible; min-height: 0;
-    border-left: none; border-top: 1px solid var(--border);
-  }
-  /* Stacked layout owns the page scroll here, so the rail's inner scroll region
-     and the pinned-terminal height must relax back to natural flow. */
-  .dashboard-right-scroll { overflow: visible; min-height: 0; }
-  .dashboard-right > .terminal-pane { height: auto; }
-  /* The 3D map wrapper takes its height from the grid `1fr` on desktop; once the
-     column stacks it has no intrinsic height, so pin one or it collapses to 0. */
-  .dashboard-topology { height: 300px; }
-
-  /* Four stat cards can't fit legibly across a phone — the labels ("CRITICAL",
-     "TARGETS") were being clipped by the card's `overflow: hidden`. Drop to two. */
-  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 14px; }
 
   /* Wide data tables (CVE = 8 cols, findings, assets, scans) can't shrink to a
      phone without clipping columns off the right. Make each table its own
@@ -1428,4 +1561,103 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
   /* Very narrow: give the stat number a little less size so nothing clips. */
   .stat-value { font-size: 2.1rem; }
   .stat-card { padding: 14px 15px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   AI Assistant (chat) — shared by the Chat page and the floating widget.
+   ───────────────────────────────────────────────────────────────────────── */
+.chat-panel { display: flex; flex-direction: column; min-height: 0; }
+.chat-panel .chat-scroll {
+  flex: 1 1 auto; min-height: 320px; max-height: 62vh; overflow-y: auto;
+  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.chat-panel--compact .chat-scroll { min-height: 240px; max-height: 46vh; padding: 12px; }
+
+.chat-empty { margin: auto; text-align: center; color: var(--text-2); max-width: 460px; }
+.chat-empty-icon { font-size: 30px; opacity: 0.7; }
+.chat-suggestions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.chat-chip {
+  border: 1px solid var(--border); background: var(--bg-2, rgba(255,255,255,0.03));
+  color: var(--text-1); border-radius: 999px; padding: 7px 12px; font-size: 12.5px;
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.chat-chip:hover { border-color: var(--accent); background: var(--glass, rgba(255,255,255,0.06)); }
+
+.chat-msg { display: flex; }
+.chat-msg--user { justify-content: flex-end; }
+.chat-msg--assistant { justify-content: flex-start; }
+.chat-bubble {
+  max-width: 86%; padding: 10px 13px; border-radius: 14px; font-size: 14px;
+  line-height: 1.5; word-wrap: break-word; overflow-wrap: anywhere;
+}
+.chat-msg--user .chat-bubble {
+  background: var(--accent-grad, var(--accent)); color: #fff; border-bottom-right-radius: 4px;
+  white-space: pre-wrap;
+}
+.chat-msg--assistant .chat-bubble {
+  background: var(--bg-2, rgba(255,255,255,0.04)); border: 1px solid var(--border);
+  color: var(--text-0); border-bottom-left-radius: 4px;
+}
+.chat-msg--assistant .chat-bubble :first-child { margin-top: 0; }
+.chat-msg--assistant .chat-bubble :last-child { margin-bottom: 0; }
+.chat-dim { color: var(--text-3); }
+
+/* streaming typing indicator */
+.chat-typing { display: inline-flex; gap: 4px; align-items: center; height: 16px; }
+.chat-typing span {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text-3);
+  animation: chat-blink 1.2s infinite both;
+}
+.chat-typing span:nth-child(2) { animation-delay: .2s; }
+.chat-typing span:nth-child(3) { animation-delay: .4s; }
+@keyframes chat-blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+.chat-error {
+  margin: 0 16px 8px; padding: 8px 12px; border-radius: var(--radius-sm);
+  background: rgba(255, 90, 90, 0.10); border: 1px solid var(--crit);
+  color: var(--crit); font-size: 12.5px;
+}
+.chat-composer {
+  display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border);
+  align-items: flex-end;
+}
+.chat-input {
+  flex: 1 1 auto; resize: none; font: inherit; font-size: 14px; color: var(--text-0);
+  background: var(--bg-1, rgba(0,0,0,0.2)); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 9px 11px; min-height: 0;
+}
+.chat-input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring, 0 0 0 2px rgba(90,140,255,.25)); }
+.chat-send { white-space: nowrap; align-self: stretch; }
+.chat-meta { padding: 0 16px 12px; font-size: 11.5px; color: var(--text-3); }
+.chat-toggle { display: inline-flex; gap: 7px; align-items: center; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.chat-setup-hint { padding: 12px 14px; margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
+
+/* Floating widget */
+.chat-widget { position: fixed; right: 22px; bottom: 22px; z-index: 60; }
+.chat-fab {
+  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+  font-size: 22px; color: #fff; background: var(--accent-grad, var(--accent));
+  box-shadow: var(--shadow-glow, 0 6px 24px rgba(0,0,0,.4)); transition: transform .15s;
+}
+.chat-fab:hover { transform: translateY(-2px) scale(1.04); }
+.chat-widget-panel {
+  position: absolute; right: 0; bottom: 64px; width: min(400px, calc(100vw - 44px));
+  padding: 0; overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0,0,0,.5));
+}
+.chat-widget-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 700;
+}
+.chat-widget-title { font-size: 13.5px; }
+.chat-widget-actions { display: flex; gap: 6px; }
+.chat-widget-expand, .chat-widget-close {
+  background: none; border: none; color: var(--text-2); cursor: pointer;
+  font-size: 15px; text-decoration: none; padding: 2px 6px; border-radius: 6px;
+}
+.chat-widget-expand:hover, .chat-widget-close:hover { color: var(--text-0); background: var(--glass, rgba(255,255,255,0.06)); }
+
+@media (max-width: 560px) {
+  .chat-widget { right: 14px; bottom: 14px; }
+  .chat-widget-panel { width: calc(100vw - 28px); }
 }

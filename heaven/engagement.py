@@ -328,27 +328,51 @@ _HOST_LEVEL_SUBSTRINGS = (
 )
 
 
+# Ports implied by an http/https scheme — normalised away so ``example.com``,
+# ``https://example.com`` and ``https://example.com:443`` share one host key.
+_DEFAULT_PORTS = frozenset({"80", "443"})
+
+
 def _host_key(target: str) -> str:
     """
-    Reduce a target to ``scheme://host[:port]`` (or bare ``host[:port]``).
+    Reduce a target to a canonical bare ``host`` (or ``host:port`` for a
+    genuinely non-default port). Path + query are dropped.
 
-    Drops path + query so site-wide findings collapse to one host.
+    The **scheme is dropped** and the default web ports (80/443) are normalised
+    away, so the same site-wide issue observed against ``example.com``,
+    ``http://example.com``, ``https://example.com`` and
+    ``https://example.com:443`` collapses to ONE finding per host instead of
+    duplicating once per representation. That representation split is exactly
+    what a domain scan produces — the DNS/email phase names the bare domain, the
+    web phase probes both ``http://`` and ``https://`` — so keeping the scheme in
+    the key made site-wide findings (missing headers, TLS, SPF/DMARC) show up two
+    or three times for the same host. A genuinely distinct service port
+    (``:8080``, ``:8443``) is preserved so two real services never merge.
     """
     t = (target or "").strip()
+    host, port = "", ""
     if "://" in t:
         try:
             from urllib.parse import urlparse
             p = urlparse(t)
             host = (p.hostname or "").lower()
-            if p.port:
-                host = f"{host}:{p.port}"
-            scheme = (p.scheme or "https").lower()
-            if host:
-                return f"{scheme}://{host}"
+            port = str(p.port) if p.port else ""
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
-    # bare host / host:port / host/path
-    return t.split("/")[0].lower()
+    if not host:
+        # bare host / host:port / host/path (also the urlparse-failed fallback).
+        hostport = t.split("/", 1)[0]
+        # Only peel a trailing :port when unambiguous (a single colon) so a bare
+        # IPv6 literal isn't mangled.
+        if hostport.count(":") == 1:
+            host, _, port = hostport.partition(":")
+        else:
+            host = hostport
+    host = host.strip().rstrip(".").lower()
+    port = port.strip()
+    if port and port not in _DEFAULT_PORTS:
+        return f"{host}:{port}"
+    return host
 
 
 def scan_display_name(targets, mode: str = "") -> str:
@@ -421,8 +445,16 @@ def _finding_hash(target: str, vuln_type: str, param: str = "",
     vt = (vuln_type or "").strip().lower()
     cve_norm = (cve or "").strip().upper()
     if cve_norm.startswith("CVE-"):
-        host = _host_key(target)
-        p = str(port or "").strip()
+        # ``_host_key`` may carry a non-default port on the host (``host:8080``);
+        # peel it back out so the port lives in one place and an explicit ``port``
+        # field wins. This unifies "port in the URL" and "port in the field" forms
+        # of the same CVE so they collapse instead of duplicating.
+        hk = _host_key(target)
+        if hk.count(":") == 1:
+            host, _, hk_port = hk.partition(":")
+        else:
+            host, hk_port = hk, ""
+        p = str(port or "").strip() or hk_port
         key = f"{host}|{p}|{cve_norm}"
     elif is_host_level(vt):
         key = f"{_host_key(target)}|{vt}"
@@ -835,6 +867,52 @@ class EngagementStore:
                 "UPDATE engagement SET name = ?, updated_at = ? WHERE id = ?",
                 (new_name, now, row["id"]),
             )
+
+    def update_engagement_details(
+        self,
+        *,
+        client: Optional[str] = None,
+        statement_of_work: Optional[str] = None,
+    ) -> Optional["Engagement"]:
+        """Update the Client and/or Statement-of-work on this engagement.
+
+        Only the fields explicitly passed (non-``None``) are written; the others
+        are preserved, so the caller can PATCH one field at a time. Targets the
+        very row ``get_engagement`` resolves (name == the DB filename stem first,
+        else the most-recently-updated) so the dashboard label, findings and
+        reports keep reading the same row. If the DB has no engagement row yet
+        (a switched-to but never-scanned engagement) one is created under the
+        canonical stem name. Returns the refreshed engagement.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        stem = self.db_path.stem
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM engagement WHERE name = ? LIMIT 1", (stem,)
+            ).fetchone()
+            if row is None:
+                row = c.execute(
+                    "SELECT * FROM engagement ORDER BY updated_at DESC, id DESC LIMIT 1"
+                ).fetchone()
+            if row is None:
+                c.execute(
+                    "INSERT INTO engagement (name, client, statement_of_work, "
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    (stem, client or "", statement_of_work or "", now, now),
+                )
+            else:
+                new_client = row["client"] if client is None else client
+                new_sow = (
+                    row["statement_of_work"]
+                    if statement_of_work is None
+                    else statement_of_work
+                )
+                c.execute(
+                    "UPDATE engagement SET client = ?, statement_of_work = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (new_client, new_sow, now, row["id"]),
+                )
+        return self.get_engagement()
 
     # ── Scope ──────────────────────────────────────────────────────────
     def add_scope(self, target: str, kind: str = "host", in_scope: bool = True,

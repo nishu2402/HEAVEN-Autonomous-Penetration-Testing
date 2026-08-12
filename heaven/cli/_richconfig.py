@@ -11,7 +11,20 @@ here changes behaviour; it is purely presentation.
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+
+def _shell_completion_active() -> bool:
+    """True when Click's shell-completion machinery is driving this process.
+
+    Click sets a single ``_<PROG>_COMPLETE`` env var (e.g. ``_HEAVEN_COMPLETE``)
+    while generating or resolving completions. We detect it generically so the
+    guard holds under any prog-name alias.
+    """
+    return any(
+        k.startswith("_") and k.endswith("_COMPLETE") for k in os.environ
+    )
 
 # Prog-name aliases HEAVEN can be invoked under. rich-click keys its
 # COMMAND_GROUPS / OPTION_GROUPS on the resolved command path, which differs
@@ -126,6 +139,14 @@ def apply_rich_click() -> bool:
     Returns True if rich-click was applied, False if it isn't installed.
     Safe to call once at import time before the subcommands are imported.
     """
+    # Shell tab-completion needs Click's *native* class identity: rich-click's
+    # patch() introduces a second `click.core.Option` class, so Click's own
+    # completion loop (`isinstance(param, Option)`) matches zero options and
+    # option/flag names silently never complete. Help styling is irrelevant
+    # while completing, so skip patching entirely in that mode.
+    if _shell_completion_active():
+        return False
+
     try:
         import rich_click
         from rich_click.patch import patch as _patch

@@ -319,3 +319,80 @@ def test_vuln_kb_alias_resolves():
     kb = lookup("vulnerable_dependency")
     assert kb.get("owasp", "").startswith("A03")  # 2025 Software Supply Chain Failures
     assert cvss_vector_for("vulnerable_dependency").startswith("CVSS:3.1")
+
+
+# ── CVSS class-vector ⇄ typical_cvss consistency (self-contradiction guard) ──
+
+def test_kb_class_vector_agrees_with_typical_cvss():
+    """Every class carrying BOTH a curated CVSS vector and a ``typical_cvss``
+    must keep them in agreement.
+
+    The detail view shows the class base score (``typical_cvss``, via
+    ``objective_base_score``) *beside* the class CVSS vector. When the two drift
+    the finding self-contradicts — the exact bug behind a dependency finding that
+    rendered "CVSS base 5.9" next to a 9.8 ``.../C:H/I:H/A:H`` vector. Lock the
+    pair so a future taxonomy edit can't reintroduce the split.
+    """
+    from heaven.devsecops import vuln_kb as KB
+    bad = []
+    for vt, vec in KB._CVSS_VECTOR_BY_KEY.items():
+        if not vec:
+            continue
+        tv = (KB.lookup(vt) or {}).get("typical_cvss")
+        if not tv:
+            continue
+        got = base_score_from_vector(vec)
+        if abs(got - float(tv)) >= 1.0:
+            bad.append((vt, float(tv), round(got, 1)))
+    assert not bad, f"class vector vs typical_cvss drift >= 1.0: {bad}"
+
+
+# ── OSV advisory cache: refresh records cached before they were scored ───────
+
+@pytest.mark.asyncio
+async def test_osv_refetches_severityless_cached_record(tmp_path):
+    """A record cached in its advisory's first hours (no CVSS, no label) must be
+    refreshed on re-scan so the finding gets the real CVSS/CWE that GitHub/NVD
+    add post-publication — instead of permanently pinning the generic class
+    fallback (a Critical-shaped vector for what may be a medium DoS)."""
+    from heaven.vulnscan.osv_client import OSVClient
+    client = OSVClient(cache_dir=tmp_path)
+    client._store_cached("GHSA-x", {"id": "GHSA-x", "aliases": ["CVE-2026-1"]})
+
+    complete = {
+        "id": "GHSA-x", "aliases": ["CVE-2026-1"],
+        "severity": [{"type": "CVSS_V3",
+                      "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"}],
+        "database_specific": {"cwe_ids": ["CWE-835"], "severity": "HIGH"},
+    }
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return complete
+
+    class _Http:
+        async def get(self, url):
+            return _Resp()
+
+    rec = await client._fetch_detail(_Http(), "GHSA-x")
+    assert rec.get("severity")                              # refreshed
+    assert client._load_cached("GHSA-x").get("severity")   # and re-cached
+
+
+@pytest.mark.asyncio
+async def test_osv_keeps_incomplete_cache_when_offline(tmp_path):
+    """Offline, refreshing a severity-less cached record must fall back to the
+    cached copy — never drop the advisory (and its finding) entirely."""
+    from heaven.vulnscan.osv_client import OSVClient
+    client = OSVClient(cache_dir=tmp_path)
+    stale = {"id": "GHSA-y", "aliases": ["CVE-2026-2"]}
+    client._store_cached("GHSA-y", stale)
+
+    class _Http:
+        async def get(self, url):
+            raise RuntimeError("offline")
+
+    rec = await client._fetch_detail(_Http(), "GHSA-y")
+    assert rec == stale  # advisory preserved despite the failed refresh

@@ -72,6 +72,72 @@ class TestProgressPartialCredit:
         assert p.progress_pct >= before
 
 
+# ── Weighted, time-linear progress (fixes the "fast 1-50, slow 50-100" bar) ──
+
+class TestWeightedProgress:
+    def test_weighted_completed_fraction(self):
+        # 25 of 100 weight-units done → 25%, regardless of task *count*.
+        p = ScanProgress(scan_id="w", total_weight=100.0, completed_weight=25.0)
+        assert 24.9 <= p.progress_pct <= 25.1
+
+    def test_heavy_task_outweighs_cheap_task(self):
+        # A cheap task (timeout 30 → weight 30) finishing advances the bar far
+        # less than a heavy task (timeout 600 → weight 600) — the whole point.
+        cheap = ScanProgress(scan_id="a", total_weight=630.0)
+        cheap.completed_weight = ScanProgress.task_weight(30)
+        heavy = ScanProgress(scan_id="b", total_weight=630.0)
+        heavy.completed_weight = ScanProgress.task_weight(600)
+        assert cheap.progress_pct < heavy.progress_pct
+        assert cheap.progress_pct < 10.0     # ~4.8%
+        assert heavy.progress_pct > 90.0     # ~95%
+
+    def test_running_task_earns_elapsed_seconds(self):
+        # A task 30s into a 100-weight window has earned ~30 of its weight.
+        p = ScanProgress(scan_id="r", total_weight=100.0)
+        p.running["t"] = (time.time() - 30, 100)
+        assert 28.0 <= p.progress_pct <= 32.0
+
+    def test_running_credit_caps_at_95pct_of_weight(self):
+        # A task running far past its expected duration tops out at 95% weight,
+        # leaving the last sliver for real completion.
+        p = ScanProgress(scan_id="c", total_weight=100.0)
+        p.running["t"] = (time.time() - 10_000, 100)
+        assert 94.0 <= p.progress_pct <= 96.0
+
+    def test_task_weight_is_clamped(self):
+        assert ScanProgress.task_weight(5) == 20.0      # floor
+        assert ScanProgress.task_weight(300) == 300.0   # mid
+        assert ScanProgress.task_weight(1800) == 600.0  # ceiling
+        assert ScanProgress.task_weight(None) == 60.0   # default
+
+    def test_weighted_never_premature_hundred(self):
+        p = ScanProgress(scan_id="d", total_weight=100.0, completed_weight=100.0)
+        assert p.progress_pct <= 99.0
+
+
+# ── ETA: honest time-remaining estimate ──────────────────────────────────────
+
+class TestEta:
+    def test_no_eta_too_early(self):
+        # Just started → not enough signal to estimate honestly.
+        p = ScanProgress(scan_id="e", total_weight=100.0, completed_weight=1.0)
+        assert p.eta_seconds is None
+
+    def test_eta_extrapolates_from_progress(self):
+        # 40% done after ~60s → whole run ~150s → ~90s remaining.
+        p = ScanProgress(scan_id="f", total_weight=100.0, completed_weight=40.0)
+        p.start_time = time.time() - 60
+        eta = p.eta_seconds
+        assert eta is not None
+        assert 80.0 <= eta <= 100.0
+
+    def test_eta_in_to_dict(self):
+        p = ScanProgress(scan_id="g", total_weight=100.0, completed_weight=50.0)
+        p.start_time = time.time() - 60
+        d = p.to_dict()
+        assert "eta_s" in d and d["eta_s"] is not None
+
+
 # ── Smarter engagement fallback ──────────────────────────────────────────────
 
 def _store_with_findings(path, cves):

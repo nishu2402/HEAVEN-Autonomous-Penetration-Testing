@@ -101,7 +101,14 @@ def run_native_benchmark(*, write_report: bool = True) -> NativeBenchmarkRun:
 
     findings = [Finding.from_heaven(f) for f in raw_findings]
     result = evaluate(findings, gt, duration_seconds=duration)
-    markdown = render_markdown_report(result, gt, scanner_name="HEAVEN")
+    # Stamp HEAVEN's real version into the report title so the header reads
+    # "HEAVEN v<X> vs. heaven-native-vuln-app v<Y>" — the trailing "v1.0" is the
+    # target app's own version, NOT HEAVEN's, and showing our version removes
+    # that ambiguity.
+    from heaven import __version__ as _heaven_version
+    markdown = render_markdown_report(
+        result, gt, scanner_name="HEAVEN", scanner_version=_heaven_version
+    )
 
     report_path: Path | None = None
     if write_report:

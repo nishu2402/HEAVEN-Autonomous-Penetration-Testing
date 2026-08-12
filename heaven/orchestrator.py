@@ -147,19 +147,52 @@ class ScanProgress:
     # a running task contributes genuine, time-based partial progress instead of
     # the bar jumping only when whole tasks finish.
     running: dict = field(default_factory=dict)
+    # Weighted-progress accounting. Every task is weighted by its expected cost
+    # (a clamp of its timeout) so the bar tracks *work done*, not task count —
+    # otherwise the many cheap recon tasks race the bar to ~50% and the few
+    # heavy scan tasks then crawl it 50→100 ("fast then slow"). These are
+    # populated by the orchestrator; when they are zero (e.g. a ScanProgress
+    # built directly in a unit test) progress_pct falls back to the task-count
+    # estimate so existing behaviour is preserved.
+    total_weight: float = 0.0
+    completed_weight: float = 0.0
+
+    @staticmethod
+    def task_weight(timeout: Optional[float]) -> float:
+        """Expected-cost weight for a task, from its timeout.
+
+        Heavier tasks (bigger timeouts — deep scans, fuzzers) weigh more than
+        trivial checks, so the bar advances in proportion to real work. Clamped
+        to ``[20, 600]`` so a single very-long task can't dominate and a tiny
+        check still registers.
+        """
+        try:
+            t = float(timeout) if timeout else 60.0
+        except (TypeError, ValueError):
+            t = 60.0
+        return min(600.0, max(20.0, t))
 
     @property
     def progress_pct(self) -> float:
+        now = time.time()
+        if self.total_weight > 0:
+            # Weighted, time-linear progress. A running task earns its *actual*
+            # elapsed seconds (capped at 95% of its weight, so the last sliver
+            # lands only on real completion); a finished task contributes its
+            # full weight. Because credit and weight are both in ~seconds, this
+            # tracks the fraction of expected work-time completed — smooth and
+            # honest, never a fabricated animation.
+            running_credit = 0.0
+            for started_at, timeout in self.running.values():
+                weight = self.task_weight(timeout)
+                running_credit += min(0.95 * weight, max(0.0, now - started_at))
+            done = self.completed_weight + running_credit
+            pct = done / self.total_weight * 100.0
+            return max(0.0, min(99.0, pct))
+
+        # ── Legacy task-count fallback (no weights populated) ──────────────
         if self.total_tasks == 0:
             return 0.0
-        # In-flight tasks earn fractional, time-based credit: a task that has
-        # been running for its expected duration is treated as ~90% done (the
-        # last 10% lands when it actually completes). This makes the bar advance
-        # continuously as real work happens — an honest estimate, never a
-        # fabricated animation — rather than teleporting between task
-        # completions (the "2 → 12 → 35 → 89" jumps). It stays monotonic: a task
-        # finishing adds a full 1.0 while removing at most 0.9 of running credit.
-        now = time.time()
         running_frac = 0.0
         for started_at, timeout in self.running.values():
             expected = max(10.0, min(float(timeout) if timeout else 60.0, 60.0))
@@ -172,7 +205,31 @@ class ScanProgress:
     def elapsed_seconds(self) -> float:
         return time.time() - self.start_time
 
+    @property
+    def eta_seconds(self) -> Optional[float]:
+        """Estimated seconds remaining, or ``None`` when it is too early to tell.
+
+        A straight linear extrapolation from observed progress: at fraction
+        ``f`` after ``elapsed`` seconds, the whole run is projected at
+        ``elapsed / f`` and the remainder is the difference. Honest and
+        self-correcting — it tightens as the scan proceeds. Suppressed for the
+        first few percent / seconds where the estimate is meaningless.
+        """
+        pct = self.progress_pct
+        elapsed = self.elapsed_seconds
+        if pct < 3.0 or elapsed < 4.0:
+            return None
+        frac = pct / 100.0
+        if frac <= 0:
+            return None
+        remaining = elapsed / frac - elapsed
+        if remaining < 0:
+            return 0.0
+        # Cap absurd early extrapolations so the UI never shows a wild number.
+        return round(min(remaining, 6 * 3600.0), 0)
+
     def to_dict(self) -> dict:
+        eta = self.eta_seconds
         return {
             "scan_id": self.scan_id,
             "phase": self.phase.value,
@@ -182,6 +239,7 @@ class ScanProgress:
             "failed": self.failed_tasks,
             "current_task": self.current_task,
             "elapsed_s": round(self.elapsed_seconds, 1),
+            "eta_s": round(eta, 0) if eta is not None else None,
             "findings": self.findings_count,
             "assets": self.assets_discovered,
             "vulns": self.vulns_found,
@@ -325,6 +383,7 @@ class ScanOrchestrator:
         self.tasks[task.id] = task
         self._task_done_events[task.id] = asyncio.Event()
         self.progress.total_tasks += 1
+        self.progress.total_weight += ScanProgress.task_weight(timeout)
         logger.debug(f"Task registered: {name} (id={task.id}, phase={phase.value})")
         return task.id
 
@@ -867,11 +926,14 @@ class ScanOrchestrator:
         this host was ever queued."""
         result: dict[str, Any] = {"followup_host": host, "hosts": [],
                                   "endpoints": [], "findings": []}
-        stealth = self.scan_targets.get("stealth_level", "normal") if isinstance(self.scan_targets, dict) else "normal"
+        _st = self.scan_targets if isinstance(self.scan_targets, dict) else {}
+        stealth = _st.get("stealth_level", "normal")
+        evade = bool(_st.get("evade", False))
         try:
             from heaven.recon.network_scanner import scan_network
             net = await scan_network([host], port_range="1-10000",
-                                     stealth_level=stealth, time_budget=90)
+                                     stealth_level=stealth, time_budget=90,
+                                     evade=evade)
         except Exception as e:  # noqa: BLE001 — best-effort follow-on
             logger.debug(f"follow-up recon failed for {host}: {e}")
             net = {}
@@ -935,6 +997,7 @@ class ScanOrchestrator:
                 task.result = result
                 self.results[task.id] = result
                 self.progress.completed_tasks += 1
+                self.progress.completed_weight += ScanProgress.task_weight(task.timeout)
                 # Wake anyone waiting on us
                 evt = self._task_done_events.get(task.id)
                 if evt:
@@ -945,9 +1008,11 @@ class ScanOrchestrator:
 
             if result.state == TaskState.COMPLETED:
                 self.progress.completed_tasks += 1
+                self.progress.completed_weight += ScanProgress.task_weight(task.timeout)
             elif result.state == TaskState.FAILED:
                 self.progress.failed_tasks += 1
                 self.progress.completed_tasks += 1
+                self.progress.completed_weight += ScanProgress.task_weight(task.timeout)
 
             # Notify progress callbacks (task reached a terminal state)
             await self._emit_progress()
@@ -1144,6 +1209,11 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     orch = ScanOrchestrator(config, checkpoint_store=checkpoint_store,
                              resume_scan_id=resume_scan_id, scan_mode=scan_mode)
     stealth = targets.get("stealth_level", "normal")
+    # Firewall/IDS-evasion opt-in (CLI --evade / web launcher toggle). When off,
+    # the network scanner still AUTO-detects a filtering perimeter and runs a
+    # bounded evasion re-probe on the affected hosts — this flag applies evasion
+    # to every host from the first packet.
+    evade = bool(targets.get("evade", False))
 
     # ── Scan-mode task groups ─────────────────────────────────────────────
     # Each add_task is tagged with the set of modes it belongs to. `None`
@@ -1231,8 +1301,48 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         return total
 
     _host_estimate = _estimate_hosts(_net_targets)
-    _net_timeout = float(min(1800, max(300, 90 + _host_estimate * 2)))
-    _net_budget = max(60.0, _net_timeout - 45)
+
+    # Scale the deadline to the PORT BREADTH as well as the host count. A full
+    # 1-65535 `-sV -sC` sweep of a single reachable host legitimately takes many
+    # minutes; the old host-only budget (≈225s for one host) truncated it
+    # mid-scan and returned only the handful of ports that had answered so far —
+    # the "it only scans a few ports vs nmap" symptom. Budget linearly with
+    # breadth: a common (≤1k) range stays ~5 min, a full 65k sweep gets ~13 min,
+    # everything still capped at 30 min and bounded per-host by nmap's
+    # --host-timeout.
+    def _port_breadth(spec: str) -> int:
+        try:
+            from heaven.recon.network_scanner import parse_port_range
+            return len(parse_port_range(str(spec)))
+        except Exception:
+            return 1024
+
+    _port_count = _port_breadth(targets.get("ports", "1-65535"))
+    _port_budget = 180.0 + min(1.0, _port_count / 65535.0) * 540.0
+
+    # Scale the deadline to the STEALTH level too. A quieter profile sends far
+    # fewer packets/sec by design (paranoid -T1, stealth -T2), so the very same
+    # host+port sweep legitimately takes several times longer. Without this a
+    # stealth/paranoid scan was cancelled mid-run and returned a truncated (often
+    # empty) port set — so the SAME target produced DIFFERENT results at different
+    # stealth levels. Give the slow profiles proportionally more wall-clock (and a
+    # higher ceiling) so they converge on the same inventory as a normal scan,
+    # just slower. Fast profiles finish sooner, so they get a little less.
+    _stealth_factor = {
+        "paranoid": 4.0, "stealth": 2.0, "normal": 1.0,
+        "aggressive": 0.8, "loud": 0.7,
+    }.get(str(stealth).strip().lower(), 1.0)
+    # Slow profiles may exceed the standard 30-min cap on a wide range — the
+    # operator explicitly chose "very slow", so allow up to 60 min for them.
+    _net_cap = 3600.0 if _stealth_factor > 1.0 else 1800.0
+    _net_timeout = float(min(
+        _net_cap, max(300, (90 + _host_estimate * 2 + _port_budget) * _stealth_factor)))
+    # Leave generous headroom below the hard task timeout for the deep scan's
+    # cleanup PLUS the passive-OSINT enrichment pass (which self-bounds well under
+    # a minute). Undersizing this let a firewalled host's enrichment tip the whole
+    # network task over its hard timeout — cancelling it and discarding the active
+    # results too. 75s keeps the ~55s enrichment backstop comfortably inside.
+    _net_budget = max(60.0, _net_timeout - 75)
 
     net_id = orch.add_task(
         "Network Reconnaissance", scan_network,
@@ -1243,6 +1353,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         port_range=targets.get("ports", "1-65535"),
         stealth_level=stealth,
         time_budget=_net_budget,
+        evade=evade,
     )
     orch.net_task_id = net_id
 
@@ -2310,6 +2421,38 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "PoC Validation", _validate_findings,
         phase=ScanPhase.VALIDATION,
         depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, inject_id, dir_fuzz_id, idor_id, dns_id, cve_map_id],
+    )
+
+    # ═══ Phase: ACTIVE VERIFICATION (Potential → Confirmed) ═══
+    # Gated by targets["verify"] (set by `heaven scan --verify`, implied by
+    # --autonomous). Version-banner CVE matches are labelled Potential (the
+    # backport problem). For a curated set of well-known CVEs, a SAFE read-only
+    # behavioural probe (Apache path-traversal file read, Shellshock canary echo)
+    # promotes the finding to Confirmed in place — a negative/absent probe never
+    # deletes or downgrades a real finding. Mutates the shared finding dicts so
+    # the promotion survives aggregation + dedup.
+    async def _active_verify(**kw):
+        if not targets.get("verify"):
+            return {"skipped": True, "reason": "--verify flag not set"}
+        try:
+            from heaven.vulnscan.active_verifier import verify_findings
+        except Exception as e:  # noqa: BLE001
+            return {"skipped": True, "reason": f"active_verifier unimportable: {e}"}
+        findings: list[dict] = []
+        for tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            findings.extend(data.get("vulnerabilities", []))
+            findings.extend(data.get("findings", []))
+            findings.extend(data.get("validated_findings", []))
+        return await verify_findings(findings=findings, authorized=True,
+                                     scan_id=orch.scan_id)
+
+    orch.add_task(
+        "Active Verification", _active_verify,
+        phase=ScanPhase.EXPLOIT_PROOF, depends_on=[val_id],
+        timeout=600,
     )
 
     # ═══ Phase: AI_TRIAGE (Layer E — LLM borderline FP review) ═══

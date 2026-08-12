@@ -144,6 +144,15 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
         for h in inventory:
             os_txt = h.get("os_label") or "OS not determined"
             _print(f"\n[bold cyan]{h['host']}[/bold cyan]  [dim]{os_txt}[/dim]")
+            meta = []
+            if h.get("device_name_label"):
+                meta.append(f"Device: {h['device_name_label']}")
+            if h.get("device_type_label"):
+                meta.append(f"Type: {h['device_type_label']}")
+            if h.get("mac_label"):
+                meta.append(f"MAC: {h['mac_label']}")
+            if meta:
+                _print(f"  [dim]{'  ·  '.join(meta)}[/dim]")
             if not h.get("ports"):
                 _print("  [dim]No open ports observed.[/dim]")
                 continue

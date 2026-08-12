@@ -134,10 +134,11 @@ class CredentialValidator:
             import asyncssh  # type: ignore[import-not-found]
         except ImportError:
             raise RuntimeError("asyncssh not installed")
+        from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
 
         try:
             async with asyncio.timeout(self.timeout):
-                async with asyncssh.connect(  # type: ignore[attr-defined]
+                async with ssh_safe.connect(  # type: ignore[attr-defined]
                     host, port=port, username=user, password=pwd,
                     known_hosts=None,
                 ) as conn:

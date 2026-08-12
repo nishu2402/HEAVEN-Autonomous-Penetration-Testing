@@ -22,6 +22,49 @@ from heaven.utils.logger import get_logger
 logger = get_logger("auth_scanner")
 
 
+def _registered_domain(host: str) -> Optional[str]:
+    """Best-effort registered domain (eTLD+1) for a hostname, or ``None`` for IP
+    literals / localhost / single-label hosts. Used to decide whether a redirect
+    stayed on the in-scope site."""
+    import ipaddress
+    host = (host or "").strip().rstrip(".").lower()
+    if not host or host == "localhost":
+        return None
+    if host.count(":") == 1 and "]" not in host:
+        host = host.split(":", 1)[0]
+    try:
+        ipaddress.ip_address(host)
+        return None
+    except ValueError:
+        pass
+    parts = host.split(".")
+    if len(parts) < 2:
+        return None
+    return ".".join(parts[-2:])
+
+
+def _same_site(requested_url: str, final_url: str) -> bool:
+    """True when a response was NOT redirected off the requested site — i.e. the
+    final response host shares the requested host's registered domain (an apex↔www
+    or http→https hop stays "same site"). A cross-registered-domain redirect
+    (target → CDN / parking / SSO / marketing host) means the response headers
+    describe a *different* server, so header-derived findings must not be
+    attributed to the in-scope target. Fails safe to True when either host can't
+    be resolved to a registered domain (IP targets, single-label hosts)."""
+    try:
+        req_host = urllib.parse.urlparse(requested_url).hostname or ""
+        fin_host = urllib.parse.urlparse(final_url).hostname or ""
+    except Exception:
+        return True
+    if not fin_host or fin_host == req_host:
+        return True
+    req_dom = _registered_domain(req_host)
+    fin_dom = _registered_domain(fin_host)
+    if req_dom is None or fin_dom is None:
+        return True  # can't compare (IP / intranet) — don't over-suppress
+    return req_dom == fin_dom
+
+
 def _dedup(findings: list[dict]) -> list[dict]:
     """Deduplicate by (target, vuln_type) — one finding per unique combination."""
     seen: set[tuple[str, str]] = set()
@@ -580,13 +623,36 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
     try:
         async with session.get(url, allow_redirects=True,
                                timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            # A cross-site redirect (target → CDN / parking / SSO / marketing
+            # host) means these response headers describe a DIFFERENT server, not
+            # the in-scope target. Attributing e.g. "Server: nginx/1.29.8" to the
+            # target when the real host runs Apache is a wrong-target false
+            # positive — so if we were redirected off-site, don't emit any
+            # header-derived findings for this URL.
+            final_url = str(resp.url)
+            if not _same_site(url, final_url):
+                logger.debug(
+                    "security headers: %s redirected off-site to %s — skipping "
+                    "header findings (they describe a different host)",
+                    url, final_url)
+                return findings
             hdrs = resp.headers
+            status = resp.status
+            # Response headers double as the proof that a header is absent — so
+            # carry them (Set-Cookie redacted, we never echo a live token into a
+            # report) and the status, so the report shows a real HTTP 200 rather
+            # than a fabricated "HTTP 0 (0 bytes)".
+            proof_headers = {
+                k: ("<redacted>" if k.lower() == "set-cookie" else v)
+                for k, v in hdrs.items()
+            }
             for header, (vuln_type, severity, title, desc) in required.items():
                 if header not in hdrs:
                     findings.append(_make_finding(
                         url, vuln_type, severity, title, desc,
                         confidence=0.98,
-                        evidence={"missing_header": header},
+                        evidence={"missing_header": header, "status": status,
+                                  "response_headers": proof_headers},
                     ))
 
             # CSP analysis — check for unsafe-inline / unsafe-eval
@@ -621,7 +687,7 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
                     "Server header reveals version information, aiding attackers in targeting "
                     "known vulnerabilities.",
                     confidence=0.98,
-                    evidence={"server": server_hdr},
+                    evidence={"server": server_hdr, "observed_at": final_url},
                 ))
             if x_powered:
                 findings.append(_make_finding(

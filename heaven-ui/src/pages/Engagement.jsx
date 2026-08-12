@@ -1,16 +1,105 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Engagement as Eng } from "../api";
 import { EmptyState } from "../components/Skeleton.jsx";
+import { useToast } from "../components/Toast.jsx";
 
 export default function EngagementPage() {
+  const toast = useToast();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    Eng.summary()
-      .then(setData)
-      .catch((e) => setError(e.message));
+  // Inline edit for Client / Statement of work.
+  const [editField, setEditField] = useState(null);   // "client" | "statement_of_work" | null
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  const reload = useCallback(() => {
+    Eng.summary().then(setData).catch((e) => setError(e.message));
   }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  function startEdit(field, current) {
+    setEditField(field);
+    setDraft(current || "");
+    setSaveError(null);
+  }
+  function cancelEdit() {
+    setEditField(null);
+    setDraft("");
+    setSaveError(null);
+  }
+  async function saveEdit(field) {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await Eng.updateDetails({ [field]: draft });
+      // Fold the server's canonical (trimmed/capped) value back into view.
+      setData((d) => (d && res.engagement ? { ...d, engagement: res.engagement } : d));
+      setEditField(null);
+      setDraft("");
+      toast.success?.("Engagement details saved");
+    } catch (e) {
+      setSaveError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // One editable metadata row (label ↔ value with an inline pencil editor).
+  function EditableRow({ label, field, value }) {
+    if (editField === field) {
+      return (
+        <tr>
+          <td>{label}</td>
+          <td>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                className="form-input"
+                autoFocus
+                value={draft}
+                disabled={saving}
+                maxLength={200}
+                placeholder={`Add ${label.toLowerCase()}…`}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); saveEdit(field); }
+                  if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+                }}
+                style={{ flex: "1 1 240px", minWidth: 180 }}
+              />
+              <button className="btn-small" disabled={saving} onClick={() => saveEdit(field)}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button className="btn-small" disabled={saving} onClick={cancelEdit}>Cancel</button>
+            </div>
+            {saveError && (
+              <div className="error" style={{ marginTop: 6, fontSize: 12 }}>{saveError}</div>
+            )}
+          </td>
+        </tr>
+      );
+    }
+    return (
+      <tr>
+        <td>{label}</td>
+        <td>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+            <span className={value ? "" : "dim"}>{value || "—"}</span>
+            <button
+              className="btn-small"
+              onClick={() => startEdit(field, value)}
+              title={`Edit ${label.toLowerCase()}`}
+              style={{ flex: "0 0 auto" }}
+            >
+              ✎ Edit
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
 
   if (error) {
     return (
@@ -77,8 +166,8 @@ heaven scope add https://app.acme.example --kind url`}</pre>
         <table className="kv-table">
           <tbody>
             <tr><td>Name</td><td style={{ color: 'var(--text-0)', fontWeight: 700 }}>{engagement.name}</td></tr>
-            <tr><td>Client</td><td>{engagement.client || "—"}</td></tr>
-            <tr><td>Statement of work</td><td>{engagement.statement_of_work || "—"}</td></tr>
+            <EditableRow label="Client" field="client" value={engagement.client} />
+            <EditableRow label="Statement of work" field="statement_of_work" value={engagement.statement_of_work} />
             <tr><td>Created</td><td className="dim">{engagement.created_at || "—"}</td></tr>
             <tr><td>Targets in scope</td><td>{stats.scope_targets}</td></tr>
             <tr><td>Scans run</td><td>{stats.scans_run}</td></tr>

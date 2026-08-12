@@ -38,6 +38,21 @@ def _isolate_llm_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _disable_passive_osint(monkeypatch):
+    """Keep the whole suite OFFLINE for passive OSINT enrichment by default.
+
+    Passive enrichment (Shodan InternetDB + the endoflife.date EOL feed) is ON in
+    production, but a unit test must never make an accidental outbound call: it is
+    slow and non-deterministic (a live feed's answer depends on today's date — e.g.
+    endoflife.date correctly reporting nginx 1.24 EOL). The kill-switch is set here
+    so no test reaches the network unless it opts back in. The passive-intel /
+    dynamic-EOL feature tests re-enable it (``monkeypatch.setenv(..., "0")``) and
+    mock the network, so they stay deterministic AND offline. Restored per test."""
+    monkeypatch.setenv("HEAVEN_NO_PASSIVE_INTEL", "1")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_data_dir(tmp_path, monkeypatch):
     """Point HEAVEN's data dir — engagements, generated reports and the audit
     trail — at a per-test temp directory so the suite never writes into the

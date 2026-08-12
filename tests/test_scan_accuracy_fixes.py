@@ -79,6 +79,59 @@ class TestCveIdentity:
         assert len(dedup_findings([i1, i2])) == 1
 
 
+# ── scheme/port host normalisation (certifiedhacker.com duplicate findings) ───
+
+class TestSchemeHostDedup:
+    """A domain scan names the same host three ways: the DNS/email phase uses the
+    bare domain while the web phase probes both ``http://`` and ``https://``. A
+    site-wide finding (missing headers, TLS, SPF/DMARC) or a service CVE must NOT
+    duplicate once per representation. Regression for the reported "duplicate
+    findings" seen scanning certifiedhacker.com."""
+
+    @pytest.mark.parametrize("vt", ["hsts_missing", "spf_missing", "weak_cipher",
+                                    "csp_missing", "dmarc_missing", "cors_misconfig"])
+    def test_host_level_collapses_across_scheme_and_default_port(self, vt):
+        forms = ["certifiedhacker.com", "http://certifiedhacker.com",
+                 "https://certifiedhacker.com", "https://certifiedhacker.com:443",
+                 "CERTIFIEDHACKER.COM", "certifiedhacker.com."]
+        findings = [{"target": t, "vuln_type": vt, "severity": "low",
+                     "confidence": 0.8} for t in forms]
+        out = dedup_findings(findings)
+        assert len(out) == 1
+        assert out[0]["target"] == "certifiedhacker.com"
+
+    def test_full_domain_scan_finding_set_dedups(self):
+        findings = [
+            {"target": "certifiedhacker.com", "vuln_type": "spf_missing", "confidence": 0.9},
+            {"target": "https://certifiedhacker.com", "vuln_type": "spf_missing", "confidence": 0.9},
+            {"target": "http://certifiedhacker.com", "vuln_type": "hsts_missing", "confidence": 0.8},
+            {"target": "https://certifiedhacker.com", "vuln_type": "hsts_missing", "confidence": 0.8},
+            {"target": "https://certifiedhacker.com", "vuln_type": "vulnerable_service",
+             "cve": "CVE-2023-1234", "port": "443", "confidence": 0.7},
+            {"target": "certifiedhacker.com", "vuln_type": "vulnerable_service",
+             "cve": "CVE-2023-1234", "port": "443", "confidence": 0.7},
+        ]
+        # Six raw findings, three real vulnerabilities.
+        assert len(dedup_findings(findings)) == 3
+
+    def test_cve_port_in_url_matches_port_in_field(self):
+        a = {"target": "https://h:8080", "vuln_type": "vulnerable_service", "cve": "CVE-2023-9"}
+        b = {"host": "h", "port": 8080, "vuln_type": "vulnerable_service", "cve": "CVE-2023-9"}
+        assert _finding_hash(*_finding_identity(a)) == _finding_hash(*_finding_identity(b))
+
+    def test_distinct_nondefault_ports_do_not_merge(self):
+        # Two genuinely different TLS services on one host stay separate.
+        a = {"target": "https://h:8443", "vuln_type": "weak_cipher"}
+        b = {"target": "https://h:9443", "vuln_type": "weak_cipher"}
+        assert len(dedup_findings([a, b])) == 2
+
+    def test_www_and_apex_stay_distinct(self):
+        # www and apex can carry different DNS/headers — never silently merged.
+        a = {"target": "https://www.certifiedhacker.com", "vuln_type": "hsts_missing"}
+        b = {"target": "https://certifiedhacker.com", "vuln_type": "hsts_missing"}
+        assert len(dedup_findings([a, b])) == 2
+
+
 # ── Store: distinct CVEs persist + reconciliation ────────────────────────────
 
 class TestStoreCvePersistence:

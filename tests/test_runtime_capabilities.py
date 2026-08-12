@@ -18,14 +18,19 @@ def _reset_cache():
     rc._cache_val = None
 
 
+def _by_name(caps, name):
+    return next(c for c in caps if c["name"] == name)
+
+
 def test_shape_and_armed(monkeypatch):
     _reset_cache()
     monkeypatch.setattr(rc, "_chromium_status",
                         lambda: (True, "Chromium browser installed"))
     caps = rc.runtime_capabilities(use_cache=False)
-    assert len(caps) == 1
-    c = caps[0]
-    assert c["name"] == "playwright-chromium"
+    names = {c["name"] for c in caps}
+    # Playwright + the local-LLM (Ollama) capability are both surfaced.
+    assert {"playwright-chromium", "local-llm"} <= names
+    c = _by_name(caps, "playwright-chromium")
     assert c["present"] is True
     assert c["hint"] == ""              # armed → no install hint
     assert "DAST" in c["purpose"]
@@ -36,7 +41,7 @@ def test_not_armed_offers_hint(monkeypatch):
     monkeypatch.setattr(
         rc, "_chromium_status",
         lambda: (False, "browser bundle not downloaded — run `playwright install chromium`"))
-    c = rc.runtime_capabilities(use_cache=False)[0]
+    c = _by_name(rc.runtime_capabilities(use_cache=False), "playwright-chromium")
     assert c["present"] is False
     assert c["hint"] == "playwright install chromium"
     assert "not downloaded" in c["detail"]

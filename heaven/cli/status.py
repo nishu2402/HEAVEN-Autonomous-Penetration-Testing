@@ -78,6 +78,21 @@ def _collect_status(engagement: Optional[str]) -> dict:
         "python": sys.version.split()[0],
     }
 
+    # Python line vs the range we test (3.11-3.13). A brand-new major (3.14+ in
+    # its first months) can leave native security deps (asyncssh<->Nettle,
+    # cryptography, numpy) ABI-unstable, which has historically surfaced as a hard
+    # interpreter crash rather than a Python error. Flag it honestly so an
+    # operator on an unvetted interpreter knows why an unexplained crash happened.
+    _pv = sys.version_info[:2]
+    report["python_supported"] = (3, 11) <= _pv <= (3, 13)
+    if _pv > (3, 13):
+        report["python_note"] = (
+            "newer than the tested range (3.11-3.13); native libraries may not be "
+            "ABI-stable yet — use Python 3.12 or 3.13 if you hit a native crash"
+        )
+    elif _pv < (3, 11):
+        report["python_note"] = "older than the minimum supported (3.11); please upgrade"
+
     # LLM gateway
     try:
         from heaven.ai import get_gateway
@@ -87,9 +102,22 @@ def _collect_status(engagement: Optional[str]) -> dict:
             "provider": gw.provider or None,
             "model": gw.model or None,
             "init_error": gw._init_error,
+            "fallback_provider": getattr(gw, "fallback_provider", "") or None,
         }
     except Exception as e:
         report["llm"] = {"available": False, "error": str(e)}
+
+    # Local LLM runtime (Ollama) — surfaced so `heaven doctor` / Web Health show
+    # whether a private, rate-limit-free model is available.
+    try:
+        from heaven.ai import local_llm
+        provider = (os.environ.get("HEAVEN_LLM_PROVIDER") or "").lower()
+        base = os.environ.get("HEAVEN_LLM_BASE_URL", "") if provider == "local" else ""
+        report["local_llm"] = local_llm.local_status(
+            provider="local" if provider == "local" else "ollama", base_url=base,
+        )
+    except Exception as e:
+        report["local_llm"] = {"installed": None, "reachable": False, "error": str(e)}
 
     # SIEM
     try:
@@ -203,6 +231,13 @@ def _next_steps(report: dict) -> list[str]:
     # display name which can contain spaces/parens and isn't a valid --engagement.
     name = eng.get("selector") or eng.get("name") or "<name>"
     steps: list[str] = []
+    # An unvetted interpreter (see python_supported) is the most foundational
+    # thing to fix — it can crash scans natively — so surface it first.
+    if not report.get("python_supported", True) and report.get("python_note"):
+        steps.append(
+            "[cyan]rebuild your venv on Python 3.12 or 3.13[/cyan]  — current "
+            f"Python is {report['python_note'].split(';')[0]}"
+        )
     # Missing scanner binaries cap HEAVEN below full power — offer the one-shot
     # installer first so the operator lands on a fully-capable setup.
     missing = [t for t, present in (report.get("external_tools") or {}).items() if not present]
@@ -235,15 +270,34 @@ def _render_pretty(report: dict) -> None:
     """Human-friendly two-column layout."""
     v = report["version"]
     _print(f"[bold cyan]🛰  HEAVEN v{v}[/bold cyan]  ·  Python {report['python']}")
+    if not report.get("python_supported", True) and report.get("python_note"):
+        _print(f"  [yellow]! Python[/yellow]     {report['python_note']}")
     _print("")
 
     # LLM
     llm = report.get("llm", {})
     if llm.get("available"):
-        _print(f"  [green]✓ LLM[/green]        {llm['provider']} ({llm['model']})")
+        fb = llm.get("fallback_provider")
+        fb_note = f"  [dim](fallback: {fb})[/dim]" if fb else ""
+        _print(f"  [green]✓ LLM[/green]        {llm['provider']} ({llm['model']}){fb_note}")
     else:
         err = llm.get("init_error") or llm.get("error") or "no API key set"
         _print(f"  [yellow]· LLM[/yellow]        not configured — {err}")
+
+    # Local LLM runtime (Ollama) — private, no rate limits.
+    local = report.get("local_llm", {})
+    if local.get("installed"):
+        if local.get("reachable"):
+            models = local.get("models") or []
+            note = (", ".join(models[:3]) + ("…" if len(models) > 3 else "")) \
+                if models else "no models pulled — heaven ai pull"
+            _print(f"  [green]✓ Local AI[/green]   Ollama up · {note}")
+        else:
+            _print("  [yellow]· Local AI[/yellow]   Ollama installed but not "
+                   "running — [cyan]ollama serve[/cyan]")
+    else:
+        _print("  [dim]· Local AI    not installed — heaven ai setup "
+               "(no key, no rate limits)[/dim]")
 
     # SIEM
     siem = report.get("siem", {})

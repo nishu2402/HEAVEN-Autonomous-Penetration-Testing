@@ -14,6 +14,7 @@ import { CommandPalette } from "./components/CommandPalette.jsx";
 import Tour from "./components/Tour.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import ForcedPasswordChange from "./components/ForcedPasswordChange.jsx";
+import ChatWidget from "./components/ChatWidget.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import NotFound from "./pages/NotFound.jsx";
 
@@ -26,6 +27,7 @@ const KillChain      = lazy(() => import("./pages/KillChain.jsx"));
 const Scans          = lazy(() => import("./pages/Scans.jsx"));
 const AssetsPage     = lazy(() => import("./pages/Assets.jsx"));
 const AIPlans        = lazy(() => import("./pages/AIPlans.jsx"));
+const ChatPage       = lazy(() => import("./pages/Chat.jsx"));
 const Benchmark      = lazy(() => import("./pages/Benchmark.jsx"));
 const Methodology    = lazy(() => import("./pages/Methodology.jsx"));
 const AutonomousPage = lazy(() => import("./pages/Autonomous.jsx"));
@@ -140,6 +142,7 @@ function Shell() {
               <Route path="/lateral" element={<LateralPage />} />
               <Route path="/knowledge" element={<KnowledgePage />} />
               <Route path="/ai-plans" element={<AIPlans />} />
+              <Route path="/chat" element={<ChatPage />} />
               <Route path="/benchmark" element={<Benchmark />} />
               <Route path="/methodology" element={<Methodology />} />
               <Route path="/reports" element={<Reports />} />
@@ -156,6 +159,8 @@ function Shell() {
           </ErrorBoundary>
         </div>
       </div>
+      {/* Floating AI assistant — available on every authenticated page. */}
+      {!mustChange && <ChatWidget />}
     </div>
   );
 }

@@ -4,10 +4,45 @@
 // observed them. An OS flagged "heuristic — unconfirmed" is a TTL guess, not a
 // stack fingerprint, and is labelled so it's never read as a confirmed fact.
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { Assets } from "../api";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
+
+// Ascending sort key for a host row. IPv4 addresses sort numerically (so .2
+// comes before .10, not lexicographically after it); anything else (hostnames,
+// IPv6) falls back to a case-insensitive string compare. Returned as a tuple so
+// numeric IPs always sort ahead of, and independently from, named hosts.
+function hostSortKey(host) {
+  const h = (host || "").trim();
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (m) {
+    const n = ((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4];
+    return [0, n, ""];
+  }
+  return [1, 0, h.toLowerCase()];
+}
+
+function compareHosts(a, b) {
+  const ka = hostSortKey(a.host), kb = hostSortKey(b.host);
+  if (ka[0] !== kb[0]) return ka[0] - kb[0];
+  if (ka[1] !== kb[1]) return ka[1] - kb[1];
+  return ka[2] < kb[2] ? -1 : ka[2] > kb[2] ? 1 : 0;
+}
+
+// Does a host row match the free-text search? Matches the host/IP, the OS
+// label, and any port's service or version — so "mysql", "apache", "3306" or an
+// IP prefix all find the right box.
+function hostMatches(h, q) {
+  if (!q) return true;
+  const hay = [
+    h.host, h.os_label,
+    h.device_name, h.device_name_label, h.device_type, h.device_type_label,
+    h.mac_address, h.mac_vendor,
+    ...(h.ports || []).flatMap((p) => [String(p.port), p.service, p.service_version, p.cpe]),
+  ].filter(Boolean).join(" ").toLowerCase();
+  return hay.includes(q);
+}
 
 // Colour the OS chip by how much to trust it: a real nmap fingerprint is
 // confident (accent), a TTL heuristic is cautionary (warn), unknown is muted.
@@ -15,6 +50,15 @@ function osStyle(host) {
   const src = host.os_source;
   if (src === "nmap") return { color: "var(--ok, #3fb950)", border: "var(--ok, #3fb950)" };
   if (src === "heuristic") return { color: "var(--warn, #d29922)", border: "var(--warn, #d29922)" };
+  return { color: "var(--text-dim)", border: "var(--border)" };
+}
+
+// Same trust-colouring for the device-type chip: an nmap -O classification is
+// confident (accent), a MAC-vendor-derived category is a maker hint (warn).
+function deviceTypeStyle(host) {
+  const src = host.device_type_source;
+  if (src === "nmap") return { color: "var(--accent-2, #6D7CFF)", border: "var(--accent-2, #6D7CFF)" };
+  if (src === "mac-vendor") return { color: "var(--warn, #d29922)", border: "var(--warn, #d29922)" };
   return { color: "var(--text-dim)", border: "var(--border)" };
 }
 
@@ -41,6 +85,7 @@ export default function AssetsPage() {
   const [dnsTotals, setDnsTotals] = useState(null);
   const [scans, setScans] = useState([]);
   const [scanId, setScanId] = useState(null);
+  const [query, setQuery] = useState("");
 
   // Pass scanId=null to let the backend pick the most recent scan. The
   // inventory is scoped to ONE scan so two separate scans never blend into a
@@ -75,7 +120,23 @@ export default function AssetsPage() {
     ["Open ports", totals?.open_ports],
     ["Services", totals?.distinct_services],
     ["OS identified", totals?.os_identified],
+    ["Devices", totals?.devices_identified],
   ];
+
+  // Sorted ascending by host/IP and filtered by the search box. The backend
+  // returns hosts busiest-first (most open ports); operators asked for a
+  // predictable ascending order plus a way to jump straight to one target.
+  const q = query.trim().toLowerCase();
+  const visibleHosts = useMemo(
+    () => [...inventory].filter((h) => hostMatches(h, q)).sort(compareHosts),
+    [inventory, q],
+  );
+  const visibleDns = useMemo(
+    () => (q
+      ? dns.filter((n) => (n.domain || "").toLowerCase().includes(q))
+      : [...dns].sort((a, b) => (a.domain || "").localeCompare(b.domain || ""))),
+    [dns, q],
+  );
 
   return (
     <div className="page">
@@ -86,10 +147,16 @@ export default function AssetsPage() {
           discovered — reported exactly as observed by nmap, nothing fabricated.
           An OS shown as <em>heuristic — unconfirmed</em> was inferred from a TTL
           value, not a full stack fingerprint, and should be treated as
-          indicative only. The inventory is scoped to a single scan (most recent
-          by default) so two scans never blend into one host table — use the
-          picker to switch. Run a network scan (<code>heaven scan -m network</code>
-          {" "}or the <Link to="/scans">Scans</Link> launcher) to populate this.
+          indicative only. Where the scan observed them, each host also shows its
+          <strong> device name</strong>, <strong>device type</strong> and
+          {" "}<strong>MAC address</strong> — a MAC only appears for a host on the
+          same local network segment scanned with sufficient privileges (it is an
+          ARP fact, so remote/routed hosts have none), and a device type tagged
+          {" "}<em>per MAC vendor</em> is a maker hint, not a fingerprint. The
+          inventory is scoped to a single scan (most recent by default) so two
+          scans never blend into one host table — use the picker to switch. Run a
+          network scan (<code>heaven scan -m network</code>{" "}or the{" "}
+          <Link to="/scans">Scans</Link> launcher) to populate this.
         </p>
 
         {scans.length > 0 && (
@@ -108,8 +175,21 @@ export default function AssetsPage() {
           </label>
         )}
 
+        {(inventory.length > 0 || dns.length > 0) && (
+          <label className="form-group" style={{ maxWidth: 460, marginTop: 10 }}>
+            <span className="form-label">Search targets</span>
+            <input
+              className="form-input"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter by IP, hostname, service, version or port — e.g. 10.0.0., mysql, 443"
+            />
+          </label>
+        )}
+
         {totals && (
-          <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+          <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
             {stat.map(([label, val]) => (
               <div key={label} className="mini-stat">
                 <div className="mini-stat-label" style={{ textTransform: "uppercase" }}>{label}</div>
@@ -138,22 +218,50 @@ export default function AssetsPage() {
         </div>
       )}
 
-      {!loading && inventory.map((h) => {
+      {!loading && !error && q && visibleHosts.length === 0 && visibleDns.length === 0 &&
+        (inventory.length > 0 || dns.length > 0) && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="dim" style={{ padding: 8 }}>
+            No host or domain matches “{query.trim()}”. Clear the search to see all targets.
+          </div>
+        </div>
+      )}
+
+      {!loading && visibleHosts.map((h) => {
         const os = osStyle(h);
+        const dt = deviceTypeStyle(h);
         return (
           <div key={h.host} className="card" style={{ marginTop: 12 }}>
             <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span className="mono">{h.host}</span>
+              {h.device_name_label && (
+                <span className="dim" style={{ fontSize: 12.5, fontWeight: 500 }}>
+                  {h.device_name_label}
+                </span>
+              )}
               <span style={{
                 fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999,
                 color: os.color, border: `1px solid ${os.border}`,
               }}>
                 {h.os_label || "OS not determined"}
               </span>
+              {h.device_type_label && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999,
+                  color: dt.color, border: `1px solid ${dt.border}`,
+                }}>
+                  {h.device_type_label}
+                </span>
+              )}
               <span className="dim" style={{ fontSize: 12, fontWeight: 400 }}>
                 {h.port_count} open port{h.port_count === 1 ? "" : "s"}
               </span>
             </div>
+            {h.mac_label && (
+              <div className="dim mono" style={{ fontSize: 11.5, marginTop: 2 }}>
+                MAC {h.mac_label}
+              </div>
+            )}
             {(!h.ports || h.ports.length === 0) ? (
               <div className="dim" style={{ padding: 8 }}>No open ports observed.</div>
             ) : (
@@ -187,7 +295,7 @@ export default function AssetsPage() {
         );
       })}
 
-      {!loading && dns.length > 0 && (
+      {!loading && visibleDns.length > 0 && (
         <div className="card" style={{ marginTop: 18 }}>
           <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🌐 DNS Enumeration</h2>
           <p className="page-lead" style={{ marginBottom: 8 }}>
@@ -213,7 +321,7 @@ export default function AssetsPage() {
         </div>
       )}
 
-      {!loading && dns.map((n) => {
+      {!loading && visibleDns.map((n) => {
         const RT = ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"];
         const recRows = RT.flatMap((rt) =>
           (n.records?.[rt] || []).map((val, i) => ({ rt, val, key: `${rt}-${i}` })),

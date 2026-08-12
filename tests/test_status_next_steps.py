@@ -65,3 +65,35 @@ def test_all_tools_present_no_install_step(monkeypatch):
         "external_tools": {"nmap": True, "sqlmap": True},
     }
     assert "install-tools" not in "\n".join(_next_steps(report))
+
+
+def test_untested_python_surfaces_rebuild_step_first(monkeypatch):
+    """Running on an unvetted interpreter is the most foundational fix (it can
+    crash scans natively), so it must be the FIRST next-step suggested."""
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "x" * 12)
+    report = {
+        "engagement": {"name": "demo", "selector": "demo", "exists": True,
+                       "total_findings": 3},
+        "external_tools": {"nmap": True, "sqlmap": True},
+        "python_supported": False,
+        "python_note": "newer than the tested range (3.11-3.13); use Python 3.12 or 3.13",
+    }
+    steps = _next_steps(report)
+    assert steps and "rebuild your venv" in steps[0]
+    assert "3.12 or 3.13" in steps[0]
+
+
+def test_supported_python_no_rebuild_step(monkeypatch):
+    """On a supported interpreter (or when the field is absent), no Python
+    rebuild step is offered."""
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "x" * 12)
+    report = {
+        "engagement": {"name": "demo", "selector": "demo", "exists": True,
+                       "total_findings": 3},
+        "external_tools": {"nmap": True, "sqlmap": True},
+        "python_supported": True,
+    }
+    assert "rebuild your venv" not in "\n".join(_next_steps(report))
+    # Absent field defaults to supported → still no rebuild step.
+    report.pop("python_supported")
+    assert "rebuild your venv" not in "\n".join(_next_steps(report))

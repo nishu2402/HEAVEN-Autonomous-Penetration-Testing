@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { Scans as ScansApi, Demo, Engagement, Engagements } from "../api";
+import { Scans as ScansApi, Demo, Engagement, Engagements, Retest, previewRetestReport } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import HelpTip from "../components/HelpTip.jsx";
 import TargetsInput, { classifyTarget } from "../components/TargetsInput.jsx";
@@ -29,6 +29,12 @@ export default function Scans() {
   const [targets, setTargets]   = useState("");
   const [mode, setMode]         = useState(initialMode);
   const [stealth, setStealth]   = useState("3");
+  const [evade, setEvade]       = useState(false);   // firewall/IDS evasion (authorized)
+  // Port scope for the network sweep. Defaults to a FULL 1–65535 scan so the
+  // web path matches `heaven scan` and a plain `nmap -p-`; "fast" narrows to the
+  // common 1–1024 range, "custom" takes an explicit nmap-style spec.
+  const [portScope, setPortScope] = useState("full");
+  const [customPorts, setCustomPorts] = useState("");
   // Which engagement the scan's findings will be saved into. A picker of the
   // engagements on disk (+ "new") replaces the old free-text field so a scan
   // can never silently pile into a surprise/sticky engagement — the operator
@@ -119,6 +125,12 @@ export default function Scans() {
     if (engChoice === "__new__" && !destEngagement) {
       setLaunchError("Name the new engagement, or pick an existing one."); return;
     }
+    const ports = portScope === "full" ? "1-65535"
+      : portScope === "fast" ? "1-1024"
+      : customPorts.trim();
+    if (portScope === "custom" && !ports) {
+      setLaunchError("Enter a port range (e.g. 1-65535 or 22,80,443) or pick a preset."); return;
+    }
 
     submittingRef.current = true;
     setLaunching(true);
@@ -128,7 +140,9 @@ export default function Scans() {
       const payload = {
         targets: rawTargets,
         mode,
+        ports,
         stealth_level: parseInt(stealth, 10),
+        ...(evade && { evade: true }),
         engagement: destEngagement || undefined,
         i_have_authorization: true,
         // Only send auth fields that are actually filled in.
@@ -214,6 +228,45 @@ export default function Scans() {
             <select className="form-select" value={stealth} onChange={e => setStealth(e.target.value)}>
               {STEALTH.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
+          </label>
+
+          <label className="form-group">
+            <span className="form-label">
+              Port scope
+              <HelpTip text="Which TCP ports the network sweep covers. Full scans all 65,535 ports — the same coverage as `nmap -p-` — and is the default so nothing is missed. Fast limits to the common 1–1024 range for a quicker pass. Custom takes an nmap-style spec (e.g. 1-65535, or 22,80,443,8000-8100). High-value web/DB/cPanel ports are always included regardless of choice." />
+            </span>
+            <select className="form-select" value={portScope} onChange={e => setPortScope(e.target.value)}>
+              <option value="full">Full — all 65,535 ports (like nmap -p-)</option>
+              <option value="fast">Fast — common ports (1–1024)</option>
+              <option value="custom">Custom range…</option>
+            </select>
+            {portScope === "custom" && (
+              <input
+                className="form-input"
+                style={{ marginTop: 8 }}
+                value={customPorts}
+                onChange={e => setCustomPorts(e.target.value)}
+                placeholder="e.g. 1-65535  ·  22,80,443  ·  8000-8100"
+              />
+            )}
+            {portScope === "full" && (
+              <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                Thorough — a full-port sweep of one host can take several minutes.
+              </span>
+            )}
+          </label>
+
+          <label className="form-group form-full" style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={evade}
+              onChange={e => setEvade(e.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span className="form-label" style={{ margin: 0 }}>
+              Firewall / IDS evasion
+              <HelpTip text="Authorized testing only. Applies nmap evasion (packet fragmentation, padding, a trusted source port, decoys) to every host so a filtering firewall is more likely to pass the probes. Even off, HEAVEN auto-detects a filtering perimeter and runs a bounded evasion re-probe of the affected hosts — so services hidden behind a firewall still surface." />
+            </span>
           </label>
 
           <label className="form-group form-full">
@@ -362,9 +415,137 @@ heaven scan -t 10.0.0.0/24 -m network \\
 heaven resume --engagement my-eng --i-have-authorization`}</pre>
       </div>
 
+      {/* Remediation retest — compare a baseline scan to a later re-scan. */}
+      <RetestCard refreshKey={listRefresh} />
+
       {/* Pentest scan activity — SAST/SCA live in their own sections, so they
           never merge into this list. */}
       <ScanList kind="pentest" title="Scan Activity" refreshKey={listRefresh} />
+    </div>
+  );
+}
+
+// ── Remediation Retest ───────────────────────────────────────────────────────
+// Compare a baseline scan to a later re-scan of the same engagement and show the
+// remediation posture (fixed / still-open / reintroduced / new + % remediated).
+// Needs ≥2 finished scans; otherwise it renders a short hint.
+function RetestCard({ refreshKey }) {
+  const toast = useToast();
+  const [scans, setScans]       = useState([]);
+  const [baseline, setBaseline] = useState("");
+  const [current, setCurrent]   = useState("");
+  const [posture, setPosture]   = useState(null);
+  const [busy, setBusy]         = useState(false);
+  const [opening, setOpening]   = useState(false);
+
+  useEffect(() => {
+    ScansApi.list(50, "pentest")
+      .then((d) => {
+        const finished = (d.scans || []).filter(
+          (s) => s.status === "completed" || s.status === "failed");
+        setScans(finished);
+        // Default: newest as current, next-newest as baseline.
+        if (finished.length >= 2) {
+          setCurrent((c) => c || (finished[0].scan_id || finished[0].id));
+          setBaseline((b) => b || (finished[1].scan_id || finished[1].id));
+        }
+      })
+      .catch(() => {});
+  }, [refreshKey]);
+
+  const label = (s) => {
+    const id = s.scan_id || s.id;
+    const when = (s.created || s.started_at || "").slice(0, 16).replace("T", " ");
+    const mode = s.mode || s.config?.mode || "full";
+    return `${(id || "").slice(0, 8)} · ${mode}${when ? " · " + when : ""}`;
+  };
+
+  async function runRetest() {
+    if (!baseline || !current || baseline === current) {
+      toast.error("Pick two different scans (baseline and re-scan).");
+      return;
+    }
+    setBusy(true); setPosture(null);
+    try {
+      const r = await Retest.posture(current, baseline);
+      setPosture(r.posture);
+    } catch (e) {
+      toast.error(e.message || "Retest failed");
+    } finally { setBusy(false); }
+  }
+
+  async function openReport() {
+    if (!baseline || !current || baseline === current) {
+      toast.error("Pick two different scans first.");
+      return;
+    }
+    setOpening(true);
+    try { await previewRetestReport(current, baseline); }
+    catch (e) { toast.error(e.message || "Could not open report"); }
+    finally { setOpening(false); }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        Remediation Retest
+        <HelpTip text="Compare a baseline scan to a later re-scan of the same engagement: how many baseline findings are verified fixed, still open, reintroduced (a fix that came back), or newly introduced. Mirrors the CLI's `heaven retest`." />
+      </div>
+      {scans.length < 2 ? (
+        <p className="dim" style={{ fontSize: 12 }}>
+          Run at least two scans of this engagement to retest remediation between them.
+        </p>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+            <label className="form-group">
+              <span className="form-label">Baseline scan</span>
+              <select className="form-select" value={baseline} onChange={(e) => setBaseline(e.target.value)}>
+                {scans.map((s) => <option key={s.scan_id || s.id} value={s.scan_id || s.id}>{label(s)}</option>)}
+              </select>
+            </label>
+            <label className="form-group">
+              <span className="form-label">Re-scan (current)</span>
+              <select className="form-select" value={current} onChange={(e) => setCurrent(e.target.value)}>
+                {scans.map((s) => <option key={s.scan_id || s.id} value={s.scan_id || s.id}>{label(s)}</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={runRetest}>
+              {busy ? "Comparing…" : "↻ Run retest"}
+            </button>
+            <button type="button" className="btn" disabled={opening} onClick={openReport}>
+              {opening ? "Opening…" : "⤓ Open HTML report"}
+            </button>
+          </div>
+          {posture && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 10, marginTop: 16 }}>
+              <RetestKpi n={posture.remediation_rate == null ? "—" : `${Math.round(posture.remediation_rate)}%`} l="Remediated" accent />
+              <RetestKpi n={posture.remediated} l="Fixed" />
+              <RetestKpi n={posture.still_open} l="Still open" />
+              <RetestKpi n={posture.reintroduced} l="Reintroduced" warn={posture.reintroduced > 0} />
+              <RetestKpi n={posture.newly_introduced} l="New" />
+            </div>
+          )}
+          {posture && posture.reintroduced > 0 && (
+            <div className="form-banner form-banner-error" style={{ marginTop: 12 }}>
+              ⚠ {posture.reintroduced} previously-fixed finding(s) came back
+              ({posture.regressed_critical_or_high} critical/high).
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function RetestKpi({ n, l, accent, warn }) {
+  const color = warn ? "var(--danger, #dc2626)" : accent ? "var(--accent, #6366f1)" : "var(--text-0)";
+  return (
+    <div style={{ background: "var(--bg-elev, rgba(255,255,255,.03))", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color }}>{n}</div>
+      <div className="dim" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".04em" }}>{l}</div>
     </div>
   );
 }

@@ -21,12 +21,19 @@ function TopologyFallback() {
   )
 }
 
+// Bright literals for GRAPHIC fills (severity bars, glows) — vivid on both
+// themes. For TEXT/number colours use SEV_TOKEN instead: the theme tokens deepen
+// automatically in light mode so labels never wash out on white.
 const SEV = {
   critical: { color: '#FF4D6A', label: 'Critical' },
   high:     { color: '#FF8A3D', label: 'High' },
   medium:   { color: '#FFC53D', label: 'Medium' },
   low:      { color: '#38BDF8', label: 'Low' },
   info:     { color: '#8593AD', label: 'Info' },
+}
+const SEV_TOKEN = {
+  critical: 'var(--crit)', high: 'var(--high)', medium: 'var(--med)',
+  low: 'var(--low)', info: 'var(--info)',
 }
 
 function StatCard({ label, value, color, sub, delay = 0, help }) {
@@ -56,7 +63,7 @@ function SeverityBars({ bySeverity, total }) {
         return (
           <div key={s}>
             <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 5 }}>
-              <span style={{ color: SEV[s].color, fontWeight: 600 }}>{SEV[s].label}</span>
+              <span style={{ color: SEV_TOKEN[s], fontWeight: 600 }}>{SEV[s].label}</span>
               <span className="mono" style={{ color: 'var(--text-2)' }}>{n}</span>
             </div>
             <div className="progress-bar">
@@ -256,14 +263,14 @@ export default function Dashboard() {
         </div>
 
         <div className="stat-grid">
-          <StatCard label="Critical" value={bySev.critical ?? 0} color={SEV.critical.color}
+          <StatCard label="Critical" value={bySev.critical ?? 0} color={SEV_TOKEN.critical}
                     sub={(bySev.critical ?? 0) > 0 ? 'Needs attention' : 'All clear'} delay={0.02}
                     help="severity" />
-          <StatCard label="High" value={bySev.high ?? 0} color={SEV.high.color} delay={0.06} />
-          <StatCard label="Total findings" value={totalFindings} color="#6D7CFF" delay={0.10}
+          <StatCard label="High" value={bySev.high ?? 0} color={SEV_TOKEN.high} delay={0.06} />
+          <StatCard label="Total findings" value={totalFindings} color="var(--accent)" delay={0.10}
                     sub={`${stats.scans_run ?? 0} scan${stats.scans_run !== 1 ? 's' : ''} run`}
                     help="risk_score" />
-          <StatCard label="Targets" value={stats.scope_targets ?? 0} color="#34E5A3" delay={0.14}
+          <StatCard label="Targets" value={stats.scope_targets ?? 0} color="var(--brand)" delay={0.14}
                     sub="In scope" />
         </div>
 
@@ -410,6 +417,19 @@ export default function Dashboard() {
                 {totalFindings} finding{totalFindings !== 1 ? 's' : ''} ·{' '}
                 {stats.scope_targets ?? 0} target{(stats.scope_targets ?? 0) !== 1 ? 's' : ''} in scope
               </div>
+              {stats.overall_risk && (
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center',
+                              gap: 8, flexWrap: 'wrap', fontSize: 12 }}>
+                  <span style={{ color: 'var(--text-2)' }}>Overall risk</span>
+                  <span className={`sev-pill sev-${stats.overall_risk === 'Informational' ? 'info' : (stats.overall_risk || 'info').toLowerCase()}`}>
+                    {stats.overall_risk}
+                  </span>
+                  <span className="dim" title="Overall risk is rated from confirmed findings; potential (version-inferred) findings are verified separately.">
+                    {stats.confirmed_total ?? 0} confirmed
+                    {(stats.potential_total ?? 0) > 0 && <> · {stats.potential_total} potential</>}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -457,6 +477,12 @@ export default function Dashboard() {
                     <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1, minWidth: 0,
                                    overflow: 'hidden', textOverflow: 'ellipsis',
                                    whiteSpace: 'nowrap' }}>{f.title}</span>
+                    {f.confirmation === 'Potential' && (
+                      <span className="conf-badge conf-potential" style={{ flexShrink: 0, fontSize: 10 }}
+                            title="Inferred from a service version banner — verify before treating as present.">
+                        Potential
+                      </span>
+                    )}
                     <span className="mono" style={{ fontSize: 11, color: 'var(--text-2)', flexShrink: 0 }}>
                       {Number(f.risk_score || 0).toFixed(1)}
                     </span>

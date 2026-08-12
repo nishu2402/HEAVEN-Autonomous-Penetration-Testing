@@ -134,10 +134,38 @@ def runtime_capabilities(use_cache: bool = True) -> list[dict]:
     (``name`` / ``present`` / ``purpose`` / ``hint``) so ``heaven doctor`` and
     the web System-Health panel render them uniformly."""
     present, detail = _cached_chromium_status(use_cache)
-    return [{
+    caps = [{
         "name": "playwright-chromium",
         "present": present,
         "purpose": "Headless-browser DAST: XSS execution proof + JS-rendered crawl",
         "hint": "" if present else _INSTALL_HINT,
         "detail": detail,
     }]
+
+    # Local LLM runtime (Ollama) — private, rate-limit-free AI for every AI layer
+    # + the chatbot. "Present" means a model is actually usable (server up), not
+    # merely that the CLI is installed.
+    try:
+        from heaven.ai import local_llm
+        installed = local_llm.is_ollama_installed()
+        models = local_llm.list_models() if installed else []
+        reachable = bool(models) or (installed and local_llm.ollama_reachable())
+        if not installed:
+            local_detail = "Ollama not installed"
+        elif not reachable:
+            local_detail = "installed, server not running (ollama serve)"
+        elif not models:
+            local_detail = f"server up, no models — heaven ai pull {local_llm.DEFAULT_OLLAMA_MODEL}"
+        else:
+            local_detail = "ready: " + ", ".join(models[:3])
+        caps.append({
+            "name": "local-llm",
+            "present": bool(reachable and models),
+            "purpose": "Local AI (no API key, no rate limits) for AI layers + chatbot",
+            "hint": "" if (reachable and models) else "heaven ai setup",
+            "detail": local_detail,
+        })
+    except Exception:  # noqa: BLE001 — capability probe must never raise
+        logger.debug("local-llm capability probe failed", exc_info=True)
+
+    return caps

@@ -50,7 +50,10 @@ def _load_runner():
               help="Emit machine-readable JSON instead of a table.")
 @click.option("--no-report", is_flag=True,
               help="Don't write reports/native_benchmark.md (just print).")
-def benchmark(as_json: bool, no_report: bool) -> None:
+@click.option("--scorecard", type=click.Path(), default=None,
+              help="Also write the headline metrics as a machine-readable JSON "
+                   "scorecard to this path (for CI badges / a committed artifact).")
+def benchmark(as_json: bool, no_report: bool, scorecard: str | None) -> None:
     """Score HEAVEN's scanner against the built-in labelled target.
 
     Runs the real detectors against a faithful, in-process reproduction of DVWA's
@@ -121,6 +124,30 @@ def benchmark(as_json: bool, no_report: bool) -> None:
         "per_category": per_cat,
         "report": str(run.report_path) if run.report_path else None,
     }
+
+    # Optional committed artifact: a compact, machine-readable scorecard so the
+    # README / CI / web can all cite one canonical headline number.
+    if scorecard:
+        import datetime as _dt
+        import json as _json
+        card = {
+            "tool": "HEAVEN", "kind": "native-controlled-functional-benchmark",
+            "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "target": payload["target"], "target_version": payload["target_version"],
+            "metrics": payload["metrics"],
+            "required_detected": payload["required_detected"],
+            "required_total": payload["required_total"],
+            "categories": sorted(per_cat),
+            "duration_seconds": payload["duration_seconds"],
+            "note": ("Controlled functional benchmark on a known, labelled surface — "
+                     "measures end-to-end detection + attribution, not a claim against "
+                     "any live third-party app."),
+        }
+        _sc = Path(scorecard)
+        _sc.parent.mkdir(parents=True, exist_ok=True)
+        _sc.write_text(_json.dumps(card, indent=2) + "\n")
+        if not (as_json or json_output()):
+            _print(f"[dim]Scorecard written to {scorecard}[/dim]")
 
     if as_json or json_output():
         emit_json(payload)

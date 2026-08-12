@@ -11,6 +11,7 @@
     - the external scanner tools (nmap / nuclei / sqlmap / ffuf / semgrep /
       docker) via winget / choco / scoop / pip / go
     - the web UI (if Node.js is present)
+    - PowerShell Tab-completion for the 'heaven' command
     - a ready-to-use .env with generated credentials
 
   Run from the repo root (an ordinary, non-admin PowerShell is fine):
@@ -76,15 +77,28 @@ if ($env:HEAVEN_SKIP_TOOLS -eq '1') { $SkipTools = $true }
 # -- 1. Python ----------------------------------------------------------------
 Write-Step "Step 1/9 - Checking Python..."
 
+# Prefer a stable, well-tested interpreter. HEAVEN's native security deps
+# (asyncssh<->Nettle, cryptography, numpy/scikit-learn) are only ABI-stable on
+# released Python lines; a brand-new major (e.g. 3.14 in its first months) can
+# crash those C extensions. Ask the 'py' launcher for the newest known-good line
+# (3.13 -> 3.12 -> 3.11) first, then fall back to whatever python is on PATH.
 $PyExe = $null
-foreach ($cand in @(
-        @{ cmd = 'py';     pre = @('-3') },
-        @{ cmd = 'python'; pre = @() },
-        @{ cmd = 'python3'; pre = @() })) {
+$candidates = @(
+    @{ cmd = 'py';      pre = @('-3.13') },
+    @{ cmd = 'py';      pre = @('-3.12') },
+    @{ cmd = 'py';      pre = @('-3.11') },
+    @{ cmd = 'py';      pre = @('-3') },
+    @{ cmd = 'python';  pre = @() },
+    @{ cmd = 'python3'; pre = @() })
+foreach ($cand in $candidates) {
     if (Get-Command $cand.cmd -ErrorAction SilentlyContinue) {
-        $PyExe = $cand.cmd
-        $PyPre = $cand.pre
-        break
+        # For versioned 'py' launches, confirm that exact version is installed.
+        $probe = & $cand.cmd @($cand.pre) -c "print(1)" 2>$null
+        if ($probe -and $probe.Trim() -eq '1') {
+            $PyExe = $cand.cmd
+            $PyPre = $cand.pre
+            break
+        }
     }
 }
 if (-not $PyExe) {
@@ -93,8 +107,16 @@ if (-not $PyExe) {
 
 $verOk = & $PyExe @PyPre -c "import sys; print(1 if sys.version_info >= (3,11) else 0)"
 $verStr = & $PyExe @PyPre -c "import sys; print('%d.%d.%d' % sys.version_info[:3])"
+# 1 when newer than the newest line we test (3.13): usable, not yet vetted.
+$verNew = & $PyExe @PyPre -c "import sys; print(1 if sys.version_info >= (3,14) else 0)"
 if ($verOk.Trim() -ne '1') {
     Die "Python 3.11+ required. Found: $verStr. Please upgrade Python."
+}
+if ($verNew.Trim() -eq '1') {
+    Write-Warn "Python $verStr is newer than HEAVEN's tested range (3.11-3.13)."
+    Write-Warn "It should work, but native security libraries may not be ABI-stable"
+    Write-Warn "on it yet. If you hit a native crash, install Python 3.12 or 3.13"
+    Write-Warn "and re-run this installer (delete '$InstallDir\venv' first)."
 }
 Write-Ok "Python $verStr"
 
@@ -135,6 +157,21 @@ if ($CoreOnly) {
     }
 }
 
+# The playwright wheel ships in the core install; the Chromium bundle it drives
+# (DOM/stored-XSS execution proof + JS-rendered crawl) is a separate ~150 MB
+# download. Fetch it here so full power is on by default - same as install.sh.
+# Non-fatal; skipped for a lean footprint (CoreOnly / HEAVEN_SKIP_BROWSER=1).
+if ($CoreOnly -or $env:HEAVEN_SKIP_BROWSER -eq '1') {
+    Write-Info "Skipping Playwright browser download (lean footprint)"
+} else {
+    & $VenvPython -m playwright install chromium 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "Playwright Chromium installed (headless DAST proof enabled)"
+    } else {
+        Write-Warn "Playwright browser skipped  (enable later: python -m playwright install chromium)"
+    }
+}
+
 # -- 5. Put 'heaven' on PATH --------------------------------------------------
 Write-Step "Step 5/9 - Installing global 'heaven' command..."
 
@@ -161,6 +198,24 @@ if ($procPath.Split(';') -notcontains $VenvScripts) {
 }
 Write-Ok "heaven command: $VenvHeaven"
 
+# -- Tab-completion (press <Tab> to complete commands, options and values) -----
+# Click ships no PowerShell completion backend, so HEAVEN provides a native
+# argument-completer that `heaven completion --install powershell` wires into
+# your $PROFILE (idempotent, backed up first). This is the "Tab does nothing"
+# pain point, handled at install time. Best-effort - never aborts the install.
+# Opt out with HEAVEN_SKIP_COMPLETION=1.
+if ($env:HEAVEN_SKIP_COMPLETION -eq '1') {
+    Write-Info "HEAVEN_SKIP_COMPLETION=1 - skipping Tab-completion (enable later: heaven completion --install)"
+} else {
+    Write-Info "Enabling PowerShell Tab-completion (commands, options and values)..."
+    & $VenvPython -m heaven.main --quiet completion --install powershell 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "Tab-completion installed - open a new terminal (or run: . `$PROFILE), then press Tab after 'heaven '"
+    } else {
+        Write-Warn "Tab-completion setup skipped (enable later: heaven completion --install)"
+    }
+}
+
 # -- 6. External tools --------------------------------------------------------
 Write-Step "Step 6/9 - Installing external scanner tools..."
 
@@ -181,6 +236,32 @@ if ($SkipTools) {
         Write-Warn "Some external tools couldn't be installed automatically (non-fatal - each has a fallback)"
         Write-Host "    Re-run any time:  heaven install-tools   -   see what's missing:  heaven doctor"
     }
+}
+
+# -- Optional: local AI (Ollama) - no API key, no rate limits ------------------
+# OPT-IN only (HEAVEN_WITH_OLLAMA=1): a 7B model is a big download, so never pull
+# it unprompted. Otherwise just point users at the one-command setup.
+if ($env:HEAVEN_WITH_OLLAMA -eq '1') {
+    if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+        Write-Info "Installing Ollama (HEAVEN_WITH_OLLAMA=1)..."
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget install --id Ollama.Ollama -e --source winget --accept-package-agreements --accept-source-agreements 2>$null
+        } elseif (Get-Command scoop -ErrorAction SilentlyContinue) {
+            scoop install ollama 2>$null
+        } else {
+            Write-Warn "No winget/scoop - install Ollama: https://ollama.com/download"
+        }
+    }
+    if (Get-Command ollama -ErrorAction SilentlyContinue) {
+        $Model = if ($env:HEAVEN_OLLAMA_MODEL) { $env:HEAVEN_OLLAMA_MODEL } else { "qwen2.5:7b" }
+        Write-Info "Pulling local model $Model (this can take a while)..."
+        ollama pull $Model 2>$null
+        if ($LASTEXITCODE -eq 0) { Write-Ok "Local model $Model ready" }
+        else { Write-Warn "Model pull failed - run later: ollama pull $Model" }
+    }
+} else {
+    Write-Info "Local AI: run 'heaven ai setup' for a private, rate-limit-free model (no API key)"
+    Write-Info "  - or set HEAVEN_WITH_OLLAMA=1 to install it during setup."
 }
 
 # -- 7. Web UI ----------------------------------------------------------------

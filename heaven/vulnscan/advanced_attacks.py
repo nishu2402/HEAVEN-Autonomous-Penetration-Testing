@@ -218,21 +218,46 @@ class RaceConditionDetector:
         if not results:
             return None
 
-        # Analyze for inconsistencies (sign of race condition)
-        statuses = [r["status"] for r in results]
-        unique_statuses = set(statuses)
-        hashes = [r["body_hash"] for r in results]
-        unique_hashes = set(hashes)
+        # A race / TOCTOU is only credibly indicated when identical concurrent
+        # *state-changing* requests come back with *different successful* results
+        # — i.e. the server committed divergent state for requests that should
+        # have been serialised. Mere status-code variance across concurrent
+        # requests (a mix of 200/301/401/403/429/5xx) is load-balancing,
+        # rate-limiting, or transient error — NOT a race. The previous
+        # ``len(unique_statuses) > 1`` test fired on any admin panel that merely
+        # answered inconsistently (e.g. /cpanel → a spread of 301/401/403),
+        # manufacturing bogus "Race Condition Detected" highs. A GET carries no
+        # state, so it can never evidence a race here.
+        if method.upper() == "GET":
+            return None
 
-        if len(unique_statuses) > 1 or (len(unique_hashes) > 2 and len(results) > 5):
+        successes = [r for r in results if 200 <= r["status"] < 300]
+        # Need several concurrent successes to talk about a race at all.
+        if len(successes) < 3:
+            return None
+        succ_statuses = {r["status"] for r in successes}
+        succ_hashes = {r["body_hash"] for r in successes}
+        # Deterministic endpoints return the SAME success body every time
+        # (succ_hashes == 1) → nothing raced. Divergent success bodies for
+        # identical concurrent state-changing requests are the actual signal —
+        # reported as a low-confidence lead requiring manual verification (a
+        # single-packet / last-byte-sync PoC), never a standalone high.
+        if len(succ_hashes) > 1:
             return AdvancedFinding(
-                target=url, vuln_type="race_condition", severity="high",
-                title="Race Condition Detected",
-                description=f"Concurrent requests produce inconsistent results ({len(unique_statuses)} statuses, {len(unique_hashes)} response variants)",
-                confidence=0.7,
-                evidence={"concurrent_requests": concurrent_requests,
-                           "unique_statuses": list(unique_statuses),
-                           "unique_responses": len(unique_hashes)},
+                target=url, vuln_type="race_condition", severity="low",
+                title="Possible Race Condition (TOCTOU) Indicator",
+                description=(
+                    f"{len(successes)} identical concurrent {method} requests returned "
+                    f"{len(succ_hashes)} different successful responses "
+                    f"(statuses {sorted(succ_statuses)}). If this endpoint performs a "
+                    f"state change that should occur at most once, this may be an "
+                    f"exploitable race — verify manually with a single-packet attack."
+                ),
+                confidence=0.4,
+                evidence={"method": method, "concurrent_requests": concurrent_requests,
+                          "identical_success_variants": len(succ_hashes),
+                          "success_statuses": sorted(succ_statuses),
+                          "note": "manual verification required — potential false positive"},
                 remediation="Implement proper locking/mutex. Use database-level transactions with appropriate isolation.",
                 cwe="CWE-362",
             )
@@ -542,10 +567,11 @@ class CredentialSprayer:
         """Try common SSH credentials using asyncssh (if available) or socket probing."""
         findings: list[AdvancedFinding] = []
         try:
-            import asyncssh  # optional dependency
+            import asyncssh  # optional dependency  # noqa: F401
         except ImportError:
             logger.debug("asyncssh not installed — SSH spray skipped")
             return findings
+        from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
 
         ssh_creds = [
             ("root", "root"), ("root", "toor"), ("root", "password"), ("root", ""),
@@ -557,7 +583,7 @@ class CredentialSprayer:
 
         for username, password in ssh_creds:
             try:
-                async with asyncssh.connect(
+                async with ssh_safe.connect(
                     host, port=port,
                     username=username, password=password,
                     known_hosts=None,

@@ -46,6 +46,15 @@ def _print_inventory(assets: Optional[list]) -> None:
     for h in inventory:
         os_txt = h.get("os_label") or "OS not determined"
         _print(f"  [cyan]{h['host']}[/cyan]  [dim]{os_txt}[/dim]")
+        meta = []
+        if h.get("device_name_label"):
+            meta.append(f"Device: {h['device_name_label']}")
+        if h.get("device_type_label"):
+            meta.append(f"Type: {h['device_type_label']}")
+        if h.get("mac_label"):
+            meta.append(f"MAC: {h['mac_label']}")
+        if meta:
+            _print(f"    [dim]{'  ·  '.join(meta)}[/dim]")
         for p in h.get("ports", []):
             ver = p.get("service_version") or ""
             _print(f"    [dim]{p['port']:>5}/{p.get('protocol','tcp')}[/dim]  "
@@ -124,10 +133,15 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
               help="After detection, automatically run exploit_proof on every high-confidence "
                    "SQLi/cmdi/SSRF finding. Captures proof artifacts (sqlmap dump, RCE canary, "
                    "SSRF callback) into evidence.exploit_proof[].")
+@click.option("--verify", is_flag=True,
+              help="Actively verify Potential (version-banner) findings with SAFE, read-only "
+                   "probes for well-known CVEs (e.g. Apache path-traversal, Shellshock). A "
+                   "confirmed probe promotes the finding Potential → Confirmed; a negative "
+                   "probe leaves it untouched. Requires operator authorization.")
 @click.option("--autonomous", is_flag=True,
-              help="Full autonomous mode: --auto-prove + chain post-exploitation modules "
-                   "(linpeas / cred-reuse) from initial-access findings. Requires explicit "
-                   "operator authorization.")
+              help="Full autonomous mode: --auto-prove + --verify + chain post-exploitation "
+                   "modules (linpeas / cred-reuse) from initial-access findings. Requires "
+                   "explicit operator authorization.")
 @click.option("--watch-tail", is_flag=True,
               help="Headless mode: disable the Rich live HUD and stream a flat log line per "
                    "phase / finding to stdout. Better for CI, ssh sessions, and `tee` piping.")
@@ -135,6 +149,12 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
               help="Also hunt for publicly exposed S3/GCS/Azure buckets guessed from the "
                    "target domain. Off by default — it fires external requests to the cloud "
                    "providers, so it stays an explicit opt-in.")
+@click.option("--evade", is_flag=True,
+              help="Firewall/IDS evasion for AUTHORIZED testing: apply nmap evasion "
+                   "(packet fragmentation, padding, a trusted source port, decoys) to every "
+                   "host from the first packet. Even without this flag HEAVEN auto-detects a "
+                   "filtering perimeter and runs a bounded evasion re-probe of the affected "
+                   "hosts, so services hidden behind a firewall still surface.")
 def scan(
     target: tuple[str, ...], url: tuple[str, ...],
     repo: tuple[str, ...], cloud: tuple[str, ...],
@@ -146,8 +166,8 @@ def scan(
     i_have_authorization: bool, skip_dep_check: bool,
     seed: Optional[int], cookie_file: Optional[str], auth: str,
     low_priv_cookie_file: Optional[str] = None, low_priv_auth: str = "",
-    auto_prove: bool = False, autonomous: bool = False,
-    watch_tail: bool = False, cloud_buckets: bool = False,
+    auto_prove: bool = False, verify: bool = False, autonomous: bool = False,
+    watch_tail: bool = False, cloud_buckets: bool = False, evade: bool = False,
 ) -> None:
     """Launch a vulnerability scan against specified targets."""
     print_banner()
@@ -206,10 +226,11 @@ def scan(
             _print(f"[red]Low-priv auth setup failed:[/red] {e}")
             sys.exit(4)
 
-    # --autonomous implies --auto-prove
+    # --autonomous implies --auto-prove + --verify
     if autonomous:
         auto_prove = True
-        _print("[bold magenta]⚙ AUTONOMOUS MODE[/bold magenta] — auto-prove + post-ex chaining enabled")
+        verify = True
+        _print("[bold magenta]⚙ AUTONOMOUS MODE[/bold magenta] — auto-prove + active-verify + post-ex chaining enabled")
 
     targets: dict[str, Any] = {
         "ips": list(target), "urls": list(url),
@@ -218,8 +239,8 @@ def scan(
         "ad_domain": ad_domain, "ad_dc": ad_dc,
         "enable_iot": iot, "enable_api_scan": api_scan,
         "enable_container": container, "enable_mitre": mitre_map,
-        "auto_prove": auto_prove, "autonomous": autonomous,
-        "cloud_buckets": cloud_buckets,
+        "auto_prove": auto_prove, "verify": verify, "autonomous": autonomous,
+        "cloud_buckets": cloud_buckets, "evade": evade,
     }
 
     # Engagement scope check — second authorization gate
@@ -228,31 +249,67 @@ def scan(
         from heaven.engagement import EngagementStore
         db_path = _engagement_db_path(engagement)
         if not db_path.exists():
-            _print(f"[red]Engagement DB not found:[/red] {db_path}")
-            _print(f"Run: [cyan]heaven engage init {engagement}[/cyan]")
-            sys.exit(2)
+            # Auto-create rather than abort. Aborting here (the old `sys.exit(2)`)
+            # turned a typo or a first-time engagement name into a scan that never
+            # ran — one of the "I scanned and got zero findings" traps. The
+            # web/API path already creates the engagement on demand; the CLI now
+            # matches it so a named engagement is a convenience, never a landmine.
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            _print(f"[cyan]Creating engagement:[/cyan] {engagement}")
         engagement_store = EngagementStore(db_path)
+        try:
+            engagement_store.create_engagement(name=engagement)
+        except Exception:  # noqa: BLE001 — already exists / best-effort
+            logger.debug("engagement create was a no-op / already exists", exc_info=True)
 
         if use_scope:
-            kept_ips, dropped_ips = [], []
-            for t in list(targets["ips"]):
-                if engagement_store.is_in_scope(t):
-                    kept_ips.append(t)
-                else:
-                    dropped_ips.append(t)
-            kept_urls, dropped_urls = [], []
-            for u in list(targets["urls"]):
-                if engagement_store.is_in_scope(u):
-                    kept_urls.append(u)
-                else:
-                    dropped_urls.append(u)
-            if dropped_ips or dropped_urls:
-                _print("[yellow]Targets dropped (not in engagement scope):[/yellow]")
-                for x in dropped_ips + dropped_urls:
-                    _print(f"  - {x}")
-                _print("[dim]Add them with: [cyan]heaven scope add <target>[/cyan][/dim]")
-            targets["ips"] = kept_ips
-            targets["urls"] = kept_urls
+            def _scope_kind(t: str) -> str:
+                t = t.strip()
+                if t.startswith(("http://", "https://")):
+                    return "url"
+                if "/" in t and t.replace(".", "").replace("/", "").isdigit():
+                    return "cidr"
+                if t and all(ch.isdigit() or ch == "." for ch in t):
+                    return "ip"
+                return "host"
+
+            if not engagement_store.list_scope():
+                # A fresh / scope-less engagement can't meaningfully *filter* — the
+                # targets the operator just named ARE the scope. Record them
+                # (parity with the web path) so the dashboard/report show the real
+                # targets, and scan them all instead of dropping everything.
+                for _t in list(targets["ips"]) + list(targets["urls"]):
+                    try:
+                        engagement_store.add_scope(_t, kind=_scope_kind(_t),
+                                                   notes="auto-added from scan")
+                    except Exception:  # noqa: BLE001 — scope is best-effort
+                        logger.debug("auto-add scope entry failed for %s", _t, exc_info=True)
+            else:
+                kept_ips: list[str] = []
+                dropped_ips: list[str] = []
+                for t in list(targets["ips"]):
+                    (kept_ips if engagement_store.is_in_scope(t) else dropped_ips).append(t)
+                kept_urls: list[str] = []
+                dropped_urls: list[str] = []
+                for u in list(targets["urls"]):
+                    (kept_urls if engagement_store.is_in_scope(u) else dropped_urls).append(u)
+                if dropped_ips or dropped_urls:
+                    _print("[yellow]Targets dropped (not in engagement scope):[/yellow]")
+                    for x in dropped_ips + dropped_urls:
+                        _print(f"  - {x}")
+                    _print("[dim]Add them with: [cyan]heaven scope add <target>[/cyan], "
+                           "or bypass scope with [cyan]--no-use-scope[/cyan][/dim]")
+                targets["ips"] = kept_ips
+                targets["urls"] = kept_urls
+                # If scope filtering removed EVERY target, stop now with a clear
+                # fix instead of proceeding into a guaranteed "zero findings" run.
+                if not kept_ips and not kept_urls:
+                    _print("[red]All targets are outside this engagement's scope — "
+                           "nothing to scan.[/red]")
+                    _print("[dim]Add a target with [cyan]heaven scope add <target>[/cyan], "
+                           "choose a different [cyan]--engagement[/cyan], or re-run with "
+                           "[cyan]--no-use-scope[/cyan].[/dim]")
+                    sys.exit(1)
 
     has_targets = any(targets[k] for k in ("ips", "urls", "repositories", "cloud_providers"))
     if not has_targets and mode != "ci" and not ad_domain:
@@ -675,9 +732,12 @@ def scan(
                 else:
                     _print("  [red]Failed to generate PDF report.[/red]")
             elif output == "sarif":
-                from heaven.devsecops.aggregator import export_sarif
-                sarif_data = export_sarif(summary)
-                Path(output_file).write_text(json.dumps(sarif_data, indent=2))
+                from heaven.devsecops.ci_export import findings_to_sarif_str
+                findings_in_summary = (
+                    summary.get("vulnerabilities", []) + summary.get("findings", [])
+                )
+                Path(output_file).write_text(
+                    findings_to_sarif_str(findings_in_summary))
                 _print(f"  SARIF results written to: {output_file}")
             elif output == "markdown":
                 from heaven.devsecops.evidence import export_findings_markdown

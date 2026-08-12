@@ -9,6 +9,667 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Firewall / IDS-IPS aware scanning — still get findings through a filtering
+  perimeter.** The network scanner now tells a stateful firewall (which *drops*
+  probes → nmap `filtered`) apart from a normal host (which *refuses* them → TCP
+  `closed`/RST) and, for a host whose ports are being silently filtered, runs a
+  bounded, **authorized** evasion re-probe of the high-value ports — packet
+  fragmentation, padding, a trusted source port (53) and decoys via nmap, plus an
+  independent pure-Python connect-scan second opinion — that routinely recovers
+  services the naive scan could not see (the classic "the box is clearly
+  vulnerable but the scan found nothing" case on hardened / internal targets). A
+  new read-only classifier (`heaven/recon/firewall_detector.py`) labels the
+  perimeter posture (**firewall / IDS-IPS / tarpit**, plus a **WAF** fingerprinter
+  for web targets — Cloudflare, Akamai, Imperva, AWS WAF, F5 ASM, ModSecurity, …)
+  and surfaces an informational **"Perimeter Defense Detected"** finding that
+  explains *why* results may be thin and exactly how to still get them (evasion,
+  scan from an in-scope segment, tester-IP allowlist). It is deliberately
+  conservative — a normal, closed-heavy host (e.g. Metasploitable) is classified
+  "none" and adds no note. Opt into always-on evasion with `heaven scan --evade`
+  or the web launcher's **Firewall / IDS evasion** toggle (`ScanRequest.evade`);
+  even off, the adaptive re-probe still fires on a detected filtering perimeter.
+- **Methodology Coverage expanded to seven compliance frameworks — live, not
+  static.** The `§ Methodology Coverage` page (and `heaven methodology coverage`
+  + `/api/methodology`) now map HEAVEN's detectors against **Cyber Essentials**,
+  **Cyber Essentials Plus**, **ISO/IEC 27001:2022 (Annex A)**, **PCI DSS
+  v4.0.1**, **CIS Controls v8.1**, **NIST CSF 2.0** and **SOC 2 (Trust Services
+  Criteria)** — alongside the existing OWASP WSTG / NIST 800-115 / PTES
+  methodologies (ten standards in total). Every framework is driven by the same
+  live machinery: a control lights up **✓ exercised** only when the HEAVEN
+  detector it names actually produced a finding in the active engagement, and
+  governance / physical / endpoint controls a remote scanner cannot evidence are
+  honestly marked `(organizational)` / `(physical)` / `(manual)` — coverage is
+  never fabricated. To make the compliance rows genuinely light up, the
+  finding-→detector map (`heaven/methodology.py`) gained the real `vuln_type`s
+  the scanners emit for vulnerability/patch management (CVE, end-of-life,
+  dependencies), network-boundary exposure (Telnet/SNMP/IPMI/cleartext),
+  container/cloud misconfiguration, broken access control and SAST. The CLI
+  `--standard` filter is now dynamic (any doc stem or a short alias like `iso`,
+  `pci`, `ce-plus`), so future frameworks are selectable without code changes.
+  Each framework is pinned to its current published version — Cyber Essentials
+  **v3.3** ("Danzell" question set, 2026), ISO/IEC 27001:2022 **Amendment
+  1:2024**, PCI DSS **v4.0.1**, CIS **v8.1**, NIST CSF **2.0**, SOC 2 **TSC 2017
+  (revised points of focus, 2022)**. `scripts/sync_test_count.py` now also keeps
+  the README's **CLI-command count** in sync — introspected straight from the
+  Click root group (exactly what `heaven --help` lists), alongside the existing
+  test / module / API-route counts, so none can silently drift.
+- **Editable engagement details — set Client & Statement of work from the web.**
+  The **Engagement Details** card used to show *Client* and *Statement of work*
+  as read-only "—". Both are now editable inline: click **✎ Edit**, type, and
+  **Save** (Enter to save, Esc to cancel). Values are trimmed and length-capped,
+  written straight to the engagement DB, and flow through to the report cover
+  page. Backed by a new `PATCH /api/engagement` (partial update — send either or
+  both fields; the untouched one is preserved) and `EngagementStore.update_
+  engagement_details`. Works even on a switched-to-but-never-scanned engagement
+  (the row is created under the canonical name).
+- **The Benchmark page's Refresh button now actually re-runs the benchmark.** It
+  previously only re-read the last cached report, so clicking it appeared to do
+  nothing. It's now **↻ Re-run benchmark**: it regenerates the native,
+  Docker-free benchmark on the server (the same run `heaven benchmark` performs),
+  shows a **⏳ Running…** state while it works, and loads the fresh
+  precision/recall/F1 — no shelling into the server required. New endpoint
+  `POST /api/benchmark/run` (needs the benchmark extras server-side; returns a
+  clear 503 and keeps the cached report otherwise).
+- **Watch Mode is now a full web feature — launch, watch live, and stop from the
+  browser.** The **Watch** page used to be read-only ("run it from the CLI").
+  It's now a real launcher: pick targets + an engagement + interval + iteration
+  count + scan mode, tick authorization, and **Start watch loop**. Each iteration
+  streams in live over a WebSocket — a per-run table shows 🆕 new / ⚠ regressed /
+  ✅ resolved counts, whether an alert fired, and *what* changed (the top
+  new/regressed findings), with a running "N with changes" tally and a **Stop**
+  button. The run survives navigating away and a full refresh (resumes from
+  sessionStorage + the server-side job), exactly like the Autonomous loop.
+  Web-launched watches are **bounded** (1–500 iterations, 15 s–24 h interval) so
+  a browser click can't spawn an unkillable loop; `heaven watch` remains the tool
+  for a truly endless monitor. New endpoints: `POST /api/watch/start`,
+  `GET /api/watch/jobs[/{id}]`, `POST /api/watch/jobs/{id}/stop`,
+  `WS /api/watch/jobs/{id}/stream`, and `GET /api/watch/channels` (which drives
+  the alert-channel tiles honestly — a channel now shows "active" only when its
+  env vars are actually set). The per-iteration diff is persisted into each
+  scan's summary, so what changed is visible after the fact, not just in the
+  terminal.
+- **Device identity in the Host & Service Inventory — MAC address, device name
+  and device type.** Every host in the **Assets** view (and the CLI `heaven
+  assets` / scan summary and every report format) now shows, where the scan
+  observed them: its **MAC address** (+ OUI vendor) from nmap's ARP reply, its
+  **device / computer name** (NetBIOS/SMB name, else reverse-DNS PTR), and its
+  **device type** (nmap `-O` classification, else a conservative MAC-vendor
+  category). Each value is reported exactly as nmap observed it and carries an
+  honest source label — a device type tagged *(per MAC vendor)* is a maker hint,
+  not a fingerprint — and stays blank when unobserved. A MAC is an L2/ARP fact,
+  so it appears only for a host on the **same local segment** scanned with
+  sufficient privileges (routed/remote hosts have none); nothing is fabricated.
+- **Local LLM support (Ollama + any OpenAI-compatible server) — no API key, no
+  rate limits, private.** HEAVEN's whole AI layer (FP triage, remediation,
+  attack-chain planning, coverage grading, vuln hypotheses) plus the new chatbot
+  now run against a model on your own machine. Two new gateway providers —
+  `ollama` (keyless, `http://localhost:11434`) and `local` (LM Studio / llama.cpp
+  / vLLM / LocalAI via `HEAVEN_LLM_BASE_URL`) — speak the OpenAI-compatible schema
+  over `httpx`, so **no new Python dependency** is added. One command wires it up:
+  `heaven ai setup` detects/installs Ollama, pulls the default **qwen2.5:7b**
+  (override with `HEAVEN_LLM_MODEL`; `llama3.1:8b`/`qwen2.5:14b` also great), saves
+  `.env`, and live-tests it. Also `heaven ai models` / `ai pull` / `ai test` /
+  `ai status`, and shown in `heaven doctor` + System Health.
+- **Point-and-click local-AI setup in the web app (no terminal).** The web
+  **Settings → AI / LLM → Local AI** card is now a full wizard: it detects whether
+  Ollama is installed/running (live status + Refresh), shows a copy-paste install
+  one-liner for your OS if it's missing, **pulls a model with a live progress bar**
+  (streamed over `WS /api/ai/local/pull` from Ollama's native pull API), and points
+  HEAVEN at it in **one click** with a live "Local AI is live" test — no `.env`
+  editing, no restart. An "Other endpoint" tab connects any OpenAI-compatible
+  server by base URL + model. Backed by new `POST /api/ai/local/configure` and
+  `WS /api/ai/local/pull` endpoints.
+- **AI security assistant (chatbot) — CLI + Web, engagement-grounded, streaming.**
+  A conversational analyst over the LLM gateway that can be fed a compact summary
+  of your **active engagement** (top findings, hosts, last scan) so it answers
+  about *your* results, cites specific findings, and never fabricates. `heaven
+  chat` (streaming terminal REPL, `--once`/`--engagement`/`--no-context`); a
+  dedicated **Assistant** page and a **floating chat widget** on every page in the
+  web UI; `POST /api/chat` + a streaming `WS /api/chat/stream`. Replies stream
+  token-by-token and stay local (private) when using Ollama.
+- **Hybrid AI fallback.** `HEAVEN_LLM_FALLBACK_PROVIDER` — if the primary provider
+  is unavailable or returns nothing, HEAVEN transparently retries once on the
+  fallback (e.g. local primary + a cloud key as a safety net, or vice-versa). A
+  dead local endpoint fails *fast* (distinct "unreachable" error, no retry burn)
+  so a scan never stalls waiting on a model that isn't running. Opt-in — default
+  behavior is unchanged. `scripts/install.sh` / `install.ps1` gained an opt-in
+  `HEAVEN_WITH_OLLAMA=1` step (otherwise they just point at `heaven ai setup`).
+- **Full 65,535-port scanning by default from the web/API path, plus a Port scope
+  control.** A web/API scan used to default to ports **1–1024** while the CLI and a
+  plain `nmap -p-` scan all 65,535 — so a scan launched from the UI genuinely
+  missed everything above 1024 (services on high ports, alt-HTTP, some databases),
+  which read as "HEAVEN only scans a few ports vs nmap". The default is now a full
+  `1–65535` sweep (parity with `heaven scan`), and the launcher gained a **Port
+  scope** selector — *Full* (default), *Fast* (common 1–1024) or a *Custom*
+  nmap-style range — so speed is an explicit, honest choice. High-value web / DB /
+  mail / cPanel ports are still always folded in regardless of scope.
+- **Pure-Python TCP connect-scan fallback when nmap isn't installed.** Previously a
+  host with no nmap on `PATH` returned **zero** ports (the scan silently found
+  nothing). The scanner now falls back to a real, concurrent TCP connect scan that
+  genuinely covers every requested port — real handshakes only, service names from
+  the well-known port map, live banner grabs — so a full-range sweep still works
+  without nmap (the honest trade-off is no `-sV` version depth or `-O` OS
+  fingerprint; install nmap for those). Nothing is ever fabricated.
+- **Fewer blank Service / CPE cells in the Host & Service Inventory — filled from
+  real observed data, never guessed.** Three gaps left cells empty that a
+  side-by-side nmap fills: (1) a well-known port nmap couldn't name by banner was
+  shown unlabelled even though HEAVEN's port table knows it — a known port now
+  falls back to its conventional label (e.g. `2077 → cpanel-webdav`), while a port
+  with *no* standard assignment (e.g. `26`) honestly stays blank; (2) the CPE
+  column was empty for every port because HEAVEN had no CPE fallback when nmap
+  omits the `<cpe>` element (common for newer versions like nginx 1.29.8) — a CPE
+  is now derived from the product+version nmap *did* report, for well-established
+  NVD vendors only (an unknown product yields no CPE — no guessed vendor); (3)
+  passive OSINT (Shodan InternetDB) now carries its real observed CPE onto passive
+  ports and backfills a blank product/version/CPE on an actively-found port,
+  without ever overwriting richer active data. Versions on TLS/non-bannering ports
+  that returned no data stay blank — inventing them would be fabrication.
+
+### Changed
+
+- **Network-recon deadline now scales with port breadth.** A full-range sweep of a
+  single host earns materially more time (~13 min vs the old ~4 min single-host
+  floor) so a `-p- -sV -sC` scan finishes instead of being truncated mid-scan back
+  to "a few ports". Still capped at 30 min and bounded per-host by nmap's
+  `--host-timeout`.
+- **Host & Service Inventory (web) sorts ascending and is searchable.** The Assets
+  page now lists hosts in ascending order (IPv4 numerically — `.2` before `.10` —
+  hostnames after) and adds a **search box** that filters by IP, hostname, service,
+  version or port number, so a specific target is one keystroke away.
+
+- **Active Confirmation now works for *every* finding — one honest verdict, not a
+  blunt "Proved: no".** The finding-detail "Active Confirmation" panel used to run
+  an injection-only exploit prover, so any non-injection finding (missing headers,
+  exposed files, weak TLS, an exposed database/port, a directory listing, …)
+  silently came back "Proved: no" with no explanation — indistinguishable from a
+  real failed proof. A new unified dispatcher (`heaven/vulnscan/confirm.py`) routes
+  each finding to the safest applicable **live** proof and returns a structured,
+  honest verdict:
+  - **Injection** (SQLi/command-injection/SSRF/XSS) → the exploitation canary.
+  - **Known CVEs** (Apache path-traversal, Shellshock) → the safe read-only probe.
+  - **HTTP-observable misconfig** (missing security headers, directory listing, an
+    exposed file, permissive CORS, an open redirect, an exposed management
+    endpoint) → a single read-only GET that re-checks the exact condition live.
+  - **TLS/SSL** → a fresh handshake via the SSL scanner; confirmed only if the same
+    issue reappears.
+  - **Exposed network service/port** → a plain TCP connect proving reachability.
+
+  The verdict is one of **Confirmed** (a live probe proved it now), **Already
+  confirmed** (the detection itself is the proof — e.g. an SCA/DNS/config
+  observation), **Could not confirm** (a probe ran but couldn't reproduce it —
+  patched or unreachable), or **No automated proof** (a class with no safe
+  auto-proof — the panel now shows the concrete manual next step instead of a
+  misleading "no"). Every probe is read-only, bounded, and authorization-gated;
+  nothing is ever fabricated. A fresh proof promotes the finding to Confirmed and
+  persists the evidence.
+- **Accurate, time-linear scan-progress bar with a live "time left" estimate.**
+  The Scan Activity bar previously advanced by *task count*, so it raced through
+  the many cheap recon tasks (1→50% fast) then crawled through the few heavy scan
+  tasks (50→100% slow). Progress is now **weighted by each task's expected cost**
+  (a clamp of its timeout) and a running task earns its *actual* elapsed seconds,
+  so the bar tracks real work and moves at a steady pace. Each running scan also
+  shows an honest estimated time-remaining (`~2m left`), extrapolated from observed
+  progress and suppressed until there is enough signal to estimate. Exposed as
+  `eta_s` on the scans API and rendered under the percentage.
+- **Passive internet-scan enrichment — HEAVEN no longer misses a port/service/CVE
+  that is already publicly visible.** During recon, every *public* target is now
+  cross-referenced against Shodan's free, key-less **InternetDB**
+  (`https://internetdb.shodan.io/{ip}`) and the results are merged into the one
+  host-inventory blob every downstream stage reads (inventory, exposed-database,
+  end-of-life audit, CVE mapping). This directly fixes the class of miss where an
+  authenticated Shodan record shows 80/443 + MySQL/PostgreSQL but a single flaky
+  active scan came back without them. A port the public record lists but the
+  active scan didn't return is **re-probed read-only to confirm it**, then
+  labelled honestly — a confirmed re-probe becomes `open` (`passive+active`),
+  while one that can't be reached from the scan origin is kept but clearly marked
+  *"passive (public OSINT — unconfirmed)"* in the inventory's new **Source**
+  column. CVE IDs the public record ties to the host are surfaced as **Potential**
+  findings (never inflating the confirmed-only Overall Risk), and CPEs carry a
+  real product+version into the EOL/CVE stages. On by default for internet-routable
+  targets only (private/loopback are a no-op); disable with
+  `HEAVEN_NO_PASSIVE_INTEL=1`. Fully graceful offline. New module
+  `heaven/recon/passive_intel.py`.
+- **Dynamic end-of-life detection via the live endoflife.date feed.** The EOL
+  audit now consults the key-less endoflife.date API for any product the curated
+  static table doesn't cover, so an unsupported component that isn't in HEAVEN's
+  hand-maintained list is still flagged — firing only on a real, published EOL
+  date (never a guess). The static table remains the offline fallback.
+- **A high-value always-probe port set is folded into every network scan** (web,
+  database, mail/LDAP, cPanel/WHM), so a flaky, rate-limited or narrowed run can
+  never silently drop the common ports. Union-only: it adds coverage, never
+  removes a requested port, and is a no-op for a full-range scan.
+
+### Fixed
+
+- **Shell Tab-completion now completes options and flag values, and installs with
+  one command.** Two problems are fixed. First, pressing Tab after an option
+  (`heaven scan --<TAB>`) or a choice flag (`heaven scan --stealth <TAB>`)
+  produced nothing: rich-click's `patch()` created a *second* `click.core.Option`
+  class, so Click's own completion loop (`isinstance(param, Option)`) matched zero
+  options — command/subcommand completion worked, but options and their values
+  never did. rich-click is now skipped only while completion is running (help
+  styling is irrelevant there), so Click keeps native class identity and every
+  command, subcommand, option and `Choice()` value completes. Second, installing
+  completion used to mean hand-editing your shell rc — the `fpath`/`compinit`
+  ordering is easy to get wrong (oh-my-zsh runs `compinit` for you, so a
+  `fpath` line added afterwards is ignored and Tab silently stays dead). New
+  `heaven completion --install` writes the script to `~/.config/heaven/` and adds
+  a small guarded, `compinit`-aware block to `~/.zshrc` / `~/.bashrc` (fish needs
+  no rc edit) — idempotent, backed up first, and reversible with
+  `--uninstall`; preview with `--dry-run`. The installers now run this for you,
+  so Tab works out of the box on a fresh install (opt out with
+  `HEAVEN_SKIP_COMPLETION=1`; the matching completion block is removed on
+  uninstall).
+- **Windows / PowerShell Tab-completion.** Click ships no PowerShell completion
+  backend, so `heaven` never completed in PowerShell. HEAVEN now provides a native
+  argument-completer (`Register-ArgumentCompleter`, reusing Click's `zsh_complete`
+  protocol under the hood) that `heaven completion --install` (auto-detected on
+  Windows, or `--install powershell`) wires into your `$PROFILE` — idempotent,
+  backed up, and removed on uninstall. `scripts/install.ps1` sets it up
+  automatically.
+- **`scripts/install.ps1` now downloads the Playwright Chromium bundle**, matching
+  `install.sh`. Without it the headless DAST proof (DOM / stored-XSS execution,
+  JS-rendered crawl) silently degraded on Windows even though the `playwright`
+  wheel was installed. Skipped for a lean footprint (`-CoreOnly` /
+  `HEAVEN_SKIP_BROWSER=1`).
+- **The live finding count no longer balloons then collapses during a web scan.**
+  The in-progress count could spike (e.g. 65 → 346) as noisy raw candidates
+  surfaced and only settled back to the real number when the final dedup /
+  FP-suppression ran at completion. The web scan's live flush now mirrors the
+  finalizer exactly — it collects the same result keys (including each task's
+  `suppressed_findings`), runs the same `dedup_findings`, and reconciles the store
+  to the deduped survivors on every tick — so the running count tracks the
+  authoritative set and *converges as verdicts land* instead of snapping down at
+  the end.
+- **A scan no longer freezes mid-run redundantly re-scanning the host it just
+  scanned.** The closed-loop feedback engine treated the operator's own seed
+  target as a "newly-discovered in-scope host" — every finding carries the host
+  as its `target`, and the network result lists it under `hosts` — and queued it
+  for a full `DYNAMIC_FOLLOWUP` re-scan across ~10,000 ports. On a service-rich
+  host this stalled the scan for ~90s at ~44% with no new findings (the "it
+  scanned forever and looked like it found nothing" symptom). The
+  `FeedbackEngine` now records the seed hosts (and any host it has already
+  followed up) and never re-queues them; genuinely-new hosts (DNS subdomains,
+  loot references, redirects to *other* hosts) are still followed up. Verified
+  live against Metasploitable-2: same 67 findings, no seed re-scan, ~90s faster.
+- **`heaven scan --engagement <name>` no longer silently produces zero
+  findings.** A name with no existing DB hard-exited the whole scan (`Engagement
+  DB not found … exit 2`); the CLI now **auto-creates** the engagement (parity
+  with the web/API path). And when `--use-scope` (the default) filtered out
+  *every* target because the engagement's scope didn't include it, the scan used
+  to proceed against nothing and report zero — it now records the named targets
+  into a fresh/empty scope automatically, and if a *populated* scope excludes all
+  targets it stops with a clear fix (`heaven scope add …`, a different
+  `--engagement`, or `--no-use-scope`) instead of a mystery empty run.
+- **Finding-detail "CVSS base" is labelled for what the number actually is.** The
+  base score row printed "(weakness class)" even when the number was a real
+  published CVSS score; it now reads "(base score)" for the resolved objective
+  base and "(typical for class)" only when falling back to the class default.
+- **A dependency finding no longer shows a CVSS vector that contradicts its
+  score.** A `VULNERABLE_DEPENDENCY` finding (nanoid 3.3.16 / CVE-2026-67213)
+  rendered "CVSS base **5.9**" beside a `.../C:H/I:H/A:H` vector that computes to
+  **9.8** — the generic *known-vulnerable-component* class vector, stamped
+  because the advisory had been cached in its first hours (before GitHub/NVD
+  added the real CVSS + CWE). Two root fixes: (1) `OSVClient` now **refreshes a
+  cached advisory that carries no severity yet** on the next scan (offline-safe:
+  it keeps the cached copy if the refresh fails), so a finding picks up the real
+  score/CWE the moment upstream publishes them; (2) a KB-wide sweep reconciled
+  every vuln class's **curated CVSS vector with its documented `typical_cvss`** —
+  28 classes had drifted (e.g. `vulnerable_component` 7.5-vs-9.8,
+  `sensitive_file_exposure` 5.3-vs-7.5), so the detail view's *CVSS base* and
+  *CVSS vector* rows disagreed on every fallback-scored finding. The vectors were
+  corrected to match the documented score (severity bands and ML features
+  unchanged), and a regression test now locks base ⇄ vector agreement so it can
+  never drift again.
+- **Dependency upgrades (SCA-clean end to end).** Upgraded the project's own
+  vulnerable dependency **nanoid 3.3.16 → 3.3.18** (clears CVE-2026-67213, the
+  finding above — `npm audit`: 0 vulnerabilities) and bumped the test-only
+  **pypdf** floor to **>=6.15.0** (clears CVE-2026-71852 / CVE-2026-71870). A
+  full OSV.dev audit of the Python environment and both npm lockfiles now reports
+  zero known-vulnerable dependencies.
+- **Duplicate findings on a domain scan — the same site-wide issue no longer
+  reports two or three times for one host.** A domain assessment names the same
+  host several ways: the DNS/email phase uses the bare domain (`example.com`)
+  while the web phase probes both `http://example.com` and `https://example.com`.
+  The finding-identity key kept the scheme and explicit port, so a single
+  site-wide issue (missing security headers, weak TLS, SPF/DMARC) — and a service
+  CVE — hashed differently per representation and persisted as separate rows,
+  surfacing as duplicates in the findings list, reports and host topology. The
+  host key now canonicalises to the bare host (scheme dropped, default web ports
+  80/443 normalised away, host lower-cased, trailing dot stripped), so all those
+  forms collapse to **one finding per host**, while a genuinely distinct service
+  port (`:8080`, `:8443`) is still kept separate and `www.`-vs-apex stay distinct.
+  The CVE identity also unifies "port in the URL" and "port in the field" forms
+  of the same finding. (Existing rows in an engagement DB de-duplicate on the
+  next scan, when the new identity is written.)
+- **README/hero-poster stat figures corrected and the API-route count is now
+  CI-checked.** The "API routes" figure read **66** (distinct HTTP paths only,
+  dropping the 6 WebSocket endpoints despite the "REST + WebSocket API" label);
+  it now reads **77** — every registered `/api/*` route handler including
+  WebSockets. The hero poster's visible stat strip was also stale (`1358` tests,
+  `51` CLI commands, `64` routes) and now matches the real counts (1663 / 53 /
+  77). `scripts/sync_test_count.py` gained a static, import-free route counter
+  (parses `heaven/api/server.py`), so the README route figure is now kept in sync
+  and CI-gated alongside the test and module counts and can't silently drift.
+- **Benchmark report title now names HEAVEN's version, removing the "which v1.0?"
+  confusion.** The header read `Benchmark: HEAVEN vs. heaven-native-vuln-app
+  v1.0` — that `v1.0` is the *target app's* own version, but with HEAVEN's
+  version absent it looked like HEAVEN was stuck at v1.0. The title now reads
+  `Benchmark: HEAVEN v2.1.0 vs. heaven-native-vuln-app v1.0`, so it's clear the
+  tool is on 2.1.0 and the labelled target reproduction is its own v1.0. (The
+  scanner version is pulled from `heaven.__version__`, so it stays in sync on
+  every release.)
+- **Watch Mode now actually alerts when something changes that isn't
+  critical/high — and `--heartbeat` finally pings.** The watch loop routed its
+  change alerts through the scan-complete webhook path, which by design stays
+  *silent* unless there are critical or high findings — so a run that turned up a
+  new **medium** or **low** finding (or a regression of one) reported
+  `alert=✓` but sent nothing, and the first-run heartbeat never fired at all.
+  Watch alerts now go through a dedicated change-focused sender that always
+  posts when a webhook is configured, with a message that says *what* changed
+  (🆕 new / ⚠ regressed / ✅ resolved counts + severity), not a generic "critical
+  vulnerabilities detected". SIEM events are now tagged `watch.change` /
+  `watch.heartbeat` / `watch.start`.
+- **Header engagement name no longer ellipsizes to nothing when the chip is
+  crowded (~1000px, or any width once the running-scan / task badges appear).**
+  The name was the only shrinkable item in the chip, so when the "ENGAGEMENT"
+  label, client and finding/target counts filled the row it was squeezed to an
+  empty `…`. Fixed two ways: (1) the name now keeps a `min-width` floor so it can
+  never collapse to nothing — it ellipsizes past the floor instead; (2) the chip
+  progressively sheds its least-important metadata (counts → client → label) as
+  space runs out, keeping the name. That shedding is driven by a **container
+  query** on the header's left region, not a viewport breakpoint, so it reacts to
+  the *actual* room the chip has — including the running-scan / task badges on the
+  right that eat into it, which a viewport media query can't see. Verified live in
+  both themes from 1000px up to a wide viewport, and under a simulated badge
+  squeeze where a viewport rule would have failed.
+- **Light-theme polish, round 2 — unreadable coloured text, odd black panels,
+  invisible in-console text selection, and a 3D-map overlap.** Follow-up to the
+  light-theme rebuild below, from reviewing the live app: (1) severity/accent hues
+  (emerald, cyan, amber, sky, orange, violet) are vivid on the dark base but wash
+  out as *text/dots/borders* on white (~1.5–2:1), so the light theme now deepens
+  those tokens (`--crit/--high/--med/--low/--info/--brand/--cyan/--accent-2/
+  --danger`) to WCAG-grade variants — pill *fills* are separate `rgba()` literals
+  so pills keep their soft wash while their text darkens — and the sidebar/login
+  wordmark gradient and the faint `--text-3` tier were deepened too; the Dashboard
+  (which used hard-coded severity hex) now points its stat numbers and severity
+  labels at those tokens. (2) The terminal / code / evidence / CLI blocks now use
+  a **light** code surface in light mode instead of a lone black panel; this also
+  fixes text **selected inside a console being invisible** (the default light
+  selection now reads correctly on the light surface). (3) In the 3D topology map,
+  the selected-host card no longer overlaps the severity legend — the legend hides
+  while a host is selected and returns on deselect. Dark mode is unchanged.
+- **Light theme was only half-built — the web UI looked broken in light mode,
+  and the dashboard crowded on narrow laptops.** The light theme overrode only
+  the surface/text/border tokens, but the whole UI was painted with ~30 hard-coded
+  `rgba(255,255,255,…)` overlays (button/badge/pill fills, row hovers, the
+  progress track, scrollbar, text selection) that vanished white-on-white in light
+  mode, a global dark bottom-vignette (`body::after`) that smeared grey across
+  every light page, several inline styles referencing **undefined** design tokens
+  (`--surface-1`, `--bg-elev`, `--danger`, a bare `--text`) that fell back to
+  hard-coded dark (the Settings *Save changes* bar rendered dark; the Autonomous
+  executive-summary box had no background), a login card with no surface (its form
+  was invisible on the light page), and a 3D topology map hard-wired to a dark
+  grid + starfield. Fixes: one set of **theme-aware overlay tokens**
+  (`--overlay-weak/-med/-strong`, `--hover`, `--track`, `--scrollbar-thumb`,
+  `--selection-*`) that flip to slate-alpha in light and equal the old values in
+  dark; the missing tokens are now defined in both themes; the light-mode vignette
+  is removed; the terminal, code and evidence blocks get a light code surface in
+  light mode (dark in dark mode); and the 3D map reads the active theme (light
+  grid, no starfield, light tooltip).
+  Dark mode is unchanged. Separately, the Dashboard now collapses its two-pane
+  grid to a single column at ≤1100px (was 860px), so the four stat cards no longer
+  clip their labels on a narrow laptop.
+- **A whole scan could return 0 findings and an empty inventory on a live,
+  service-rich host — and give different results at different stealth levels.**
+  Root cause: HEAVEN always ran nmap with `-sC` (default NSE scripts), and on some
+  nmap builds — notably nmap 7.9x on macOS/Apple-Silicon — the scripting engine
+  **aborts** mid-scan (`Assertion failed: lua_status(L) == LUA_YIELD`, SIGABRT),
+  emitting a truncated XML document with **zero ports**. nmap crashing took the
+  entire scan down with it: no ports → empty Host & Service Inventory → no
+  exposed-DB / EOL / CVE findings → "0 findings" on targets that a side-by-side
+  nmap lit up (Metasploitable 2, `certifiedhacker.com`, …). Because the crash is
+  timing-dependent on a remote host, it fired *intermittently*, so the same target
+  produced different results run-to-run and across stealth levels. Fixes:
+  - **nmap `-sC`/NSE crash is now survived.** A crashed/truncated nmap run is told
+    apart from a clean "nothing open" result; on a crash the host is **retried
+    without `-sC`** so the full port + service-version inventory is still captured
+    (only the optional default-script output is lost). If nmap is unusable on every
+    attempt, HEAVEN falls back to its pure-Python TCP connect scan — so a live host
+    is never reported as 0 ports. Nothing is fabricated.
+  - **Stealth levels are now consistent and finite.** The paranoid profile's packet
+    floor (`--min-rate 10`) was so low a real port range could never finish inside
+    the time budget — the host was cancelled and returned nothing, so a paranoid
+    scan disagreed with a normal one. Floors were raised to values that stay
+    progressively quieter (`-T1`/`-T2` still drive the real IDS evasion) while
+    guaranteeing completion, every level now retries ≥ 2 (no single-retry port
+    loss → stable results run-to-run), and the network-recon deadline scales up for
+    the slower profiles so the same target converges on the same inventory at every
+    stealth level. Verified end-to-end: a Metasploitable-class host went from 0 →
+    a full set of findings, and all four stealth levels return an identical,
+    reproducible port set.
+- **A firewalled/hardened target could make an entire scan return almost nothing
+  (empty Host & Service Inventory, only one port, far fewer findings).** The
+  passive-OSINT enrichment's read-only re-probe was unbounded — against a host
+  that silently drops probe traffic (e.g. a cPanel/WHM server behind CSF/LFD
+  port-scan blocking) it could run for many minutes, tipping the network-recon
+  task past its hard timeout. The orchestrator then cancelled that task, and
+  because assets and network-derived findings are only collected from *completed*
+  tasks, the inventory came back empty and the exposed-database / EOL / CVE stages
+  had no hosts to work from. Enrichment is now bulletproof: every publicly-visible
+  port is merged **first** (before any active traffic), the re-probe is an
+  optional *upgrade* pass bounded twice (nmap `--host-timeout` + an asyncio
+  backstop) with a global wall-clock deadline, and the whole pass is wrapped so it
+  can never overrun the scan. The orchestrator also reserves more headroom below
+  the task timeout. Net effect: even when a host blocks an active sweep, HEAVEN
+  still recovers its real surface (ports, exposed databases, EOL software, CVEs)
+  from the public record — honestly labelled — instead of losing the scan.
+- **A rate-limited/out-of-quota AI key could drag a scan out for many minutes.** A
+  scan fans a lot of LLM calls out sequentially (per-finding false-positive review,
+  vuln hypotheses, coverage grading, remediation). When the operator's key was
+  throttled, *every* call hit a `429`/`RESOURCE_EXHAUSTED` — and two things turned
+  that into a multi-minute stall (observed as an ~8-minute DVWA scan that timed out
+  in the AI phases): the provider SDKs' **own** internal retry loops re-sent each
+  request honoring the response's multi-second `Retry-After` *before* HEAVEN ever
+  saw the error, and even after HEAVEN fast-failed one `429` the next call
+  round-tripped again. The AI retry/backoff is now bounded on both fronts:
+  provider-SDK internal retries are disabled at client init (`max_retries=0` for
+  Anthropic/OpenAI, `retry_options=attempts=1` for google-genai) so the gateway is
+  the sole retry controller; and the first quota/`429` error arms a short cooldown
+  during which the remaining LLM calls short-circuit straight to their non-LLM
+  fallback (the built-in remediation knowledge base, heuristic FP review, etc.)
+  instead of each making a doomed call. The cooldown is sized from the server's own
+  `Retry-After` hint when present, else a bounded default, always clamped, and
+  self-clears; `HEAVEN_LLM_RATELIMIT_COOLDOWN=0` disables the breaker. Genuinely
+  transient errors (5xx/timeout) are still retried on the existing bounded backoff.
+  A throttled key now degrades a scan to its (excellent) non-LLM output in seconds
+  rather than minutes.
+
+### Changed
+
+- **Installers now prefer a well-tested Python interpreter, and `heaven doctor`
+  flags an unvetted one.** HEAVEN's native security dependencies
+  (`asyncssh`↔Nettle, `cryptography`, `numpy`/`scikit-learn`) are only ABI-stable
+  on released Python lines; a brand-new major (e.g. 3.14 in its first months) can
+  crash those C extensions natively — the same root cause as the UMAC segfault
+  below. `scripts/install.sh` and `scripts/install.ps1` now pick the newest
+  known-good interpreter they can find (Python 3.13 → 3.12 → 3.11) before falling
+  back to whatever `python3`/`py` resolves to, and warn (without failing) when the
+  chosen interpreter is newer than the tested range (3.11–3.13), telling the
+  operator to use 3.12/3.13 if they hit a native crash. `heaven doctor` gained a
+  matching runtime check: it reports `python_supported` and, on an untested
+  interpreter, surfaces a header warning and a top "rebuild your venv on Python
+  3.12 or 3.13" next-step. The supported range is now documented in the README.
+
+### Fixed
+
+- **Report proofs no longer fabricate an HTTP request/response for findings that
+  never made one.** The evidence renderer unconditionally emitted a
+  `Request: GET <target>`, a `Response: HTTP 0 (0 bytes)` line, and a `curl`
+  reproduction for *every* finding — including DNS/mail posture (SPF, DMARC,
+  DNSSEC, MTA-STS), TLS, and exposed-service findings that issue no HTTP request
+  at all. The result was a report where nearly every proof read as fake
+  (`GET certifiedhacker.com` → `HTTP 0 (0 bytes)`, plus a `curl` that reproduces
+  nothing). The renderer now emits the HTTP request/response/`curl` block only
+  when the finding actually performed an HTTP transaction; DNS/mail/network
+  findings instead show their real observed evidence (the actual SPF record, DNS
+  answer, port/service). Relatedly, the security-header audit now carries the
+  real response status and headers (Set-Cookie redacted), so a missing-header
+  finding shows a genuine `HTTP 200` with the headers as proof instead of
+  `HTTP 0`.
+
+- **Several web detectors no longer emit false positives on ordinary sites.**
+  (1) `race_condition` fired on mere HTTP status-*variance* across concurrent
+  requests — so an admin panel that simply answered inconsistently (`/cpanel`
+  returning a spread of 301/401/403) produced a bogus "Race Condition Detected".
+  It now requires genuinely divergent *successful* responses to identical
+  concurrent state-changing requests (never GET), reported as a low-confidence
+  lead. (2) `http_smuggling_indicator` treated any non-`(400,501,505)` status
+  differing from baseline as a signal, so a WAF's `406` tripped it — and it
+  attached the unrelated **CVE-2019-16278** (a nostromo RCE) to the guess. It now
+  ignores 4xx/5xx rejections (only a normal 2xx/3xx deviation counts) and carries
+  no bogus CVE. (3) `dangerous_http_method` flagged PUT/DELETE on any status
+  `< 405`, so a benign `404` fired; it now requires a real success (200/201/204/
+  207). (4) An "endpoint accepts XML" surface note (`xml_accepted`) was aliased
+  into the full **XXE (High, CWE-611)** class and fired on any `200` to an XML
+  POST; it now has its own low-severity taxonomy and only fires when the response
+  is genuinely XML/SOAP or shows an XML parser error. Confirmed
+  `xxe_entity_expansion` stays High.
+
+- **Coverage gaps closed vs a real external host.** Internet-reachable databases
+  (MySQL/MariaDB, PostgreSQL, MSSQL, Oracle, MongoDB, Redis, Elasticsearch,
+  CouchDB, Memcached, Cassandra) are now flagged as an exposure
+  (`database_exposed`, high) — but only on a public/routable host, so
+  internal-range (`/24`) scans aren't spammed. The end-of-life table gained
+  **PostgreSQL** (branches before 13) and **ISC BIND** (before 9.18), and the
+  network scanner now fingerprints the **cPanel / WHM / webmail control-plane
+  ports** (2077/2078/2082/2083/2086/2087/2095/2096) and alt-SSH (2222), which are
+  ubiquitous on shared-hosting targets.
+
+- **Scans no longer crash the server with "Python quit unexpectedly" when an SSH
+  target is in scope.** `asyncssh` ships an optional UMAC message-auth
+  implementation that is an untyped `ctypes` binding to the native Nettle library
+  (`asyncssh/crypto/umac.py`); on some platforms that binding is ABI-incompatible
+  with the installed `libnettle` and **segfaults the instant an SSH MAC is
+  computed** (reproduced on Apple Silicon + CPython 3.14 + Homebrew `nettle` 9:
+  `nettle_umac64_digest` → SIGSEGV). Because HEAVEN runs scans in-process, that
+  native crash took down the whole API server — every in-flight scan died and the
+  UI showed "Load failed". It triggered on any ordinary engagement: connecting to
+  an SSH service that offers `umac-64@openssh.com`/`umac-128@openssh.com` MACs
+  (OpenSSH does — e.g. Metasploitable-2). New `heaven/utils/ssh_safe.py` strips
+  those UMAC MACs from `asyncssh`'s negotiation before any connection (its
+  documented no-Nettle fallback path), so SSH negotiates a standard HMAC-SHA2 MAC
+  instead — verified against a live SSH handshake. Every SSH call site now routes
+  through `ssh_safe.connect`, and `faulthandler` is enabled at server/CLI startup
+  so any *future* native crash surfaces a Python traceback instead of a silent
+  kill.
+
+- **SARIF export now carries usable locations and lost its stray-file side
+  effect.** The previous exporter read a non-existent `asset` key, so every
+  `artifactLocation.uri` was `"unknown"`, and calling it without an output path
+  silently wrote a `heaven-results.sarif` into the working directory. Both the
+  `heaven export`/scan paths and the API now route through the new
+  `ci_export.findings_to_sarif`, which uses the finding's real target and writes
+  nothing unless asked; `aggregator.export_sarif` delegates to it for
+  backward-compatibility.
+
+- **Version-based CVE mapping no longer floods reports with unverified
+  "potential" CVEs as confirmed Criticals.** When a service banner named a
+  product but not its exact version (e.g. a hardened `Server: Apache` with the
+  version stripped), the inline-CVE path emitted *every* CVE known for that
+  product as a separate Critical/High **Open** finding — so a single Apache host
+  reachable on ports 80 and 443 produced ~20 speculative findings, and a
+  *patched* server that still advertised an old-looking banner would light up
+  red. The version-undetermined path now collapses to **one** low-severity,
+  low-confidence `potential_vulnerable_service` finding per product per host that
+  names the candidate CVEs for manual verification instead of asserting them.
+  Findings with a real, observed version are unaffected (each matched CVE keeps
+  its genuine per-CVE score). On a live re-run of an external target whose
+  Apache/Dovecot versions are hidden, this removed roughly 30 speculative
+  Critical/High rows.
+- **Bounded CVE version ranges are matched jointly (AND), not as a flat OR — kills
+  "patched-but-flagged" false positives.** A record like OpenSSH regreSSHion's
+  `['<=9.7p1', '>=8.5p1']` (affected 8.5p1–9.7p1) was matched if *any* single
+  spec held, so a **patched OpenSSH 9.9** matched via `>=8.5p1` alone and was
+  reported as vulnerable. A new shared `heaven/vulnscan/cve_mapper.py::
+  specs_match_version` treats a `>=`/`<=` pair as a bounded window that must hold
+  jointly, keeps branch-ceiling lists (`['<=16.1','<=15.5']`) and exact/dash/`all*`
+  clauses as OR, and now backs both the inline DB and the live-feed
+  `filter_by_version` confirmation. This corrects the same over-match on Log4Shell
+  (patched 2.17), Struts, GitLab, Confluence, Redis, Samba and Node.js records —
+  a version above the fixed ceiling no longer matches.
+- **Consolidated "potential" service findings deduplicate per host+product**, so
+  a version-undetermined service reachable on several ports (Apache on 80 *and*
+  443) is reported once rather than once per port. Confirmed per-CVE findings keep
+  their existing per-(host, port, CVE) identity.
+- **Server-version / security-header findings from a cross-site redirect are no
+  longer attributed to the in-scope target.** The header audit follows redirects,
+  so a target that redirected to a CDN / parking / SSO host fronted by a
+  *different* server (e.g. `Server: nginx/1.29.8` when the real host runs Apache)
+  produced a wrong-target "Server Version Disclosed" false positive. A new
+  same-registered-site guard (`heaven/vulnscan/auth_scanner.py::_same_site`) drops
+  every header-derived finding when the response was redirected off the target's
+  registered domain; on-site hops (`http→https`, apex↔`www`) and IP targets are
+  unaffected, and a genuine on-host banner still reports (now with the observed
+  URL recorded in evidence).
+
+### Added
+
+- **Active verification promotes Potential findings to Confirmed via safe,
+  read-only probes.** A version banner does not prove exploitability (vendors
+  backport fixes without bumping it). For a curated set of well-known CVEs — Apache
+  path-traversal (CVE-2021-41773 / 42013), Shellshock (CVE-2014-6271 / 6278) — a
+  new `heaven/vulnscan/active_verifier.py` runs a non-destructive behavioural probe
+  (read a world-readable file via the traversal; echo a unique canary through the
+  CGI). A probe that fires promotes the finding **Potential → Confirmed**
+  (`validated=True` + `evidence.active_verification`); a negative or absent probe
+  leaves it untouched — never fabricated, never deleted. Authorization-gated and
+  opt-in: `heaven scan --verify` (implied by `--autonomous`) runs it in-pipeline,
+  and `heaven verify --i-have-authorization` re-verifies a stored engagement's
+  Potential findings and persists the proof.
+- **Remediation retest report — Fixed / Still-open / Reintroduced / New.**
+  `heaven retest <baseline> <current>` compares a baseline scan to a later re-scan
+  of the same engagement and renders a client-facing HTML deliverable
+  (`heaven/devsecops/retest_report.py`) with a remediation-rate headline (measured
+  only against the findings that existed at the baseline), plus API endpoints
+  (`GET /api/scans/{id}/retest` and `…/retest.html`) and a Remediation Retest card
+  on the web Scans page. A previously-fixed finding that returns is flagged urgent.
+- **SARIF 2.1.0 + JUnit XML export for CI pipelines.** A dedicated
+  `heaven/devsecops/ci_export.py` emits SARIF with correct `artifactLocation` URIs
+  (the target), `partialFingerprints` (so GitHub/GitLab track a finding across
+  runs), a numeric `security-severity`, CWE/OWASP rule tags and the confirmation
+  status; and JUnit XML where findings at/above `--fail-on` become failing tests so
+  a build can gate. Wired through `heaven export --format sarif|junit`, the
+  `/api/report/export` endpoint and the web Reports page.
+- **Committed benchmark scorecard.** `heaven benchmark --scorecard PATH` writes the
+  headline precision/recall/F1 as a machine-readable JSON artifact
+  (`docs/benchmark_scorecard.json`) so the README, CI and web can cite one
+  canonical, honestly-captioned number.
+- **Confirmation status — Confirmed vs Potential — on every finding, end to
+  end.** A professional test separates what was *proven present* (a header seen
+  in a live response, an open cleartext port, a payload that executed, an
+  anonymous login that succeeded, an authoritative dependency-manifest match)
+  from what is only *inferred* from an unauthenticated service version banner
+  (the backport caveat). One compute-on-read resolver
+  (`heaven.utils.cvss.confirmation_status`) drives it everywhere: the HTML/PDF
+  reports gain a **Confirmation** column and a confirmed/potential split, the web
+  Findings table + Finding detail + Dashboard show a Confirmed/Potential badge,
+  the `/api/*` finding payloads and the dashboard/summary stats carry the label,
+  and `heaven findings` tags each row `CONFIRMED`/`POTENTIAL`. Potential findings
+  are never suppressed — they stay in full, clearly labelled.
+
+### Changed
+
+- **Overall Risk is now rated from confirmed findings only.** A hardened target
+  whose only "Critical" is an unauthenticated, version-based CVE match no longer
+  shows an inflated **Critical** headline — the rating reflects the worst
+  *confirmed* finding, while the potential critical still appears in the findings
+  list (as `Critical · Potential`) and the executive summary calls out how many
+  potential findings need verification. Applies consistently to the reports, the
+  dashboard headline and the engagement summary.
+
 ## [2.1.0] — 2026-08-04
 
 Accuracy and scope-correctness release. Builds on 2.0.0 with a false-positive

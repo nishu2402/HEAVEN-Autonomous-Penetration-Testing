@@ -136,6 +136,35 @@ def test_engine_finding_host_and_token():
     assert any(lead.kind == TOKEN for lead in leads)
 
 
+def test_engine_never_requeues_a_seed_host():
+    """A seed target is echoed back as every finding's ``target`` and in the
+    network result's ``hosts`` — it must NOT become a follow-up HOST lead (it was
+    already scanned). This is the regression guard for the DYNAMIC_FOLLOWUP phase
+    redundantly re-scanning the seed host across thousands of ports (the "scan
+    stuck at ~44%, nothing new" symptom)."""
+    eng = FeedbackEngine({"ips": ["192.168.0.162"]})
+    # The network scan lists the scanned seed under "hosts"…
+    eng.ingest_result({"hosts": [{"ip": "192.168.0.162", "open_ports": [{"port": 80}]}]})
+    # …and every finding on it carries it as target (including a URL form).
+    eng.ingest_finding({"vuln_type": "vulnerable_service", "target": "192.168.0.162"})
+    eng.ingest_finding({"vuln_type": "x", "target": "http://192.168.0.162:80/"})
+    host_leads = [lead for lead in eng.drain() if lead.kind == HOST]
+    assert host_leads == [], f"seed host was re-queued: {[h.value for h in host_leads]}"
+    assert "192.168.0.162" not in eng.hosts
+
+
+def test_engine_still_follows_genuinely_new_in_scope_host():
+    """A host that was NOT a seed (discovered inside an in-scope CIDR) must still
+    be followed up — the seed-exclusion must not suppress real new hosts."""
+    eng = FeedbackEngine({"ips": ["10.0.0.0/24"]})
+    eng.ingest_result({"hosts": [{"ip": "10.0.0.7", "open_ports": [{"port": 22}]}]})
+    new_hosts = [lead.value for lead in eng.drain() if lead.kind == HOST]
+    assert new_hosts == ["10.0.0.7"]
+    # …but only once — a later reference to it is not re-queued.
+    eng.ingest_finding({"vuln_type": "y", "target": "10.0.0.7"})
+    assert [lead for lead in eng.drain() if lead.kind == HOST] == []
+
+
 # ── resolve_js_endpoint ──────────────────────────────────────────────────────
 
 def test_resolve_js_relative_to_absolute_same_origin():
@@ -220,6 +249,27 @@ def test_feedback_cycle_no_duplicate_followup_for_same_host():
     followups = [t for t in orch.tasks.values()
                  if t.phase == ScanPhase.DYNAMIC_FOLLOWUP]
     assert len(followups) == 1               # queued exactly once
+
+
+def test_feedback_cycle_never_followups_the_seed_host():
+    """End-to-end guard for the reported bug: scanning a single IP surfaced that
+    same IP (via its findings + network result) as a "newly-discovered" host and
+    queued a full DYNAMIC_FOLLOWUP re-scan of it. The seed must never get a
+    follow-up task."""
+    targets = {"ips": ["192.168.0.162"]}
+    orch = _make_orch(targets)
+    orch.results["net"] = _completed("net", {
+        "hosts": [{"ip": "192.168.0.162", "open_ports": [{"port": 80}]}],
+    })
+    orch.results["vuln"] = _completed("vuln", {
+        "findings": [{"vuln_type": "vulnerable_service", "target": "192.168.0.162"}],
+    })
+    before = len(orch.tasks)
+    orch._feedback_cycle(ScanPhase.VULN_SCAN)
+    followups = [t for t in orch.tasks.values()
+                 if t.phase == ScanPhase.DYNAMIC_FOLLOWUP]
+    assert followups == []                   # the seed is never re-scanned
+    assert len(orch.tasks) == before
 
 
 def test_scan_new_host_degrades_when_recon_empty(monkeypatch):

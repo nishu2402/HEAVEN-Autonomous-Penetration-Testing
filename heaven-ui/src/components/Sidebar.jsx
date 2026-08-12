@@ -29,6 +29,7 @@ const GROUPS = [
       { to: "/findings",    label: "Findings",     icon: "⚠" },
       { to: "/kill-chain",  label: "Kill Chain",   icon: "⛓" },
       { to: "/ai-plans",    label: "AI Plans",     icon: "✦" },
+      { to: "/chat",        label: "Assistant",    icon: "💬" },
       { to: "/coverage",    label: "Coverage",     icon: "◐" },
     ],
   },

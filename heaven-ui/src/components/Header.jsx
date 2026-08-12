@@ -97,9 +97,9 @@ export default function Header({ onMenu }) {
             <span className="eng-label">Engagement</span>
             <span className="eng-name">{eng.engagement.name}</span>
             {eng.engagement.client && (
-              <span className="eng-stats">· {eng.engagement.client}</span>
+              <span className="eng-stats eng-client">· {eng.engagement.client}</span>
             )}
-            <span className="eng-stats">
+            <span className="eng-stats eng-counts">
               · {eng.stats.total_findings ?? 0} finding{(eng.stats.total_findings ?? 0) !== 1 ? "s" : ""}
               {" · "}{eng.stats.scope_targets ?? 0} target{(eng.stats.scope_targets ?? 0) !== 1 ? "s" : ""}
             </span>

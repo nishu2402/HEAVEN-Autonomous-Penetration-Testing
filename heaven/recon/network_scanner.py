@@ -637,6 +637,61 @@ async def _python_connect_scan(
     ]
 
 
+async def _connect_scan_fallback(
+    host: str,
+    ports: list[int],
+    *,
+    timeout: float = 2.0,
+    stealth_level: str = "normal",
+) -> list[PortResult]:
+    """Reliable connect-scan recovery for when nmap comes back with no open ports.
+
+    Runs in two stages so a live host is fully covered while a genuinely dead /
+    silent one is ruled out fast — important because this may run per-host inside
+    a CIDR sweep:
+
+    1. Probe the curated high-value service ports first (FTP/SSH/SMTP/HTTP/SMB/
+       DB/…). These answer in a couple of seconds; an open one proves the host is
+       alive. If NONE answer we stop and report nothing, so a dead or fully
+       silent host never pays for a full-range sweep and no port is invented.
+    2. Only once the host has proven itself alive do we sweep the *rest* of the
+       requested range, so a genuinely-open uncommon port is never missed.
+
+    Every result is a real completed TCP handshake — no port, service or banner is
+    ever fabricated. This is what keeps a live, service-rich box (a full
+    ``-sV -sC`` sweep of which nmap could not finish in its host-timeout) from
+    being reported as "0 findings".
+    """
+    if not ports:
+        return []
+    port_set = set(ports)
+    common = sorted(port_set & _ALWAYS_PROBE_PORTS)
+    if not common:
+        # The caller asked for a range with no high-value port in it — just scan
+        # exactly what was requested (still bounded by the connect scanner).
+        return await _python_connect_scan(
+            host, ports, timeout=timeout, stealth_level=stealth_level)
+
+    found = await _python_connect_scan(
+        host, common, timeout=timeout, stealth_level=stealth_level)
+    if not found:
+        # No high-value service answered → treat the host as dead / empty rather
+        # than spending the budget connect-scanning every port of a silent box.
+        return []
+
+    remaining = sorted(port_set - set(common))
+    if remaining:
+        found += await _python_connect_scan(
+            host, remaining, timeout=timeout, stealth_level=stealth_level)
+
+    # De-duplicate on port (common and remaining are disjoint, but be defensive)
+    # and return in stable ascending order.
+    by_port: dict[int, PortResult] = {}
+    for pr in found:
+        by_port.setdefault(pr.port, pr)
+    return [by_port[p] for p in sorted(by_port)]
+
+
 def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
     """Parse nmap ``-oX`` output into open ports + OS evidence.
 
@@ -663,6 +718,18 @@ def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
     status = xml_root.find(".//status")
     _status_up = status is not None and status.get("state") == "up"
     probe_confirmed = _status_up and (status.get("reason") or "") not in ("", "user-set")
+
+    # nmap ran out of its --host-timeout before finishing this host: the scan is
+    # INCOMPLETE, so an empty (or short) port list is "didn't get to look", not a
+    # confirmed "nothing open". nmap marks it on the <host> element as
+    # timedout="true". The caller uses this to fall back to the built-in connect
+    # scanner instead of accepting 0 ports on a host that is plainly alive — the
+    # exact failure a full 1-65535 `-sV -sC` sweep hits on a slow / heavily
+    # firewalled / emulated target.
+    host_elem = xml_root.find(".//host")
+    host_timed_out = bool(
+        host_elem is not None and (host_elem.get("timedout") or "").lower() == "true"
+    )
 
     # ── Device identity: MAC (ARP), device name (NetBIOS/SMB, then PTR) ────────
     # All strictly observed; each stays '' when nmap didn't report it.
@@ -843,6 +910,7 @@ def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
         "device_type_source": device_type_source,
         "filtered_count": filtered_count,
         "closed_count": closed_count,
+        "host_timed_out": host_timed_out,
     }
 
 
@@ -997,21 +1065,72 @@ async def scan_host(
                 host_result.device_type = parsed.get("device_type", "")
                 host_result.device_type_source = parsed.get("device_type_source", "")
 
-            # Every nmap attempt crashed / was unparseable (no clean result, no
-            # ports) → fall back to the pure-Python connect scan so a live,
-            # service-rich host is never reported as 0 ports just because nmap's NSE
-            # aborted. Real TCP handshakes only; no -sV/-O depth (nmap is broken).
-            if nmap_ran and parsed is None and not host_result.open_ports:
-                logger.warning(
-                    "nmap produced no usable output for %s (crash / parse failure) "
-                    "— falling back to the built-in TCP connect scanner.", host,
-                )
-                fb = await _python_connect_scan(
+            # nmap came back with NO open ports — but on a host we were explicitly
+            # told to scan we cannot take that at face value. It happens for three
+            # very different reasons, and every one otherwise turns a live,
+            # service-rich box into a silent "0 findings" report:
+            #   • nmap CRASHED and emitted unparseable XML (parsed is None) — e.g.
+            #     the nmap 7.9x -sC/NSE `lua_status(L) == LUA_YIELD` SIGABRT;
+            #   • nmap ran out of its --host-timeout mid-sweep (host_timed_out) —
+            #     a full 1-65535 `-sV -sC` scan of a slow / heavily-filtered /
+            #     emulated host never finishes, so nmap returns a *clean*, valid
+            #     XML that reports zero ports because it never got to scan them;
+            #   • nmap finished but its scan technique was silently filtered, or it
+            #     saw the host refuse probes (closed_count > 0) yet missed the
+            #     genuinely-open ports (ephemeral-port exhaustion, transient drops).
+            # Cross-check all of them with the built-in concurrent TCP connect
+            # scanner. On an unprivileged host (macOS has no raw sockets, so nmap
+            # is itself doing a *serial* connect scan) our concurrent scanner is
+            # both faster and more reliable. It never invents a port — every result
+            # is a completed handshake — probes the high-value service ports first
+            # so a genuinely-dead host is ruled out in a couple of seconds, and
+            # only sweeps the full range once the host has proven itself alive. So
+            # it costs nothing on the happy path (skipped the instant nmap DID find
+            # a port) and stays safe inside a CIDR sweep. Banners grabbed for the
+            # standard service ports still feed the CVE fingerprinter, so recovered
+            # ports keep their version-based findings even without nmap's -sV.
+            host_timed_out = bool(parsed and parsed.get("host_timed_out"))
+            # Recover when nmap found NOTHING (crash / silent-filter) OR when its
+            # scan was cut short by the host-timeout (INCOMPLETE — it may have
+            # found some ports but missed others it never reached). In the latter
+            # case we UNION the connect-scan result with nmap's, so a partial nmap
+            # is completed rather than trusted as final, and nmap's richer -sV
+            # entries are always kept.
+            if nmap_ran and (not host_result.open_ports or host_timed_out or parsed is None):
+                if parsed is None:
+                    logger.warning(
+                        "nmap produced no usable output for %s (crash / parse "
+                        "failure) — recovering with the built-in TCP connect "
+                        "scanner.", host,
+                    )
+                elif host_timed_out:
+                    logger.warning(
+                        "nmap hit its --host-timeout on %s (a full-range -sV -sC "
+                        "sweep can't finish on a slow / heavily-filtered host) — "
+                        "completing the inventory with the built-in TCP connect "
+                        "scanner.", host,
+                    )
+                recovered = await _connect_scan_fallback(
                     host, ports, timeout=timeout, stealth_level=stealth_level,
                 )
-                host_result.open_ports = fb
-                if fb:
+                # Keep nmap's own (version-rich) ports; add only ports it missed.
+                known = {p.port for p in host_result.open_ports}
+                added = [p for p in recovered if p.port not in known]
+                if added:
+                    host_result.open_ports = sorted(
+                        host_result.open_ports + added, key=lambda p: p.port)
                     host_result.is_alive = True
+                    # nmap had written these off as filtered/refused (or never
+                    # reached them); correct the closed tally so the perimeter
+                    # classifier / inventory don't describe a wide-open box as
+                    # locked down.
+                    host_result.closed_ports = max(
+                        0, host_result.closed_ports - len(added))
+                    logger.info(
+                        "  ↳ connect-scan recovery found %d open port(s) on %s "
+                        "that nmap missed: %s", len(added), host,
+                        ", ".join(str(p.port) for p in added),
+                    )
 
         except FileNotFoundError:
             # No nmap on PATH — fall back to the built-in pure-Python TCP connect
@@ -1300,6 +1419,37 @@ async def scan_network(
     concurrency = profile.max_concurrent if profile else 500
     sem = asyncio.Semaphore(concurrency)
 
+    # ── Bound nmap's per-host --host-timeout to the deep-scan budget ───────────
+    # A full 1-65535 `-sV -sC` sweep of a slow / heavily-filtered / emulated host
+    # never finishes. Left at the 30-min default, nmap would still be running when
+    # the orchestrator's time_budget fired: the scan_host coroutine would be
+    # CANCELLED mid-nmap and its result DISCARDED — the "scan sits for minutes and
+    # then reports 0 findings" bug. Cap the per-host nmap deadline WELL below the
+    # budget so nmap always yields in time for the built-in connect-scan recovery
+    # to run AND for the host to finish (and be kept) inside the budget. Reserve
+    # scales with the port count (the connect sweep is the only thing that must
+    # still fit after nmap gives up). Direct callers (time_budget=None) keep the
+    # generous 30-min default.
+    if time_budget and time_budget > 0:
+        _connect_reserve = min(400.0, 45.0 + (len(ports) / max(1, concurrency)) * timeout * 1.3)
+        # Ceiling: a legitimately-reachable host finishes an unprivileged connect
+        # scan of the full range well inside a few minutes (closed ports RST
+        # instantly); a host that is still unfinished past this is being silently
+        # filtered, and the connect-scan recovery — a strict superset of what
+        # unprivileged nmap can see, and far faster — will complete it. Capping
+        # here turns the "sits for many minutes on a filtered/emulated host" wait
+        # into a bounded one without losing coverage. Quieter stealth profiles
+        # legitimately need longer, so scale the ceiling by the packet-rate factor.
+        _stealth_ceiling = {
+            "paranoid": 4.0, "stealth": 2.0, "normal": 1.0,
+            "aggressive": 1.0, "loud": 1.0,
+        }.get(str(stealth_level).strip().lower(), 1.0)
+        _nmap_ceiling = 240.0 * _stealth_ceiling
+        _nmap_host_secs = int(max(60.0, min(_nmap_ceiling, time_budget - _connect_reserve)))
+        nmap_host_timeout = f"{_nmap_host_secs}s"
+    else:
+        nmap_host_timeout = "30m"
+
     # ── Host-discovery sweep for broad ranges ─────────────────────────────────
     # A /24 expands to 254 addresses, most of them dead. Under -Pn (which we use
     # so firewalled hosts aren't skipped) nmap would faithfully full-scan every
@@ -1347,6 +1497,7 @@ async def scan_network(
         result = await scan_host(
             host, ports, timeout=timeout, semaphore=sem,
             include_udp=include_udp, stealth_level=stealth_level, evade=evade,
+            host_timeout=nmap_host_timeout,
         )
         if not isinstance(result, HostResult):
             return None

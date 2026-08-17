@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 500" role="img"
-     aria-label="HEAVEN — Autonomous Penetration-Testing Framework. Pipeline: Recon to ML Risk Scoring to Verified Exploitation to Reporting. 1731 tests, 55 CLI commands, 77 API routes, 24 UI pages, 12 scan modes, CVSS ML predictor R-squared 0.9925.">
+     aria-label="HEAVEN — Autonomous Penetration-Testing Framework. Pipeline: Recon to ML Risk Scoring to Verified Exploitation to Reporting. 1856 tests, 55 CLI commands, 77 API routes, 24 UI pages, 12 scan modes, CVSS ML predictor R-squared 0.9925.">
   <title>HEAVEN — Autonomous Penetration-Testing Framework</title>
 
   <defs>
@@ -243,7 +243,7 @@
       <rect x="1037" y="392" width="176" height="66" rx="13" fill="#FFFFFF" stroke="#D9E1F0"/>
     </g>
     <g text-anchor="middle" fill="url(#statL)" font-family="'Segoe UI',Roboto,-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800">
-      <text x="155"  y="426" font-size="28">1703</text>
+      <text x="155"  y="426" font-size="28">1856</text>
       <text x="349"  y="426" font-size="28">55</text>
       <text x="543"  y="426" font-size="28">77</text>
       <text x="737"  y="426" font-size="28">24</text>
@@ -265,7 +265,7 @@
       <animateTransform attributeName="transform" type="translate" values="0 0; 996 0; 0 0" keyTimes="0;0.5;1" dur="5s" repeatCount="indefinite"/>
     </rect>
     <text x="67" y="489" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#66748F">CLI · WEB UI · REST + WEBSOCKET API — ONE ENGAGEMENT DATASET</text>
-    <text x="1213" y="489" text-anchor="end" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#66748F">v2.1.0 · MIT LICENSE</text>
+    <text x="1213" y="489" text-anchor="end" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#66748F">v3.0.0 · MIT LICENSE</text>
   </g>
 
   <!-- outer frame -->

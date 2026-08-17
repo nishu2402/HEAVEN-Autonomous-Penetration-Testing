@@ -123,7 +123,6 @@ so the README's benchmark badge has a target to link to.
 | Add an LLM to the AI layer | `pip install -e ".[gemini]"`, set `GEMINI_API_KEY` (or Anthropic/OpenAI), re-run. Full guide: [README — API Keys](../README.md#api-keys) |
 | Continuously monitor a target | [README — CLI Reference (`watch`)](../README.md#cli) |
 | Compare HEAVEN vs Burp / ZAP / sqlmap | [COMPARISON.md](COMPARISON.md) |
-| Record a demo video | [DEMO.md](DEMO.md) |
 | Contribute code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Report a vulnerability in HEAVEN | [SECURITY.md](../SECURITY.md) |
 

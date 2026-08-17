@@ -220,6 +220,122 @@ _PREFIX_MODULE: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+# ── Real emitters discovered by reading the detector source ──────────────────
+# The historical VULN_MODULE above under-mapped HEAVEN's real coverage: several
+# scanners that run on every web scan (``web_fuzzer``, ``misconfig_scanner``,
+# ``auth_scanner``, ``anomaly_probe``) emit confirmation-based findings whose
+# vuln_type slugs were never mapped to a module token — so their findings lit no
+# methodology row. Every slug below was verified against the ``_finding(...)`` /
+# ``category=`` call that actually produces it; each maps ONLY to the module that
+# genuinely emits it, so nothing is over-claimed. Merged as a UNION into
+# VULN_MODULE (extending, never replacing, the historical tuples).
+_ADDITIONAL_EMITTERS: dict[str, tuple[str, ...]] = {
+    # heaven.vulnscan.web_fuzzer — HTTP methods, verb tampering, host header,
+    # 403/auth bypass, cache poisoning, smuggling, HPP, deserialization, etc.
+    "xst_trace_enabled": ("web_fuzzer",),
+    "http_trace_enabled": ("web_fuzzer",),
+    "dangerous_http_method": ("web_fuzzer",),
+    "dangerous_methods_allowed": ("web_fuzzer",),
+    "method_override_accepted": ("web_fuzzer",),
+    "http_parameter_pollution": ("web_fuzzer",),
+    "content_type_confusion": ("web_fuzzer",),
+    "hidden_parameter_discovered": ("web_fuzzer", "param_miner"),
+    "403_bypass_ip_header": ("web_fuzzer",),
+    "403_bypass_path_manipulation": ("web_fuzzer",),
+    "cache_poisoning_unkeyed_header": ("web_fuzzer",),
+    "web_cache_deception": ("web_fuzzer",),
+    "http_smuggling_indicator": ("web_fuzzer", "advanced_attacks"),
+    "http_smuggling_te_obfuscation": ("web_fuzzer", "advanced_attacks"),
+    "insecure_deserialization": ("web_fuzzer",),
+    "xxe_entity_expansion": ("web_fuzzer", "anomaly_probe", "safe_validator"),
+    "xml_accepted": ("web_fuzzer",),
+    "ssi_injection": ("web_fuzzer",),
+    "smtp_header_injection": ("web_fuzzer",),
+    # heaven.vulnscan.misconfig_scanner — CORS, cookies, headers, redirect, JWT,
+    # server-banner, GraphQL, plus the new client/session config probes.
+    "cors_misconfig": ("misconfig_scanner", "safe_validator", "advanced_attacks"),
+    "insecure_cookie": ("misconfig_scanner", "auth_scanner"),
+    "jwt_alg_none": ("misconfig_scanner",),
+    "jwt_weak_secret": ("misconfig_scanner", "advanced_attacks"),
+    "missing_security_headers": ("misconfig_scanner", "web_crawler"),
+    "server_version_disclosure": ("misconfig_scanner", "auth_scanner", "adaptive_intel"),
+    "open_redirect": ("misconfig_scanner", "safe_validator", "advanced_attacks", "auth_scanner"),
+    "graphql_introspection": ("misconfig_scanner", "api_scanner"),
+    "clickjacking": ("misconfig_scanner", "web_crawler"),
+    "permissive_crossdomain_policy": ("misconfig_scanner",),
+    "password_autocomplete_enabled": ("misconfig_scanner",),
+    "sensitive_cache_control": ("misconfig_scanner",),
+    "session_token_in_url": ("misconfig_scanner",),
+    "padding_oracle": ("misconfig_scanner",),
+    "long_session_timeout": ("misconfig_scanner",),
+    # heaven.vulnscan.auth_scanner — lockout, CSRF, session fixation, password
+    # policy, session-id entropy, cookies, OAuth, registration/logout surrogates.
+    "account_lockout_detected": ("auth_scanner",),
+    "no_account_lockout": ("auth_scanner",),
+    "lockout_inconclusive": ("auth_scanner",),
+    "cookie_no_httponly": ("auth_scanner", "misconfig_scanner"),
+    "cookie_no_samesite": ("auth_scanner", "misconfig_scanner"),
+    "cookie_no_secure": ("auth_scanner", "misconfig_scanner"),
+    "csp_unsafe_eval": ("auth_scanner",),
+    "csp_unsafe_inline": ("auth_scanner", "web_crawler"),
+    "csrf_missing_token": ("auth_scanner", "advanced_attacks"),
+    "oauth_open_redirect": ("auth_scanner",),
+    "oauth_state_reflected": ("auth_scanner",),
+    "session_fixation": ("auth_scanner",),
+    "technology_disclosure": ("auth_scanner", "adaptive_intel"),
+    "weak_http_auth_credentials": ("auth_scanner",),
+    "weak_login_credentials": ("auth_scanner",),
+    "weak_password_policy": ("auth_scanner",),
+    "weak_session_id": ("auth_scanner",),
+    "open_registration": ("auth_scanner",),
+    "weak_registration_policy": ("auth_scanner",),
+    "weak_logout": ("auth_scanner",),
+    "security_question_reset": ("auth_scanner",),
+    "alt_channel_auth_weakness": ("auth_scanner", "api_scanner"),
+    # heaven.vulnscan.anomaly_probe — LDAP/XPath/NoSQL/SSTI/XXE injection,
+    # WebSocket/CSWSH, host-header, prototype pollution, format string, etc.
+    "ldap_injection": ("anomaly_probe", "advanced_attacks"),
+    "xpath_injection": ("anomaly_probe",),
+    "nosql_injection": ("anomaly_probe",),
+    "ssti": ("anomaly_probe", "advanced_attacks"),
+    "xxe": ("anomaly_probe", "safe_validator", "advanced_attacks"),
+    "prototype_pollution": ("anomaly_probe",),
+    "websocket_cleartext": ("anomaly_probe",),
+    "websocket_hijacking": ("anomaly_probe",),
+    "host_header_injection": ("anomaly_probe", "web_fuzzer", "advanced_attacks"),
+    "ip_restriction_bypass": ("anomaly_probe", "web_fuzzer"),
+    "format_string": ("anomaly_probe",),
+    "command_injection": ("anomaly_probe", "advanced_attacks", "injection_scanner"),
+    "buffer_overflow": ("anomaly_probe",),
+    "integer_overflow": ("anomaly_probe",),
+    # heaven.vulnscan.client_audit — static analysis of HTML + inline/linked JS.
+    "source_comment_disclosure": ("client_audit",),
+    "dom_xss_sink": ("client_audit", "injection_scanner"),
+    "insecure_postmessage": ("client_audit",),
+    "sensitive_browser_storage": ("client_audit",),
+    "cross_site_script_inclusion": ("client_audit",),
+    "css_injection": ("client_audit",),
+    "client_resource_manipulation": ("client_audit",),
+    "flash_crossdomain": ("client_audit", "misconfig_scanner"),
+    # heaven.vulnscan.injection_scanner — stored XSS (inject + refetch).
+    "xss_stored": ("injection_scanner",),
+    # request smuggling is emitted by both the fuzzer and advanced_attacks.
+    "request_smuggling": ("web_fuzzer", "advanced_attacks"),
+    # architecture inventory surrogate (INFO-10).
+    "architecture_map": ("adaptive_intel", "inventory"),
+    # heaven.recon.firewall_detector — perimeter firewall / IDS-IPS / tarpit / WAF
+    # classification from filtered-vs-closed tallies. Real, confirmation-based
+    # emitter that was never mapped, so its evidence lit NO methodology row. Lights
+    # the ruleset-review / identifying-defenses / network-monitoring controls
+    # (NIST 800-115 §3.3, PTES defenses, CIS CSC-13, NIST CSF DE.CM, SOC 2 CC7.2).
+    "perimeter_defense": ("firewall_detector",),
+}
+# UNION-merge into VULN_MODULE (dedup, order-preserving) so historical mappings
+# are extended, never lost.
+for _vt, _toks in _ADDITIONAL_EMITTERS.items():
+    VULN_MODULE[_vt] = tuple(dict.fromkeys(VULN_MODULE.get(_vt, ()) + _toks))
+
+
 def modules_for_vuln(vuln_type: str) -> tuple[str, ...]:
     """Detector module token(s) that produce a given finding vuln_type."""
     if not vuln_type:

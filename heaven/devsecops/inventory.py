@@ -282,7 +282,8 @@ def normalize_assets(assets: Optional[list]) -> list[dict]:
                     "honeypot_indicators": [],
                     "mac_address": "", "mac_vendor": "",
                     "device_name": "", "device_name_source": "",
-                    "device_type": "", "device_type_source": ""}
+                    "device_type": "", "device_type_source": "",
+                    "web_components": {}}
             hosts[key] = node
         _merge_os(node, a)
         _merge_device_identity(node, a)
@@ -298,6 +299,16 @@ def normalize_assets(assets: Optional[list]) -> list[dict]:
         for ind in (a.get("honeypot_indicators") or []):
             if ind and ind not in node["honeypot_indicators"]:
                 node["honeypot_indicators"].append(ind)
+        # Web-tier components disclosed in HTTP headers (PHP/OpenSSL/…), keyed by
+        # (service, version) so the same PHP seen on several URLs is listed once.
+        for wc in (a.get("web_components") or []):
+            if not isinstance(wc, dict):
+                continue
+            svc = (wc.get("service") or "").strip().lower()
+            ver = (wc.get("version") or "").strip()
+            if not svc or not ver:
+                continue
+            node["web_components"].setdefault((svc, ver), wc)
 
     out: list[dict] = []
     for node in hosts.values():
@@ -305,6 +316,11 @@ def normalize_assets(assets: Optional[list]) -> list[dict]:
         node = dict(node)
         node["ports"] = ports
         node["port_count"] = len(ports)
+        node["web_components"] = sorted(
+            node["web_components"].values(),
+            key=lambda w: ((w.get("product") or w.get("service") or ""),
+                           w.get("version") or ""),
+        )
         node["alive"] = node["alive"] or bool(ports)
         node["os_label"] = os_label(node)
         node["device_name_label"] = device_name_label(node)
@@ -397,9 +413,19 @@ def render_markdown(assets: Optional[list], *, already_normalized: bool = False)
             header.append(f"**MAC:** {h['mac_label']}")
         lines.append("  \n".join(header))
         lines.append("")
-        if not h.get("ports"):
-            lines.append("_No open ports observed._")
+        for wc in (h.get("web_components") or []):
+            src = wc.get("source_header")
+            src_txt = f" (web, `{src}` header)" if src else " (web)"
+            lines.append(
+                f"- **{wc.get('product') or wc.get('service')} "
+                f"{wc.get('version')}**{src_txt}"
+            )
+        if h.get("web_components"):
             lines.append("")
+        if not h.get("ports"):
+            if not h.get("web_components"):
+                lines.append("_No open ports observed._")
+                lines.append("")
             continue
         lines.append("| Port | Proto | Service | Version | CPE | Source |")
         lines.append("| ---- | ----- | ------- | ------- | --- | ------ |")

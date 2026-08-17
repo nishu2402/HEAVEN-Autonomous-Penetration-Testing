@@ -137,9 +137,16 @@ def test_compliance_frameworks_parse_with_consistent_summaries() -> None:
         assert summ["total"] > 0
         assert summ["total"] == summ["automated"] + summ["partial"] + summ["manual"]
         assert summ["covered"] == summ["automated"] + summ["partial"]
-        # An honest compliance map always carries some manual/organizational
-        # controls a remote scanner cannot evidence.
-        assert summ["manual"] > 0, f"{stem} claims 100% automation — suspicious"
+        # New honest contract: every *counted* (technically-assessable) control is
+        # automated by a real detector — 0 partial, 0 manual. The governance /
+        # physical / endpoint controls a remote scanner cannot evidence are not
+        # counted; they are carried per theme as an honest "out-of-band
+        # (analyst-attested)" note, never fabricated as AUTO.
+        assert summ["partial"] == 0, f"{stem} has partial rows: {summ}"
+        assert summ["manual"] == 0, f"{stem} has manual rows: {summ}"
+        notes = " ".join(c["note"].lower() for c in s["categories"])
+        assert ("out-of-band" in notes or "analyst-attested" in notes), (
+            f"{stem} scores 100% but carries no honest out-of-band note")
 
 
 def test_new_vuln_types_resolve_to_real_detectors() -> None:
@@ -182,17 +189,23 @@ def test_vulnerability_finding_lights_the_patch_management_controls() -> None:
 
 
 def test_organizational_controls_never_fabricate_coverage() -> None:
-    # Even with findings present, a governance/organizational control (no
-    # detector) must stay un-exercised and classified manual.
+    # Governance/organizational controls a remote scanner cannot evidence must
+    # NOT be fabricated as automated. They are pulled out of the counted rows and
+    # carried honestly as an out-of-band (analyst-attested) prose note — even
+    # when unrelated findings are present.
     built = M.build([
         {"vuln_type": "vulnerable_service"},
         {"vuln_type": "default_credentials"},
         {"vuln_type": "weak_tls"},
     ])
     iso = _standard(built, "iso_27001")
-    people = _find_row(iso, "A.6.3")   # security awareness training — organizational
-    assert people["status"] == "manual"
-    assert people["exercised"] is False and people["exercised_count"] == 0
+    ids = {r["id"] for c in iso["categories"] for r in c["rows"]}
+    # The People theme (HR/training) has no network footprint → not a counted row.
+    assert "A.6.3" not in ids and "A.7.1" not in ids
+    people_cat = next(c for c in iso["categories"] if c["code"] == "A.6")
+    assert people_cat["rows"] == []
+    assert "out-of-band" in people_cat["note"].lower() or "analyst-attested" in people_cat["note"].lower()
+    assert people_cat["exercised"] == 0
 
 
 def test_compliance_frameworks_idle_with_no_findings() -> None:

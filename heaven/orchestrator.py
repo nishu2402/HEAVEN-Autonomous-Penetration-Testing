@@ -1945,12 +1945,22 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             from urllib.parse import urlparse
             # Build "host:port" string list — scan_ssl_targets accepts list[str]
             ssl_targets: list[str] = []
+
+            def _add_ssl_target(tgt: str) -> None:
+                if tgt not in ssl_targets:
+                    ssl_targets.append(tgt)
+
             for url in targets.get("urls", []):
                 parsed = urlparse(url)
                 host = parsed.hostname or ""
-                port = parsed.port or (443 if parsed.scheme == "https" else 80)
-                if host:
-                    ssl_targets.append(f"{host}:{port}")
+                # Only audit URLs actually served over TLS. A plain http:// URL was
+                # fetched in cleartext, so its port (usually :80) has no TLS to
+                # audit — scanning it yields nothing and, when a crawl produces many
+                # same-host http URLs, floods this phase with duplicate :80 probes
+                # that can exhaust its timeout. Real TLS ports found by the network
+                # scan are added separately below.
+                if host and parsed.scheme == "https":
+                    _add_ssl_target(f"{host}:{parsed.port or 443}")
             # Also probe TLS ports found during network scan
             net_res = orch.results.get(orch.net_task_id or "")
             if net_res and net_res.data and isinstance(net_res.data, dict):
@@ -2091,6 +2101,40 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="web", timeout=600,
     )
 
+    # ═══ Phase: WEB-TIER TECH FINGERPRINT (EOL + CVE from HTTP headers) ═══
+    # nmap sees the front listener (Apache); the runtime stack behind it (PHP,
+    # ASP.NET, the OpenSSL the server links) is disclosed only in HTTP response
+    # headers. Extract those versioned components and run them through the SAME
+    # EOL + CVE pipelines, so an end-of-life PHP 5.x named only in X-Powered-By is
+    # surfaced as CWE-1104 + CVE-mapped, and listed in the host inventory.
+    async def _web_tech(**kw):
+        try:
+            from heaven.recon.web_tech import scan_web_tech
+        except ImportError:
+            return {}
+        urls = list(targets.get("urls", []))
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                if ep_url and ep_url not in urls:
+                    urls.append(ep_url)
+        if not urls:
+            return {"skipped": True, "reason": "no URLs to fingerprint"}
+        # Returns {findings, vulnerabilities, web_components, hosts, total}.
+        # The emitted `hosts` carry web_components only (no ports), so the CVE-map
+        # phase does not re-map them and the inventory gains no phantom ports.
+        return await scan_web_tech(urls)
+
+    web_tech_id = orch.add_task(
+        "Web Technology Fingerprint (EOL + CVE)", _web_tech,
+        phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=120,
+    )
+
     # ═══ Phase: MISCONFIG & OUT-OF-BAND (CORS/cookies/JWT/redirect/SSRF/XXE) ═══
     async def _misconfig_oob(**kw):
         try:
@@ -2136,6 +2180,36 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
         modes=WEBAPI_MODES,
         concurrency_group="web", timeout=600,
+    )
+
+    # ═══ Phase: CLIENT-SIDE & SOURCE REVIEW ═══
+    # Static analysis of the delivered HTML + inline/linked JS: source/comment
+    # review (WSTG-INFO-05), DOM-XSS source→sink, insecure postMessage, sensitive
+    # browser storage, XSSI, CSS injection, client resource manipulation, legacy
+    # Flash. Read-only; fires only on real matches in the site's own content.
+    async def _client_audit(**kw):
+        try:
+            from heaven.vulnscan.client_audit import scan_client_audit
+        except ImportError:
+            return {}
+        urls = list(targets.get("urls", []))
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                if ep_url and ep_url not in urls:
+                    urls.append(ep_url)
+        if not urls:
+            return {"skipped": True, "reason": "no URLs for client-side audit"}
+        return await scan_client_audit(urls)
+
+    orch.add_task(
+        "Client-side & Source Review", _client_audit,
+        phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        modes=WEB_MODES,
+        concurrency_group="web", timeout=420,
     )
 
     # ═══ Phase: CMS (WordPress) HARDENING ═══
@@ -2420,7 +2494,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     val_id = orch.add_task(
         "PoC Validation", _validate_findings,
         phase=ScanPhase.VALIDATION,
-        depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, inject_id, dir_fuzz_id, idor_id, dns_id, cve_map_id],
+        depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, web_tech_id, inject_id, dir_fuzz_id, idor_id, dns_id, cve_map_id],
     )
 
     # ═══ Phase: ACTIVE VERIFICATION (Potential → Confirmed) ═══

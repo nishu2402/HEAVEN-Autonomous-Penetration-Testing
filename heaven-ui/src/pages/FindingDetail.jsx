@@ -72,7 +72,7 @@ export default function FindingDetail() {
   const [error, setError]     = useState(null);
   const [notes, setNotes]     = useState("");
   const [updating, setUpdating] = useState(false);
-  const [copied, setCopied]   = useState(false);
+  const [copiedKey, setCopiedKey] = useState("");
 
   function load() {
     setError(null);
@@ -95,13 +95,12 @@ export default function FindingDetail() {
     }
   }
 
-  async function copyCurl() {
-    const cmd = data?.evidence_package?.curl_command;
-    if (!cmd) return;
+  async function copyText(text, key) {
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(cmd);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(""), 1500);
     } catch { /* no clipboard API */ }
   }
 
@@ -274,22 +273,59 @@ export default function FindingDetail() {
         </div>
       </div>
 
-      {/* Curl repro */}
-      {ev.curl_command && (
+      {/* Reproduce — dynamic per finding: HTTP curl + raw request, else class-appropriate command */}
+      {(ev.curl_command || ev.raw_http_request || ev.repro_command || ev.repro_note) && (
         <div className="card">
           <div className="card-title">Reproduce</div>
-          <p className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
-            Paste into terminal or Burp's "Paste as request" to verify manually.
-          </p>
-          <div className="evidence-block">{ev.curl_command}</div>
-          <button className="btn" onClick={copyCurl} style={{ marginTop: 10 }}>
-            {copied ? "✓ Copied to clipboard" : "Copy curl command"}
-          </button>
+
+          {ev.is_http ? (
+            <>
+              {ev.curl_command && (
+                <>
+                  <p className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
+                    Paste into a terminal to replay this exact HTTP request.
+                  </p>
+                  <div className="evidence-block">{ev.curl_command}</div>
+                  <button className="btn" onClick={() => copyText(ev.curl_command, "curl")} style={{ marginTop: 10 }}>
+                    {copiedKey === "curl" ? "✓ Copied to clipboard" : "Copy curl command"}
+                  </button>
+                </>
+              )}
+              {ev.raw_http_request && (
+                <>
+                  <div style={{ margin: "16px 0 8px", fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
+                    RAW HTTP REQUEST — Burp → "Paste as request"
+                  </div>
+                  <div className="evidence-block">{ev.raw_http_request}</div>
+                  <button className="btn" onClick={() => copyText(ev.raw_http_request, "raw")} style={{ marginTop: 10 }}>
+                    {copiedKey === "raw" ? "✓ Copied to clipboard" : "Copy raw request"}
+                  </button>
+                </>
+              )}
+            </>
+          ) : ev.repro_command ? (
+            <>
+              <p className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
+                Read-only command to re-observe this finding from your own machine.
+              </p>
+              <div className="evidence-block">{ev.repro_command}</div>
+              <button className="btn" onClick={() => copyText(ev.repro_command, "repro")} style={{ marginTop: 10 }}>
+                {copiedKey === "repro" ? "✓ Copied to clipboard" : "Copy command"}
+              </button>
+              {ev.repro_note && (
+                <p className="dim" style={{ fontSize: 12, marginTop: 10, fontStyle: "italic" }}>{ev.repro_note}</p>
+              )}
+            </>
+          ) : (
+            <p className="dim" style={{ fontSize: 12, fontStyle: "italic" }}>
+              {ev.repro_note || "Observed passively — no single-command reproduction."}
+            </p>
+          )}
         </div>
       )}
 
-      {/* Request / Response */}
-      {(ev.request_url || ev.request_method) && (
+      {/* Request / Response — only for real HTTP transactions */}
+      {ev.is_http && (ev.request_url || ev.response_status > 0 || ev.response_excerpt) && (
         <div className="card">
           <div className="card-title">Evidence</div>
           <div style={{ marginBottom: 8, fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
@@ -306,6 +342,19 @@ export default function FindingDetail() {
           </div>
           <div className="evidence-block">
             {ev.response_excerpt?.slice(0, 2000) || "(no response captured)"}
+          </div>
+        </div>
+      )}
+
+      {/* Observed evidence — non-HTTP findings (banners, ports, records) */}
+      {!ev.is_http && ev.response_excerpt && (
+        <div className="card">
+          <div className="card-title">Evidence</div>
+          <div style={{ marginBottom: 8, fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
+            OBSERVED
+          </div>
+          <div className="evidence-block">
+            {ev.response_excerpt.slice(0, 2000)}
           </div>
         </div>
       )}

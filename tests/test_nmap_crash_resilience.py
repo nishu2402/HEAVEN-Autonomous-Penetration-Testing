@@ -20,7 +20,15 @@ These tests pin the fixes:
   5. the stealth timing profiles are bounded (no pathologically-low packet-rate
      floor that can't finish in budget) and retry >= 2 (no single-retry port loss),
      and the network task's time budget scales up for the slower stealth levels so
-     the same target converges on the same inventory at every stealth level.
+     the same target converges on the same inventory at every stealth level;
+  6. connect-scan-recovered ports (which have NO -sV version data) are enriched by
+     a targeted `-sV` on just those short ports, so the Service/Version/CPE columns
+     and CVE mapping are no longer blank on a slow / heavily-filtered / emulated
+     host — while a clean completed scan is NOT re-scanned (no wasted work);
+  7. the enrichment happens in two ordered passes — the service band is -sV'd BEFORE
+     the ephemeral/high-band completion sweep (so the flood can't starve it), and
+     the freshly-swept ephemeral ports get their OWN scoped -sV only AFTER a settle
+     lets the flood drain — so even dynamic RPC/OS high ports are fingerprinted.
 """
 from __future__ import annotations
 
@@ -84,6 +92,47 @@ TIMED_OUT_PARTIAL_XML = b"""<?xml version="1.0"?>
 <nmaprun><host timedout="true"><status state="up" reason="user-set"/>
  <ports><port protocol="tcp" portid="80"><state state="open"/>
   <service name="http" product="Apache" version="2.2.8"/></port></ports></host></nmaprun>"""
+
+# The result of the TARGETED -sV enrichment scan on the (short) recovered open-port
+# list: nmap finishes instantly on a small explicit port set and returns full
+# service/version detail for each — the data the connect scanner alone can't get,
+# and which the inventory columns + CVE mapping need.
+ENRICH_SV_XML = b"""<?xml version="1.0"?>
+<nmaprun><host><status state="up" reason="syn-ack"/>
+ <ports>
+  <port protocol="tcp" portid="21"><state state="open"/>
+   <service name="ftp" product="vsftpd" version="2.3.4"/></port>
+  <port protocol="tcp" portid="22"><state state="open"/>
+   <service name="ssh" product="OpenSSH" version="4.7p1"/></port>
+  <port protocol="tcp" portid="139"><state state="open"/>
+   <service name="netbios-ssn" product="Samba smbd" version="3.X - 4.X"/></port>
+  <port protocol="tcp" portid="3306"><state state="open"/>
+   <service name="mysql" product="MySQL" version="5.0.51a"/></port>
+ </ports></host></nmaprun>"""
+
+# A clean, COMPLETED scan (not timed out) that found an open port nmap's -sV
+# couldn't identify. This is the happy path: nmap already ran -sV, so re-scanning
+# it would be pure waste — the enrichment must NOT fire here.
+VERSIONLESS_CLEAN_XML = b"""<?xml version="1.0"?>
+<nmaprun><host><status state="up" reason="syn-ack"/>
+ <ports><port protocol="tcp" portid="9999"><state state="open"/></port></ports>
+</host></nmaprun>"""
+
+# Targeted -sV enrichment result for a single recovered HTTP port (:80).
+ENRICH_HTTP_XML = b"""<?xml version="1.0"?>
+<nmaprun><host><status state="up" reason="syn-ack"/>
+ <ports><port protocol="tcp" portid="80"><state state="open"/>
+  <service name="http" product="Apache httpd" version="2.2.8"/></port></ports>
+</host></nmaprun>"""
+
+# The SECOND targeted -sV — over the freshly-swept ephemeral/high band — identifies
+# a dynamic RPC service (the kind rpcbind hands out on a high port). This is what
+# turns the previously-blank ephemeral ports into named services.
+ENRICH_EPHEMERAL_XML = b"""<?xml version="1.0"?>
+<nmaprun><host><status state="up" reason="syn-ack"/>
+ <ports><port protocol="tcp" portid="50000"><state state="open"/>
+  <service name="status" product="RPC status" version="1"/></port></ports>
+</host></nmaprun>"""
 
 
 def _fake_exec(behavior):
@@ -186,12 +235,17 @@ def test_scan_host_falls_back_to_connect_scan_when_nmap_unusable(monkeypatch):
 def test_scan_host_cross_checks_connect_when_nmap_reports_0_open_on_live_host(monkeypatch):
     """nmap returns a *clean* XML (so no crash fallback) that reports the host
     alive but ZERO open ports, when the ports are in fact open. The connect-scan
-    cross-check must recover them, or the whole scan yields 0 findings."""
+    cross-check must recover them (or the whole scan yields 0 findings), and the
+    version-less recovered port is then enriched by a targeted -sV."""
     calls: list[list] = []
 
     def behavior(argv):
         calls.append(argv)
-        return (ANSWERED_BUT_NO_OPEN_XML, b"", 0)  # valid, alive, nothing open
+        # 1st nmap = the full-range primary (clean, alive, 0 open). Any later nmap
+        # = the targeted -sV enrichment of the recovered port.
+        if len(calls) == 1:
+            return (ANSWERED_BUT_NO_OPEN_XML, b"", 0)  # valid, alive, nothing open
+        return (ENRICH_HTTP_XML, b"", 0)
 
     monkeypatch.setattr(ns.asyncio, "create_subprocess_exec", _fake_exec(behavior))
 
@@ -204,10 +258,12 @@ def test_scan_host_cross_checks_connect_when_nmap_reports_0_open_on_live_host(mo
     monkeypatch.setattr(ns, "_python_connect_scan", fake_connect)
     res = asyncio.run(scan_host("10.0.0.1", [80, 443]))
 
-    # A clean result is not retried, so nmap ran once; the cross-check then fired.
-    assert len(calls) == 1
+    # The primary ran once (no -sC crash retry) and the cross-check then fired.
+    assert calls[0][calls[0].index("-p") + 1] == "80,443"  # the full-range primary
     assert xchecked == [True], "expected a connect-scan cross-check after 0 open ports"
     assert [p.port for p in res.open_ports] == [80]
+    # …and the recovered, version-less port was enriched by the targeted -sV.
+    assert res.open_ports[0].product == "Apache httpd"
     assert res.is_alive
 
 
@@ -340,6 +396,223 @@ def test_scan_network_bounds_nmap_host_timeout_under_budget(monkeypatch):
     ))
     secs = int(captured["host_timeout"].rstrip("s"))
     assert 60 <= secs < 600, f"nmap host-timeout {secs}s must be bounded under the budget"
+
+
+# ── 4d. targeted -sV enrichment of version-less recovered ports ────────────────
+# The connect-scan recovery proves ports OPEN but does no version detection, so
+# the recovered ports come back with blank product/version/CPE — which empties the
+# inventory columns and starves CVE mapping. A targeted `-sV` on just those (short)
+# ports finishes fast and restores the detail. These pin that behaviour.
+
+def test_nmap_service_scan_parses_targeted_sv(monkeypatch):
+    """The enrichment helper runs nmap -sV on a short port list and returns a
+    {port: PortResult} map carrying the real product/version detail."""
+    def behavior(argv):
+        assert "-sV" in argv and "-p" in argv  # a real service scan of explicit ports
+        return (ENRICH_SV_XML, b"", 0)
+
+    monkeypatch.setattr(ns.asyncio, "create_subprocess_exec", _fake_exec(behavior))
+    out = asyncio.run(ns._nmap_service_scan("10.0.0.1", [21, 22, 139, 3306]))
+
+    assert set(out) == {21, 22, 139, 3306}
+    assert out[21].product == "vsftpd" and out[21].version == "2.3.4"
+    assert out[3306].product == "MySQL" and out[3306].version == "5.0.51a"
+
+
+def test_nmap_service_scan_empty_on_no_ports():
+    assert asyncio.run(ns._nmap_service_scan("10.0.0.1", [])) == {}
+
+
+def test_scan_host_enriches_versionless_recovered_ports(monkeypatch):
+    """The headline fix for THIS issue: a full-range sweep times out (0 ports),
+    the connect scanner recovers the open ports version-less, and the targeted -sV
+    enrichment then fills in product/version/CPE — so the inventory columns and CVE
+    mapping are no longer blank on a slow / heavily-filtered host."""
+    calls: list[list] = []
+
+    def behavior(argv):
+        calls.append(argv)
+        # 1st nmap = the full-range primary sweep → times out with zero ports.
+        # Any later nmap = the targeted -sV enrichment on the recovered ports.
+        if len(calls) == 1:
+            return (TIMED_OUT_EMPTY_XML, b"", 0)
+        return (ENRICH_SV_XML, b"", 0)
+
+    monkeypatch.setattr(ns.asyncio, "create_subprocess_exec", _fake_exec(behavior))
+
+    async def fake_connect(host, ports, **kw):
+        # Connect scan proves the ports open, but WITHOUT any version data.
+        want = {21, 22, 139, 3306}
+        return [ns.PortResult(host=host, port=p, state="open")
+                for p in ports if p in want]
+
+    monkeypatch.setattr(ns, "_python_connect_scan", fake_connect)
+    res = asyncio.run(scan_host("10.0.0.1", [21, 22, 139, 3306, 443]))
+
+    by_port = {p.port: p for p in res.open_ports}
+    assert set(by_port) == {21, 22, 139, 3306}
+    # Every recovered port now carries the -sV detail — no more blank columns.
+    assert by_port[21].product == "vsftpd" and by_port[21].version == "2.3.4"
+    assert by_port[22].product == "OpenSSH"
+    assert by_port[139].product == "Samba smbd"
+    assert by_port[3306].product == "MySQL" and by_port[3306].version == "5.0.51a"
+    assert len(calls) >= 2, "expected a targeted -sV enrichment scan after recovery"
+    assert res.is_alive
+
+
+def test_scan_host_skips_enrichment_on_clean_completed_scan(monkeypatch):
+    """No wasted re-scan on the happy path: a clean COMPLETED nmap already ran -sV,
+    so even a version-less open port must NOT trigger a second targeted scan."""
+    calls: list[list] = []
+
+    def behavior(argv):
+        calls.append(argv)
+        return (VERSIONLESS_CLEAN_XML, b"", 0)  # clean, one open port, no version
+
+    monkeypatch.setattr(ns.asyncio, "create_subprocess_exec", _fake_exec(behavior))
+
+    async def fake_connect(host, ports, **kw):  # pragma: no cover - must not fire
+        raise AssertionError("connect scan / enrichment must not run on a clean scan")
+
+    monkeypatch.setattr(ns, "_python_connect_scan", fake_connect)
+    res = asyncio.run(scan_host("10.0.0.1", [9999]))
+
+    assert len(calls) == 1, "a clean completed scan must not trigger an enrichment scan"
+    assert [p.port for p in res.open_ports] == [9999]
+
+
+def test_scan_host_enriches_service_band_first_then_ephemeral_after_settle(monkeypatch):
+    """Both bands get fingerprinted, in a load-bearing order:
+
+      1. the service-band -sV runs BEFORE the full-range completion sweep — on a
+         fragile / slow / emulated host the flood (tens of thousands of connections)
+         leaves it (and the scanner's local port pool) unresponsive, starving any
+         -sV that runs during it (the live "ports show but Service/Version/CVE are
+         blank" bug);
+      2. the freshly-swept ephemeral/high ports then get their OWN -sV — but only
+         after a settle so the flood has drained, otherwise it would be starved too.
+    """
+    events: list[str] = []
+    ephemeral_argv: list[list] = []
+
+    def behavior(argv):
+        joined = " ".join(str(a) for a in argv)
+        if "nmap:primary" not in events:
+            events.append("nmap:primary")           # full-range sweep → times out
+            return (TIMED_OUT_EMPTY_XML, b"", 0)
+        if "50000" in joined:
+            events.append("nmap:enrich-ephemeral")  # 2nd -sV, scoped to the high band
+            ephemeral_argv.append(argv)
+            return (ENRICH_EPHEMERAL_XML, b"", 0)
+        events.append("nmap:enrich-service")        # 1st -sV, the service band
+        return (ENRICH_SV_XML, b"", 0)
+
+    monkeypatch.setattr(ns.asyncio, "create_subprocess_exec", _fake_exec(behavior))
+
+    async def fake_connect(host, ports, **kw):
+        if ports and all(p > ns._SERVICE_PORT_CEILING for p in ports):
+            events.append("connect:ephemeral")      # the flood band
+            return [ns.PortResult(host=host, port=50000, state="open")]
+        events.append("connect:service")
+        return [ns.PortResult(host=host, port=p, state="open")
+                for p in ports if p in {21, 22, 139, 3306}]
+
+    monkeypatch.setattr(ns, "_python_connect_scan", fake_connect)
+
+    # Record the inter-pass settle without actually waiting (keeps the test fast).
+    async def recording_sleep(secs):
+        events.append(f"settle:{secs}")
+
+    monkeypatch.setattr(ns.asyncio, "sleep", recording_sleep)
+    res = asyncio.run(scan_host("10.0.0.1", ns.parse_port_range("1-65535"),
+                                enrich_host_timeout="30s",
+                                ephemeral_enrich_host_timeout="20s"))
+
+    # (1) service-band -sV precedes the ephemeral flood
+    assert events.index("nmap:enrich-service") < events.index("connect:ephemeral"), \
+        "the service-band -sV must precede the ephemeral flood"
+    # (2) a settle of exactly _ENRICH_SETTLE_SECONDS sits between the flood and the
+    #     ephemeral -sV — so the flood can't starve it
+    settle_marker = f"settle:{ns._ENRICH_SETTLE_SECONDS}"
+    assert settle_marker in events, "the inter-pass settle must be honored"
+    assert (events.index("connect:ephemeral")
+            < events.index(settle_marker)
+            < events.index("nmap:enrich-ephemeral")), \
+        "the ephemeral -sV must run AFTER the flood settles"
+    by_port = {p.port: p for p in res.open_ports}
+    assert by_port[21].product == "vsftpd"           # service band enriched
+    assert by_port[3306].product == "MySQL"
+    assert by_port[50000].product == "RPC status"    # ephemeral port NOW enriched too
+    # (3) the ephemeral pass forces a CONNECT scan (-sT): these ports answer a full
+    #     handshake but not a bare SYN on a filtered/emulated host, so a SYN-based
+    #     enrichment (when HEAVEN runs nmap privileged) would see them filtered.
+    assert ephemeral_argv, "the ephemeral -sV pass must have run"
+    assert "-sT" in ephemeral_argv[0], "the ephemeral pass must force a connect scan"
+
+
+def test_scan_host_ephemeral_pass_includes_rpcbind_context(monkeypatch):
+    """The dynamic RPC high ports only resolve when nmap is given the rpcbind port
+    (111) in the same scan — without it a dynamically-assigned RPC port stays
+    `unknown`. The ephemeral enrichment must therefore include any open rpcbind
+    port as CONTEXT (scanned, but not merged over)."""
+    ephemeral_argv: list[list] = []
+
+    def behavior(argv):
+        joined = " ".join(str(a) for a in argv)
+        if "50000" in joined:                        # the ephemeral enrichment pass
+            ephemeral_argv.append(argv)
+            return (ENRICH_EPHEMERAL_XML, b"", 0)
+        return (TIMED_OUT_EMPTY_XML, b"", 0)          # primary sweep → times out
+
+    monkeypatch.setattr(ns.asyncio, "create_subprocess_exec", _fake_exec(behavior))
+
+    async def fake_connect(host, ports, **kw):
+        if ports and all(p > ns._SERVICE_PORT_CEILING for p in ports):
+            return [ns.PortResult(host=host, port=50000, state="open")]
+        # service band: an open rpcbind on 111 (already service-labelled)
+        return [ns.PortResult(host=host, port=111, state="open", service="rpcbind")]
+
+    monkeypatch.setattr(ns, "_python_connect_scan", fake_connect)
+
+    async def instant_sleep(_secs):
+        return None
+
+    monkeypatch.setattr(ns.asyncio, "sleep", instant_sleep)
+    res = asyncio.run(scan_host("10.0.0.1", ns.parse_port_range("1-65535"),
+                                ephemeral_enrich_host_timeout="20s"))
+
+    assert ephemeral_argv, "the ephemeral -sV pass must have run"
+    argv = ephemeral_argv[0]
+    # rpcbind (111) is scanned as CONTEXT alongside the ephemeral target…
+    port_spec = argv[argv.index("-p") + 1]
+    assert "111" in port_spec.split(","), "rpcbind must be scanned as RPC context"
+    assert "50000" in port_spec.split(","), "the ephemeral target must be scanned"
+    # …but the context port is never overwritten by the enrichment merge.
+    by_port = {p.port: p for p in res.open_ports}
+    assert by_port[111].service == "rpcbind"         # context port left intact
+    assert by_port[50000].product == "RPC status"    # ephemeral target enriched
+
+
+def test_scan_network_bounds_enrich_host_timeout_under_budget(monkeypatch):
+    """scan_network must reserve a bounded slice of the deep-scan budget for the
+    targeted enrichment, so primary nmap + connect scan + enrichment all finish
+    inside time_budget (and the host result is kept, not cancelled-and-discarded)."""
+    captured: dict[str, str] = {}
+
+    async def fake_scan_host(host, ports, **kw):
+        captured["enrich"] = kw.get("enrich_host_timeout", "")
+        captured["primary"] = kw.get("host_timeout", "")
+        return ns.HostResult(host=host)
+
+    monkeypatch.setattr(ns, "scan_host", fake_scan_host)
+    asyncio.run(ns.scan_network(
+        ["10.0.0.1"], port_range="1-65535", time_budget=600.0,
+        passive_enrich=False,
+    ))
+    enrich = int(captured["enrich"].rstrip("s"))
+    primary = int(captured["primary"].rstrip("s"))
+    assert 30 <= enrich <= 180, f"enrich host-timeout {enrich}s must be small + bounded"
+    assert primary + enrich < 600, "primary + enrichment must both fit under the budget"
 
 
 # ── 5. stealth timing is bounded + reliable, and budget scales with stealth ────

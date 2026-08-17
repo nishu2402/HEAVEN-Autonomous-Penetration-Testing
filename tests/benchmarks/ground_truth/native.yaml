@@ -50,7 +50,7 @@ vulnerabilities:
 
   - id: cmdi_ip
     endpoint: "/vulnerabilities/exec/"
-    method: GET
+    method: POST
     parameter: ip
     category: cmdi
     subtypes_ok: [os_command_injection]

@@ -22,7 +22,7 @@ def compile_json_report(scan_data: dict, output_path: Optional[str] = None) -> d
         "schema_version": "1.0",
         "tool": {
             "name": "HEAVEN",
-            "version": "2.1.0",
+            "version": "3.0.0",
             "author": "Nisarg Chasmawala (Shroff)"
         },
         "scan_id": scan_data.get("scan_id", str(uuid4())),

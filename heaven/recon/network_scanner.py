@@ -692,6 +692,89 @@ async def _connect_scan_fallback(
     return [by_port[p] for p in sorted(by_port)]
 
 
+async def _nmap_service_scan(
+    host: str,
+    ports: list[int],
+    *,
+    stealth_level: str = "normal",
+    host_timeout: str = "120s",
+    evade: bool = False,
+    connect_scan: bool = False,
+    context_ports: Optional[list[int]] = None,
+) -> dict[int, PortResult]:
+    """Targeted nmap ``-sV -sC`` on a KNOWN-SHORT list of already-open ports.
+
+    This is the enrichment counterpart to the connect-scan fallback. Once the
+    open ports are known — from a full-range ``-sV -sC`` sweep that hit its
+    ``--host-timeout`` (or crashed) on a slow / heavily-filtered / emulated host,
+    with the ports recovered by the built-in connect scanner — a version scan of
+    *just those ports* finishes in seconds where the full-range sweep never could,
+    and restores the service / product / version / CPE / NSE detail that drives
+    the inventory columns and CVE mapping (which keys off product/version/banner).
+
+    ``connect_scan`` forces a TCP connect scan (``-sT``) instead of nmap's default
+    (which is a raw SYN scan when HEAVEN runs nmap privileged, via passwordless
+    sudo / root). The enrichment always targets ports already proven open by a real
+    TCP handshake, so a connect scan is the faithful match — and it is REQUIRED for
+    ports that answer a full connect but not a bare SYN (e.g. the dynamic RPC ports
+    on a filtered / emulated host, which a SYN scan reports as filtered).
+
+    ``context_ports`` are scanned alongside ``ports`` but never returned as targets
+    to merge — they give nmap the context it needs to identify the real targets.
+    The canonical case is rpcbind (111): without it in the same scan, nmap cannot
+    resolve a dynamically-assigned RPC port to its program (status / nlockmgr /
+    mountd …) and leaves it ``unknown``.
+
+    Returns ``{port: PortResult}`` for the ports nmap could parse (each PortResult
+    already carries service/product/version/extrainfo/cpe/banner/fingerprint —
+    see :func:`_parse_nmap_xml`). Best-effort: returns ``{}`` when nmap is absent,
+    crashes, or identifies nothing. Never raises. Does NOT acquire the host
+    semaphore — the caller (``scan_host``) already holds its slot.
+    """
+    if not ports:
+        return {}
+    scan_ports = sorted(set(ports) | set(context_ports or []))
+    port_str = _build_nmap_port_spec(scan_ports)
+    if not port_str:
+        return {}
+    timing = _nmap_timing_args(stealth_level)
+    sudo_prefix = list(_nmap_sudo_prefix())
+    evasion = (
+        _nmap_evasion_args(_have_admin_privileges() or bool(sudo_prefix))
+        if evade else []
+    )
+    scan_type = ["-sT"] if connect_scan else []
+    # -sV ONLY (deliberately no -sC). Service/version/CPE — everything the
+    # inventory columns and CVE mapping need — comes from -sV; the default-script
+    # engine (-sC / NSE) is the slow, occasionally-crashing half and adds nothing
+    # to those fields, so leaving it out keeps this enrichment fast (~20-30s on a
+    # ~30-port list) and reliable enough to finish inside its bounded host-timeout
+    # even on a loaded machine. The primary full-range scan already carries NSE
+    # output for anything it reached.
+    cmd = [
+        *sudo_prefix, "nmap", *scan_type, "-sV", "-Pn", "-p", port_str,
+        "-oX", "-", "--host-timeout", host_timeout, *timing, *evasion, host,
+    ]
+    parsed: Optional[dict] = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _stderr = await proc.communicate()
+        parsed = _parse_nmap_xml(stdout, host) if stdout else None
+    except FileNotFoundError:
+        return {}
+    except Exception:  # noqa: BLE001 - enrichment must never break a scan
+        logger.debug("targeted -sV enrichment failed for %s", host, exc_info=True)
+        return {}
+
+    if not parsed:
+        return {}
+    return {p.port: p for p in parsed["ports"]}
+
+
 def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
     """Parse nmap ``-oX`` output into open ports + OS evidence.
 
@@ -914,6 +997,97 @@ def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
     }
 
 
+def _merge_recovered_ports(
+        host_result: HostResult, recovered: list, ctx: str) -> list[int]:
+    """Union newly-discovered open ports into ``host_result``.
+
+    Adds only ports not already present (never removes or overwrites nmap's own
+    version-rich entries), marks the host alive, and corrects the closed-port tally
+    the perimeter classifier reads. ``ctx`` labels the log line. Returns the sorted
+    list of port numbers actually added (empty when nothing new was found) so the
+    caller can target follow-up enrichment at exactly the new ports.
+    """
+    if not recovered:
+        return []
+    known = {p.port for p in host_result.open_ports}
+    added = [p for p in recovered if p.port not in known]
+    if not added:
+        return []
+    host_result.open_ports = sorted(
+        host_result.open_ports + added, key=lambda p: p.port)
+    host_result.is_alive = True
+    host_result.closed_ports = max(0, host_result.closed_ports - len(added))
+    logger.info(
+        "  ↳ %s found %d open port(s) on %s: %s", ctx, len(added),
+        host_result.host, ", ".join(str(p.port) for p in added))
+    return sorted(p.port for p in added)
+
+
+async def _enrich_versionless_ports(
+    host_result: HostResult,
+    host: str,
+    host_timeout: str,
+    stealth_level: str,
+    evade: bool,
+    only_ports: Optional[list[int]] = None,
+    context_ports: Optional[list[int]] = None,
+    connect_scan: bool = False,
+) -> None:
+    """Fill service/product/version/CPE for the open ports the connect scanner
+    recovered without version data, via a targeted :func:`_nmap_service_scan`.
+
+    Merges nmap's real detection onto each matching port IN PLACE (nmap wins over
+    the bare connect-scan banner; NSE fingerprints are merged). Every port was
+    already proven open by a real handshake, so nothing is fabricated. No-op when
+    no open port is missing version data. When ``only_ports`` is given, the scan is
+    scoped to just those ports (used for the second pass over the freshly-swept
+    ephemeral/high band, so the service band isn't needlessly re-probed).
+
+    ``connect_scan`` and ``context_ports`` are passed straight through to
+    :func:`_nmap_service_scan` (the ephemeral/high-band pass forces ``-sT`` and
+    hands nmap the rpcbind port so dynamic RPC services resolve). The merge is
+    restricted to the targeted (needy) ports, so context ports are never touched.
+    """
+    scope = set(only_ports) if only_ports is not None else None
+    needy = [p.port for p in host_result.open_ports
+             if not p.product and not p.version
+             and (scope is None or p.port in scope)]
+    if not needy:
+        return
+    needy_set = set(needy)
+    enriched = await _nmap_service_scan(
+        host, needy, stealth_level=stealth_level,
+        host_timeout=host_timeout, evade=evade,
+        connect_scan=connect_scan, context_ports=context_ports)
+    filled = 0
+    for pr in host_result.open_ports:
+        if pr.port not in needy_set:
+            continue
+        e = enriched.get(pr.port)
+        if e is None:
+            continue
+        if e.service:
+            pr.service = e.service
+        if e.product:
+            pr.product = e.product
+        if e.version:
+            pr.version = e.version
+        if e.extrainfo:
+            pr.extrainfo = e.extrainfo
+        if e.banner:
+            pr.banner = e.banner
+        if e.cpe:
+            pr.cpe = e.cpe
+        if e.fingerprint:
+            pr.fingerprint = {**pr.fingerprint, **e.fingerprint}
+        if e.product or e.version:
+            filled += 1
+    if filled:
+        logger.info(
+            "  ↳ targeted -sV enrichment identified %d service version(s) on %s "
+            "the full-range sweep could not finish", filled, host)
+
+
 async def scan_host(
     host: str,
     ports: list[int],
@@ -923,6 +1097,8 @@ async def scan_host(
     udp_ports: Optional[list[int]] = None,
     stealth_level: str = "normal",
     host_timeout: str = "30m",
+    enrich_host_timeout: str = "120s",
+    ephemeral_enrich_host_timeout: str = "60s",
     evade: bool = False,
 ) -> HostResult:
     """
@@ -939,6 +1115,18 @@ async def scan_host(
     re-probe of a *known* short port list (e.g. the passive-OSINT confirmation
     step) sets a small value like ``"20s"`` so nmap self-terminates on a
     firewalled host instead of retrying for the full 30-minute default.
+
+    ``enrich_host_timeout`` bounds the follow-up targeted ``-sV`` service scan that
+    runs on a DEGRADED host: when the full-range sweep hits its host-timeout (or
+    crashes) and the connect scanner recovers the ports version-less, a ``-sV`` of
+    just those (now known, short) ports restores service/version/CPE/NSE — the
+    inventory columns and CVE inputs — in seconds. Bounded so it always fits inside
+    the caller's deep-scan budget (see ``scan_network``).
+
+    ``ephemeral_enrich_host_timeout`` bounds the SECOND targeted ``-sV`` that
+    fingerprints the freshly-swept ephemeral/high band (dynamic RPC/OS ports). It
+    runs after a short settle so the completion-sweep flood can't starve it, and is
+    kept shorter than ``enrich_host_timeout`` because that port list is tiny.
     """
     sem = semaphore or asyncio.Semaphore(50)
     host_result = HostResult(host=host)
@@ -1096,7 +1284,9 @@ async def scan_host(
             # case we UNION the connect-scan result with nmap's, so a partial nmap
             # is completed rather than trusted as final, and nmap's richer -sV
             # entries are always kept.
-            if nmap_ran and (not host_result.open_ports or host_timed_out or parsed is None):
+            degraded = nmap_ran and (
+                not host_result.open_ports or host_timed_out or parsed is None)
+            if degraded:
                 if parsed is None:
                     logger.warning(
                         "nmap produced no usable output for %s (crash / parse "
@@ -1110,27 +1300,74 @@ async def scan_host(
                         "completing the inventory with the built-in TCP connect "
                         "scanner.", host,
                     )
-                recovered = await _connect_scan_fallback(
-                    host, ports, timeout=timeout, stealth_level=stealth_level,
-                )
-                # Keep nmap's own (version-rich) ports; add only ports it missed.
-                known = {p.port for p in host_result.open_ports}
-                added = [p for p in recovered if p.port not in known]
-                if added:
-                    host_result.open_ports = sorted(
-                        host_result.open_ports + added, key=lambda p: p.port)
-                    host_result.is_alive = True
-                    # nmap had written these off as filtered/refused (or never
-                    # reached them); correct the closed tally so the perimeter
-                    # classifier / inventory don't describe a wide-open box as
-                    # locked down.
-                    host_result.closed_ports = max(
-                        0, host_result.closed_ports - len(added))
-                    logger.info(
-                        "  ↳ connect-scan recovery found %d open port(s) on %s "
-                        "that nmap missed: %s", len(added), host,
-                        ", ".join(str(p.port) for p in added),
-                    )
+
+                # ORDER MATTERS. Recover + `-sV`-ENRICH the SERVICE band FIRST, then
+                # sweep the ephemeral/high band. The full-range completion sweep
+                # floods the target with tens of thousands of short-lived connections,
+                # which leaves a fragile / emulated / rate-limited host (and the
+                # scanner's own local ephemeral-port pool) unresponsive long enough to
+                # STARVE a follow-up `-sV` — every probe dropped, 0 versions returned.
+                # That is exactly the "ports show up but Service/Version/CVE are blank"
+                # symptom. Every CVE-bearing service lives in the service band (plus
+                # the curated high-value ports), so we version-scan it while the host
+                # is still healthy; the ephemeral/high band is only dynamic RPC / OS
+                # ports with no CVE surface, so those legitimately stay version-less.
+                port_set = set(ports)
+                service_ports = sorted(
+                    p for p in port_set
+                    if p <= _SERVICE_PORT_CEILING or p in _ALWAYS_PROBE_PORTS)
+                ephemeral_ports = sorted(port_set - set(service_ports))
+                # A request confined to the high range has no separate flood band —
+                # recover + enrich it directly (it's small, so it can't flood).
+                if not service_ports:
+                    service_ports, ephemeral_ports = ephemeral_ports, []
+
+                if service_ports:
+                    # common-first: this bails cheaply on a dead host (no full sweep),
+                    # so it stays safe per-host inside a CIDR range.
+                    recovered = await _connect_scan_fallback(
+                        host, service_ports, timeout=timeout,
+                        stealth_level=stealth_level)
+                    _merge_recovered_ports(
+                        host_result, recovered, "connect-scan recovery")
+
+                # Enrich the version-less open ports NOW — before the ephemeral flood
+                # — while the host is still responsive.
+                if host_result.open_ports:
+                    await _enrich_versionless_ports(
+                        host_result, host, enrich_host_timeout,
+                        stealth_level, evade)
+
+                # Completion sweep of the ephemeral/high band for a full inventory,
+                # but ONLY once the host proved alive in the service band (a dead host
+                # answered nothing → skip the expensive sweep). Runs AFTER the
+                # service-band enrichment so its flood can't starve THAT `-sV`.
+                if host_result.open_ports and ephemeral_ports:
+                    rest = await _python_connect_scan(
+                        host, ephemeral_ports, timeout=timeout,
+                        stealth_level=stealth_level)
+                    newly = _merge_recovered_ports(
+                        host_result, rest, "ephemeral-range sweep")
+                    # Fingerprint the freshly-discovered high ports too — but only
+                    # after a short settle so the flood (and the local port pool) has
+                    # drained; a `-sV` fired immediately after the flood is starved
+                    # just like the first pass. Scoped to just the new ports (a
+                    # handful of dynamic RPC/OS services). Two things make these
+                    # resolve where the primary sweep couldn't: a forced connect scan
+                    # (`-sT` — they answer a full handshake but not a bare SYN on a
+                    # filtered/emulated host), and handing nmap the rpcbind port(s) as
+                    # context so a dynamic RPC port maps to its program (status /
+                    # nlockmgr / mountd …) instead of staying `unknown`.
+                    if newly:
+                        if _ENRICH_SETTLE_SECONDS > 0:
+                            await asyncio.sleep(_ENRICH_SETTLE_SECONDS)
+                        rpc_ctx = sorted({
+                            p.port for p in host_result.open_ports
+                            if p.port == 111 or p.service == "rpcbind"})
+                        await _enrich_versionless_ports(
+                            host_result, host, ephemeral_enrich_host_timeout,
+                            stealth_level, evade, only_ports=newly,
+                            context_ports=rpc_ctx, connect_scan=True)
 
         except FileNotFoundError:
             # No nmap on PATH — fall back to the built-in pure-Python TCP connect
@@ -1255,6 +1492,24 @@ _ALWAYS_PROBE_PORTS: frozenset[int] = frozenset(_LIVENESS_PROBE_PORTS) | frozens
     1521, 9200, 5984, 11211, 9042, 9300,    # Oracle / ES / CouchDB / memcached / Cassandra
     2077, 2078, 8443, 10000,                # cPanel WebDAV / https-alt / Webmin
 })
+
+# The upper bound of the "service band": ports at or below this (plus the curated
+# high-value ports above) are where real, CVE-bearing services live. When a
+# degraded scan (nmap timed out / crashed) is recovered by the connect scanner, the
+# service band is recovered AND -sV-enriched FIRST — before the full-range
+# completion sweep floods the target and starves the follow-up version scan (see
+# scan_host). Ports above this that aren't curated high-value ports are treated as
+# ephemeral / dynamic (RPC, OS) ports; they're fingerprinted by a SECOND targeted
+# -sV that runs only AFTER the completion sweep has settled (see below).
+_SERVICE_PORT_CEILING = 10000
+
+# After the ephemeral/high-band completion sweep floods the target, the host (and
+# the scanner's own local ephemeral-port pool, which fills with TIME_WAIT entries)
+# needs a moment to recover before a SECOND targeted -sV on the freshly-discovered
+# high ports can succeed — fired immediately, its probes are dropped exactly like
+# the starved first pass. This settle is paid only on the degraded path, and only
+# when the flood actually discovered new high ports worth fingerprinting.
+_ENRICH_SETTLE_SECONDS = 12.0
 
 
 async def _nmap_ping_sweep(
@@ -1444,11 +1699,35 @@ async def scan_network(
             "paranoid": 4.0, "stealth": 2.0, "normal": 1.0,
             "aggressive": 1.0, "loud": 1.0,
         }.get(str(stealth_level).strip().lower(), 1.0)
+        # Reserve for the targeted -sV enrichment that runs AFTER the connect-scan
+        # recovery on a degraded host (a full-range sweep couldn't finish, so the
+        # recovered ports are version-less). The port list is tiny, so this is
+        # small and bounded; scale it by the stealth factor (quieter = slower
+        # probes). Carving it out of the budget keeps the whole scan_host — primary
+        # nmap + connect scan + enrichment — finishing INSIDE time_budget so its
+        # result is kept, never the cancelled-and-discarded case.
+        _enrich_secs = int(max(30.0, min(180.0, 120.0 * _stealth_ceiling)))
+        # The SECOND -sV pass fingerprints the freshly-swept ephemeral/high band (a
+        # tiny port list, but dynamic RPC ports need nmap's full version-intensity
+        # RPC grind, which is slow on a fragile / emulated host — ~2min — so it gets
+        # a generous ceiling). Reserve BOTH passes plus the inter-pass settle so the
+        # whole scan_host still finishes inside budget. This lowers the PRIMARY nmap
+        # ceiling, which is fine: a healthy host finishes a full-range -sV -sC well
+        # inside it, and a slow host that would blow past it degrades to the connect
+        # scan + enrichment anyway — so the reserve just makes that handoff earlier.
+        _ephemeral_enrich_secs = int(max(45.0, min(150.0, 130.0 * _stealth_ceiling)))
+        _enrich_reserve = (
+            float(_enrich_secs) + _ENRICH_SETTLE_SECONDS + float(_ephemeral_enrich_secs))
         _nmap_ceiling = 240.0 * _stealth_ceiling
-        _nmap_host_secs = int(max(60.0, min(_nmap_ceiling, time_budget - _connect_reserve)))
+        _nmap_host_secs = int(max(
+            60.0, min(_nmap_ceiling, time_budget - _connect_reserve - _enrich_reserve)))
         nmap_host_timeout = f"{_nmap_host_secs}s"
+        enrich_host_timeout = f"{_enrich_secs}s"
+        ephemeral_enrich_host_timeout = f"{_ephemeral_enrich_secs}s"
     else:
         nmap_host_timeout = "30m"
+        enrich_host_timeout = "120s"
+        ephemeral_enrich_host_timeout = "60s"
 
     # ── Host-discovery sweep for broad ranges ─────────────────────────────────
     # A /24 expands to 254 addresses, most of them dead. Under -Pn (which we use
@@ -1497,7 +1776,8 @@ async def scan_network(
         result = await scan_host(
             host, ports, timeout=timeout, semaphore=sem,
             include_udp=include_udp, stealth_level=stealth_level, evade=evade,
-            host_timeout=nmap_host_timeout,
+            host_timeout=nmap_host_timeout, enrich_host_timeout=enrich_host_timeout,
+            ephemeral_enrich_host_timeout=ephemeral_enrich_host_timeout,
         )
         if not isinstance(result, HostResult):
             return None

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "heaven-pentest"
-version = "2.1.0"
-description = "HEAVEN — autonomous penetration-testing framework with AI-driven attack-chain planning, continuous monitoring, SAST/DAST, and 42 CLI commands"
+version = "3.0.0"
+description = "HEAVEN — autonomous penetration-testing framework with AI-driven attack-chain planning, continuous monitoring, SAST/DAST, and 55 CLI commands"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -23,7 +23,7 @@ maintainers = [
 dependencies = [
     # Core async
     "uvloop>=0.19.0; sys_platform != 'win32'",
-    "aiohttp>=3.14.1",  # 3.14.1 fixes 11 CVEs incl. request smuggling (pip-audit)
+    "aiohttp>=3.14.3",  # floor patched: request smuggling + 2026 advisories (OSV/pip-audit)
     "aiofiles>=23.2.0",
     # Database
     "asyncpg>=0.29.0",
@@ -35,7 +35,7 @@ dependencies = [
     "websockets>=12.0",
     "slowapi>=0.1.9",
     # ML / Data — xgboost-cpu avoids the 300+MB nvidia-nccl wheel; macOS still gets full xgboost
-    "scikit-learn>=1.4.0",
+    "scikit-learn>=1.5.0",  # floor patched: GHSA-jw8x-6495-233v (OSV)
     "xgboost-cpu>=2.0.0; sys_platform != 'darwin'",
     "xgboost>=2.0.0; sys_platform == 'darwin'",
     "numpy>=1.26.0",
@@ -47,16 +47,16 @@ dependencies = [
     "pydantic>=2.6.0",
     "pydantic-settings>=2.14.2",  # 2.14.2 fixes GHSA-4xgf-cpjx-pc3j (pip-audit)
     "rich>=13.7.0",
-    "click>=8.1.0",
+    "click>=8.3.3",  # floor patched: PYSEC-2026-2132 (OSV)
     "rich-click>=1.7.0",
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.2.2",  # floor patched: PYSEC-2026-2270 (OSV)
     "httpx>=0.27.0",
     "hypothesis>=6.152.4",
     # Security + the default offline data store. These power the documented
     # out-of-the-box experience (JWT sessions, vault encryption, SQLite mode),
     # so they belong in the base install rather than an extra.
-    "pyjwt>=2.8.0",
-    "cryptography>=42.0.0",
+    "pyjwt>=2.13.0",       # floor patched: multiple JWT advisories (OSV)
+    "cryptography>=50.0.0",  # floor patched: incl. 2026 advisories thru 49.x (OSV)
     "aiosqlite>=0.19.0",
     "defusedxml>=0.7.1",          # XXE-safe XML parsing (untrusted pom.xml / nmap output)
     "cvss>=3.0",                  # reference-grade CVSS v4.0 base scoring (v3.1 is in-house)
@@ -69,13 +69,13 @@ dependencies = [
     # and heavyweight GCP/Azure SDKs remain opt-in. All of the following ship
     # prebuilt wheels for every supported platform, so the base install stays
     # wheel-only (no compilers).
-    "dnspython>=2.6.0",           # DNS enumeration (recon)
-    "scapy>=2.5.0",               # raw-packet probes (recon)
-    "jinja2>=3.1.3",              # HTML report templating (reports)
+    "dnspython>=2.6.1",           # DNS enumeration (recon); floor patched (OSV)
+    "scapy>=2.7.0",               # raw-packet probes (recon); floor patched (OSV)
+    "jinja2>=3.1.6",              # HTML report templating (reports); floor patched: CVE-2026-* template advisories (OSV)
     "reportlab>=4.0.0",           # PDF reports (reports)
     "tabulate>=0.9.0",            # table rendering (reports/CLI)
     "impacket>=0.11.0",           # SMB/Kerberos lateral movement (lateral)
-    "asyncssh>=2.14.0",           # SSH credential testing (lateral)
+    "asyncssh>=2.14.2",           # SSH credential testing (lateral); floor patched (OSV)
     "ldap3>=2.9.1",               # LDAP/AD enumeration (lateral)
     "pywinrm>=0.4.3",             # WinRM credential validation (lateral)
     "docker>=7.0.0",              # container recon (deploy)
@@ -103,17 +103,17 @@ Changelog     = "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Test
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
+    "pytest>=9.0.3",       # floor patched (OSV)
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "black>=24.0.0",
+    "black>=26.3.1",       # floor patched (OSV)
     "ruff>=0.2.0",
     "mypy>=1.8.0",
     # Flask backs the native offline vulnerable-app test target
     # (tests/benchmarks/native/vuln_app.py). Without it the native detector and
     # benchmark tests skip at collection — which both hides them from CI and made
     # the collected test count environment-dependent (CI counted 11 fewer).
-    "flask>=3.0.0",
+    "flask>=3.1.3",  # floor patched (OSV)
     # google-genai backs the Gemini gateway regression tests
     # (tests/test_llm_gateway_gemini.py), which import real `google.genai.types`
     # (GenerateContentConfig/ThinkingConfig) to assert the dispatch path. Without
@@ -138,7 +138,7 @@ cloud-gcp = [
 ]
 cloud-azure = [
     "azure-mgmt-compute>=30.0.0", "azure-mgmt-storage>=21.0.0",
-    "azure-identity>=1.15.0",              # DefaultAzureCredential
+    "azure-identity>=1.16.1",              # DefaultAzureCredential; floor patched (OSV)
     "azure-mgmt-authorization>=4.0.0",     # subscription-scope RBAC audit
     "azure-mgmt-resource>=23.0.0",         # subscription auto-resolution
 ]
@@ -157,9 +157,9 @@ llm = ["google-genai>=1.0.0", "anthropic>=0.39.0", "openai>=1.40.0"]
 # already-satisfied subsets of `dependencies` above; `pip install -e ".[recon]"`
 # still resolves for anyone with it in their scripts. The only genuine opt-ins
 # left are dev tooling, the alternate LLM providers, and the heavy GCP/Azure SDKs.
-recon = ["dnspython>=2.6.0", "scapy>=2.5.0"]
-reports = ["jinja2>=3.1.3", "reportlab>=4.0.0", "tabulate>=0.9.0"]
-lateral = ["impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1", "pywinrm>=0.4.3"]
+recon = ["dnspython>=2.6.1", "scapy>=2.7.0"]
+reports = ["jinja2>=3.1.6", "reportlab>=4.0.0", "tabulate>=0.9.0"]
+lateral = ["impacket>=0.11.0", "asyncssh>=2.14.2", "ldap3>=2.9.1", "pywinrm>=0.4.3"]
 # MITRE ATT&CK mapping ships a bundled dataset and talks TAXII over plain HTTP,
 # so it needs no extra pip packages — hence there is no `mitre` extra.
 deploy = ["docker>=7.0.0", "kubernetes>=29.0.0"]
@@ -170,9 +170,9 @@ cloud-aws = ["boto3>=1.34.0"]
 # (install [cloud-aws] / [cloud-gcp] / [cloud-azure] on their own) —
 # `pip install -e ".[all]"`
 all = [
-    "dnspython>=2.6.0", "scapy>=2.5.0",
-    "jinja2>=3.1.3", "reportlab>=4.0.0", "tabulate>=0.9.0",
-    "impacket>=0.11.0", "asyncssh>=2.14.0", "ldap3>=2.9.1", "pywinrm>=0.4.3",
+    "dnspython>=2.6.1", "scapy>=2.7.0",
+    "jinja2>=3.1.6", "reportlab>=4.0.0", "tabulate>=0.9.0",
+    "impacket>=0.11.0", "asyncssh>=2.14.2", "ldap3>=2.9.1", "pywinrm>=0.4.3",
     "docker>=7.0.0", "kubernetes>=29.0.0",
     "apscheduler>=3.10.0", "alembic>=1.13.0",
     "playwright>=1.40.0",

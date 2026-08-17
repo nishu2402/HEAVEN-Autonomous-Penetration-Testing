@@ -7,10 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [3.0.0] — 2026-08-17
 
 ### Added
 
+- **OWASP Testing Guide (WSTG v4.2) coverage is now fully automated — every
+  technical test runs a real detector.** The `§ Methodology Coverage` OWASP page
+  previously marked ~half of the 86 technical WSTG tests as *manual/partial*.
+  Root cause: two scanners that run on every web scan (`web_fuzzer`,
+  `misconfig_scanner`) emitted real, confirmation-based findings but were never
+  wired into the methodology map, and the mapping doc credited several tests to
+  the wrong module. That is fixed, and the remaining genuine gaps were filled
+  with new, evidence-only probes:
+    - **New `heaven/vulnscan/client_audit.py`** — static analysis of a page's own
+      HTML + inline/linked JS: source/comment secret review (WSTG-INFO-05),
+      DOM-XSS source→sink (CLNT-01/02), insecure `postMessage` (CLNT-11),
+      sensitive `localStorage`/`sessionStorage` (CLNT-12), XSSI (CLNT-13), CSS
+      injection (CLNT-05), client-side resource manipulation (CLNT-06), legacy
+      Flash (CLNT-08). Wired into the web scan phase.
+    - **`misconfig_scanner`** gains dedicated clickjacking (CLNT-09), RIA
+      cross-domain policy (CONF-08), password-field autocomplete (ATHN-05),
+      sensitive-page cache-control (ATHN-06), session-token-in-URL (SESS-04) and
+      a conservative CBC padding-oracle probe (CRYP-02).
+    - **`web_fuzzer`** gains SSI injection (INPV-08) and mail-header/CRLF
+      injection (INPV-10); **`auth_scanner`** gains open-registration/provisioning
+      (IDNT-02/03), security-question reset (ATHN-08) and alternate-auth-channel
+      (ATHN-10) surrogates; **`injection_scanner`** gains a stored-XSS
+      inject-and-refetch probe (INPV-02/14).
+  All new finding types carry full OWASP-2025 / CWE / CVSS taxonomy. The page now
+  reports **86/86 technical tests automated**; only **Business Logic** remains
+  analyst-led (it requires application-specific domain knowledge — HEAVEN never
+  fabricates a verdict it cannot evidence). Verified live against a
+  Metasploitable 2 target (84/86 rows exercised with real findings; the two
+  unlit rows genuinely have no footprint on that host).
+- **Every remaining Methodology Coverage framework is now fully automated too —
+  honestly.** The nine non-WSTG standards (NIST SP 800-115, PTES, Cyber
+  Essentials + Plus, ISO/IEC 27001:2022, PCI DSS v4.0.1, CIS Controls v8.1, NIST
+  CSF 2.0, SOC 2) previously showed large *partial/manual* counts. The cause was
+  the same family of mapping bugs as WSTG: a real emitter left unmapped
+  (`heaven/recon/firewall_detector.py`'s `perimeter_defense` lit no row — now
+  wired), a literal-pipe table-parsing bug (NIST §6.3), real tool features not
+  named in their cell (NIST §6.5/§6.6/§8.3, PTES target-selection/RoE/pillaging),
+  over-modest "partial" qualifiers on detectors that do the whole external job,
+  and a wrong module path (`devsecops.sca_scanner` → `vulnscan.sca_scanner`).
+  Every **technically-assessable** control is now genuine **AUTO**, named to a
+  real, pre-existing detector (`network_exposure`, `cve_mapper`, `eol_scanner`,
+  `sca_scanner`, `sbom`, `inventory`, `access_control`, `firewall_detector`,
+  `watcher`, `alerting`, `retest_report`, …). Controls no remote/credentialed
+  scan can evidence (governance, physical, endpoint anti-malware, target-side
+  audit-logging, social engineering, on-wire sniffing, MFA/IdP config) are
+  consolidated per theme into an honest **out-of-band (analyst-attested)** prose
+  note — 0 counted rows, exactly like WSTG's Business Logic, never fabricated as a
+  scan result. All ten standards now report **0 partial / 0 manual**. Verified
+  live against Metasploitable 2 + DVWA (`192.168.0.162`).
 - **Firewall / IDS-IPS aware scanning — still get findings through a filtering
   perimeter.** The network scanner now tells a stateful firewall (which *drops*
   probes → nmap `filtered`) apart from a normal host (which *refuses* them → TCP
@@ -167,8 +216,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without ever overwriting richer active data. Versions on TLS/non-bannering ports
   that returned no data stay blank — inventing them would be fabrication.
 
+- **Active verification promotes Potential findings to Confirmed via safe,
+  read-only probes.** A version banner does not prove exploitability (vendors
+  backport fixes without bumping it). For a curated set of well-known CVEs — Apache
+  path-traversal (CVE-2021-41773 / 42013), Shellshock (CVE-2014-6271 / 6278) — a
+  new `heaven/vulnscan/active_verifier.py` runs a non-destructive behavioural probe
+  (read a world-readable file via the traversal; echo a unique canary through the
+  CGI). A probe that fires promotes the finding **Potential → Confirmed**
+  (`validated=True` + `evidence.active_verification`); a negative or absent probe
+  leaves it untouched — never fabricated, never deleted. Authorization-gated and
+  opt-in: `heaven scan --verify` (implied by `--autonomous`) runs it in-pipeline,
+  and `heaven verify --i-have-authorization` re-verifies a stored engagement's
+  Potential findings and persists the proof.
+- **Remediation retest report — Fixed / Still-open / Reintroduced / New.**
+  `heaven retest <baseline> <current>` compares a baseline scan to a later re-scan
+  of the same engagement and renders a client-facing HTML deliverable
+  (`heaven/devsecops/retest_report.py`) with a remediation-rate headline (measured
+  only against the findings that existed at the baseline), plus API endpoints
+  (`GET /api/scans/{id}/retest` and `…/retest.html`) and a Remediation Retest card
+  on the web Scans page. A previously-fixed finding that returns is flagged urgent.
+- **SARIF 2.1.0 + JUnit XML export for CI pipelines.** A dedicated
+  `heaven/devsecops/ci_export.py` emits SARIF with correct `artifactLocation` URIs
+  (the target), `partialFingerprints` (so GitHub/GitLab track a finding across
+  runs), a numeric `security-severity`, CWE/OWASP rule tags and the confirmation
+  status; and JUnit XML where findings at/above `--fail-on` become failing tests so
+  a build can gate. Wired through `heaven export --format sarif|junit`, the
+  `/api/report/export` endpoint and the web Reports page.
+- **Committed benchmark scorecard.** `heaven benchmark --scorecard PATH` writes the
+  headline precision/recall/F1 as a machine-readable JSON artifact
+  (`docs/benchmark_scorecard.json`) so the README, CI and web can cite one
+  canonical, honestly-captioned number.
+- **Confirmation status — Confirmed vs Potential — on every finding, end to
+  end.** A professional test separates what was *proven present* (a header seen
+  in a live response, an open cleartext port, a payload that executed, an
+  anonymous login that succeeded, an authoritative dependency-manifest match)
+  from what is only *inferred* from an unauthenticated service version banner
+  (the backport caveat). One compute-on-read resolver
+  (`heaven.utils.cvss.confirmation_status`) drives it everywhere: the HTML/PDF
+  reports gain a **Confirmation** column and a confirmed/potential split, the web
+  Findings table + Finding detail + Dashboard show a Confirmed/Potential badge,
+  the `/api/*` finding payloads and the dashboard/summary stats carry the label,
+  and `heaven findings` tags each row `CONFIRMED`/`POTENTIAL`. Potential findings
+  are never suppressed — they stay in full, clearly labelled.
+
 ### Changed
 
+- **`heaven update` now genuinely self-updates HEAVEN — not just its detection
+  feeds.** Previously `heaven update` only refreshed Nuclei templates + the NVD
+  delta + the ExploitDB mirror and, by its own docstring, *did not* touch HEAVEN's
+  own code — so when a newer version was published, `heaven update` brought in
+  nothing new about HEAVEN itself. It now, first, brings the install up to the
+  latest released code and then refreshes the detection data:
+    - The standard install is an **editable git checkout** (`git clone` +
+      `scripts/install.sh` → `pip install -e .`), so a fast-forward `git pull`
+      makes the new Python live on the very next `heaven` command. HEAVEN re-runs
+      `pip install -e .` **only when dependencies changed** and rebuilds the web UI
+      **only when the frontend changed** (its built `heaven-ui/dist/` is gitignored,
+      so a plain pull would otherwise leave the UI stale). It reports the real
+      `vX → vY` bump.
+    - **It never destroys uncommitted work:** a dirty working tree is *refused*
+      (with the exact files listed) unless you pass `--force`, which stashes →
+      fast-forwards → pops non-destructively. It only ever *fast-forwards* — never a
+      merge, rebase, or `reset --hard` — and never claims success on a failed pull.
+    - **Honest about non-git installs:** a release tarball / Docker image /
+      non-editable pip install can't be updated in place, so HEAVEN says so and
+      points you at the right step instead of pretending it worked.
+    - New flags: `--check` (dry-run: "is a newer version available?"),
+      `--code-only`, `--data-only` (the pre-2.1 behavior), `--force`, `--skip-ui`.
+      The existing `--skip-nuclei` / `--skip-nvd` / `--skip-exploitdb` / `--output`
+      still apply to the detection-data step. Covered by `tests/test_self_update.py`
+      and live-verified end-to-end against a real git fast-forward (v2.0.0 → current).
 - **Network-recon deadline now scales with port breadth.** A full-range sweep of a
   single host earns materially more time (~13 min vs the old ~4 min single-host
   floor) so a `-p- -sV -sC` scan finishes instead of being truncated mid-scan back
@@ -241,7 +358,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never silently drop the common ports. Union-only: it adds coverage, never
   removes a requested port, and is a no-op for a full-range scan.
 
+- **Installers now prefer a well-tested Python interpreter, and `heaven doctor`
+  flags an unvetted one.** HEAVEN's native security dependencies
+  (`asyncssh`↔Nettle, `cryptography`, `numpy`/`scikit-learn`) are only ABI-stable
+  on released Python lines; a brand-new major (e.g. 3.14 in its first months) can
+  crash those C extensions natively — the same root cause as the UMAC segfault
+  below. `scripts/install.sh` and `scripts/install.ps1` now pick the newest
+  known-good interpreter they can find (Python 3.13 → 3.12 → 3.11) before falling
+  back to whatever `python3`/`py` resolves to, and warn (without failing) when the
+  chosen interpreter is newer than the tested range (3.11–3.13), telling the
+  operator to use 3.12/3.13 if they hit a native crash. `heaven doctor` gained a
+  matching runtime check: it reports `python_supported` and, on an untested
+  interpreter, surfaces a header warning and a top "rebuild your venv on Python
+  3.12 or 3.13" next-step. The supported range is now documented in the README.
+
+- **Overall Risk is now rated from confirmed findings only.** A hardened target
+  whose only "Critical" is an unauthenticated, version-based CVE match no longer
+  shows an inflated **Critical** headline — the rating reflects the worst
+  *confirmed* finding, while the potential critical still appears in the findings
+  list (as `Critical · Potential`) and the executive summary calls out how many
+  potential findings need verification. Applies consistently to the reports, the
+  dashboard headline and the engagement summary.
+- **Web-tier EOL + CVE detection from HTTP response headers (the "outdated PHP"
+  gap).** An end-of-life PHP disclosed only in `X-Powered-By: PHP/5.2.4` or a
+  `Server:` header was never flagged, because the EOL scanner and CVE mapper read
+  only nmap-derived `open_ports[].product/version`. A new
+  `heaven/recon/web_tech.py` extracts versioned components from response headers
+  (PHP, Apache, nginx, OpenSSL, IIS, Tomcat … — only when a real version is
+  present, never guessed) and runs them through the **existing** `eol_scanner`
+  (CWE-1104 `unsupported_software`) and `cve_mapper`, so a header-disclosed EOL or
+  CVE-bearing component now surfaces exactly like an nmap-detected one — findings
+  carry an honest `detection_source: http_response_header` provenance (kept
+  distinct from the CVE mapper's own match `source`). Wired into the web scan
+  phase; web components are attached to the Host & Service Inventory
+  (`PHP 5.2.4 (web, X-Powered-By header)`). Verified live against Metasploitable 2
+  (`192.168.0.162`): Apache 2.2.8 + OpenSSL 0.9.8 + PHP 5.2.4 → 3 EOL findings +
+  the mapped PHP/OpenSSL CVEs.
+- **Dynamic, faithful reproduction per finding — curl + raw HTTP request, or a
+  class-appropriate command.** The "Reproduce / Paste as request" block used to
+  emit a bogus `curl -i http://host:3306` for DNS/DB/TLS/host findings that made
+  no HTTP request, and never rendered the raw request its label promised. Now
+  `evidence.package_finding` decides per finding: a real HTTP finding gets a
+  **faithful curl** (method, param + proof-payload folded into the exact
+  URL/body) **and** a **raw HTTP/1.1 request** for Burp Repeater's *Paste as
+  request*, both built from the same transaction; a non-HTTP finding gets a
+  read-only, class-appropriate command (`openssl s_client`, `dig`, `nmap`,
+  `redis-cli`, `smbclient`, `mysql`, …) or an honest "observed via …; no
+  single-command reproduction" note — **never** a fabricated curl. Surfaced
+  through the evidence API (`is_http`, `raw_http_request`, `repro_command`,
+  `repro_note`), the Finding-detail Reproduce card (each block with its own Copy
+  button) and `heaven findings replay`.
+
+- **Cyber Kill Chain — real phase coverage.** Many `vuln_type` slugs the scanners
+  actually emit (`cmdi`, `missing_authentication`, `database_exposed`,
+  `docker_api_exposed`, `kubelet_exposed`, `perimeter_defense`,
+  `unsupported_software`, `telnet`, `smtp_open_relay`, k8s/ICS/IPMI exposures …)
+  were absent from `VULN_KILLCHAIN_MAP`, so those findings fell through to the
+  default *Reconnaissance* bucket and the **Weaponization / Installation /
+  Command-&-Control** phases stayed structurally dark. The map was grounded by
+  grepping every emitter and extended so each real slug resolves to the phase(s)
+  its exposure enables (reporting-only — the module never executes a phase; a
+  *good* control like "SPF present" is deliberately never mapped as an attacker
+  enabler). A realistic finding set now lights all seven phases.
+
 ### Fixed
+
+- **POST-form command injection is now exercised by the default test gate — the
+  Docker-free benchmark modelled DVWA's exec page as a GET form, so a regression
+  in POST command-injection handling could have shipped green.** Real
+  command-injection sinks (DVWA's `/vulnerabilities/exec/` and most ping-style
+  forms) POST their input; a live authenticated DVWA scan confirms HEAVEN detects
+  it (the crawler extracts the `ip` POST vector, `build_injection_targets` builds
+  the POST form, and `_test_cmdi_param(post=True)` confirms via the reflection-safe
+  `uid=` signal). But the native benchmark's exec endpoint was a **GET** form, so
+  the perfect-score recall floor never actually covered the POST path. Fixed:
+  `tests/benchmarks/native/vuln_app.py` now models exec as a faithful `method="post"`
+  form (reads `$_REQUEST`-style `request.values`) and the ground truth
+  (`native.yaml`) marks it POST — the default-gate benchmark now genuinely
+  exercises POST command injection end-to-end and still scores 100% precision /
+  recall / F1. Added `tests/test_injection_post_cmdi.py` (flask-free) pinning the
+  POST-cmdi path — the wiring (`build_injection_targets` extracts the POST `ip`
+  vector), the confirmation (uid= over POST → `cmdi`/CWE-78), and a benign-POST
+  negative control (no false positive). No detection-logic change was needed: the
+  capability was already correct; this closes the *coverage* gap so it stays that
+  way. (Note: against an emulated amd64-on-arm64 DVWA saturated by concurrent scan
+  phases, the exec probe — which triggers a slow server-side `ping -c 4` — can time
+  out and be missed intermittently; that is a target-saturation artifact of the
+  emulated fixture, not a detection or pipeline defect — the cmdi finding survives
+  dedup/suppression identically to SQLi.)
+- **CVE version-matching no longer flags ancient software with modern-branch CVEs
+  (major false-positive class, found live vs Metasploitable 2).** An
+  upper-bound-only curated spec (`<8.3.8`, `<=2.4.39`) matched *any* version below
+  the ceiling, so PHP **5.2.4** collected PHP 7/8 CVEs (incl. CVE-2024-4577 "PHP
+  CGI RCE on **Windows**") and Apache **2.2.8** collected Apache 2.4-only CVEs
+  (mod_http2 / mod_lua / mod_proxy). Fixes: (a) `specs_match_version` now treats a
+  record's multiple `<=`/`<` ceilings as *per-branch* fix levels — a version only
+  matches within its own `major.minor` (or `major`, for PostgreSQL-style 2-part
+  ceilings) branch, so 5.2.4 / 5.0.51 are excluded from 7/8 / 5.7/8.0 branch CVEs
+  while in-branch and two-sided windows are unchanged; (b) the Apache inline
+  records carry honest lower bounds (`>=2.4.0`) and the two CVEs that genuinely
+  span 2.2 (mod_mime CVE-2017-7679, Optionsbleed CVE-2017-9798) use explicit 2.2 +
+  2.4 branch ranges (so 2.2.8 gets those *real* CVEs, not the fake 2.4 ones);
+  (c) OpenSSH records gained real lower bounds — CVE-2021-41617 `>=6.2` and
+  CVE-2023-38408 `>=5.4` (its ssh-agent PKCS#11 code path did not exist before
+  5.4) — so an OpenSSH 4.7p1 keeps only its genuine CVEs. `tests/test_cve_version_fp.py`.
+- **Live CVE feed no longer asserts misattributed CVEs on version-less services.**
+  A version-less service ("vnc", "telnet") pulled specific CVEs by product-NAME
+  keyword — RealVNC-on-Windows onto a Linux VNC, GNU-inetutils telnetd onto netkit
+  telnetd. The feed path now emits an individual finding only for a
+  *version-confirmed* range match and collapses the unconfirmed keyword remainder
+  into a single honest low `potential_vulnerable_service` finding (mirroring the
+  inline version-less collapse) instead of N speculative Criticals.
+- **SSL/TLS audit no longer floods plain-HTTP port 80 until the phase times out.**
+  The audit derived a target from every crawled URL, defaulting an `http://` URL
+  to `host:80` and never de-duplicating — so a crawl of a plain-HTTP host queued
+  dozens of identical `:80` TLS probes that exhausted the 300s budget and produced
+  nothing. It now audits only `https://` URLs (a cleartext URL has no TLS to
+  audit) plus real TLS ports found by the network scan, and `scan_ssl_targets`
+  de-duplicates defensively. `tests/test_ssl_target_selection.py`.
+- **Cyber Kill Chain now lights Command & Control / Installation for backdoors.**
+  A vsftpd 2.3.4 / UnrealIRCd command-execution backdoor or a root bindshell
+  classifies as a generic `vulnerable_service` (Weaponization + Exploitation), so
+  the C2 phase stayed dark on a host defined by its backdoors. Explicit
+  backdoor / bindshell / web-shell / root-shell language now also lights
+  Installation + Command & Control (evidence-gated — ordinary findings are never
+  promoted). `tests/test_killchain_phase_coverage.py`.
 
 - **Network scan no longer hangs and then reports 0 findings on a slow /
   heavily-filtered host (e.g. Metasploitable in a VM).** A full-range
@@ -268,6 +509,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `192.168.0.162` (UTM/QEMU): **0 → 54 findings (9 critical)** including the
   vsftpd 2.3.4 backdoor (CVE-2011-2523), telnetd `-f root` auth bypass, Apache
   SSRF, and OpenSSH agent RCE.
+
+- **Service / Version / CPE / CVE columns no longer come back blank after that
+  recovery.** With the ports recovered, the *next* layer surfaced: the built-in
+  connect scanner proves a port OPEN but does no `-sV`, so the recovered ports had
+  no `product` / `version` / `cpe` — which left the inventory's Service / Version /
+  CPE columns empty and starved CVE mapping (it keys off product/version/banner),
+  so only the two or three ports that happen to emit a text banner (FTP/SSH/HTTP)
+  got a CVE. A full-range `-sV` can't finish on such a host, but nmap has no trouble
+  on a **short explicit port list**, so HEAVEN now runs a targeted `nmap -sV`
+  (`_nmap_service_scan`) on the recovered open ports and merges the real
+  service/version/CPE detail back onto them — exactly what a manual `nmap -sV`
+  shows, in ~15 s. The **ordering is load-bearing**: the version scan runs on the
+  *service band* (the low ports + curated high-value ports, where every CVE-bearing
+  service lives) **before** the full-range completion sweep. That sweep floods the
+  target with tens of thousands of short-lived connections, which leaves a fragile /
+  emulated / rate-limited host — and the scanner's own local ephemeral-port pool —
+  unresponsive; a `-sV` that ran *after* it was starved and came back completely
+  empty (found live vs the VM: 0/30 enriched). Enriching the service band first
+  sidesteps that entirely. The ephemeral/high band (dynamic RPC / OS ports) is then
+  swept and given its **own** targeted pass — but only after a short settle lets the
+  flood drain, and with two things the primary sweep lacked: a forced **connect
+  scan** (`-sT` — these ports answer a full handshake but not a bare SYN on a
+  filtered / emulated host, so a privileged SYN scan reports them `filtered`) and
+  the **rpcbind port (111) handed to nmap as context**, without which a dynamically
+  assigned RPC port can't be resolved and stays `unknown`. Enrichment fires
+  **only** on the degraded path (a sweep that timed out / crashed), never
+  re-scanning a host that already completed `-sV`, and is budgeted so the whole
+  per-host scan still finishes inside the deep-scan `time_budget`. Live vs the real
+  Metasploitable 2 VM at `192.168.0.162` (UTM/QEMU): the service ports went from
+  **product 0/30, version 0/30** to full identification — vsftpd 2.3.4, OpenSSH
+  4.7p1, telnetd, Postfix, ISC BIND 9.4.2, Apache 2.2.8, Samba 3.0.20, ProFTPD
+  1.3.1, MySQL 5.0.51a, distccd, PostgreSQL 8.3, UnrealIRCd, Tomcat, Ruby DRb — and
+  the four dynamic RPC high ports (43967/52107/55016/57901), formerly blank, now
+  resolve to **java-rmi / status / nlockmgr / mountd** (`service=30/30`), with CVE
+  mapping covering the full service surface, not just FTP/SSH/HTTP. Every enriched
+  port was already proven open by a real handshake — no service, version or CVE is
+  invented.
 
 - **SSH credential spray no longer fabricates a "Default Credentials" finding
   from the auditor's own key or a permissive server.** `CredentialSprayer.
@@ -419,7 +697,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confusion.** The header read `Benchmark: HEAVEN vs. heaven-native-vuln-app
   v1.0` — that `v1.0` is the *target app's* own version, but with HEAVEN's
   version absent it looked like HEAVEN was stuck at v1.0. The title now reads
-  `Benchmark: HEAVEN v2.1.0 vs. heaven-native-vuln-app v1.0`, so it's clear the
+  `Benchmark: HEAVEN v3.0.0 vs. heaven-native-vuln-app v1.0`, so it's clear the
   tool is on 2.1.0 and the labelled target reproduction is its own v1.0. (The
   scanner version is pulled from `heaven.__version__`, so it stays in sync on
   every release.)
@@ -549,24 +827,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A throttled key now degrades a scan to its (excellent) non-LLM output in seconds
   rather than minutes.
 
-### Changed
-
-- **Installers now prefer a well-tested Python interpreter, and `heaven doctor`
-  flags an unvetted one.** HEAVEN's native security dependencies
-  (`asyncssh`↔Nettle, `cryptography`, `numpy`/`scikit-learn`) are only ABI-stable
-  on released Python lines; a brand-new major (e.g. 3.14 in its first months) can
-  crash those C extensions natively — the same root cause as the UMAC segfault
-  below. `scripts/install.sh` and `scripts/install.ps1` now pick the newest
-  known-good interpreter they can find (Python 3.13 → 3.12 → 3.11) before falling
-  back to whatever `python3`/`py` resolves to, and warn (without failing) when the
-  chosen interpreter is newer than the tested range (3.11–3.13), telling the
-  operator to use 3.12/3.13 if they hit a native crash. `heaven doctor` gained a
-  matching runtime check: it reports `python_supported` and, on an untested
-  interpreter, surfaces a header warning and a top "rebuild your venv on Python
-  3.12 or 3.13" next-step. The supported range is now documented in the README.
-
-### Fixed
-
 - **Report proofs no longer fabricate an HTTP request/response for findings that
   never made one.** The evidence renderer unconditionally emitted a
   `Request: GET <target>`, a `Response: HTTP 0 (0 bytes)` line, and a `curl`
@@ -677,60 +937,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unaffected, and a genuine on-host banner still reports (now with the observed
   URL recorded in evidence).
 
-### Added
+- **Directory brute-force silently found nothing when ffuf 2.x was installed.**
+  `dir_fuzzer` prefers the ffuf binary when present, but the invocation passed
+  `-silent` — a flag removed in ffuf 2.x — so ffuf aborted with "flag provided
+  but not defined", wrote no output, and the wrapper returned zero, while the
+  working native async engine was skipped precisely *because* ffuf was present.
+  Net effect on a live Metasploitable 2 target: 0 interesting directories where
+  the native engine finds several. Fixed by dropping the unsupported flag and
+  making `_run_ffuf` return `None` on any failure (missing binary, non-zero exit,
+  unparseable output) — distinct from `[]` ("ran, found nothing") — so `fuzz`
+  falls back to the native engine per-target. A target ffuf handled is trusted
+  and never re-scanned. Live-verified: `http://192.168.0.162/` now returns real
+  200/301 hits (`index.php`, `phpinfo.php`, `phpMyAdmin`) across the
+  200/300/403 bands the report expects.
 
-- **Active verification promotes Potential findings to Confirmed via safe,
-  read-only probes.** A version banner does not prove exploitability (vendors
-  backport fixes without bumping it). For a curated set of well-known CVEs — Apache
-  path-traversal (CVE-2021-41773 / 42013), Shellshock (CVE-2014-6271 / 6278) — a
-  new `heaven/vulnscan/active_verifier.py` runs a non-destructive behavioural probe
-  (read a world-readable file via the traversal; echo a unique canary through the
-  CGI). A probe that fires promotes the finding **Potential → Confirmed**
-  (`validated=True` + `evidence.active_verification`); a negative or absent probe
-  leaves it untouched — never fabricated, never deleted. Authorization-gated and
-  opt-in: `heaven scan --verify` (implied by `--autonomous`) runs it in-pipeline,
-  and `heaven verify --i-have-authorization` re-verifies a stored engagement's
-  Potential findings and persists the proof.
-- **Remediation retest report — Fixed / Still-open / Reintroduced / New.**
-  `heaven retest <baseline> <current>` compares a baseline scan to a later re-scan
-  of the same engagement and renders a client-facing HTML deliverable
-  (`heaven/devsecops/retest_report.py`) with a remediation-rate headline (measured
-  only against the findings that existed at the baseline), plus API endpoints
-  (`GET /api/scans/{id}/retest` and `…/retest.html`) and a Remediation Retest card
-  on the web Scans page. A previously-fixed finding that returns is flagged urgent.
-- **SARIF 2.1.0 + JUnit XML export for CI pipelines.** A dedicated
-  `heaven/devsecops/ci_export.py` emits SARIF with correct `artifactLocation` URIs
-  (the target), `partialFingerprints` (so GitHub/GitLab track a finding across
-  runs), a numeric `security-severity`, CWE/OWASP rule tags and the confirmation
-  status; and JUnit XML where findings at/above `--fail-on` become failing tests so
-  a build can gate. Wired through `heaven export --format sarif|junit`, the
-  `/api/report/export` endpoint and the web Reports page.
-- **Committed benchmark scorecard.** `heaven benchmark --scorecard PATH` writes the
-  headline precision/recall/F1 as a machine-readable JSON artifact
-  (`docs/benchmark_scorecard.json`) so the README, CI and web can cite one
-  canonical, honestly-captioned number.
-- **Confirmation status — Confirmed vs Potential — on every finding, end to
-  end.** A professional test separates what was *proven present* (a header seen
-  in a live response, an open cleartext port, a payload that executed, an
-  anonymous login that succeeded, an authoritative dependency-manifest match)
-  from what is only *inferred* from an unauthenticated service version banner
-  (the backport caveat). One compute-on-read resolver
-  (`heaven.utils.cvss.confirmation_status`) drives it everywhere: the HTML/PDF
-  reports gain a **Confirmation** column and a confirmed/potential split, the web
-  Findings table + Finding detail + Dashboard show a Confirmed/Potential badge,
-  the `/api/*` finding payloads and the dashboard/summary stats carry the label,
-  and `heaven findings` tags each row `CONFIRMED`/`POTENTIAL`. Potential findings
-  are never suppressed — they stay in full, clearly labelled.
+### Security
 
-### Changed
-
-- **Overall Risk is now rated from confirmed findings only.** A hardened target
-  whose only "Critical" is an unauthenticated, version-based CVE match no longer
-  shows an inflated **Critical** headline — the rating reflects the worst
-  *confirmed* finding, while the potential critical still appears in the findings
-  list (as `Critical · Potential`) and the executive summary calls out how many
-  potential findings need verification. Applies consistently to the reports, the
-  dashboard headline and the engagement summary.
+- **Dependency floors patched to the nearest fixed stable (audit + SCA verify).**
+  A `pip-audit` / OSV pass bumped floors in `pyproject.toml` for advisories in
+  `aiohttp`, `scikit-learn`, `click`, `python-dotenv`, `pyjwt`, `cryptography`,
+  `dnspython`, `scapy`, `jinja2`, `asyncssh`, `azure-identity` and the dev tools
+  (`pytest`, `black`, `flask`) — floors only, no new packages, nothing that breaks
+  the pinned React 19 / Vite 8 / Node ≥22 UI stack. The reported
+  `extract-zip 2.0.1` / **CVE-2026-56876** (symlink path-traversal) is **not** a
+  HEAVEN dependency (absent from `heaven-ui/package.json`, `package-lock.json` and
+  `node_modules`); instead HEAVEN's own SCA scanner is verified to flag it on a
+  *target* lockfile — an `extract-zip@2.0.1` `package-lock.json` is parsed as an
+  npm package and, against the OSV advisory, reported as `vulnerable_dependency`
+  carrying CVE-2026-56876 and its fix.
 
 ## [2.1.0] — 2026-08-04
 
@@ -738,6 +972,15 @@ Accuracy and scope-correctness release. Builds on 2.0.0 with a false-positive
 elimination pass on the injection scanner, a scope-safety fix so a URL target
 never drags in unrelated services on a host's *other* ports, a completed DVWA
 benchmark ground truth, and a genuine 100 % native functional benchmark.
+
+### Changed
+
+- **Native functional benchmark is now a genuine 100% / 100% / 100%
+  (precision / recall / F1).** The one remaining unmatched finding — the werkzeug
+  server-version header leak — is a real information disclosure, so it is now
+  labelled in the ground truth; the benchmark floor is tightened from "precision
+  ≥ 0.90" to an exact perfect score, making any future false positive *or* newly
+  emitted real finding fail the benchmark until it is triaged.
 
 ### Fixed
 
@@ -802,15 +1045,6 @@ benchmark ground truth, and a genuine 100 % native functional benchmark.
   `xss_s` name-field stored XSS, and the `csp` script-injection sink) are credited
   as true positives instead of being scored as false positives. Focused
   crawl→scan precision rose from **59% → 94%** with recall holding at 80–90%.
-
-### Changed
-
-- **Native functional benchmark is now a genuine 100% / 100% / 100%
-  (precision / recall / F1).** The one remaining unmatched finding — the werkzeug
-  server-version header leak — is a real information disclosure, so it is now
-  labelled in the ground truth; the benchmark floor is tightened from "precision
-  ≥ 0.90" to an exact perfect score, making any future false positive *or* newly
-  emitted real finding fail the benchmark until it is triaged.
 
 ## [2.0.0] — 2026-08-01
 
@@ -879,215 +1113,6 @@ green CI. The complete, itemised history follows.
   tests · 51 CLI · 64 API routes · 24 UI pages · 12 scan modes · CVSS ML R²=0.9925).
   Replaces the three external capsule-render / typing-SVG banners at the top of the
   README with one brand-exact, offline-safe hero.
-
-### Changed
-
-- **README module count is now a real, reproducible figure (157) and CI-guarded.**
-  The badge and metric table read 148 while the footer/structure line read 152 —
-  and neither matched the project's own counting method. It is now derived
-  mechanically as the number of substantive Python modules in the `heaven/`
-  package (`find heaven -name '*.py' ! -name __init__.py`) and synced across all
-  four README spots by `scripts/sync_test_count.py`, whose `--check` mode CI
-  already runs — so a reviewer who clones and counts gets exactly the printed
-  number, and it can never silently drift again.
-
-- **Upgraded the web OWASP mapping to the OWASP Top 10:2025 across the whole
-  platform.** The report coverage matrix (HTML + PDF), the Coverage self-grade
-  (`heaven coverage` / `/api/coverage` / web UI), the vulnerability knowledge
-  base, every scanner/demo tag, the SAST rule pack and the methodology page now
-  speak the 2025 taxonomy. The 2025 edition is a re-ranking with two structural
-  changes that are respected everywhere: **SSRF** (A10:2021) folds into **A01
-  Broken Access Control**, and **Vulnerable & Outdated Components** (A06:2021)
-  broadens into **A03 Software Supply Chain Failures**; the brand-new **A10
-  Mishandling of Exceptional Conditions** now receives verbose-error / stack-
-  trace findings. A single canon + a 2021→2025 crosswalk live in
-  `frameworks.py` (`OWASP_2025`, `normalize_owasp`, `owasp_2025_id`), so any
-  finding stored under a legacy 2021 tag is **upgraded on read** — old
-  engagement data renders as 2025 without a migration.
-
-### Fixed
-
-- **Documentation accuracy pass — corrected stale counts, a stale demo banner,
-  broken README deep-links, and two out-of-date runbooks.** A full sweep of
-  `docs/` against the shipped code: the README Project-Summary table said **50**
-  CLI commands while its own poster/footer (and the real CLI) say **51** — aligned
-  to 51; `docs/QUICKSTART.md` claimed **19** web pages (actual **24**);
-  `docs/DEMO.md`'s Scene 1 described the `heaven --version` output as a branded
-  banner "listing 31 commands" (it prints only the version string) — rewritten to
-  use `heaven info`, which shows the real ASCENDANT AEGIS banner. Three README
-  deep-links that no longer resolved (`#installation-detailed`,
-  `#continuous-monitoring`, `#scanner-rating`) were repointed to live anchors, and
-  `docs/BENCHMARK_HOWTO.md` §3 now points at `BENCHMARK_RESULTS.md` instead of a
-  removed section. Two aspirational runbooks that misrepresented the shipped
-  product were rewritten to match reality: `docs/runbooks/frontend_audit.md` (the
-  UI ships with token auth + a 401 interceptor + CSP/security headers — it no
-  longer reads as "the frontend has no auth yet") and `docs/runbooks/ml_training.md`
-  (the CVSS model is a **real** NVD-trained ExtraTreesRegressor, R²=0.9925, via
-  `heaven train-model` — not the "synthetic stub" the old doc described; it also
-  referenced two files that don't exist). `docs/runbooks/ad_lab.md` no longer
-  claims "HEAVEN doesn't do lateral movement" (it does — `heaven lateral` /
-  `heaven postex`). No product code changed; the README test/module count-check
-  still passes.
-
-- **CI "Check README test count is in sync" no longer fails — and now can't drift
-  again.** After the previous test-skip fix, `pytest` itself passed on both
-  Python versions, but the 3.12-only docs-sync step (`scripts/sync_test_count.py
-  --check`) still failed: the recent feature commits added tests (**1352 → 1358**)
-  without re-running the sync script, so the decorative count printed in
-  `README.md` (poster alt-text, Project Summary, Project Structure listing,
-  footer) had gone stale. The counts are re-synced to the real values
-  (tests = 1358, modules = 159). To stop this recurring, a **`.githooks/pre-commit`
-  guard** (wired via `core.hooksPath`) now re-syncs and re-stages `README.md`
-  automatically on every commit, so the printed count can never fall out of step
-  with the suite — CI stays green by construction. Fresh clones enable it with
-  `git config core.hooksPath .githooks`.
-
-- **CI unit tests (Python 3.11 / 3.12) are green again.** The regression test that
-  asserts the ML model spreads predicted CVSS across a genuine range
-  (`test_ml_predicted_cvss_spreads_within_a_severity_band`) requires the trained
-  NVD regressor (`data/models/NVD_model.pkl`), which is intentionally gitignored
-  and fetched with `heaven download-model` — so it is absent on a fresh checkout
-  and in CI, where `predict_cvss_score` returns a constant fallback by design. The
-  test now **skips** when the model isn't loaded instead of failing, matching how
-  the suite already treats other optional artifacts. The class-vector spread that
-  the test guards is still asserted model-free by
-  `test_ml_features_vary_by_class_not_flat_per_severity`, which runs everywhere.
-
-- **Severity and CVSS can no longer contradict each other (no more "CVSS 8.1 /
-  Low", or a "Critical" badge beside a 7.5 score).** A finding shows two views of
-  its risk side by side — the qualitative severity the detector assigned and the
-  numeric CVSS resolved for its class — and the two could drift apart. A single
-  shared reconciler (`heaven/utils/cvss.py::reconcile_severity`, applied at the
-  `vuln_kb.enrich_finding` chokepoint every report/export/API path flows through)
-  now keeps them in the same band, honestly and without ever inventing a number:
-  a **weak, unconfirmed detection** ("possible … indicator", low confidence) has
-  its inherited *confirmed-class* base capped down to its own low severity, so a
-  heuristic smuggling indicator reads **Low / 3.9**, not Low / 8.1; a **published
-  CVE score** is authoritative and drives the label up or down (a real Critical is
-  never buried behind a hand-set Low, an over-rated Critical is corrected to its
-  real High); and a confirmed non-CVE posture finding is aligned to its curated
-  class band. To make this correct on **older persisted findings** — a CVE finding
-  that lost its numeric score would otherwise fall back to a generic class number —
-  `enrich_finding` now backfills the **real published CVSS** for any CVE in the
-  bundled inline DB (`cve_mapper.published_cvss_for`, offline), so a stale Critical
-  is never demoted to its class fallback and its severity matches the true per-CVE
-  score. Regression-locked in `tests/test_per_finding_cvss.py`.
-
-- **Report tables no longer overflow the page horizontally.** Wide tables (the
-  Findings Summary with long target URLs, the coverage matrices) pushed the whole
-  page sideways in the HTML report and its in-app viewer. Every table is now
-  wrapped in a horizontally-scrollable box (`.tablewrap`) and long cell content is
-  allowed to break, so a wide table scrolls inside its own frame and the page body
-  never scrolls sideways — across HTML, PDF (already wrapping via reportlab
-  `Paragraph` cells) and Markdown.
-
-- **DNSSEC "not configured" no longer reported twice.** The DNS-recon task emitted
-  `dnssec_not_enabled` (medium) while the email-posture check emitted
-  `dnssec_missing` (low) for the same domain — same issue, different `vuln_type`,
-  so the content-hash dedup never collapsed them. Both now emit `dnssec_missing`
-  at a consistent **medium** severity (matching the class's CVSS base), so a full
-  scan records one DNSSEC finding, not two.
-
-- **DNS enumeration now actually appears after a normal scan — not only after the
-  standalone `heaven dns` command.** Scanning a hostname (`heaven scan --target
-  example.com`, or the web launcher) produced an empty DNS section everywhere.
-  Root cause: the DNS-reconnaissance task gathered domains only from the `domains`
-  and `urls` target buckets, but a plain hostname target is placed in the `ips`
-  bucket ("IPs, hostnames, or CIDRs") by both the CLI and the API — so the task
-  ran with no domains and enumerated nothing. A new shared `_scan_domains()`
-  resolver now also mines registered domains (eTLD+1) from the `ips` bucket (IP
-  literals, `localhost` and single-label hosts are dropped), so every scan of a
-  real domain populates the Assets **DNS Enumeration** section and the report's
-  DNS section. As a bonus, email-posture checks (SPF/DMARC/DKIM/DNSSEC) now also
-  run against hostname targets. Two further gaps in the same feature were closed:
-  `heaven dns --engagement <name>` now **auto-creates** the engagement instead of
-  erroring when it doesn't exist yet, and the CLI `heaven report` (HTML) and
-  `heaven export --format markdown` now include the DNS Enumeration section (they
-  passed host inventory but not DNS records; the web report-download already did).
-- **A CVE finding now shows its own real CVSS — not a flat 7.5 for every service
-  vulnerability.** In a live report, every OpenSSH / Apache / Dovecot CVE in the
-  Findings Summary rendered the same **7.5** regardless of the actual CVE, and the
-  score disagreed with the severity ("Critical … 7.5", "Low … 8.1"). Root cause:
-  the findings table has no CVSS column and `upsert_finding` never preserved the
-  real per-CVE base score, so after the DB round-trip the report resolver fell
-  back to the `vulnerable_component` class "typical" constant (7.5) for all of
-  them — and the ML feature extractor had the same blind spot (it read
-  `cvss_base` but the CVE score was carried under `cvss`), collapsing the priority
-  score too. Fixed end-to-end and in sync: `cve_mapper` now emits the canonical
-  `cvss_base` on every inline / live-feed / NVD CVE **and derives the severity
-  band from that objective score** (a curated "critical/8.1" like regreSSHion is
-  corrected to its true **High/8.1**, matching NVD); `upsert_finding` persists the
-  real `cvss_base` + vector through the DB round-trip; the ML extractor and the
-  risk fallback both read the real score; and the web finding-detail shows the
-  same objective score the report does. A live re-run of the certifiedhacker
-  engagement now renders **9.8 / 8.8 / 8.2 / 8.1 / 7.5 / 5.9** across the CVE
-  findings with every severity band consistent with its score. Regression-locked
-  by `tests/test_per_finding_cvss.py`.
-- **CVSS is now a genuine per-finding score, not a flat per-severity constant.**
-  Every finding in a severity band used to show the same number (all highs 8.0,
-  all mediums 5.5, …) because the ML feature extractor collapsed any finding
-  without its own CVSS vector into one of four per-severity constant feature
-  vectors, and the qualitative-label fallback returned a fixed number per band.
-  Findings now resolve their **class's curated CVSS vector** (48 curated vectors →
-  32 distinct base scores) and score it with the standard formula, so two
-  different weakness classes get genuinely different scores (SQLi 9.8, XSS 6.1,
-  missing-header 5.2…) while the same class stays stable — that's correct CVSS
-  semantics, not fabricated uniqueness. One authoritative resolver
-  (`heaven/utils/cvss.py::objective_base_score`, precedence: published CVE/NVD/OSV
-  score → KB class typical → class-vector base score → the finding's own vector)
-  is now shared by the report, the store/UI and the ML feature extractor, so a
-  finding's CVSS reads the same everywhere.
-- **CVSS v4.0 advisories are now scored (fixes the flat `react-router` row).**
-  The in-house calculator only understood CVSS v3.1, so any advisory carrying a
-  **v4.0** vector (increasingly common on 2025+ GHSA records) was unscoreable and
-  fell back to the flat severity-label constant — e.g. the real react-router
-  advisory GHSA-qwww-vcr4-c8h2 showed `8` instead of its true base score. CVSS:4.0
-  vectors are now routed to the reference-grade `cvss` library (added as a base
-  dependency), so that finding correctly reads **7.1** and its v4.0 vector is
-  preserved; v3.x scoring is unchanged. Degrades gracefully to the label fallback
-  if the library is somehow absent.
-- **Cleared the `react-router` advisory at the source by migrating the web UI to
-  React 19.** The SCA self-scan flagged `react-router@7.18.1` for
-  GHSA-qwww-vcr4-c8h2 (RSC-mode CSRF, CWE-352, affected range `[7.12.0, 8.3.0)`) —
-  a real, correctly-matched advisory. The 7.x line has no backported fix and the
-  fixed release lives only on the consolidated **`react-router` 8.3.0** package
-  (there is no `react-router-dom@8`), which requires **React ≥ 19.2.7**. The whole
-  frontend was therefore upgraded: **React 18 → 19** (react + react-dom 19.2.8),
-  **`react-router-dom` → `react-router` 8.3.0** with imports rewritten across 22
-  files, **@react-three/fiber 8 → 9** and **@react-three/drei 9 → 10** (React 19
-  reconciler), types bumped to 19, and the unused `recharts` dependency dropped.
-  HEAVEN's own SCA scan of `heaven-ui` now reports **0 vulnerabilities**, and
-  **all 24 UI routes** (plus the finding-detail and not-found routes and a
-  client-side router transition) were live-verified end-to-end — sign-in, the R3F
-  3D topology and framer-motion animations included — with **zero console errors**
-  on every page. This supersedes the interim CVSS-scoring fix above: the finding is
-  now **removed**, not merely rescored.
-- **Pinned the Node ≥ 22.22 build floor everywhere it's declared.** react-router 8
-  requires `node >=22.22.0`, so the requirement is now enforced consistently
-  instead of relying on "latest 22.x" resolving above the floor by chance: a
-  `heaven-ui/package.json` `engines` field, a new `heaven-ui/.nvmrc` (`22.22`),
-  both CI `setup-node` jobs pinned to `22.22`, the Dockerfile `node:22-slim` base
-  documented as the ≥22.22 floor, and the Unix/Windows install scripts warn early
-  when the local Node is older (message and gate updated from the stale "18+/20+").
-
-- **Green CI, reproducibly.** Two jobs had begun failing on `main` from
-  environment drift rather than any code defect:
-  - *Lint (ruff).* CI installs ruff unpinned (`pip install ruff`), so when ruff
-    **0.16** shipped, its broadened *implicit* default rule set flagged 1800+
-    style items (import order, f-strings, annotation styles) on unchanged,
-    previously-clean code. The lint rule set is now declared **explicitly** in
-    `[tool.ruff.lint]` (`select = ["E4","E7","E9","F"]` — ruff's long-standing
-    default, exactly what the codebase was linted against), so any ruff version
-    enforces the same rules and a future release can't silently break the build.
-  - *Unit tests (3.11 / 3.12).* Three `test_p3_cloud_iam_parity.py` cases
-    imported the deliberately opt-in cloud SDKs (`googleapiclient`,
-    `azure.identity`) — present on dev machines but not in CI's lean
-    `pip install -e ".[dev]"`, so they raised `ModuleNotFoundError`. They now
-    `pytest.importorskip(...)` those SDKs: they **skip cleanly** where the
-    `[cloud-gcp]` / `[cloud-azure]` extras aren't installed and still **run
-    fully** wherever they are. Collected test count is unchanged (1319).
-
-### Added
 
 - **Full-power runtime dependencies are now installed by default, so the proof
   and credentialed-audit paths light up out of the box.** The `playwright` wheel
@@ -1411,7 +1436,351 @@ green CI. The complete, itemised history follows.
   its findings' outcomes (per target-profile technique success/failure) into the
   knowledge graph — previously nothing wrote to it, so it was permanently empty.
 
+- **Rename an engagement — CLI, API and dashboard.** An engagement's name was
+  welded to both its store key *and* its SQLite filename
+  (`engagements/<name>.db`) with no way to change it, so an awkward name (e.g.
+  `certified hacker`) was permanent. You can now rename in place:
+  - New **`heaven engage rename <old> <new>`** CLI command.
+  - New **`POST /api/engagements/{name}/rename`** route, backing a **rename (✎)**
+    action in the dashboard's engagement manager (which now also shows for a
+    single engagement, so you can rename the only one you have).
+  - The rename moves the DB and its WAL/SHM sidecars, rewrites the in-DB name
+    row, handles a case-only rename on case-insensitive filesystems (macOS:
+    `certified hacker` → `Certified Hacker`), and repoints the active pointer if
+    you rename the engagement you're currently viewing. It never clobbers a
+    different existing engagement. Covered by `tests/test_engagement_rename.py`.
+
+- **Host & Service Inventory — open ports, service versions and OS, surfaced
+  everywhere.** The network scanner already ran a full-spectrum nmap scan
+  (`-sV -sC -O`, all 65535 ports by default, plus UDP), but the ports, service
+  versions and OS it captured only lived inside the raw scan summary and never
+  reached the operator. They are now a first-class inventory shown identically
+  across the whole tool:
+  - New **Assets** page in the web UI (host → OS → open ports / service versions
+    / CPE), fed by a reshaped `GET /api/assets` that returns a normalized,
+    deduplicated inventory plus roll-up totals.
+  - New **`heaven assets`** CLI command (table / JSON / markdown), and every
+    `heaven scan` / `heaven resume` now prints the inventory at the end.
+  - A **"Host & Service Inventory" section** added to the HTML, PDF and Markdown
+    reports (and the `heaven report` / `heaven export` / API report exports),
+    so a written report documents the attack surface, not just the findings.
+  - Accuracy improvements in the scanner: the service version now recombines
+    nmap's product + version + extrainfo (previously the product name was
+    dropped), and OS detection records its **source and confidence** — an nmap
+    `-O` stack fingerprint is labelled *(fingerprinted, N%)* while a TTL guess is
+    labelled *(heuristic — unconfirmed)*. Nothing is fabricated: an
+    undetermined OS is shown as such, and a guess is never presented as a fact.
+  - **OS fingerprinting no longer silently needs root.** `nmap -O` (and SYN/UDP
+    scans) require raw sockets and abort the whole scan if run unprivileged, so
+    HEAVEN now auto-elevates via passwordless `sudo -n` when it's available
+    (controllable with `HEAVEN_NMAP_SUDO=auto|always|never`; `-n` never prompts,
+    so no credential is ever handled), and detects an elevated session on
+    Windows. When it genuinely can't fingerprint, it no longer falls straight to
+    a coarse TTL guess: it first infers the OS from nmap's own service-detection
+    evidence (the `ostype` attribute and OS-level CPEs that `-sV` reports without
+    root) — a real, more specific signal — still labelled *unconfirmed*, and logs
+    a one-line hint on how to unlock authoritative results (run as root, enable
+    passwordless sudo, or `setcap cap_net_raw` on nmap).
+  - A shared `heaven/devsecops/inventory.py` is the single source of truth for
+    normalization/labelling reused by the CLI, API, UI and reports;
+    `tests/test_service_inventory.py` locks in the parsing, the no-false-positive
+    OS labelling and the cross-surface rendering.
+
+- **Per-section scan results in the web UI.** SAST and SCA runs now have their
+  own result lists on the SAST and SCA pages (a "SAST scan history" / "SCA audit
+  history" panel, same expandable-row + inline-findings view as the Scans page),
+  instead of being merged into the general Scan Activity list where the same run
+  showed up twice. Backed by a new `kind` filter on `GET /api/scans`
+  (`pentest` — the default, excludes code-analysis runs — plus `sast`, `sca`,
+  `all`). Reusable `ScanList` component (`heaven-ui/src/components/ScanList.jsx`)
+  drives all three sections.
+- **More scan modes in the launcher.** The Launch Scan mode dropdown now exposes
+  every mode with a real scanner phase: FULL, WEB, NETWORK, API, CLOUD,
+  CONTAINER, IOT, **OT**, AD and EMAIL (was only web/network/full/ad/cloud). Added
+  `OT` (operational technology) to the `ScanMode` enum; it runs the same
+  IoT/SCADA/OT scanner phase.
+- **Dashboard quick-launch panel.** The dashboard now has a "Launch a scan" grid
+  with a tile for every scan surface (Full, Web, Network, API, Cloud, Container,
+  IoT, OT, AD, Email) plus the analysis tools (SAST, SCA, CVE) — each one click
+  from the landing page. Scan-mode tiles deep-link into the launcher with the
+  mode preselected (`/scans?mode=<mode>`); FULL is highlighted and appears once.
+  Both the panel and the launcher `<select>` read from one shared source of truth
+  (`heaven-ui/src/scanModes.js`), so they can never drift apart.
+
+### Changed
+
+- **README module count is now a real, reproducible figure (157) and CI-guarded.**
+  The badge and metric table read 148 while the footer/structure line read 152 —
+  and neither matched the project's own counting method. It is now derived
+  mechanically as the number of substantive Python modules in the `heaven/`
+  package (`find heaven -name '*.py' ! -name __init__.py`) and synced across all
+  four README spots by `scripts/sync_test_count.py`, whose `--check` mode CI
+  already runs — so a reviewer who clones and counts gets exactly the printed
+  number, and it can never silently drift again.
+
+- **Upgraded the web OWASP mapping to the OWASP Top 10:2025 across the whole
+  platform.** The report coverage matrix (HTML + PDF), the Coverage self-grade
+  (`heaven coverage` / `/api/coverage` / web UI), the vulnerability knowledge
+  base, every scanner/demo tag, the SAST rule pack and the methodology page now
+  speak the 2025 taxonomy. The 2025 edition is a re-ranking with two structural
+  changes that are respected everywhere: **SSRF** (A10:2021) folds into **A01
+  Broken Access Control**, and **Vulnerable & Outdated Components** (A06:2021)
+  broadens into **A03 Software Supply Chain Failures**; the brand-new **A10
+  Mishandling of Exceptional Conditions** now receives verbose-error / stack-
+  trace findings. A single canon + a 2021→2025 crosswalk live in
+  `frameworks.py` (`OWASP_2025`, `normalize_owasp`, `owasp_2025_id`), so any
+  finding stored under a legacy 2021 tag is **upgraded on read** — old
+  engagement data renders as 2025 without a migration.
+
+- **A blank "active engagement" now resolves to your most-populated engagement,
+  not `default`.** When no engagement is explicitly selected and no active
+  pointer exists (e.g. the one you were viewing was deleted), the app — and the
+  scan writer — now resolve to the on-disk engagement richest in real data
+  instead of a blank `default` that silently absorbed scans. On startup the app
+  also adopts that engagement as active, so it opens on your actual work.
+
+- **The scan launcher now picks the destination engagement explicitly.** The
+  free-text "engagement name" field is a dropdown of the engagements on disk
+  (plus "＋ New engagement…"), defaulting to the one you're viewing and showing
+  where findings will be saved — so a scan can't silently pile into a surprise
+  or stale engagement.
+
+- **Every scan mode now runs a real, focused pipeline — the mode selector is no
+  longer cosmetic.** `build_full_scan` previously registered all ~35 tasks
+  regardless of the chosen mode, so WEB, NETWORK, API, CLOUD, CONTAINER, IOT, OT,
+  AD and EMAIL all executed the identical full scan (neither the CLI nor the web
+  launcher wired the mode through). Each task is now tagged with the modes it
+  belongs to; a focused mode registers only its dedicated modules plus the shared
+  enrichment tail (validation, FP-suppression, ML scoring, MITRE mapping,
+  reporting), and `FULL` still runs everything. The CLI (`heaven scan -m …`) and
+  the web API (`POST /api/scans` `mode`) both pass the mode through to a
+  per-scan-isolated builder (no shared-singleton mutation). New
+  `tests/test_scan_modes.py` locks in the per-mode task sets.
+- **OT is now a distinct mode from IOT.** OT/ICS runs ICS/SCADA protocol probes
+  (Modbus, Siemens S7comm, EtherNet/IP, DNP3, IEC 60870-5-104, OPC-UA, BACnet);
+  IOT covers consumer / building-automation devices (MQTT, SNMP, RTSP, CoAP,
+  UPnP/SSDP, vendor web panels). Previously OT re-ran the IoT scanner.
+- **CLOUD mode now does real work against any target.** Selecting CLOUD mode is
+  itself the opt-in for the public-bucket exposure probe (previously gated behind
+  the `--cloud-buckets` flag), so a CLOUD scan automatically guesses bucket names
+  from the target host and proves public exposure from each provider's own
+  response. The probe stays opt-in in every other mode.
+- **Zero Bandit findings at every severity (previously clean only at medium+).**
+  The 132 best-effort `except … : pass|continue` handlers that silently swallowed
+  probe errors now log at `debug` with `exc_info` — a scanner that hides an
+  unexpected probe error can silently miss a vulnerability, so the breadcrumb is a
+  real observability win (and it costs nothing when debug logging is off). The
+  irreducible intentional patterns carry a precise, documented per-line
+  `# nosec <id>` instead of a blanket skip (default-credential and auth-bypass
+  test payloads, MITRE ATT&CK ids / taxonomy strings, deterministic seedable repro
+  RNG and non-crypto jitter, subprocess calls to vetted CLI tools, and XML
+  output-escaping), so the checks stay live for any *new* real issue. Also
+  modernized `asyncio.get_event_loop()` → `get_running_loop()` inside coroutines,
+  replaced a mypy-narrowing `assert` with a positive `isinstance` guard, and
+  tightened the CI Bandit gate from `-ll` to `-l` so low-severity regressions
+  surface in code scanning.
+
+- **Default scan mode is now FULL** (was WEB) in both the web launcher and the
+  `heaven scan` CLI wizard, so the out-of-the-box scan runs every module.
+- **Full power by default.** Folded the pure-Python runtime feature-packs
+  (recon, reports, lateral movement, deploy, scheduling, AWS cloud, and the
+  default Gemini AI SDK) into the base `dependencies`, so a plain `pip install`
+  is fully powered with no extras to remember. The former `[recon]`/`[reports]`/…
+  extras remain as backward-compatible aliases.
+- **The one-command install now does everything in one pass and can't hang.**
+  External-tool installation runs as part of `install.sh` / `install.ps1` (no
+  separate step to remember). Every per-tool install is bounded by a timeout
+  (`HEAVEN_TOOL_INSTALL_TIMEOUT`, default 900s) with a watchdog that kills a
+  stalled command, runs package managers non-interactively
+  (`DEBIAN_FRONTEND=noninteractive`, `HOMEBREW_NO_AUTO_UPDATE`, winget
+  `--disable-interactivity`), and makes `sudo` fail fast when there's no
+  interactive terminal instead of blocking forever on a password prompt.
+  `install.sh` pre-authorizes `sudo` once up front so Linux tool installs never
+  stall mid-run.
+- **Web UI build now targets Node 22 (active LTS)** in CI and the Dockerfile.
+  Vite 8 requires Node ≥20.19 / ≥22.12, and Node 20 has reached end-of-life.
+
 ### Fixed
+
+- **Documentation accuracy pass — corrected stale counts, a stale demo banner,
+  broken README deep-links, and two out-of-date runbooks.** A full sweep of
+  `docs/` against the shipped code: the README Project-Summary table said **50**
+  CLI commands while its own poster/footer (and the real CLI) say **51** — aligned
+  to 51; `docs/QUICKSTART.md` claimed **19** web pages (actual **24**);
+  `docs/DEMO.md`'s Scene 1 described the `heaven --version` output as a branded
+  banner "listing 31 commands" (it prints only the version string) — rewritten to
+  use `heaven info`, which shows the real ASCENDANT AEGIS banner. Three README
+  deep-links that no longer resolved (`#installation-detailed`,
+  `#continuous-monitoring`, `#scanner-rating`) were repointed to live anchors, and
+  `docs/BENCHMARK_HOWTO.md` §3 now points at `BENCHMARK_RESULTS.md` instead of a
+  removed section. Two aspirational runbooks that misrepresented the shipped
+  product were rewritten to match reality: `docs/runbooks/frontend_audit.md` (the
+  UI ships with token auth + a 401 interceptor + CSP/security headers — it no
+  longer reads as "the frontend has no auth yet") and `docs/runbooks/ml_training.md`
+  (the CVSS model is a **real** NVD-trained ExtraTreesRegressor, R²=0.9925, via
+  `heaven train-model` — not the "synthetic stub" the old doc described; it also
+  referenced two files that don't exist). `docs/runbooks/ad_lab.md` no longer
+  claims "HEAVEN doesn't do lateral movement" (it does — `heaven lateral` /
+  `heaven postex`). No product code changed; the README test/module count-check
+  still passes.
+
+- **CI "Check README test count is in sync" no longer fails — and now can't drift
+  again.** After the previous test-skip fix, `pytest` itself passed on both
+  Python versions, but the 3.12-only docs-sync step (`scripts/sync_test_count.py
+  --check`) still failed: the recent feature commits added tests (**1352 → 1358**)
+  without re-running the sync script, so the decorative count printed in
+  `README.md` (poster alt-text, Project Summary, Project Structure listing,
+  footer) had gone stale. The counts are re-synced to the real values
+  (tests = 1358, modules = 159). To stop this recurring, a **`.githooks/pre-commit`
+  guard** (wired via `core.hooksPath`) now re-syncs and re-stages `README.md`
+  automatically on every commit, so the printed count can never fall out of step
+  with the suite — CI stays green by construction. Fresh clones enable it with
+  `git config core.hooksPath .githooks`.
+
+- **CI unit tests (Python 3.11 / 3.12) are green again.** The regression test that
+  asserts the ML model spreads predicted CVSS across a genuine range
+  (`test_ml_predicted_cvss_spreads_within_a_severity_band`) requires the trained
+  NVD regressor (`data/models/NVD_model.pkl`), which is intentionally gitignored
+  and fetched with `heaven download-model` — so it is absent on a fresh checkout
+  and in CI, where `predict_cvss_score` returns a constant fallback by design. The
+  test now **skips** when the model isn't loaded instead of failing, matching how
+  the suite already treats other optional artifacts. The class-vector spread that
+  the test guards is still asserted model-free by
+  `test_ml_features_vary_by_class_not_flat_per_severity`, which runs everywhere.
+
+- **Severity and CVSS can no longer contradict each other (no more "CVSS 8.1 /
+  Low", or a "Critical" badge beside a 7.5 score).** A finding shows two views of
+  its risk side by side — the qualitative severity the detector assigned and the
+  numeric CVSS resolved for its class — and the two could drift apart. A single
+  shared reconciler (`heaven/utils/cvss.py::reconcile_severity`, applied at the
+  `vuln_kb.enrich_finding` chokepoint every report/export/API path flows through)
+  now keeps them in the same band, honestly and without ever inventing a number:
+  a **weak, unconfirmed detection** ("possible … indicator", low confidence) has
+  its inherited *confirmed-class* base capped down to its own low severity, so a
+  heuristic smuggling indicator reads **Low / 3.9**, not Low / 8.1; a **published
+  CVE score** is authoritative and drives the label up or down (a real Critical is
+  never buried behind a hand-set Low, an over-rated Critical is corrected to its
+  real High); and a confirmed non-CVE posture finding is aligned to its curated
+  class band. To make this correct on **older persisted findings** — a CVE finding
+  that lost its numeric score would otherwise fall back to a generic class number —
+  `enrich_finding` now backfills the **real published CVSS** for any CVE in the
+  bundled inline DB (`cve_mapper.published_cvss_for`, offline), so a stale Critical
+  is never demoted to its class fallback and its severity matches the true per-CVE
+  score. Regression-locked in `tests/test_per_finding_cvss.py`.
+
+- **Report tables no longer overflow the page horizontally.** Wide tables (the
+  Findings Summary with long target URLs, the coverage matrices) pushed the whole
+  page sideways in the HTML report and its in-app viewer. Every table is now
+  wrapped in a horizontally-scrollable box (`.tablewrap`) and long cell content is
+  allowed to break, so a wide table scrolls inside its own frame and the page body
+  never scrolls sideways — across HTML, PDF (already wrapping via reportlab
+  `Paragraph` cells) and Markdown.
+
+- **DNSSEC "not configured" no longer reported twice.** The DNS-recon task emitted
+  `dnssec_not_enabled` (medium) while the email-posture check emitted
+  `dnssec_missing` (low) for the same domain — same issue, different `vuln_type`,
+  so the content-hash dedup never collapsed them. Both now emit `dnssec_missing`
+  at a consistent **medium** severity (matching the class's CVSS base), so a full
+  scan records one DNSSEC finding, not two.
+
+- **DNS enumeration now actually appears after a normal scan — not only after the
+  standalone `heaven dns` command.** Scanning a hostname (`heaven scan --target
+  example.com`, or the web launcher) produced an empty DNS section everywhere.
+  Root cause: the DNS-reconnaissance task gathered domains only from the `domains`
+  and `urls` target buckets, but a plain hostname target is placed in the `ips`
+  bucket ("IPs, hostnames, or CIDRs") by both the CLI and the API — so the task
+  ran with no domains and enumerated nothing. A new shared `_scan_domains()`
+  resolver now also mines registered domains (eTLD+1) from the `ips` bucket (IP
+  literals, `localhost` and single-label hosts are dropped), so every scan of a
+  real domain populates the Assets **DNS Enumeration** section and the report's
+  DNS section. As a bonus, email-posture checks (SPF/DMARC/DKIM/DNSSEC) now also
+  run against hostname targets. Two further gaps in the same feature were closed:
+  `heaven dns --engagement <name>` now **auto-creates** the engagement instead of
+  erroring when it doesn't exist yet, and the CLI `heaven report` (HTML) and
+  `heaven export --format markdown` now include the DNS Enumeration section (they
+  passed host inventory but not DNS records; the web report-download already did).
+- **A CVE finding now shows its own real CVSS — not a flat 7.5 for every service
+  vulnerability.** In a live report, every OpenSSH / Apache / Dovecot CVE in the
+  Findings Summary rendered the same **7.5** regardless of the actual CVE, and the
+  score disagreed with the severity ("Critical … 7.5", "Low … 8.1"). Root cause:
+  the findings table has no CVSS column and `upsert_finding` never preserved the
+  real per-CVE base score, so after the DB round-trip the report resolver fell
+  back to the `vulnerable_component` class "typical" constant (7.5) for all of
+  them — and the ML feature extractor had the same blind spot (it read
+  `cvss_base` but the CVE score was carried under `cvss`), collapsing the priority
+  score too. Fixed end-to-end and in sync: `cve_mapper` now emits the canonical
+  `cvss_base` on every inline / live-feed / NVD CVE **and derives the severity
+  band from that objective score** (a curated "critical/8.1" like regreSSHion is
+  corrected to its true **High/8.1**, matching NVD); `upsert_finding` persists the
+  real `cvss_base` + vector through the DB round-trip; the ML extractor and the
+  risk fallback both read the real score; and the web finding-detail shows the
+  same objective score the report does. A live re-run of the certifiedhacker
+  engagement now renders **9.8 / 8.8 / 8.2 / 8.1 / 7.5 / 5.9** across the CVE
+  findings with every severity band consistent with its score. Regression-locked
+  by `tests/test_per_finding_cvss.py`.
+- **CVSS is now a genuine per-finding score, not a flat per-severity constant.**
+  Every finding in a severity band used to show the same number (all highs 8.0,
+  all mediums 5.5, …) because the ML feature extractor collapsed any finding
+  without its own CVSS vector into one of four per-severity constant feature
+  vectors, and the qualitative-label fallback returned a fixed number per band.
+  Findings now resolve their **class's curated CVSS vector** (48 curated vectors →
+  32 distinct base scores) and score it with the standard formula, so two
+  different weakness classes get genuinely different scores (SQLi 9.8, XSS 6.1,
+  missing-header 5.2…) while the same class stays stable — that's correct CVSS
+  semantics, not fabricated uniqueness. One authoritative resolver
+  (`heaven/utils/cvss.py::objective_base_score`, precedence: published CVE/NVD/OSV
+  score → KB class typical → class-vector base score → the finding's own vector)
+  is now shared by the report, the store/UI and the ML feature extractor, so a
+  finding's CVSS reads the same everywhere.
+- **CVSS v4.0 advisories are now scored (fixes the flat `react-router` row).**
+  The in-house calculator only understood CVSS v3.1, so any advisory carrying a
+  **v4.0** vector (increasingly common on 2025+ GHSA records) was unscoreable and
+  fell back to the flat severity-label constant — e.g. the real react-router
+  advisory GHSA-qwww-vcr4-c8h2 showed `8` instead of its true base score. CVSS:4.0
+  vectors are now routed to the reference-grade `cvss` library (added as a base
+  dependency), so that finding correctly reads **7.1** and its v4.0 vector is
+  preserved; v3.x scoring is unchanged. Degrades gracefully to the label fallback
+  if the library is somehow absent.
+- **Cleared the `react-router` advisory at the source by migrating the web UI to
+  React 19.** The SCA self-scan flagged `react-router@7.18.1` for
+  GHSA-qwww-vcr4-c8h2 (RSC-mode CSRF, CWE-352, affected range `[7.12.0, 8.3.0)`) —
+  a real, correctly-matched advisory. The 7.x line has no backported fix and the
+  fixed release lives only on the consolidated **`react-router` 8.3.0** package
+  (there is no `react-router-dom@8`), which requires **React ≥ 19.2.7**. The whole
+  frontend was therefore upgraded: **React 18 → 19** (react + react-dom 19.2.8),
+  **`react-router-dom` → `react-router` 8.3.0** with imports rewritten across 22
+  files, **@react-three/fiber 8 → 9** and **@react-three/drei 9 → 10** (React 19
+  reconciler), types bumped to 19, and the unused `recharts` dependency dropped.
+  HEAVEN's own SCA scan of `heaven-ui` now reports **0 vulnerabilities**, and
+  **all 24 UI routes** (plus the finding-detail and not-found routes and a
+  client-side router transition) were live-verified end-to-end — sign-in, the R3F
+  3D topology and framer-motion animations included — with **zero console errors**
+  on every page. This supersedes the interim CVSS-scoring fix above: the finding is
+  now **removed**, not merely rescored.
+- **Pinned the Node ≥ 22.22 build floor everywhere it's declared.** react-router 8
+  requires `node >=22.22.0`, so the requirement is now enforced consistently
+  instead of relying on "latest 22.x" resolving above the floor by chance: a
+  `heaven-ui/package.json` `engines` field, a new `heaven-ui/.nvmrc` (`22.22`),
+  both CI `setup-node` jobs pinned to `22.22`, the Dockerfile `node:22-slim` base
+  documented as the ≥22.22 floor, and the Unix/Windows install scripts warn early
+  when the local Node is older (message and gate updated from the stale "18+/20+").
+
+- **Green CI, reproducibly.** Two jobs had begun failing on `main` from
+  environment drift rather than any code defect:
+  - *Lint (ruff).* CI installs ruff unpinned (`pip install ruff`), so when ruff
+    **0.16** shipped, its broadened *implicit* default rule set flagged 1800+
+    style items (import order, f-strings, annotation styles) on unchanged,
+    previously-clean code. The lint rule set is now declared **explicitly** in
+    `[tool.ruff.lint]` (`select = ["E4","E7","E9","F"]` — ruff's long-standing
+    default, exactly what the codebase was linted against), so any ruff version
+    enforces the same rules and a future release can't silently break the build.
+  - *Unit tests (3.11 / 3.12).* Three `test_p3_cloud_iam_parity.py` cases
+    imported the deliberately opt-in cloud SDKs (`googleapiclient`,
+    `azure.identity`) — present on dev machines but not in CI's lean
+    `pip install -e ".[dev]"`, so they raised `ModuleNotFoundError`. They now
+    `pytest.importorskip(...)` those SDKs: they **skip cleanly** where the
+    `[cloud-gcp]` / `[cloud-azure]` extras aren't installed and still **run
+    fully** wherever they are. Collected test count is unchanged (1319).
 
 - **The authenticated Azure IAM audit never claims authentication it doesn't
   have.** `DefaultAzureCredential` and the management client both construct
@@ -1743,112 +2112,6 @@ green CI. The complete, itemised history follows.
   now shrink correctly (`minmax(0, …)`), the fields stack on narrow screens, and
   the button is spaced properly.
 
-### Changed
-
-- **A blank "active engagement" now resolves to your most-populated engagement,
-  not `default`.** When no engagement is explicitly selected and no active
-  pointer exists (e.g. the one you were viewing was deleted), the app — and the
-  scan writer — now resolve to the on-disk engagement richest in real data
-  instead of a blank `default` that silently absorbed scans. On startup the app
-  also adopts that engagement as active, so it opens on your actual work.
-
-- **The scan launcher now picks the destination engagement explicitly.** The
-  free-text "engagement name" field is a dropdown of the engagements on disk
-  (plus "＋ New engagement…"), defaulting to the one you're viewing and showing
-  where findings will be saved — so a scan can't silently pile into a surprise
-  or stale engagement.
-
-### Added
-
-- **Rename an engagement — CLI, API and dashboard.** An engagement's name was
-  welded to both its store key *and* its SQLite filename
-  (`engagements/<name>.db`) with no way to change it, so an awkward name (e.g.
-  `certified hacker`) was permanent. You can now rename in place:
-  - New **`heaven engage rename <old> <new>`** CLI command.
-  - New **`POST /api/engagements/{name}/rename`** route, backing a **rename (✎)**
-    action in the dashboard's engagement manager (which now also shows for a
-    single engagement, so you can rename the only one you have).
-  - The rename moves the DB and its WAL/SHM sidecars, rewrites the in-DB name
-    row, handles a case-only rename on case-insensitive filesystems (macOS:
-    `certified hacker` → `Certified Hacker`), and repoints the active pointer if
-    you rename the engagement you're currently viewing. It never clobbers a
-    different existing engagement. Covered by `tests/test_engagement_rename.py`.
-
-- **Host & Service Inventory — open ports, service versions and OS, surfaced
-  everywhere.** The network scanner already ran a full-spectrum nmap scan
-  (`-sV -sC -O`, all 65535 ports by default, plus UDP), but the ports, service
-  versions and OS it captured only lived inside the raw scan summary and never
-  reached the operator. They are now a first-class inventory shown identically
-  across the whole tool:
-  - New **Assets** page in the web UI (host → OS → open ports / service versions
-    / CPE), fed by a reshaped `GET /api/assets` that returns a normalized,
-    deduplicated inventory plus roll-up totals.
-  - New **`heaven assets`** CLI command (table / JSON / markdown), and every
-    `heaven scan` / `heaven resume` now prints the inventory at the end.
-  - A **"Host & Service Inventory" section** added to the HTML, PDF and Markdown
-    reports (and the `heaven report` / `heaven export` / API report exports),
-    so a written report documents the attack surface, not just the findings.
-  - Accuracy improvements in the scanner: the service version now recombines
-    nmap's product + version + extrainfo (previously the product name was
-    dropped), and OS detection records its **source and confidence** — an nmap
-    `-O` stack fingerprint is labelled *(fingerprinted, N%)* while a TTL guess is
-    labelled *(heuristic — unconfirmed)*. Nothing is fabricated: an
-    undetermined OS is shown as such, and a guess is never presented as a fact.
-  - **OS fingerprinting no longer silently needs root.** `nmap -O` (and SYN/UDP
-    scans) require raw sockets and abort the whole scan if run unprivileged, so
-    HEAVEN now auto-elevates via passwordless `sudo -n` when it's available
-    (controllable with `HEAVEN_NMAP_SUDO=auto|always|never`; `-n` never prompts,
-    so no credential is ever handled), and detects an elevated session on
-    Windows. When it genuinely can't fingerprint, it no longer falls straight to
-    a coarse TTL guess: it first infers the OS from nmap's own service-detection
-    evidence (the `ostype` attribute and OS-level CPEs that `-sV` reports without
-    root) — a real, more specific signal — still labelled *unconfirmed*, and logs
-    a one-line hint on how to unlock authoritative results (run as root, enable
-    passwordless sudo, or `setcap cap_net_raw` on nmap).
-  - A shared `heaven/devsecops/inventory.py` is the single source of truth for
-    normalization/labelling reused by the CLI, API, UI and reports;
-    `tests/test_service_inventory.py` locks in the parsing, the no-false-positive
-    OS labelling and the cross-surface rendering.
-
-### Changed
-
-- **Every scan mode now runs a real, focused pipeline — the mode selector is no
-  longer cosmetic.** `build_full_scan` previously registered all ~35 tasks
-  regardless of the chosen mode, so WEB, NETWORK, API, CLOUD, CONTAINER, IOT, OT,
-  AD and EMAIL all executed the identical full scan (neither the CLI nor the web
-  launcher wired the mode through). Each task is now tagged with the modes it
-  belongs to; a focused mode registers only its dedicated modules plus the shared
-  enrichment tail (validation, FP-suppression, ML scoring, MITRE mapping,
-  reporting), and `FULL` still runs everything. The CLI (`heaven scan -m …`) and
-  the web API (`POST /api/scans` `mode`) both pass the mode through to a
-  per-scan-isolated builder (no shared-singleton mutation). New
-  `tests/test_scan_modes.py` locks in the per-mode task sets.
-- **OT is now a distinct mode from IOT.** OT/ICS runs ICS/SCADA protocol probes
-  (Modbus, Siemens S7comm, EtherNet/IP, DNP3, IEC 60870-5-104, OPC-UA, BACnet);
-  IOT covers consumer / building-automation devices (MQTT, SNMP, RTSP, CoAP,
-  UPnP/SSDP, vendor web panels). Previously OT re-ran the IoT scanner.
-- **CLOUD mode now does real work against any target.** Selecting CLOUD mode is
-  itself the opt-in for the public-bucket exposure probe (previously gated behind
-  the `--cloud-buckets` flag), so a CLOUD scan automatically guesses bucket names
-  from the target host and proves public exposure from each provider's own
-  response. The probe stays opt-in in every other mode.
-- **Zero Bandit findings at every severity (previously clean only at medium+).**
-  The 132 best-effort `except … : pass|continue` handlers that silently swallowed
-  probe errors now log at `debug` with `exc_info` — a scanner that hides an
-  unexpected probe error can silently miss a vulnerability, so the breadcrumb is a
-  real observability win (and it costs nothing when debug logging is off). The
-  irreducible intentional patterns carry a precise, documented per-line
-  `# nosec <id>` instead of a blanket skip (default-credential and auth-bypass
-  test payloads, MITRE ATT&CK ids / taxonomy strings, deterministic seedable repro
-  RNG and non-crypto jitter, subprocess calls to vetted CLI tools, and XML
-  output-escaping), so the checks stay live for any *new* real issue. Also
-  modernized `asyncio.get_event_loop()` → `get_running_loop()` inside coroutines,
-  replaced a mypy-narrowing `assert` with a positive `isinstance` guard, and
-  tightened the CI Bandit gate from `-ll` to `-l` so low-severity regressions
-  surface in code scanning.
-
-### Fixed
-
 - **Web UI is responsive again — the dashboard no longer overflows or overlaps
   on small screens.** The dashboard's two-pane grid was locked to a fixed
   `1fr 360px` at one viewport height, and the 3D topology `<canvas>` kept its
@@ -1989,69 +2252,6 @@ green CI. The complete, itemised history follows.
   asset. Those reserved base names are now skipped — a coincidental generic-name
   match is no longer claimed as the target's bucket.
 
-### Security
-
-- **Closed an XXE in the SCA Maven parser** (CWE-611). `pom.xml` files come from
-  the *scanned* project, which may be hostile — parsing them with stdlib
-  `xml.etree.ElementTree` allowed external-entity / external-DTD attacks that
-  could read local files off the analyst's host or drive SSRF. The Maven and
-  nmap XML parsers now use `defusedxml`, and a regression test proves a
-  malicious `pom.xml` cannot exfiltrate a local file. `defusedxml` is now a
-  declared dependency.
-- **Randomised the linPEAS post-ex staging path** (CWE-377). The privilege-
-  escalation runner dropped `linpeas.sh` at a fixed `/tmp/linpeas.sh` on the
-  target, then `chmod +x` and executed it — a TOCTOU/symlink opening on a
-  multi-user target's world-writable `/tmp`. It now uses an unpredictable
-  `/tmp/.heaven-<random>.sh` per run.
-- **Clean bandit (SAST) baseline — findings _and_ log.** Reviewed and resolved
-  every `-ll` bandit finding: the two real issues above are fixed; the remaining
-  flagged lines (the scheme-validated + checksum-verified model download, the
-  readiness-probe host comparison, and the authorised OOB-callback listener bind)
-  are genuine intentional/false-positive cases. Broadly-intentional test classes
-  for a network-pentest tool (`B104` all-interfaces bind, `B108` remote-target
-  `/tmp` staging path) are documented in `[tool.bandit] skips`; `B310`/urlopen
-  stays on a scoped, prose-free `# nosec B310` so any *new* urlopen must be
-  reviewed. Result: `bandit -r heaven/ -ll -c pyproject.toml` now emits **zero
-  findings and zero parser warnings** (previously ~70 cosmetic "Test in comment"
-  / "no failed test" lines cluttered the CI SAST log).
-- **Cleared all 19 web-UI dependency advisories** reported by `heaven sca`
-  (OSV.dev). Removed the **unused `mermaid`** dependency — it was never imported,
-  and dropping it eliminated 13 advisories on its own (4 mermaid CVEs plus the
-  transitive `dompurify` set and a high-severity `uuid` issue) and removed 113
-  packages. Bumped `vite` 5→8, `@vitejs/plugin-react` 4→6 and `react-router-dom`
-  6→7 to clear the remainder. `heaven sca` and `npm audit` now report **zero**
-  vulnerable dependencies.
-- **Hardened evasion/fuzzer randomness to a CSPRNG** (CWE-330). All timing
-  jitter, User-Agent rotation, scan-order shuffling and canary generation in
-  `recon/evasion_engine.py` and `vulnscan/web_fuzzer.py` now draw from
-  `secrets.SystemRandom` instead of the default PRNG — unpredictable to IDS/WAF
-  fingerprinting, and clearing HEAVEN's own `weak-random-for-crypto` SAST rule.
-
-### Added
-
-- **Per-section scan results in the web UI.** SAST and SCA runs now have their
-  own result lists on the SAST and SCA pages (a "SAST scan history" / "SCA audit
-  history" panel, same expandable-row + inline-findings view as the Scans page),
-  instead of being merged into the general Scan Activity list where the same run
-  showed up twice. Backed by a new `kind` filter on `GET /api/scans`
-  (`pentest` — the default, excludes code-analysis runs — plus `sast`, `sca`,
-  `all`). Reusable `ScanList` component (`heaven-ui/src/components/ScanList.jsx`)
-  drives all three sections.
-- **More scan modes in the launcher.** The Launch Scan mode dropdown now exposes
-  every mode with a real scanner phase: FULL, WEB, NETWORK, API, CLOUD,
-  CONTAINER, IOT, **OT**, AD and EMAIL (was only web/network/full/ad/cloud). Added
-  `OT` (operational technology) to the `ScanMode` enum; it runs the same
-  IoT/SCADA/OT scanner phase.
-- **Dashboard quick-launch panel.** The dashboard now has a "Launch a scan" grid
-  with a tile for every scan surface (Full, Web, Network, API, Cloud, Container,
-  IoT, OT, AD, Email) plus the analysis tools (SAST, SCA, CVE) — each one click
-  from the landing page. Scan-mode tiles deep-link into the launcher with the
-  mode preselected (`/scans?mode=<mode>`); FULL is highlighted and appears once.
-  Both the panel and the launcher `<select>` read from one shared source of truth
-  (`heaven-ui/src/scanModes.js`), so they can never drift apart.
-
-### Fixed
-
 - **SAST/SCA findings now show up after a scan.** Running a SAST or SCA scan with
   an engagement name persisted the findings into that engagement's store but left
   the app pointed at whatever engagement was active before — so the Findings page
@@ -2115,30 +2315,6 @@ green CI. The complete, itemised history follows.
   / `heaven engage delete` for CLI ↔ API ↔ UI parity; the delete removes the
   SQLite DB *and* its WAL/SHM sidecars so the name can't be resurrected.
 
-### Changed
-
-- **Default scan mode is now FULL** (was WEB) in both the web launcher and the
-  `heaven scan` CLI wizard, so the out-of-the-box scan runs every module.
-- **Full power by default.** Folded the pure-Python runtime feature-packs
-  (recon, reports, lateral movement, deploy, scheduling, AWS cloud, and the
-  default Gemini AI SDK) into the base `dependencies`, so a plain `pip install`
-  is fully powered with no extras to remember. The former `[recon]`/`[reports]`/…
-  extras remain as backward-compatible aliases.
-- **The one-command install now does everything in one pass and can't hang.**
-  External-tool installation runs as part of `install.sh` / `install.ps1` (no
-  separate step to remember). Every per-tool install is bounded by a timeout
-  (`HEAVEN_TOOL_INSTALL_TIMEOUT`, default 900s) with a watchdog that kills a
-  stalled command, runs package managers non-interactively
-  (`DEBIAN_FRONTEND=noninteractive`, `HOMEBREW_NO_AUTO_UPDATE`, winget
-  `--disable-interactivity`), and makes `sudo` fail fast when there's no
-  interactive terminal instead of blocking forever on a password prompt.
-  `install.sh` pre-authorizes `sudo` once up front so Linux tool installs never
-  stall mid-run.
-- **Web UI build now targets Node 22 (active LTS)** in CI and the Dockerfile.
-  Vite 8 requires Node ≥20.19 / ≥22.12, and Node 20 has reached end-of-life.
-
-### Fixed
-
 - **A phantom "default — empty" engagement appeared on its own and couldn't be
   removed.** Merely loading the dashboard opened the fallback `default`
   engagement for a *read*, and the store constructor eagerly created its SQLite
@@ -2192,6 +2368,44 @@ green CI. The complete, itemised history follows.
   then uninstall with a data-preservation assertion) — so the Windows path is now
   gated by actual Windows execution, not just static analysis.
 
+### Security
+
+- **Closed an XXE in the SCA Maven parser** (CWE-611). `pom.xml` files come from
+  the *scanned* project, which may be hostile — parsing them with stdlib
+  `xml.etree.ElementTree` allowed external-entity / external-DTD attacks that
+  could read local files off the analyst's host or drive SSRF. The Maven and
+  nmap XML parsers now use `defusedxml`, and a regression test proves a
+  malicious `pom.xml` cannot exfiltrate a local file. `defusedxml` is now a
+  declared dependency.
+- **Randomised the linPEAS post-ex staging path** (CWE-377). The privilege-
+  escalation runner dropped `linpeas.sh` at a fixed `/tmp/linpeas.sh` on the
+  target, then `chmod +x` and executed it — a TOCTOU/symlink opening on a
+  multi-user target's world-writable `/tmp`. It now uses an unpredictable
+  `/tmp/.heaven-<random>.sh` per run.
+- **Clean bandit (SAST) baseline — findings _and_ log.** Reviewed and resolved
+  every `-ll` bandit finding: the two real issues above are fixed; the remaining
+  flagged lines (the scheme-validated + checksum-verified model download, the
+  readiness-probe host comparison, and the authorised OOB-callback listener bind)
+  are genuine intentional/false-positive cases. Broadly-intentional test classes
+  for a network-pentest tool (`B104` all-interfaces bind, `B108` remote-target
+  `/tmp` staging path) are documented in `[tool.bandit] skips`; `B310`/urlopen
+  stays on a scoped, prose-free `# nosec B310` so any *new* urlopen must be
+  reviewed. Result: `bandit -r heaven/ -ll -c pyproject.toml` now emits **zero
+  findings and zero parser warnings** (previously ~70 cosmetic "Test in comment"
+  / "no failed test" lines cluttered the CI SAST log).
+- **Cleared all 19 web-UI dependency advisories** reported by `heaven sca`
+  (OSV.dev). Removed the **unused `mermaid`** dependency — it was never imported,
+  and dropping it eliminated 13 advisories on its own (4 mermaid CVEs plus the
+  transitive `dompurify` set and a high-severity `uuid` issue) and removed 113
+  packages. Bumped `vite` 5→8, `@vitejs/plugin-react` 4→6 and `react-router-dom`
+  6→7 to clear the remainder. `heaven sca` and `npm audit` now report **zero**
+  vulnerable dependencies.
+- **Hardened evasion/fuzzer randomness to a CSPRNG** (CWE-330). All timing
+  jitter, User-Agent rotation, scan-order shuffling and canary generation in
+  `recon/evasion_engine.py` and `vulnscan/web_fuzzer.py` now draw from
+  `secrets.SystemRandom` instead of the default PRNG — unpredictable to IDS/WAF
+  fingerprinting, and clearing HEAVEN's own `weak-random-for-crypto` SAST rule.
+
 ## [1.0.0] — 2026-07-08
 
 ### Added
@@ -2240,6 +2454,345 @@ green CI. The complete, itemised history follows.
   detectors are now proven by the always-on CI benchmark, and the numbers in
   `docs/BENCHMARK_RESULTS.md` / `docs/COMPARISON.md` reflect the expanded surface.
 
+- **UNION-based SQL injection detection** — the fourth classic SQLi technique
+  (alongside error-based, boolean-blind and time-based). It sweeps the unknown
+  column count, exfiltrates a unique marker via `UNION SELECT` in both string and
+  numeric contexts, and confirms a hit only when the marker surfaces as rendered
+  query OUTPUT — the reflected payload is stripped first, so an app that merely
+  echoes the input can't trigger a false positive
+  (`heaven/vulnscan/injection_scanner.py`, verified by the native benchmark).
+- **Native, Docker-free web-injection benchmark (scored).** A tiny in-process
+  Flask target (`tests/benchmarks/native/vuln_app.py`) faithfully reproduces
+  DVWA's SQLi/LFI/cmdi/XSS endpoints — *including MySQL comment semantics* — so
+  the real crawler and injection scanner are exercised end-to-end in ~1 s with no
+  QEMU or Docker. Two always-on tests consume it: `test_native_sqli_recall.py`
+  asserts HEAVEN detects error-based **and** blind SQLi, LFI, command injection
+  and reflected XSS — each attributed to the correct parameter (`id`, not the
+  `Submit` button) and with no SQLi/cmdi false positives on reflective/escaped
+  endpoints; `test_native_benchmark.py` scores the same run through the existing
+  precision/recall/F1 metrics layer against a labelled ground truth
+  (`ground_truth/native.yaml`) and enforces floors (currently 100% precision,
+  100% required recall, 100% F1). The crawler-vector → scan-target conversion was
+  extracted from the orchestrator into a pure, unit-tested
+  `build_injection_targets()` (single source of truth).
+
+- **CycloneDX SBOM export.** `heaven sbom` and `GET /api/sbom` generate a
+  CycloneDX 1.5 SBOM whose components are the services HEAVEN discovered
+  (product/version/CPE per open port) and whose `vulnerabilities` section
+  folds in CVE-bearing findings. A "SBOM (CycloneDX)" download was added to the
+  web Reports page. The generator now consumes the real scanner asset shape
+  (`{host, open_ports:[…]}`) — previously it expected a shape the scanner never
+  produced, so it always emitted an empty SBOM (`heaven/devsecops/sbom.py`).
+- **AI-assisted remediation.** `heaven remediate <finding-id>` and
+  `POST /api/findings/{id}/remediation` generate remediation guidance via the
+  configured LLM provider, falling back to the knowledge-base remediation when
+  no key is set (`ai_generated` flags which path produced the text). A
+  "Generate AI remediation" button was added to the finding detail page
+  (`heaven/devsecops/ai_remediation.py`).
+
+- **Rebuilt the HTML report into a client-ready deliverable.** It now opens with
+  a cover page (classification, engagement, overall-risk badge), then a
+  confidentiality notice, document control + revision history, table of contents,
+  executive summary (narrative + severity distribution bar + KPI tiles + key
+  findings), scope & methodology (in-scope targets + standards: OWASP/PTES/NIST/
+  MITRE/CVSS), a risk-rating methodology table with remediation SLAs, a findings
+  summary table, detailed findings (per-finding metadata, description, impact,
+  evidence/PoC, remediation, references), OWASP Top 10 coverage, a prioritised
+  remediation roadmap, and an appendix (tooling, glossary, disclaimer).
+- **Print-ready.** Light, A4-friendly layout with `@page`/print CSS, page breaks
+  between sections, and a built-in **Print / Save as PDF** button — so the HTML
+  doubles as a polished PDF with one click (`heaven/devsecops/compliance_report.py`).
+- **One-click download + in-browser preview** on the web Reports page: a primary
+  "Download report (HTML)", a "Preview in browser" (opens the deliverable in a new
+  tab), and a direct "Download PDF". Other formats (Markdown/CSV/JSON/SARIF/Burp/
+  Proxy-JSONL) remain as secondary data exports.
+
+- **Sample data in one step.** New `heaven demo` (CLI) and a **Load sample data**
+  button on the dashboard seed a realistic example engagement (12 findings,
+  critical→info, with evidence) into the same store the dashboard reads — so a
+  fresh install shows a full Dashboard / Findings / Kill-chain / Reports
+  instantly instead of an empty screen. Idempotent and fully offline
+  (`heaven/demo.py`; `POST /api/demo/seed`).
+- **System Health page (web UI)** — the browser equivalent of `heaven doctor`.
+  Shows external tools (nmap/nuclei/sqlmap/ffuf/searchsploit/semgrep/docker)
+  with install hints, which API keys/integrations are configured, Python-module
+  health, and recommended next steps — so "is it broken or just missing a tool?"
+  is answerable at a glance (`GET /api/system/health`; `doctor` now also probes
+  ffuf + searchsploit).
+- **Friendlier CLI.** Uncaught errors now render a one-line, actionable message
+  (with a "re-run with `--debug`" hint) instead of a raw traceback. A new global
+  `--quiet`/`-q` flag silences informational logs so output pipes cleanly — pair
+  it with a command's `--format json` (e.g. `heaven --quiet findings --format
+  json | jq …`) for scripting/CI.
+- **Docs** — `docs/FAQ.md` (troubleshooting), `pipx install heaven-pentest` and
+  `docker run` one-liners, and a "See it in 60 seconds" quickstart in the README.
+- **One-click demo scan** — a "Run demo scan" button (Scans page) and
+  `POST /api/demo/scan` animate the full loop (recon → crawl → injection →
+  reporting) with live progress, then land the sample findings — so a new user
+  experiences a real-feeling scan without a target or authorization.
+- **Global `--json`** — a root flag that emits machine-readable JSON from the
+  data commands (`findings`, `doctor`, `config list`, `demo`); implies `--quiet`
+  so stdout is clean for `jq`/CI.
+- **In-app help tooltips** — a reusable `HelpTip` (?) explains CVSS / EPSS /
+  severity / confidence / risk score / kill-chain phases inline on the Dashboard
+  and Kill Chain pages.
+- **Light theme + mobile nav** — a header toggle switches light/dark (persisted
+  to `localStorage`, applied before first paint), and the sidebar collapses to an
+  off-canvas hamburger menu on narrow screens.
+- **`heaven quickstart`** — one command takes a fresh clone to a populated
+  dashboard: ensures `.env` (generating a strong admin password if missing),
+  loads sample data, and prints the next step (`--serve` launches the UI too).
+- **"Fix this first"** — a Dashboard card + `GET /api/engagement/top-findings`
+  rank findings by risk score and show a one-line remediation for each, so the
+  highest-impact next action is obvious; click through to the detail.
+- **Guided scan launcher** — the Scans launcher now validates targets live
+  (URL / IP / CIDR / host) with a valid/invalid count, disables Launch until
+  there's a valid target, shows the engagement's current scope size, and adds
+  inline help on Stealth + the authorization gate.
+- **Executive summary** on the "Fix this first" card ("N critical · M high
+  across K targets · top risk …").
+- **Animated demo** — `docs/assets/demo.svg`, a lightweight terminal cast
+  (`quickstart` → `serve` → dashboard) embedded at the top of the README's
+  "See it in 60 seconds".
+
+- A short, skippable **in-app tour** (`heaven-ui/src/components/Tour.jsx`) orients
+  a first-time operator across Dashboard → Scans → Findings/Reports → Settings →
+  System Health, ending with a one-click **Load sample data**. Auto-opens once
+  per browser and is re-launchable anytime from the command palette
+  ("Take the tour"). Token-styled, so it renders in light and dark.
+
+- **Entering API keys no longer means hand-editing `.env`.** A new
+  **Settings** page in the web UI (`/settings`) lists every configurable key —
+  LLM (Gemini / Anthropic / OpenAI), NVD, Shodan, Slack/Teams webhook, Splunk &
+  Elastic SIEM, Jira & Linear — grouped, each with a one-line description, a
+  *“how to get it”* link, and a masked indicator of whether it's already set.
+  Paste a value, click **Save**, and it's applied to the running server
+  immediately *and* persisted — survives a restart, and the CLI picks it up too.
+- **One catalog backs everything** (`heaven/settings_catalog.py`): the web
+  Settings page, the new **`heaven config`** command (`list` / `get` / `set` /
+  `unset`), and the `heaven init` wizard all read & write the **same `.env`**
+  plus `os.environ`, so a key set on any surface is live everywhere. No more
+  "I set it in the CLI but the web app didn't see it".
+- New endpoints `GET/POST /api/settings` (+ `POST /api/settings/test-llm` for a
+  no-cost "is my LLM key working?" check), gated by `config.modify`. Secrets are
+  **never** returned in full — only a short masked preview. New
+  `heaven/utils/env_file.unset_env_var()` cleanly removes a key.
+- Tests: `tests/test_settings.py` (14 cases) covers masking, persistence,
+  unset, unknown-key rejection, and the API surface.
+
+- The injection scanner is no longer SQLi+XSS only. It now tests every GET param
+  and POST field for, additionally:
+  - **Local File Inclusion / path traversal** — `/etc/passwd`, `..//` bypasses,
+    null-byte, `php://filter` wrappers; **content-leak confirmed** (CWE-98).
+  - **OS command injection** — output-based (`;id` / `$(id)` / `` `id` `` →
+    detects `uid=…`) and **time-based blind with differential timing** (doubling
+    the injected `sleep` must double the delay — defeats server jitter, so no
+    false positives on naturally-slow endpoints) (CWE-78).
+  - **Remote File Inclusion** — best-effort detection of remote-fetch attempts
+    (CWE-98).
+  Verified live against DVWA (`critical lfi — param 'page'`,
+  `critical cmdi — param 'ip'`) and covered by deterministic unit tests
+  (`tests/test_injection_probes.py`). See
+  [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md).
+
+- `docs/BENCHMARK_RESULTS.md` documents the real, reproducible results of running
+  HEAVEN against live DVWA (autonomous authenticated discovery of 17
+  `/vulnerabilities/*` endpoints; confirmed critical SQLi/LFI/cmdi; the
+  report-quality + auth fixes that made it work), linked from the README summary.
+
+- The "X not set — random value generated" config notice is now DEBUG-level, so
+  normal commands are quiet for unconfigured users (the actionable nudge still
+  lives in `heaven serve` startup + `heaven doctor`'s next-step).
+- Web Scans page shows **live elapsed time** for running scans (updates every
+  second) alongside the existing progress bar.
+- **First-run guide on the Dashboard** — a dismissible checklist
+  (scope → scan → findings → report) that auto-checks each step from real
+  engagement state and hides once the core flow is complete.
+
+- The autonomous loop now streams each iteration the instant it completes over
+  `WS /api/autonomous/jobs/{id}/stream` (snapshot → iteration… → done), with
+  per-subscriber fan-out. `run_autonomous` gained an `on_iteration` hook and
+  `IterationReport.to_dict()`. The web UI renders a live table and falls back to
+  polling if the socket drops. Verified end-to-end over a real socket.
+
+- New `tests/test_report_auth_api.py`: report export (empty-engagement 404,
+  unknown-format handling) and the password-change flow (wrong-current 401,
+  weak/common new-password 422, success persists to `.env`).
+- CI now builds the web UI (`ui-build` job: `npm ci` + `npm run build`, uploads
+  `dist`) and the Docker job depends on it.
+
+- `heaven doctor` ends with a contextual **Next step** block that walks the
+  happy path based on current state (no admin password → `heaven init`; no
+  engagement → `heaven engage init` + `scope add`; no findings → `heaven scan`;
+  has findings → `heaven report` / `heaven serve`). A new operator is never left
+  wondering "now what?".
+
+- The multi-format report export already existed but was buried as a dropdown on
+  the Findings page, so the **Reporting** section (Tickets / Benchmark /
+  Methodology) had no obvious way to "get a report". Added a first-class
+  **Reports** page (`/reports`) that shows a live severity snapshot of the active
+  engagement and one-click download in all 8 formats (PDF / HTML / Markdown /
+  CSV / JSON / SARIF / Burp / Proxy-JSONL), with an actionable empty state when
+  there are no findings yet.
+
+- pip extras for the AI layers: `pip install -e ".[gemini]"` / `".[anthropic]"` /
+  `".[openai]"`, or `".[llm]"` for all three. `.env.example` and `heaven init`
+  now document each key, where to obtain it, and which SDK to install; `heaven
+  init` prints the get-a-key URLs and the exact `pip install` line.
+
+- **Error boundary** around the routed content — a render error now shows a
+  recoverable "something went wrong" card (Reload / Back to dashboard) instead
+  of a blank screen. Keyed by route, so navigating away clears it.
+- **404 route** — unknown URLs render a proper "page not found" instead of an
+  empty content area.
+- **Session survives refresh** — the auth token is persisted in sessionStorage
+  (clears on tab close), so F5 / reopening a tab no longer forces re-login.
+  Tradeoff documented in `api.js`; httpOnly cookie remains the max-hardening
+  option.
+- **Graceful session expiry** — a 401 clears auth, raises a "Session expired"
+  toast, and ProtectedRoute redirects to /login (no more raw error card).
+- **Actionable empty states** — the "no engagement" screens on Dashboard,
+  Findings, Kill Chain and Engagement now offer an in-app **Launch a scan →**
+  button (the Scans page has a full launcher) instead of telling the operator
+  to go run CLI commands / restart the server.
+- **Global "scan running" indicator** in the header — polls so it stays visible
+  after you navigate away from the Scans page; click to return.
+- **Findings filters** — debounced auto-apply + Enter-to-apply, and a loading
+  skeleton on first fetch.
+- **Accessibility** — visible keyboard focus rings, keyboard-operable sortable
+  table headers with `aria-sort`, `aria-expanded` on sidebar groups, and
+  `aria-hidden` on decorative icons; honors `prefers-reduced-motion`.
+- **Consistency pass across all pages** — skeleton loaders on every
+  fetch/run (Coverage, Knowledge, Tickets, Methodology, Benchmark, Diff, SAST,
+  Autonomous, Post-Ex, Lateral, AI Plans) and actionable empty states
+  (Knowledge / Diff → "Launch a scan", Benchmark / Watch → clear guidance).
+- **No more `alert()` dialogs** — the Replay (Scans) and Train-priors (Coverage)
+  flows now use the in-app toast system instead of blocking browser alerts.
+
+- **Colourised, grouped help via rich-click.** `heaven --help` now renders the
+  38 commands in six labelled panels (Scanning & Monitoring · Engagements &
+  Findings · Reporting & Tickets · AI & Threat Intel · Models · Platform &
+  Setup) instead of one flat alphabetical dump. `heaven scan --help` groups its
+  options into Targets / Scan profile / Authorization & scope / Exploitation
+  chaining / Output panels and shows a worked Examples block. Falls back to
+  plain Click (same commands) when `rich-click` isn't installed.
+- **`heaven use <engagement>`** — git-branch-style sticky engagement context
+  stored per working directory (`./.heaven/`), so you stop retyping
+  `--engagement` on every command. Resolution precedence: explicit flag >
+  `HEAVEN_ENGAGEMENT` env > `heaven use` > default. `heaven use` shows the
+  current selection + available engagements; `heaven use --clear` resets it.
+  The no-arg dashboard now displays the active engagement.
+- **"Did you mean?" suggestions** on a mistyped command
+  (`heaven scna` → suggests `scan`).
+
+- **Downloadable reports (webapp + API).** New `GET /api/report/export?format=…`
+  streams a report in 8 working text/standard formats — HTML (compliance-mapped),
+  Markdown, CSV, JSON, SARIF, Burp XML, proxy-JSONL — plus PDF when `reportlab`
+  is installed (a declared dependency; returns a clear 503 if absent). A
+  "Download report" menu is wired into the Findings page (`ReportMenu`). The API
+  reuses the exact reporters behind `heaven export` / `heaven report`, so CLI and
+  webapp output match.
+- **Vulnerability Knowledge Base** (`heaven/devsecops/vuln_kb.py`) — 16 curated
+  classes with real description / impact / remediation / references / MITRE / CWE /
+  OWASP. The evidence packager and the finding-detail API enrich every finding
+  from it, so the UI and reports never show blank fields. Fixes the empty
+  `DOCKER_SOCKET_EXPOSED` detail view (now shows CVSS 9.8, MITRE T1610, CWE-284,
+  remediation, and references). Also surfaced real stored fields the detail page
+  previously dropped (CVSS from risk_score, seen-count, last-seen date).
+- **Finding-detail page** now renders an "About this vulnerability" section,
+  impact, CWE/OWASP/MITRE chips, and a references list.
+- **admin/admin default + forced change.** Fresh installs seed admin/admin so the
+  console works out-of-the-box, but the account is flagged `must_change_password`:
+  the webapp shows a blocking change-password screen on first login and refuses
+  to proceed until a strong password is set (≥8 chars, common-password blocklist).
+  `HEAVEN_ADMIN_PASSWORD` still overrides with no forced change. New
+  `POST /api/auth/change-password`; `self-audit` still flags unchanged defaults.
+
+- **PyPI release workflow** (`.github/workflows/release.yml`) — on `v*`
+  tags, builds sdist+wheel, verifies install, publishes via PyPI OIDC
+  trusted publishing, and cuts a GitHub Release with CHANGELOG body.
+- **Docker GHCR build+push workflow** (`.github/workflows/docker.yml`) —
+  multi-arch (amd64 + arm64) image at `ghcr.io/nishu2402/heaven` on
+  branch push, semver tags on `v*` tags.
+- **`heaven init`** — interactive first-time-setup wizard. Generates
+  strong passwords, prompts for optional LLM / SIEM / ticketing keys,
+  writes a versioned `.env`. Idempotent.
+- **`heaven update`** — refreshes Nuclei templates, NVD CVE delta, and
+  ExploitDB CSV mirror in one command. Useful for cron / pre-engagement.
+- **`heaven scan --watch-tail`** — headless mode that disables the Rich
+  live HUD and streams flat one-line-per-event output. For CI / ssh /
+  `tee scan.log` workflows where the live HUD scrambles the recording.
+- **Asset-criticality risk multiplier** — `heaven scope add --criticality
+  {low,medium,high,crown_jewel}` adjusts every finding's `risk_score` by
+  the configured multiplier (0.7 / 1.0 / 1.3 / 1.5). 11 new tests.
+- **Helm chart** (`deploy/helm/heaven/`) — standard chart with
+  Deployment + Service + Secret + ConfigMap + PVC + Ingress (opt-in)
+  + ServiceAccount + NOTES.txt. Multi-arch image-ready.
+- **`docs/QUICKSTART.md`** — 5-minute walkthrough for evaluators.
+- **`docs/COMPARISON.md`** — feature parity matrix vs Burp / ZAP /
+  sqlmap / Nessus / Acunetix + empirical-numbers template.
+- **`docs/DEMO.md`** — asciinema/video recording script (substitute
+  for an actual recorded demo this session).
+- **`docs/BENCHMARK_HOWTO.md`** — step-by-step to produce real DVWA
+  precision/recall numbers (substitute for the actual benchmark run).
+- **Live CI badges** in README — replaces the manually-maintained
+  `Tests-294_Passing` badge with the actual GitHub Actions status,
+  benchmark workflow status, and PyPI version badges.
+- **`pyproject.toml` metadata polish** — full PyPI classifier set,
+  project URLs, marketing description, additional keywords. Renamed
+  the published package from `heaven` (squatted) to `heaven-pentest`.
+
+- **Continuous monitoring** (`heaven watch`) — interval+jitter loop with
+  auto-diff against the previous scan. Fires alerts ONLY on `new` or
+  `regressed` findings (configurable `--heartbeat` to alert every run).
+  Optional `--auto-tickets` to create Jira / Linear issues on regressions.
+- **Differential scanning** (`heaven diff <base> <current>`) — bucketed
+  output (new / resolved / regressed / unchanged) with CI-friendly exit
+  codes. API: `GET /api/scans/{id}/diff?baseline=...`.
+- **SAST** (`heaven sast`) — Semgrep wrapper with a curated 18-rule pack
+  for Python / JavaScript / Go covering OWASP Top 10. Findings land in
+  the engagement DB alongside DAST findings.
+- **Ticketing** (`heaven tickets`) — Jira (REST v3) + Linear (GraphQL)
+  with auto-priority mapping, label normalisation, and bulk push.
+- **Iterative autonomous loop** (`heaven autonomous`) — LLM-driven
+  observe → plan → act loop bounded by `--max-iterations` and
+  `--time-budget`. Falls back to a deterministic rule-based playbook
+  when no LLM API key is set.
+- **Coverage grader** (`heaven coverage`) — rule-based OWASP coverage %
+  + scope hit rate + optional LLM gap analysis.
+- **Lateral movement** (`heaven lateral`) — SSH key reuse + SMB PsExec
+  + pass-the-hash with a hop graph output.
+- **Knowledge graph** (`heaven knowledge`) — SQLite-backed cross-engagement
+  memory of (target_profile, technique, outcome) tuples with Beta-smoothed
+  per-technique success priors.
+- **Exploit-DB lookup** (`heaven exploitdb <cve>`) — local `searchsploit`
+  (preferred) + ExploitDB CSV mirror.
+- **AI namespace** — Layers A–E: provider-agnostic LLM gateway
+  (Anthropic / OpenAI / Gemini), recon agent, attack-chain planner,
+  FP review, autonomous loop.
+- **Authenticated scanning** — `--cookie-file PATH` (Netscape format)
+  and `--auth url=/login,user=X,pass=Y[,csrf_field=token]` on
+  `heaven scan`.
+- **Exploit proof** — `heaven/vulnscan/exploit_proof.py` ties sqlmap,
+  RCE canary file dropping, and an SSRF callback verifier into a single
+  `prove_finding()` entry point. Auto-triggered with `--auto-prove` on
+  `heaven scan`.
+- **Post-exploitation** — `heaven/postex/` with `linpeas_runner`,
+  `bloodhound_collector`, `cred_validator`. Admin-gated.
+- **Benchmark suite** — `tests/benchmarks/` against DVWA with adapters
+  for Burp / ZAP / sqlmap, scanner-agnostic metrics, markdown + CSV
+  reporters, GitHub Actions weekly workflow.
+- **Methodology mapping docs** — `docs/methodology/` with explicit
+  mappings to OWASP Testing Guide v4, NIST SP 800-115, and PTES.
+- **NVD model card** — `data/models/NVD_model.MODEL_CARD.md` following
+  Google's Model Cards format.
+- **Reproducibility** — `--seed` flag on `heaven scan` + `heaven replay
+  <scan-id>` for deterministic re-execution.
+- **SIEM forwarders** — `SplunkHECAlerter` + `ElasticAlerter` in
+  `devsecops/alerting.py`.
+- **Web UI pages** — Watch, ScanDiff, SAST, Autonomous, AIPlans,
+  Coverage, Postex, Lateral, Knowledge, Tickets, Benchmark, Methodology.
+
 ### Changed
 
 - **Hostile-target resilience.** Every core-path orchestrator HTTP session now
@@ -2248,6 +2801,124 @@ green CI. The complete, itemised history follows.
   target's latency ~20×). A new `tests/test_resilience.py` drives the live web
   detectors against slow / 500 / connection-drop / redirect-loop servers and
   asserts they finish fast, never crash, and emit no false findings.
+
+- **Leaner dependency footprint for publication.** Removed eight declared
+  packages that nothing in the codebase imports: `python-nmap` (HEAVEN shells
+  out to the `nmap` *binary*), `python-whois`, `shodan` (Shodan recon uses
+  plain HTTP), `mitreattack-python` / `stix2` / `taxii2-client` (ATT&CK mapping
+  ships a bundled dataset + HTTP TAXII), `matplotlib`, and `lxml` (the crawler
+  parses with the stdlib `html.parser`). Also moved the two heaviest guarded
+  deps out of the base install into extras — `scapy` → `[recon]`, `boto3` →
+  the new `[cloud-aws]` — so `pip install heaven-pentest` is much lighter and
+  the AWS/scapy features still degrade gracefully. No feature was removed; the
+  `[mitre]` extra is gone because it required no pip packages. All tests still
+  pass, base dependency count trimmed to 28.
+- **DVWA benchmark now scans authenticated by default.** The fixture logs into
+  DVWA (CSRF token + `security=low` cookie) and hands the scan a `--cookie-file`
+  so it exercises the real `/vulnerabilities/*` attack surface instead of only
+  the public login page; the per-scan timeout default was raised to 900 s (the
+  authenticated crawl does far more work). Closes the auto-login TODO in
+  `tests/benchmarks/conftest.py`.
+
+- The PDF is now a full client deliverable matching the HTML report
+  section-for-section: cover page, confidentiality notice, document control +
+  revision history, a **real table of contents with page numbers**, executive
+  summary (narrative + severity KPIs + distribution bar + key findings), scope &
+  methodology, risk-rating methodology with SLAs, findings summary, detailed
+  findings (metadata, description, impact, evidence/PoC, remediation, references),
+  OWASP Top 10 coverage, remediation roadmap, and appendix — with a
+  "CONFIDENTIAL … Page X of Y" footer on every page.
+- The PDF and HTML reports now **share** the severity palette, OWASP mapping and
+  knowledge-base enrichment, so a finding looks identical in both, and all text is
+  escaped (long unbroken payloads wrap instead of overflowing the page).
+- **Dependency reduced:** dropped WeasyPrint (which needs Pango/Cairo system
+  libraries) from the `reports` extra and `requirements.txt`. PDF export now needs
+  only `reportlab`; the HTML report needs nothing extra.
+
+- **`install.sh` now creates `.env` for you** with a generated admin password on
+  first run (`heaven init --non-interactive`), so the web UI / API work out of
+  the box — no manual `export HEAVEN_ADMIN_PASSWORD`. It points you at the
+  Settings page / `heaven config` for API keys.
+- **Lean core by default, resilient extras.** It installs the lightweight core
+  first (guaranteed) then attempts each optional feature pack
+  (`recon` / `reports` / `mitre` / `scheduling` / `lateral` / `deploy`)
+  *independently*, so one heavy dependency that needs system libraries can't
+  abort the whole install. `HEAVEN_CORE_ONLY=1` skips extras entirely; LLM SDKs
+  stay opt-in.
+
+- Google deprecated the `google-generativeai` package (it prints a end-of-life
+  warning and stops receiving updates) in favour of the new `google-genai` SDK.
+  The LLM gateway now uses the current client-based SDK
+  (`from google import genai` → `genai.Client(...).models.generate_content(...)`,
+  with a real `system_instruction` instead of prompt-prepending) and **falls back
+  to the legacy SDK** if only that one is installed. Updated the `[gemini]` /
+  `[llm]` / `[all]` extras, `requirements.txt`, the `heaven init` pip hint, and
+  the README to `google-genai`. New `tests/test_llm_gateway.py` covers provider
+  selection, the SDK choice, secret redaction, and structured parsing.
+
+- **`pip install` now matches the documented experience.** Three deps that power
+  the default out-of-the-box flow were missing from `pyproject.toml`'s base
+  install: `aiosqlite` (the default offline SQLite store — it was wrongly buried
+  in the `dev` extra), `pyjwt` (JWT sessions) and `cryptography` (vault). Moved
+  them to core `dependencies`.
+- **Optional features are now installable as pip extras** instead of only via
+  `requirements.txt`: `[recon]`, `[reports]`, `[lateral]`, `[mitre]`, `[deploy]`,
+  `[scheduling]`, and an umbrella `[all]` (mirrors the existing `[gemini]` /
+  `[anthropic]` / `[openai]` / `[llm]` pattern). Each feature still degrades
+  gracefully when its extra isn't installed. README documents the matrix.
+
+- The CLI auto-loads `.env` with `override=True`, so it wins over stale shell
+  exports. Editing `.env` (or the Web-UI password change that writes back to it)
+  now always takes effect on the next run — no "I changed it but a leftover
+  `export` shadowed it" gotcha. `heaven init`'s next-steps no longer tell you to
+  `source`/`export` the file (that step is obsolete).
+
+- **`heaven sys-status` → `heaven doctor`.** The deployment health check now
+  uses the familiar `doctor` idiom and is discoverable in the grouped help.
+  `sys-status` is kept as a hidden, backward-compatible alias.
+- **`heaven schedule` deprecated** in favour of `heaven watch` (which adds
+  change-detection and alert-on-change). It is now hidden and prints a
+  deprecation notice, but still runs for backward compatibility.
+
+- **Complete React UI overhaul** — replaced the green-on-black CRT/matrix
+  aesthetic with a modern, professional dark theme: deep-slate surfaces,
+  aurora-gradient backdrop, glassmorphism, a violet→blue primary accent
+  with emerald kept as the live/signature colour, **Inter** for UI text +
+  **JetBrains Mono** for data/code, layered elevation, and framer-motion.
+- **Rebuilt design system** (`heaven-ui/src/index.css`) around the same
+  class vocabulary, so all 19 pages re-theme consistently. Flagship
+  surfaces hand-built: split-hero **LoginPage**, **Dashboard** (gradient
+  stat cards + real severity-distribution chart), **Sidebar**/**Header**;
+  3D topology reskinned to the new palette.
+- **Verified live** — server-rendered screenshots of Login, Dashboard,
+  Findings and Scans against a seeded engagement confirm real data flow.
+- **Code-splitting** — the heavy three.js 3D topology (~900 KB) is now
+  lazy-loaded behind a dynamic import, and every authenticated page is its
+  own chunk (`React.lazy` + `Suspense`). First-load JS dropped from a single
+  ~1.1 MB bundle to ~313 KB (login + shell); the 3D engine only downloads
+  when the Dashboard opens. Removed dead `recharts`/`mermaid` manual chunks.
+
+- **CLI split** — `heaven/main.py` decomposed from a 1380-line monolith
+  into a thin shim plus `heaven/cli/` subpackage (one module per command
+  group). The `heaven = heaven.main:cli` pyproject entry point is unchanged.
+- **`zeroday_engine.py` → `anomaly_probe.py`** — renamed to match what
+  the code actually does (behavioural fuzzing heuristics, not real
+  zero-day discovery).
+- **`ai_brain.py` priors** moved from hardcoded module constants into
+  `data/models/priors_bootstrap.json`. `heaven/ml/train_priors.py` +
+  `heaven train-priors` produce `priors_learned.json` from engagement
+  history, which is preferred at runtime when present.
+
+### Removed
+
+- Deleted two orphaned modules with no callers: `recon/wireless_recon.py`
+  (PCAP wireless parsing — needed operator-supplied captures, never wired into
+  the scan flow) and `vulnscan/msf_client.py` (Metasploit RPC — required an
+  external `msfrpcd` and an uninstalled optional dependency).
+- Removed the corresponding README claims that had no backing code: "wireless"
+  reconnaissance and the Metasploit integration row (which referenced a
+  `--enable-exploitation` flag that did not exist).
+- Refreshed the drifted project statistics (tests, modules, CLI-command count).
 
 ### Fixed
 
@@ -2336,115 +3007,6 @@ green CI. The complete, itemised history follows.
   — the same reflection-resistant principle as the boolean-SQLi fix
   (`heaven/vulnscan/injection_scanner.py`).
 
-### Added
-
-- **UNION-based SQL injection detection** — the fourth classic SQLi technique
-  (alongside error-based, boolean-blind and time-based). It sweeps the unknown
-  column count, exfiltrates a unique marker via `UNION SELECT` in both string and
-  numeric contexts, and confirms a hit only when the marker surfaces as rendered
-  query OUTPUT — the reflected payload is stripped first, so an app that merely
-  echoes the input can't trigger a false positive
-  (`heaven/vulnscan/injection_scanner.py`, verified by the native benchmark).
-- **Native, Docker-free web-injection benchmark (scored).** A tiny in-process
-  Flask target (`tests/benchmarks/native/vuln_app.py`) faithfully reproduces
-  DVWA's SQLi/LFI/cmdi/XSS endpoints — *including MySQL comment semantics* — so
-  the real crawler and injection scanner are exercised end-to-end in ~1 s with no
-  QEMU or Docker. Two always-on tests consume it: `test_native_sqli_recall.py`
-  asserts HEAVEN detects error-based **and** blind SQLi, LFI, command injection
-  and reflected XSS — each attributed to the correct parameter (`id`, not the
-  `Submit` button) and with no SQLi/cmdi false positives on reflective/escaped
-  endpoints; `test_native_benchmark.py` scores the same run through the existing
-  precision/recall/F1 metrics layer against a labelled ground truth
-  (`ground_truth/native.yaml`) and enforces floors (currently 100% precision,
-  100% required recall, 100% F1). The crawler-vector → scan-target conversion was
-  extracted from the orchestrator into a pure, unit-tested
-  `build_injection_targets()` (single source of truth).
-
-### Changed
-
-- **Leaner dependency footprint for publication.** Removed eight declared
-  packages that nothing in the codebase imports: `python-nmap` (HEAVEN shells
-  out to the `nmap` *binary*), `python-whois`, `shodan` (Shodan recon uses
-  plain HTTP), `mitreattack-python` / `stix2` / `taxii2-client` (ATT&CK mapping
-  ships a bundled dataset + HTTP TAXII), `matplotlib`, and `lxml` (the crawler
-  parses with the stdlib `html.parser`). Also moved the two heaviest guarded
-  deps out of the base install into extras — `scapy` → `[recon]`, `boto3` →
-  the new `[cloud-aws]` — so `pip install heaven-pentest` is much lighter and
-  the AWS/scapy features still degrade gracefully. No feature was removed; the
-  `[mitre]` extra is gone because it required no pip packages. All tests still
-  pass, base dependency count trimmed to 28.
-- **DVWA benchmark now scans authenticated by default.** The fixture logs into
-  DVWA (CSRF token + `security=low` cookie) and hands the scan a `--cookie-file`
-  so it exercises the real `/vulnerabilities/*` attack surface instead of only
-  the public login page; the per-scan timeout default was raised to 900 s (the
-  authenticated crawl does far more work). Closes the auto-login TODO in
-  `tests/benchmarks/conftest.py`.
-
-### Security
-
-- **Column allowlist on the raw-SQL repositories.** `EngagementRepository`,
-  `WebPathRepository`, `NotificationRepository` and `ReportRepository` build
-  `INSERT`/`UPDATE` statements by interpolating column *names* from
-  `kwargs.keys()` (values were always bound parameters). Added a per-table
-  `_COLUMNS` allowlist enforced by `_reject_unknown_columns()` so a dict key can
-  never smuggle SQL, even if raw request data were ever forwarded into
-  `create`/`update` — defense-in-depth, not a known-exploitable path
-  (`heaven/db/repository.py`).
-- **Patched 5 dependency advisories flagged by `pip-audit`.** Bumped
-  `cryptography` floor to `>=48.0.1` (48.0.0 had GHSA-537c-gmf6-5ccf; kept below
-  49 for pyopenssl compatibility) and added a `msgpack>=1.2.1` transitive floor
-  (GHSA-6v7p-g79w-8964, pulled in via `cachecontrol`). `starlette` and
-  `pydantic-settings` were already pinned to their fixed floors; the local env
-  had simply drifted. `pip-audit` now reports no known vulnerabilities
-  (`requirements.txt`).
-
-### Added — SBOM + AI remediation (wired from previously-dead code)
-
-- **CycloneDX SBOM export.** `heaven sbom` and `GET /api/sbom` generate a
-  CycloneDX 1.5 SBOM whose components are the services HEAVEN discovered
-  (product/version/CPE per open port) and whose `vulnerabilities` section
-  folds in CVE-bearing findings. A "SBOM (CycloneDX)" download was added to the
-  web Reports page. The generator now consumes the real scanner asset shape
-  (`{host, open_ports:[…]}`) — previously it expected a shape the scanner never
-  produced, so it always emitted an empty SBOM (`heaven/devsecops/sbom.py`).
-- **AI-assisted remediation.** `heaven remediate <finding-id>` and
-  `POST /api/findings/{id}/remediation` generate remediation guidance via the
-  configured LLM provider, falling back to the knowledge-base remediation when
-  no key is set (`ai_generated` flags which path produced the text). A
-  "Generate AI remediation" button was added to the finding detail page
-  (`heaven/devsecops/ai_remediation.py`).
-
-### Removed — dead code + documentation overclaims
-
-- Deleted two orphaned modules with no callers: `recon/wireless_recon.py`
-  (PCAP wireless parsing — needed operator-supplied captures, never wired into
-  the scan flow) and `vulnscan/msf_client.py` (Metasploit RPC — required an
-  external `msfrpcd` and an uninstalled optional dependency).
-- Removed the corresponding README claims that had no backing code: "wireless"
-  reconnaissance and the Metasploit integration row (which referenced a
-  `--enable-exploitation` flag that did not exist).
-- Refreshed the drifted project statistics (tests, modules, CLI-command count).
-
-### Added — professional penetration-test report
-
-- **Rebuilt the HTML report into a client-ready deliverable.** It now opens with
-  a cover page (classification, engagement, overall-risk badge), then a
-  confidentiality notice, document control + revision history, table of contents,
-  executive summary (narrative + severity distribution bar + KPI tiles + key
-  findings), scope & methodology (in-scope targets + standards: OWASP/PTES/NIST/
-  MITRE/CVSS), a risk-rating methodology table with remediation SLAs, a findings
-  summary table, detailed findings (per-finding metadata, description, impact,
-  evidence/PoC, remediation, references), OWASP Top 10 coverage, a prioritised
-  remediation roadmap, and an appendix (tooling, glossary, disclaimer).
-- **Print-ready.** Light, A4-friendly layout with `@page`/print CSS, page breaks
-  between sections, and a built-in **Print / Save as PDF** button — so the HTML
-  doubles as a polished PDF with one click (`heaven/devsecops/compliance_report.py`).
-- **One-click download + in-browser preview** on the web Reports page: a primary
-  "Download report (HTML)", a "Preview in browser" (opens the deliverable in a new
-  tab), and a direct "Download PDF". Other formats (Markdown/CSV/JSON/SARIF/Burp/
-  Proxy-JSONL) remain as secondary data exports.
-
-### Fixed
 - **Report no longer breaks on scan-controlled content.** All finding fields
   (titles, targets, payloads, evidence) are HTML-escaped, so a payload like
   `<script>…</script>` renders as text instead of injecting markup into the
@@ -2454,24 +3016,6 @@ green CI. The complete, itemised history follows.
   reportlab-but-not-WeasyPrint installed the API served a 0-byte `.pdf`. The PDF
   generator was rebuilt on **reportlab** (pure Python — no system libraries), so
   the API check and the generator now agree (`heaven/devsecops/pdf_report.py`).
-
-### Changed — professional PDF report (reportlab)
-- The PDF is now a full client deliverable matching the HTML report
-  section-for-section: cover page, confidentiality notice, document control +
-  revision history, a **real table of contents with page numbers**, executive
-  summary (narrative + severity KPIs + distribution bar + key findings), scope &
-  methodology, risk-rating methodology with SLAs, findings summary, detailed
-  findings (metadata, description, impact, evidence/PoC, remediation, references),
-  OWASP Top 10 coverage, remediation roadmap, and appendix — with a
-  "CONFIDENTIAL … Page X of Y" footer on every page.
-- The PDF and HTML reports now **share** the severity palette, OWASP mapping and
-  knowledge-base enrichment, so a finding looks identical in both, and all text is
-  escaped (long unbroken payloads wrap instead of overflowing the page).
-- **Dependency reduced:** dropped WeasyPrint (which needs Pango/Cairo system
-  libraries) from the `reports` extra and `requirements.txt`. PDF export now needs
-  only `reportlab`; the HTML report needs nothing extra.
-
-### Fixed — NVD CVE enrichment now returns real results
 
 - **NVD lookups returned nothing.** The client queried NVD's `cpeName`
   parameter, which requires an *exact* CPE 2.3 name with a concrete version and
@@ -2490,8 +3034,6 @@ green CI. The complete, itemised history follows.
   `heaven config test-nvd` (CLI, supports `--json`), and `POST
   /api/settings/test-nvd` (API).
 
-### Fixed — other external-integration bugs (same class as the NVD one)
-
 - **`heaven update` never refreshed ExploitDB.** It looked up a
   `refresh_csv_mirror` that didn't exist and fell back to the lazy cache loader,
   which returns early when the file is already present — so on any existing
@@ -2507,68 +3049,6 @@ green CI. The complete, itemised history follows.
   (Anthropic/OpenAI/Gemini), Jira v3 + Linear ticketing, and Slack / Splunk HEC /
   Elastic alerting all use correct endpoints, auth, and payload formats.
 
-## [1.0.0] — 2026-06-09
-
-### Added — onboarding & user-friendliness pass
-
-- **Sample data in one step.** New `heaven demo` (CLI) and a **Load sample data**
-  button on the dashboard seed a realistic example engagement (12 findings,
-  critical→info, with evidence) into the same store the dashboard reads — so a
-  fresh install shows a full Dashboard / Findings / Kill-chain / Reports
-  instantly instead of an empty screen. Idempotent and fully offline
-  (`heaven/demo.py`; `POST /api/demo/seed`).
-- **System Health page (web UI)** — the browser equivalent of `heaven doctor`.
-  Shows external tools (nmap/nuclei/sqlmap/ffuf/searchsploit/semgrep/docker)
-  with install hints, which API keys/integrations are configured, Python-module
-  health, and recommended next steps — so "is it broken or just missing a tool?"
-  is answerable at a glance (`GET /api/system/health`; `doctor` now also probes
-  ffuf + searchsploit).
-- **Friendlier CLI.** Uncaught errors now render a one-line, actionable message
-  (with a "re-run with `--debug`" hint) instead of a raw traceback. A new global
-  `--quiet`/`-q` flag silences informational logs so output pipes cleanly — pair
-  it with a command's `--format json` (e.g. `heaven --quiet findings --format
-  json | jq …`) for scripting/CI.
-- **Docs** — `docs/FAQ.md` (troubleshooting), `pipx install heaven-pentest` and
-  `docker run` one-liners, and a "See it in 60 seconds" quickstart in the README.
-- **One-click demo scan** — a "Run demo scan" button (Scans page) and
-  `POST /api/demo/scan` animate the full loop (recon → crawl → injection →
-  reporting) with live progress, then land the sample findings — so a new user
-  experiences a real-feeling scan without a target or authorization.
-- **Global `--json`** — a root flag that emits machine-readable JSON from the
-  data commands (`findings`, `doctor`, `config list`, `demo`); implies `--quiet`
-  so stdout is clean for `jq`/CI.
-- **In-app help tooltips** — a reusable `HelpTip` (?) explains CVSS / EPSS /
-  severity / confidence / risk score / kill-chain phases inline on the Dashboard
-  and Kill Chain pages.
-- **Light theme + mobile nav** — a header toggle switches light/dark (persisted
-  to `localStorage`, applied before first paint), and the sidebar collapses to an
-  off-canvas hamburger menu on narrow screens.
-- **`heaven quickstart`** — one command takes a fresh clone to a populated
-  dashboard: ensures `.env` (generating a strong admin password if missing),
-  loads sample data, and prints the next step (`--serve` launches the UI too).
-- **"Fix this first"** — a Dashboard card + `GET /api/engagement/top-findings`
-  rank findings by risk score and show a one-line remediation for each, so the
-  highest-impact next action is obvious; click through to the detail.
-- **Guided scan launcher** — the Scans launcher now validates targets live
-  (URL / IP / CIDR / host) with a valid/invalid count, disables Launch until
-  there's a valid target, shows the engagement's current scope size, and adds
-  inline help on Stealth + the authorization gate.
-- **Executive summary** on the "Fix this first" card ("N critical · M high
-  across K targets · top risk …").
-- **Animated demo** — `docs/assets/demo.svg`, a lightweight terminal cast
-  (`quickstart` → `serve` → dashboard) embedded at the top of the README's
-  "See it in 60 seconds".
-
-### Added — guided product tour
-
-- A short, skippable **in-app tour** (`heaven-ui/src/components/Tour.jsx`) orients
-  a first-time operator across Dashboard → Scans → Findings/Reports → Settings →
-  System Health, ending with a one-click **Load sample data**. Auto-opens once
-  per browser and is re-launchable anytime from the command palette
-  ("Take the tour"). Token-styled, so it renders in light and dark.
-
-### Fixed
-
 - **Light theme: the sidebar was unreadable.** `.sidebar` and `.nav-item.active`
   were hardcoded dark (dark gradient + white active text) while nav labels use
   theme tokens that turn dark in light mode — i.e. dark-on-dark. Added light-mode
@@ -2580,66 +3060,6 @@ green CI. The complete, itemised history follows.
 - **Demo `risk_score` was on a 0–10 scale** while real findings use 0–100
   (`risk_model` caps at 100). Demo findings now use the same 0–100 scale so the
   dashboard / "Fix this first" numbers read consistently for sample and real data.
-
-### Added — in-app API-key management (web UI + CLI, one source of truth)
-
-- **Entering API keys no longer means hand-editing `.env`.** A new
-  **Settings** page in the web UI (`/settings`) lists every configurable key —
-  LLM (Gemini / Anthropic / OpenAI), NVD, Shodan, Slack/Teams webhook, Splunk &
-  Elastic SIEM, Jira & Linear — grouped, each with a one-line description, a
-  *“how to get it”* link, and a masked indicator of whether it's already set.
-  Paste a value, click **Save**, and it's applied to the running server
-  immediately *and* persisted — survives a restart, and the CLI picks it up too.
-- **One catalog backs everything** (`heaven/settings_catalog.py`): the web
-  Settings page, the new **`heaven config`** command (`list` / `get` / `set` /
-  `unset`), and the `heaven init` wizard all read & write the **same `.env`**
-  plus `os.environ`, so a key set on any surface is live everywhere. No more
-  "I set it in the CLI but the web app didn't see it".
-- New endpoints `GET/POST /api/settings` (+ `POST /api/settings/test-llm` for a
-  no-cost "is my LLM key working?" check), gated by `config.modify`. Secrets are
-  **never** returned in full — only a short masked preview. New
-  `heaven/utils/env_file.unset_env_var()` cleanly removes a key.
-- Tests: `tests/test_settings.py` (14 cases) covers masking, persistence,
-  unset, unknown-key rejection, and the API surface.
-
-### Changed — friendlier, leaner install (`install.sh`)
-
-- **`install.sh` now creates `.env` for you** with a generated admin password on
-  first run (`heaven init --non-interactive`), so the web UI / API work out of
-  the box — no manual `export HEAVEN_ADMIN_PASSWORD`. It points you at the
-  Settings page / `heaven config` for API keys.
-- **Lean core by default, resilient extras.** It installs the lightweight core
-  first (guaranteed) then attempts each optional feature pack
-  (`recon` / `reports` / `mitre` / `scheduling` / `lateral` / `deploy`)
-  *independently*, so one heavy dependency that needs system libraries can't
-  abort the whole install. `HEAVEN_CORE_ONLY=1` skips extras entirely; LLM SDKs
-  stay opt-in.
-
-### Added — wider injection coverage: LFI / RFI / OS command injection
-
-- The injection scanner is no longer SQLi+XSS only. It now tests every GET param
-  and POST field for, additionally:
-  - **Local File Inclusion / path traversal** — `/etc/passwd`, `..//` bypasses,
-    null-byte, `php://filter` wrappers; **content-leak confirmed** (CWE-98).
-  - **OS command injection** — output-based (`;id` / `$(id)` / `` `id` `` →
-    detects `uid=…`) and **time-based blind with differential timing** (doubling
-    the injected `sleep` must double the delay — defeats server jitter, so no
-    false positives on naturally-slow endpoints) (CWE-78).
-  - **Remote File Inclusion** — best-effort detection of remote-fetch attempts
-    (CWE-98).
-  Verified live against DVWA (`critical lfi — param 'page'`,
-  `critical cmdi — param 'ip'`) and covered by deterministic unit tests
-  (`tests/test_injection_probes.py`). See
-  [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md).
-
-### Added — published DVWA benchmark results
-
-- `docs/BENCHMARK_RESULTS.md` documents the real, reproducible results of running
-  HEAVEN against live DVWA (autonomous authenticated discovery of 17
-  `/vulnerabilities/*` endpoints; confirmed critical SQLi/LFI/cmdi; the
-  report-quality + auth fixes that made it work), linked from the README summary.
-
-### Fixed — authenticated scanning now actually works end-to-end (commercial-grade coverage)
 
 Running the live DVWA benchmark surfaced four real bugs that, together, meant an
 authenticated web scan reached nothing behind the login wall. All fixed and
@@ -2672,8 +3092,6 @@ verified against live DVWA:
 
 Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
 
-### Fixed — findings multiplied per payload (major report-quality bug, found via live DVWA benchmark)
-
 - Running the real DVWA benchmark exposed that one injectable parameter probed
   with N payloads produced **N findings** — a single SQLi on `?id=` became
   **188 "findings"** (and a live scan ballooned to 1,653 rows from 2 URLs).
@@ -2689,51 +3107,6 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   (the schema column is `evidence_json`) — it would have failed for anyone with
   Docker. Fixed the query (`evidence_json AS evidence`).
 
-### Added — onboarding / UX polish
-
-- The "X not set — random value generated" config notice is now DEBUG-level, so
-  normal commands are quiet for unconfigured users (the actionable nudge still
-  lives in `heaven serve` startup + `heaven doctor`'s next-step).
-- Web Scans page shows **live elapsed time** for running scans (updates every
-  second) alongside the existing progress bar.
-- **First-run guide on the Dashboard** — a dismissible checklist
-  (scope → scan → findings → report) that auto-checks each step from real
-  engagement state and hides once the core flow is complete.
-
-### Added — live autonomous progress over WebSocket
-
-- The autonomous loop now streams each iteration the instant it completes over
-  `WS /api/autonomous/jobs/{id}/stream` (snapshot → iteration… → done), with
-  per-subscriber fan-out. `run_autonomous` gained an `on_iteration` hook and
-  `IterationReport.to_dict()`. The web UI renders a live table and falls back to
-  polling if the socket drops. Verified end-to-end over a real socket.
-
-### Added — test + CI coverage
-
-- New `tests/test_report_auth_api.py`: report export (empty-engagement 404,
-  unknown-format handling) and the password-change flow (wrong-current 401,
-  weak/common new-password 422, success persists to `.env`).
-- CI now builds the web UI (`ui-build` job: `npm ci` + `npm run build`, uploads
-  `dist`) and the Docker job depends on it.
-
-### Added — `heaven doctor` is now a guide, not just a diagnostic
-
-- `heaven doctor` ends with a contextual **Next step** block that walks the
-  happy path based on current state (no admin password → `heaven init`; no
-  engagement → `heaven engage init` + `scope add`; no findings → `heaven scan`;
-  has findings → `heaven report` / `heaven serve`). A new operator is never left
-  wondering "now what?".
-
-### Security — patched vulnerable dependency
-
-- Bumped `aiohttp` to **>=3.14.0** (was >=3.9.0). `pip-audit` flagged
-  `aiohttp 3.13.x` for CVE-2026-34993 (`CookieJar.load()` RCE on untrusted input)
-  and CVE-2026-47265 (cookies leaked across a cross-origin redirect) — both
-  relevant to HEAVEN's authenticated-scan cookie handling + redirect following.
-  `pip-audit` is now clean (0 known vulnerabilities).
-
-### Fixed — site-wide findings multiplied per URL (report-quality bug)
-
 - Host/domain-level issues (missing security headers, `server_version_disclosure`,
   HTTP request smuggling, `xml_accepted`, weak TLS, SPF/DMARC/DNSSEC) were being
   reported **once per discovered URL** instead of once per host. Root cause: the
@@ -2745,26 +3118,10 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   host while per-endpoint bugs (xss/sqli/idor/csrf…) stay distinct. Regression
   test added.
 
-### Fixed — `heaven update` CVE-feed refresh was a stub
-
 - `heaven update` bailed with "NVDPipeline.download_recent not implemented yet".
   Implemented `NVDPipeline.download_recent(days=7)` — fetches CVEs published in
   the window via the NVD 2.0 API and appends new records (de-duped by CVE id) to
   `nvd_data/nvd_dataset.jsonl`. The command now actually refreshes the CVE feed.
-
-### Changed — Gemini SDK migration (`google-generativeai` → `google-genai`)
-
-- Google deprecated the `google-generativeai` package (it prints a end-of-life
-  warning and stops receiving updates) in favour of the new `google-genai` SDK.
-  The LLM gateway now uses the current client-based SDK
-  (`from google import genai` → `genai.Client(...).models.generate_content(...)`,
-  with a real `system_instruction` instead of prompt-prepending) and **falls back
-  to the legacy SDK** if only that one is installed. Updated the `[gemini]` /
-  `[llm]` / `[all]` extras, `requirements.txt`, the `heaven init` pip hint, and
-  the README to `google-genai`. New `tests/test_llm_gateway.py` covers provider
-  selection, the SDK choice, secret redaction, and structured parsing.
-
-### Fixed — bytes/str handling in SSH post-exploitation
 
 - `asyncssh`'s `conn.run().stdout/stderr` can be `bytes` or `str` depending on
   the connection encoding. `linpeas_runner.py` and `lateral.py` assumed `str`,
@@ -2772,8 +3129,6 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   wrapper and the SSH-key-reuse check (`"uid=" in out`) would raise `TypeError`.
   Added a defensive `_as_text()` coercion at each boundary. (Surfaced by mypy once
   the `[lateral]` extra was installed.)
-
-### Fixed — security hardening
 
 - **Credential vault is written `0600`.** `vault.enc` (the AES-256-GCM credential
   store) was created with the default umask (often `0644` → world-readable). It's
@@ -2783,29 +3138,6 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   Without them the vault silently fell back to *plaintext* and auth used opaque
   (non-JWT) tokens — both degrade-gracefully paths, but not what a security tool
   should ship by default.
-
-### Changed — packaging: base install vs. feature extras
-
-- **`pip install` now matches the documented experience.** Three deps that power
-  the default out-of-the-box flow were missing from `pyproject.toml`'s base
-  install: `aiosqlite` (the default offline SQLite store — it was wrongly buried
-  in the `dev` extra), `pyjwt` (JWT sessions) and `cryptography` (vault). Moved
-  them to core `dependencies`.
-- **Optional features are now installable as pip extras** instead of only via
-  `requirements.txt`: `[recon]`, `[reports]`, `[lateral]`, `[mitre]`, `[deploy]`,
-  `[scheduling]`, and an umbrella `[all]` (mirrors the existing `[gemini]` /
-  `[anthropic]` / `[openai]` / `[llm]` pattern). Each feature still degrades
-  gracefully when its extra isn't installed. README documents the matrix.
-
-### Changed — `.env` is now authoritative
-
-- The CLI auto-loads `.env` with `override=True`, so it wins over stale shell
-  exports. Editing `.env` (or the Web-UI password change that writes back to it)
-  now always takes effect on the next run — no "I changed it but a leftover
-  `export` shadowed it" gotcha. `heaven init`'s next-steps no longer tell you to
-  `source`/`export` the file (that step is obsolete).
-
-### Fixed — CLI ↔ API ↔ Web UI wiring (the ".env never reached the server" class of bugs)
 
 - **`.env` was only loaded when you passed `--config-file`.** Plain
   `heaven serve` / `heaven autonomous` (and every other command) never read
@@ -2833,8 +3165,6 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   updates the running process, so the change sticks across restarts — `.env` is
   the single source of truth. The forced first-login change now sticks too.
 
-### Fixed — autonomous loop loses its run when you navigate away
-
 - **`POST /api/autonomous/run` ran the whole loop synchronously**, blocking the
   HTTP request for minutes; the React page kept run state in component-local
   state, so switching pages discarded the in-flight run and the result. The
@@ -2845,18 +3175,6 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   navigating away and back — and a full page refresh**. Verified live: POST
   returned in 0.47 s, the job completed in the background, and returning to the
   page re-rendered the summary.
-
-### Added — Reports page in the Reporting nav group
-
-- The multi-format report export already existed but was buried as a dropdown on
-  the Findings page, so the **Reporting** section (Tickets / Benchmark /
-  Methodology) had no obvious way to "get a report". Added a first-class
-  **Reports** page (`/reports`) that shows a live severity snapshot of the active
-  engagement and one-click download in all 8 formats (PDF / HTML / Markdown /
-  CSV / JSON / SARIF / Burp / Proxy-JSONL), with an actionable empty state when
-  there are no findings yet.
-
-### Fixed — API-key configuration consistency
 
 - The README's Quick Start told users to set **`GOOGLE_API_KEY`** for Gemini,
   but the code reads **`GEMINI_API_KEY`** — so the documented key was silently
@@ -2870,126 +3188,12 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
 - **Wrong SDK hint** — a missing Gemini SDK suggested `pip install gemini`
   (doesn't exist). It now suggests the correct `pip install google-generativeai`.
 
-### Added — easy LLM setup
-
-- pip extras for the AI layers: `pip install -e ".[gemini]"` / `".[anthropic]"` /
-  `".[openai]"`, or `".[llm]"` for all three. `.env.example` and `heaven init`
-  now document each key, where to obtain it, and which SDK to install; `heaven
-  init` prints the get-a-key URLs and the exact `pip install` line.
-
-### Fixed — web UI crash on login (critical)
-
 - `App.jsx` referenced `needsPasswordChange()` and `<ForcedPasswordChange>`
   without importing either (the imports had been dropped). With no ESLint to
   catch it and Vite not flagging undefined refs, the authenticated app threw a
   `ReferenceError` and **white-screened for every logged-in user**. Added the
   missing imports; verified end-to-end in a browser (login → forced-change →
   dashboard, zero console errors).
-
-### Added — web UI resilience & usability
-
-- **Error boundary** around the routed content — a render error now shows a
-  recoverable "something went wrong" card (Reload / Back to dashboard) instead
-  of a blank screen. Keyed by route, so navigating away clears it.
-- **404 route** — unknown URLs render a proper "page not found" instead of an
-  empty content area.
-- **Session survives refresh** — the auth token is persisted in sessionStorage
-  (clears on tab close), so F5 / reopening a tab no longer forces re-login.
-  Tradeoff documented in `api.js`; httpOnly cookie remains the max-hardening
-  option.
-- **Graceful session expiry** — a 401 clears auth, raises a "Session expired"
-  toast, and ProtectedRoute redirects to /login (no more raw error card).
-- **Actionable empty states** — the "no engagement" screens on Dashboard,
-  Findings, Kill Chain and Engagement now offer an in-app **Launch a scan →**
-  button (the Scans page has a full launcher) instead of telling the operator
-  to go run CLI commands / restart the server.
-- **Global "scan running" indicator** in the header — polls so it stays visible
-  after you navigate away from the Scans page; click to return.
-- **Findings filters** — debounced auto-apply + Enter-to-apply, and a loading
-  skeleton on first fetch.
-- **Accessibility** — visible keyboard focus rings, keyboard-operable sortable
-  table headers with `aria-sort`, `aria-expanded` on sidebar groups, and
-  `aria-hidden` on decorative icons; honors `prefers-reduced-motion`.
-- **Consistency pass across all pages** — skeleton loaders on every
-  fetch/run (Coverage, Knowledge, Tickets, Methodology, Benchmark, Diff, SAST,
-  Autonomous, Post-Ex, Lateral, AI Plans) and actionable empty states
-  (Knowledge / Diff → "Launch a scan", Benchmark / Watch → clear guidance).
-- **No more `alert()` dialogs** — the Replay (Scans) and Train-priors (Coverage)
-  flows now use the in-app toast system instead of blocking browser alerts.
-
-### Added — CLI usability pass
-
-- **Colourised, grouped help via rich-click.** `heaven --help` now renders the
-  38 commands in six labelled panels (Scanning & Monitoring · Engagements &
-  Findings · Reporting & Tickets · AI & Threat Intel · Models · Platform &
-  Setup) instead of one flat alphabetical dump. `heaven scan --help` groups its
-  options into Targets / Scan profile / Authorization & scope / Exploitation
-  chaining / Output panels and shows a worked Examples block. Falls back to
-  plain Click (same commands) when `rich-click` isn't installed.
-- **`heaven use <engagement>`** — git-branch-style sticky engagement context
-  stored per working directory (`./.heaven/`), so you stop retyping
-  `--engagement` on every command. Resolution precedence: explicit flag >
-  `HEAVEN_ENGAGEMENT` env > `heaven use` > default. `heaven use` shows the
-  current selection + available engagements; `heaven use --clear` resets it.
-  The no-arg dashboard now displays the active engagement.
-- **"Did you mean?" suggestions** on a mistyped command
-  (`heaven scna` → suggests `scan`).
-
-### Changed — CLI command clarity
-
-- **`heaven sys-status` → `heaven doctor`.** The deployment health check now
-  uses the familiar `doctor` idiom and is discoverable in the grouped help.
-  `sys-status` is kept as a hidden, backward-compatible alias.
-- **`heaven schedule` deprecated** in favour of `heaven watch` (which adds
-  change-detection and alert-on-change). It is now hidden and prints a
-  deprecation notice, but still runs for backward compatibility.
-
-### Added — report downloads, vuln knowledge base, forced-change auth
-
-- **Downloadable reports (webapp + API).** New `GET /api/report/export?format=…`
-  streams a report in 8 working text/standard formats — HTML (compliance-mapped),
-  Markdown, CSV, JSON, SARIF, Burp XML, proxy-JSONL — plus PDF when `reportlab`
-  is installed (a declared dependency; returns a clear 503 if absent). A
-  "Download report" menu is wired into the Findings page (`ReportMenu`). The API
-  reuses the exact reporters behind `heaven export` / `heaven report`, so CLI and
-  webapp output match.
-- **Vulnerability Knowledge Base** (`heaven/devsecops/vuln_kb.py`) — 16 curated
-  classes with real description / impact / remediation / references / MITRE / CWE /
-  OWASP. The evidence packager and the finding-detail API enrich every finding
-  from it, so the UI and reports never show blank fields. Fixes the empty
-  `DOCKER_SOCKET_EXPOSED` detail view (now shows CVSS 9.8, MITRE T1610, CWE-284,
-  remediation, and references). Also surfaced real stored fields the detail page
-  previously dropped (CVSS from risk_score, seen-count, last-seen date).
-- **Finding-detail page** now renders an "About this vulnerability" section,
-  impact, CWE/OWASP/MITRE chips, and a references list.
-- **admin/admin default + forced change.** Fresh installs seed admin/admin so the
-  console works out-of-the-box, but the account is flagged `must_change_password`:
-  the webapp shows a blocking change-password screen on first login and refuses
-  to proceed until a strong password is set (≥8 chars, common-password blocklist).
-  `HEAVEN_ADMIN_PASSWORD` still overrides with no forced change. New
-  `POST /api/auth/change-password`; `self-audit` still flags unchanged defaults.
-
-### Changed — web UI redesign (premium "hybrid" theme)
-
-- **Complete React UI overhaul** — replaced the green-on-black CRT/matrix
-  aesthetic with a modern, professional dark theme: deep-slate surfaces,
-  aurora-gradient backdrop, glassmorphism, a violet→blue primary accent
-  with emerald kept as the live/signature colour, **Inter** for UI text +
-  **JetBrains Mono** for data/code, layered elevation, and framer-motion.
-- **Rebuilt design system** (`heaven-ui/src/index.css`) around the same
-  class vocabulary, so all 19 pages re-theme consistently. Flagship
-  surfaces hand-built: split-hero **LoginPage**, **Dashboard** (gradient
-  stat cards + real severity-distribution chart), **Sidebar**/**Header**;
-  3D topology reskinned to the new palette.
-- **Verified live** — server-rendered screenshots of Login, Dashboard,
-  Findings and Scans against a seeded engagement confirm real data flow.
-- **Code-splitting** — the heavy three.js 3D topology (~900 KB) is now
-  lazy-loaded behind a dynamic import, and every authenticated page is its
-  own chunk (`React.lazy` + `Suspense`). First-load JS dropped from a single
-  ~1.1 MB bundle to ~313 KB (login + shell); the 3D engine only downloads
-  when the Dashboard opens. Removed dead `recharts`/`mermaid` manual chunks.
-
-### Fixed — functional reliability (no fake/stub behaviour)
 
 - **Exploit-DB product search** — added `search_product(service, version)`
   to `vulnscan/exploitdb_client.py` (searchsploit + CSV-mirror free-text
@@ -3007,8 +3211,6 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
 - **8 new regression tests** (`tests/test_honeypot_and_exploitdb.py`).
   Suite now **313 passed, 1 skipped**.
 
-### Fixed — CI / packaging
-
 - **`pyproject.toml` dependencies block** had drifted under `[project.urls]`,
   so setuptools parsed it as `project.urls.dependencies` and every
   `pip install -e .` aborted — breaking the test, mypy, self-audit and
@@ -3025,6 +3227,37 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   (checkout@v5, setup-python@v6, upload/download-artifact@v5, buildx@v4,
   build-push@v7, …), clearing the deprecation warnings.
 
+- Several mypy strict-mode issues across the new modules.
+- Ruff E731 (lambda-assignment) + F401 (unused imports) across the
+  AI layer.
+
+Initial public release of HEAVEN — autonomous penetration-testing
+framework. See README.md for the full feature matrix.
+
+### Security
+
+- **Column allowlist on the raw-SQL repositories.** `EngagementRepository`,
+  `WebPathRepository`, `NotificationRepository` and `ReportRepository` build
+  `INSERT`/`UPDATE` statements by interpolating column *names* from
+  `kwargs.keys()` (values were always bound parameters). Added a per-table
+  `_COLUMNS` allowlist enforced by `_reject_unknown_columns()` so a dict key can
+  never smuggle SQL, even if raw request data were ever forwarded into
+  `create`/`update` — defense-in-depth, not a known-exploitable path
+  (`heaven/db/repository.py`).
+- **Patched 5 dependency advisories flagged by `pip-audit`.** Bumped
+  `cryptography` floor to `>=48.0.1` (48.0.0 had GHSA-537c-gmf6-5ccf; kept below
+  49 for pyopenssl compatibility) and added a `msgpack>=1.2.1` transitive floor
+  (GHSA-6v7p-g79w-8964, pulled in via `cachecontrol`). `starlette` and
+  `pydantic-settings` were already pinned to their fixed floors; the local env
+  had simply drifted. `pip-audit` now reports no known vulnerabilities
+  (`requirements.txt`).
+
+- Bumped `aiohttp` to **>=3.14.0** (was >=3.9.0). `pip-audit` flagged
+  `aiohttp 3.13.x` for CVE-2026-34993 (`CookieJar.load()` RCE on untrusted input)
+  and CVE-2026-47265 (cookies leaked across a cross-origin redirect) — both
+  relevant to HEAVEN's authenticated-scan cookie handling + redirect following.
+  `pip-audit` is now clean (0 known vulnerabilities).
+
 ### Verified
 
 - **NVD model** (`NVD_model.pkl`) confirmed a genuinely trained 13-feature
@@ -3032,114 +3265,3 @@ Regression tests added (`test_scan_wiring.py`, plus the per-payload dedup test).
   top features = Integrity/Confidentiality/Availability impact. Not a stub.
 - **CLI ↔ webapp parity** — every operational CLI command maps to a UI
   surface; all 35 `api.js` helpers map to real server routes.
-
-### Added — publication-readiness sprint
-
-- **PyPI release workflow** (`.github/workflows/release.yml`) — on `v*`
-  tags, builds sdist+wheel, verifies install, publishes via PyPI OIDC
-  trusted publishing, and cuts a GitHub Release with CHANGELOG body.
-- **Docker GHCR build+push workflow** (`.github/workflows/docker.yml`) —
-  multi-arch (amd64 + arm64) image at `ghcr.io/nishu2402/heaven` on
-  branch push, semver tags on `v*` tags.
-- **`heaven init`** — interactive first-time-setup wizard. Generates
-  strong passwords, prompts for optional LLM / SIEM / ticketing keys,
-  writes a versioned `.env`. Idempotent.
-- **`heaven update`** — refreshes Nuclei templates, NVD CVE delta, and
-  ExploitDB CSV mirror in one command. Useful for cron / pre-engagement.
-- **`heaven scan --watch-tail`** — headless mode that disables the Rich
-  live HUD and streams flat one-line-per-event output. For CI / ssh /
-  `tee scan.log` workflows where the live HUD scrambles the recording.
-- **Asset-criticality risk multiplier** — `heaven scope add --criticality
-  {low,medium,high,crown_jewel}` adjusts every finding's `risk_score` by
-  the configured multiplier (0.7 / 1.0 / 1.3 / 1.5). 11 new tests.
-- **Helm chart** (`deploy/helm/heaven/`) — standard chart with
-  Deployment + Service + Secret + ConfigMap + PVC + Ingress (opt-in)
-  + ServiceAccount + NOTES.txt. Multi-arch image-ready.
-- **`docs/QUICKSTART.md`** — 5-minute walkthrough for evaluators.
-- **`docs/COMPARISON.md`** — feature parity matrix vs Burp / ZAP /
-  sqlmap / Nessus / Acunetix + empirical-numbers template.
-- **`docs/DEMO.md`** — asciinema/video recording script (substitute
-  for an actual recorded demo this session).
-- **`docs/BENCHMARK_HOWTO.md`** — step-by-step to produce real DVWA
-  precision/recall numbers (substitute for the actual benchmark run).
-- **Live CI badges** in README — replaces the manually-maintained
-  `Tests-294_Passing` badge with the actual GitHub Actions status,
-  benchmark workflow status, and PyPI version badges.
-- **`pyproject.toml` metadata polish** — full PyPI classifier set,
-  project URLs, marketing description, additional keywords. Renamed
-  the published package from `heaven` (squatted) to `heaven-pentest`.
-
-### Added — publication push
-
-- **Continuous monitoring** (`heaven watch`) — interval+jitter loop with
-  auto-diff against the previous scan. Fires alerts ONLY on `new` or
-  `regressed` findings (configurable `--heartbeat` to alert every run).
-  Optional `--auto-tickets` to create Jira / Linear issues on regressions.
-- **Differential scanning** (`heaven diff <base> <current>`) — bucketed
-  output (new / resolved / regressed / unchanged) with CI-friendly exit
-  codes. API: `GET /api/scans/{id}/diff?baseline=...`.
-- **SAST** (`heaven sast`) — Semgrep wrapper with a curated 18-rule pack
-  for Python / JavaScript / Go covering OWASP Top 10. Findings land in
-  the engagement DB alongside DAST findings.
-- **Ticketing** (`heaven tickets`) — Jira (REST v3) + Linear (GraphQL)
-  with auto-priority mapping, label normalisation, and bulk push.
-- **Iterative autonomous loop** (`heaven autonomous`) — LLM-driven
-  observe → plan → act loop bounded by `--max-iterations` and
-  `--time-budget`. Falls back to a deterministic rule-based playbook
-  when no LLM API key is set.
-- **Coverage grader** (`heaven coverage`) — rule-based OWASP coverage %
-  + scope hit rate + optional LLM gap analysis.
-- **Lateral movement** (`heaven lateral`) — SSH key reuse + SMB PsExec
-  + pass-the-hash with a hop graph output.
-- **Knowledge graph** (`heaven knowledge`) — SQLite-backed cross-engagement
-  memory of (target_profile, technique, outcome) tuples with Beta-smoothed
-  per-technique success priors.
-- **Exploit-DB lookup** (`heaven exploitdb <cve>`) — local `searchsploit`
-  (preferred) + ExploitDB CSV mirror.
-- **AI namespace** — Layers A–E: provider-agnostic LLM gateway
-  (Anthropic / OpenAI / Gemini), recon agent, attack-chain planner,
-  FP review, autonomous loop.
-- **Authenticated scanning** — `--cookie-file PATH` (Netscape format)
-  and `--auth url=/login,user=X,pass=Y[,csrf_field=token]` on
-  `heaven scan`.
-- **Exploit proof** — `heaven/vulnscan/exploit_proof.py` ties sqlmap,
-  RCE canary file dropping, and an SSRF callback verifier into a single
-  `prove_finding()` entry point. Auto-triggered with `--auto-prove` on
-  `heaven scan`.
-- **Post-exploitation** — `heaven/postex/` with `linpeas_runner`,
-  `bloodhound_collector`, `cred_validator`. Admin-gated.
-- **Benchmark suite** — `tests/benchmarks/` against DVWA with adapters
-  for Burp / ZAP / sqlmap, scanner-agnostic metrics, markdown + CSV
-  reporters, GitHub Actions weekly workflow.
-- **Methodology mapping docs** — `docs/methodology/` with explicit
-  mappings to OWASP Testing Guide v4, NIST SP 800-115, and PTES.
-- **NVD model card** — `data/models/NVD_model.MODEL_CARD.md` following
-  Google's Model Cards format.
-- **Reproducibility** — `--seed` flag on `heaven scan` + `heaven replay
-  <scan-id>` for deterministic re-execution.
-- **SIEM forwarders** — `SplunkHECAlerter` + `ElasticAlerter` in
-  `devsecops/alerting.py`.
-- **Web UI pages** — Watch, ScanDiff, SAST, Autonomous, AIPlans,
-  Coverage, Postex, Lateral, Knowledge, Tickets, Benchmark, Methodology.
-
-### Changed
-
-- **CLI split** — `heaven/main.py` decomposed from a 1380-line monolith
-  into a thin shim plus `heaven/cli/` subpackage (one module per command
-  group). The `heaven = heaven.main:cli` pyproject entry point is unchanged.
-- **`zeroday_engine.py` → `anomaly_probe.py`** — renamed to match what
-  the code actually does (behavioural fuzzing heuristics, not real
-  zero-day discovery).
-- **`ai_brain.py` priors** moved from hardcoded module constants into
-  `data/models/priors_bootstrap.json`. `heaven/ml/train_priors.py` +
-  `heaven train-priors` produce `priors_learned.json` from engagement
-  history, which is preferred at runtime when present.
-
-### Fixed
-
-- Several mypy strict-mode issues across the new modules.
-- Ruff E731 (lambda-assignment) + F401 (unused imports) across the
-  AI layer.
-
-Initial public release of HEAVEN — autonomous penetration-testing
-framework. See README.md for the full feature matrix.

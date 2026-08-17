@@ -365,6 +365,221 @@ async def _check_open_redirect(session: "aiohttp.ClientSession", url: str) -> li
         0.9, {"parameter": hit, "probe": _REDIRECT_PROBE_URL})]
 
 
+# ── clickjacking (WSTG-CLNT-09) ────────────────────────────────────────────────
+async def _check_clickjacking(session: "aiohttp.ClientSession", url: str) -> list[dict]:
+    """A framable HTML page — no X-Frame-Options and no CSP frame-ancestors."""
+    try:
+        async with session.get(url, allow_redirects=True) as resp:
+            if resp.status >= 400 or "html" not in (resp.content_type or ""):
+                return []
+            xfo = resp.headers.get("X-Frame-Options", "").strip().lower()
+            csp = resp.headers.get("Content-Security-Policy", "").lower()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("clickjacking check failed for %s: %s", url, e)
+        return []
+    framable = (not xfo or xfo not in ("deny", "sameorigin")) and \
+        ("frame-ancestors" not in csp)
+    if not framable:
+        return []
+    p = urlparse(url)
+    origin = f"{p.scheme}://{p.netloc}"
+    return [_finding(
+        origin, "clickjacking", "low",
+        "Page is framable — clickjacking possible",
+        "The HTML response sets neither X-Frame-Options (DENY/SAMEORIGIN) nor a CSP "
+        "frame-ancestors directive, so the page can be embedded in a hostile iframe "
+        "and used for UI-redress (clickjacking) attacks.",
+        0.8, {"x_frame_options": xfo or None, "csp_frame_ancestors": False,
+              "observed_on": url})]
+
+
+# ── login-form hygiene: password autocomplete + sensitive cache (ATHN-05/06) ───
+_PASSWORD_INPUT_RE = re.compile(r"<input\b[^>]*type\s*=\s*['\"]password['\"][^>]*>", re.IGNORECASE)
+
+
+async def _check_login_form(session: "aiohttp.ClientSession", url: str) -> list[dict]:
+    """Password-field autocomplete + cacheability of a credential page."""
+    try:
+        async with session.get(url, allow_redirects=True) as resp:
+            if resp.status >= 400 or "html" not in (resp.content_type or ""):
+                return []
+            body = await resp.text(errors="replace")
+            cache_control = resp.headers.get("Cache-Control", "").lower()
+            pragma = resp.headers.get("Pragma", "").lower()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("login-form check failed for %s: %s", url, e)
+        return []
+    pw_inputs = _PASSWORD_INPUT_RE.findall(body)
+    if not pw_inputs:
+        return []   # not a credential page — nothing to assert
+    out: list[dict] = []
+    # Autocomplete: a password field without autocomplete off/new-password lets
+    # the browser cache the secret.
+    lax = [tag for tag in pw_inputs
+           if not re.search(r"autocomplete\s*=\s*['\"](?:off|new-password)['\"]", tag, re.IGNORECASE)]
+    if lax:
+        out.append(_finding(
+            url, "password_autocomplete_enabled", "low",
+            "Password field allows browser autocomplete",
+            "A password input does not set autocomplete=\"off\"/\"new-password\", so "
+            "browsers may store the credential — a risk on shared/public machines "
+            "(WSTG-ATHN-05).",
+            0.8, {"password_inputs": len(pw_inputs), "without_autocomplete_off": len(lax)}))
+    # Cache-control: a credential page must not be cacheable.
+    cacheable = ("no-store" not in cache_control) and ("no-cache" not in cache_control) \
+        and ("no-cache" not in pragma)
+    if cacheable:
+        out.append(_finding(
+            url, "sensitive_cache_control", "low",
+            "Credential page is cacheable",
+            "A page containing a password field is served without Cache-Control: "
+            "no-store/no-cache, so proxies or the browser may cache sensitive "
+            "content (WSTG-ATHN-06).",
+            0.75, {"cache_control": cache_control or None, "pragma": pragma or None}))
+    return out
+
+
+# ── session token exposed in URL (WSTG-SESS-04) ────────────────────────────────
+_URL_SESSION_PARAMS = ("sid", "sessionid", "session_id", "jsessionid", "phpsessid",
+                       "aspsessionid", "sessid", "auth", "token", "access_token",
+                       "sessiontoken", "session")
+
+
+async def _check_session_in_url(session: "aiohttp.ClientSession", url: str) -> list[dict]:
+    """A session identifier carried in the query string or a redirect Location."""
+    out: list[dict] = []
+    parsed = urlparse(url)
+    q = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    exposed = [k for k, v in q.items()
+               if k.lower() in _URL_SESSION_PARAMS and len(v) >= 6]
+    if exposed:
+        out.append(_finding(
+            url, "session_token_in_url", "medium",
+            f"Session identifier in URL ({', '.join(exposed)})",
+            "A session/auth token is passed in the URL query string, where it leaks "
+            "via browser history, Referer headers, proxy and server logs "
+            "(WSTG-SESS-04). Carry session state in a Secure/HttpOnly cookie.",
+            0.85, {"parameters": exposed}))
+        return out
+    # Also catch a redirect that puts a session token in the Location URL.
+    try:
+        async with session.get(url, allow_redirects=False) as resp:
+            if resp.status in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("Location", "")
+                lq = dict(parse_qsl(urlparse(loc).query, keep_blank_values=True))
+                le = [k for k, v in lq.items()
+                      if k.lower() in _URL_SESSION_PARAMS and len(v) >= 6]
+                if le:
+                    out.append(_finding(
+                        url, "session_token_in_url", "medium",
+                        f"Redirect places session identifier in URL ({', '.join(le)})",
+                        "The server redirects with a session/auth token in the "
+                        "Location URL, exposing it via history/Referer/logs "
+                        "(WSTG-SESS-04).",
+                        0.8, {"parameters": le, "location": loc[:200]}))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("session-in-url check failed for %s: %s", url, e)
+    return out
+
+
+# ── RIA cross-domain policy (WSTG-CONF-08) ─────────────────────────────────────
+_CROSSDOMAIN_FILES = ("/crossdomain.xml", "/clientaccesspolicy.xml")
+
+
+async def _check_crossdomain(session: "aiohttp.ClientSession", origin: str) -> list[dict]:
+    """A permissive Flash/Silverlight cross-domain policy (wildcard allow)."""
+    out: list[dict] = []
+    for path in _CROSSDOMAIN_FILES:
+        url = origin.rstrip("/") + path
+        try:
+            async with session.get(url, allow_redirects=False) as resp:
+                if resp.status != 200 or "xml" not in (resp.content_type or "").lower():
+                    # some servers omit the xml content-type; still parse 200 bodies
+                    if resp.status != 200:
+                        continue
+                body = await resp.text(errors="replace")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("crossdomain check failed for %s: %s", url, e)
+            continue
+        wildcard = bool(
+            re.search(r"<allow-access-from\s+domain\s*=\s*['\"]\*['\"]", body, re.IGNORECASE)
+            or re.search(r"<domain\s+uri\s*=\s*['\"]\*['\"]", body, re.IGNORECASE)
+            or re.search(r"<allow-http-request-headers-from\s+domain\s*=\s*['\"]\*['\"]", body, re.IGNORECASE)
+        )
+        if wildcard:
+            out.append(_finding(
+                origin, "permissive_crossdomain_policy", "medium",
+                f"Permissive cross-domain policy ({path})",
+                "The Flash/Silverlight cross-domain policy allows access from any "
+                "domain (domain=\"*\"), letting a hostile site make credentialed "
+                "cross-domain requests through a victim's browser (WSTG-CONF-08).",
+                0.9, {"policy_file": url, "wildcard": True}))
+    return out
+
+
+# ── padding-oracle probe (WSTG-CRYP-02, conservative) ──────────────────────────
+_CBC_PARAM_HINTS = ("token", "data", "auth", "session", "id", "payload", "enc",
+                    "cipher", "state", "sig", "value")
+
+
+def _looks_like_cbc(value: str) -> bool:
+    """base64url/base64 that decodes to a block-aligned (>=16B) ciphertext."""
+    if len(value) < 22:
+        return False
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except (binascii.Error, ValueError):
+        try:
+            raw = base64.b64decode(value + "=" * (-len(value) % 4))
+        except (binascii.Error, ValueError):
+            return False
+    return len(raw) >= 16 and len(raw) % 8 == 0
+
+
+async def _check_padding_oracle(session: "aiohttp.ClientSession", url: str) -> list[dict]:
+    """Flip a byte of a ciphertext-looking parameter; a padding-specific error
+    differential (valid vs corrupted decrypt) indicates a padding oracle."""
+    parsed = urlparse(url)
+    existing = parse_qsl(parsed.query, keep_blank_values=True)
+    candidates = [(k, v) for k, v in existing
+                  if any(h in k.lower() for h in _CBC_PARAM_HINTS) and _looks_like_cbc(v)]
+    if not candidates:
+        return []
+
+    async def _status(qs: list[tuple[str, str]]) -> "tuple[int, int]":
+        probe = urlunparse(parsed._replace(query=urlencode(qs)))
+        async with session.get(probe, allow_redirects=False) as resp:
+            body = await resp.text(errors="replace")
+            return resp.status, len(body)
+
+    for name, value in candidates[:2]:
+        try:
+            baseline = await _status(existing)
+            # Corrupt the last byte of the (decoded) ciphertext → invalid padding.
+            raw = bytearray(base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)))
+            raw[-1] ^= 0x01
+            corrupted = base64.urlsafe_b64encode(bytes(raw)).decode().rstrip("=")
+            mutated = [(k, corrupted if k == name else v) for k, v in existing]
+            bad = await _status(mutated)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("padding-oracle probe failed for %s: %s", url, e)
+            continue
+        # A distinct error class for a corrupted-padding request (that the valid
+        # request did not produce) is the oracle signal. Require a real status
+        # change into the 5xx/403 space to avoid noise.
+        if baseline[0] < 400 and bad[0] >= 500:
+            return [_finding(
+                url, "padding_oracle", "high",
+                f"Potential CBC padding oracle on '{name}'",
+                "Corrupting one byte of a ciphertext-looking parameter produced a "
+                "distinct decryption/padding error the valid value did not, the "
+                "classic padding-oracle signal (WSTG-CRYP-02). Confirm before "
+                "reporting as exploitable.",
+                0.55, {"parameter": name, "baseline_status": baseline[0],
+                       "corrupted_status": bad[0]})]
+    return []
+
+
 # ── orchestration ─────────────────────────────────────────────────────────────
 # ── GraphQL introspection ─────────────────────────────────────────────────────
 # Common mount points for a GraphQL endpoint. We only report when the endpoint
@@ -437,6 +652,10 @@ async def scan_url_misconfig(session: "aiohttp.ClientSession", url: str) -> list
         _check_security_headers(session, url),
         _check_server_banner(session, url),
         _check_open_redirect(session, url),
+        _check_clickjacking(session, url),
+        _check_login_form(session, url),
+        _check_session_in_url(session, url),
+        _check_padding_oracle(session, url),
         return_exceptions=True,
     )
     out: list[dict] = []
@@ -499,6 +718,14 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
                 findings.extend(await _check_graphql(session, origin))
 
         await asyncio.gather(*[_gql(o) for o in origins], return_exceptions=True)
+
+        # RIA cross-domain policy (crossdomain.xml / clientaccesspolicy.xml) is a
+        # host-level file — probe each origin once.
+        async def _xd(origin: str) -> None:
+            async with sem:
+                findings.extend(await _check_crossdomain(session, origin))
+
+        await asyncio.gather(*[_xd(o) for o in origins], return_exceptions=True)
 
     findings = _dedup(findings)
     logger.info("Misconfig scan → %d finding(s) across %d URL(s)", len(findings), len(unique))

@@ -136,13 +136,16 @@ class CVERecord:
 INLINE_CVE_DB: dict[str, list[CVERecord]] = {
     "openssh": [
         CVERecord("CVE-2023-38408", "OpenSSH ssh-agent RCE via forwarded agent",
-                  "critical", 9.8, ["<=9.3p1"], exploit_available=True, cwe="CWE-78"),
+                  # The vulnerable code path is ssh-agent's PKCS#11 provider, added
+                  # in OpenSSH 5.4 — older releases (e.g. 4.7p1) predate it, so a
+                  # bare "<=9.3p1" would falsely flag them.
+                  "critical", 9.8, [">=5.4", "<=9.3p1"], exploit_available=True, cwe="CWE-78"),
         CVERecord("CVE-2023-51385", "OpenSSH shell metacharacter injection in ProxyCommand",
                   "high", 7.5, ["<=9.6"], cwe="CWE-78"),
         CVERecord("CVE-2024-6387", "OpenSSH regreSSHion RCE (signal handler race condition)",
                   "critical", 8.1, ["<=9.7p1", ">=8.5p1"], exploit_available=True, cwe="CWE-364"),
         CVERecord("CVE-2021-41617", "OpenSSH privilege escalation via AuthorizedKeysCommand",
-                  "high", 7.0, ["<=8.8"], cwe="CWE-269"),
+                  "high", 7.0, [">=6.2", "<=8.8"], cwe="CWE-269"),
         CVERecord("CVE-2020-15778", "OpenSSH scp shell injection via filenames",
                   "high", 7.8, ["<=8.4"], exploit_available=True, cwe="CWE-78"),
         CVERecord("CVE-2019-6111", "OpenSSH scp malicious server overwrites local files",
@@ -159,24 +162,31 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   "critical", 9.8, ["2.4.49"], exploit_available=True, cwe="CWE-22"),
         CVERecord("CVE-2021-42013", "Apache path traversal bypass (second variant)",
                   "critical", 9.8, ["2.4.49", "2.4.50"], exploit_available=True, cwe="CWE-22"),
+        # The 2.4-era defects below live in code paths (mod_http2, mod_lua,
+        # mod_proxy rewrites) that only exist in the 2.4 line, so each carries an
+        # explicit >=2.4.0 floor — without it a bare "<=2.4.x" ceiling also
+        # matched ancient 2.2/2.0 servers (e.g. Metasploitable's 2.2.8), a false
+        # positive of a modern-branch CVE on legacy software.
         CVERecord("CVE-2022-31813", "Apache HTTP request smuggling mod_proxy",
-                  "high", 7.5, ["<=2.4.53"], cwe="CWE-444"),
+                  "high", 7.5, [">=2.4.0", "<=2.4.53"], cwe="CWE-444"),
         CVERecord("CVE-2022-22720", "Apache HTTP request smuggling (incomplete fix)",
-                  "high", 7.5, ["<=2.4.52"], cwe="CWE-444"),
+                  "high", 7.5, [">=2.4.0", "<=2.4.52"], cwe="CWE-444"),
         CVERecord("CVE-2022-22721", "Apache SSRF via mod_lua",
-                  "critical", 9.8, ["<=2.4.52"], cwe="CWE-918"),
+                  "critical", 9.8, [">=2.4.0", "<=2.4.52"], cwe="CWE-918"),
         CVERecord("CVE-2021-44224", "Apache server-side request forgery in forward proxy",
-                  "high", 8.2, ["<=2.4.51"], cwe="CWE-918"),
+                  "high", 8.2, [">=2.4.0", "<=2.4.51"], cwe="CWE-918"),
         CVERecord("CVE-2021-40438", "Apache SSRF in mod_proxy",
-                  "critical", 9.0, ["<=2.4.48"], exploit_available=True, cwe="CWE-918"),
+                  "critical", 9.0, [">=2.4.0", "<=2.4.48"], exploit_available=True, cwe="CWE-918"),
         CVERecord("CVE-2020-13950", "Apache mod_proxy_http NULL pointer dereference DoS",
-                  "high", 7.5, ["<=2.4.46"], cwe="CWE-476"),
+                  "high", 7.5, [">=2.4.0", "<=2.4.46"], cwe="CWE-476"),
         CVERecord("CVE-2019-10082", "Apache mod_http2 read-after-free",
-                  "high", 7.5, ["<=2.4.39"], cwe="CWE-416"),
+                  "high", 7.5, [">=2.4.17", "<=2.4.39"], cwe="CWE-416"),
+        # These two genuinely span the 2.2 AND 2.4 lines, so both branch windows
+        # are listed explicitly (2.2.8 is a real positive; a patched 2.4.30 is not).
         CVERecord("CVE-2017-7679", "Apache mod_mime buffer overread",
-                  "critical", 9.8, ["<=2.4.25"], cwe="CWE-125"),
+                  "critical", 9.8, ["2.2.0-2.2.34", "2.4.0-2.4.25"], cwe="CWE-125"),
         CVERecord("CVE-2017-9798", "Optionsbleed: Apache OPTIONS info disclosure",
-                  "medium", 5.9, ["<=2.4.27"], cwe="CWE-416"),
+                  "medium", 5.9, ["2.2.0-2.2.34", "2.4.0-2.4.27"], cwe="CWE-416"),
     ],
     "nginx": [
         CVERecord("CVE-2021-23017", "Nginx resolver off-by-one heap write",
@@ -699,6 +709,31 @@ def _version_in_range(version: str, spec: str) -> bool:
         return False
 
 
+def _same_branch(version: str, upper_spec: str) -> bool:
+    """True when *version* shares the maintained branch of an upper-bound ceiling.
+
+    A per-branch fix ceiling implies a floor at the start of that branch, so a
+    version from an *earlier* branch is out of scope: ``<=2.4.39`` means "the 2.4
+    line, fixed at 2.4.39", not "every release ever shipped up to 2.4.39", and so
+    excludes Apache **2.2.8**.
+
+    The branch's granularity is read from the ceiling's own precision — one level
+    coarser than the patch it pins:
+
+    * a 3-part ceiling (``<=5.7.37``, ``<8.3.8``) pins the ``major.minor`` branch
+      (MySQL 5.7, PHP 8.3), so ``5.0.51`` / ``5.2.4`` are excluded;
+    * a 2-part ceiling (``<=16.1``, where PostgreSQL's minor *is* the patch) pins
+      the ``major`` line, so ``15.0`` matches ``<=15.5`` but not ``<=16.1``;
+    * a bare 1-part ceiling is too coarse to scope a branch and stays open.
+    """
+    body = upper_spec.strip().lstrip("<>=").strip()
+    parts = [p for p in re.split(r"[.\-_]", body) if p[:1].isdigit()]
+    depth = min(len(parts) - 1, 2)
+    if depth < 1:
+        return True
+    return _parse_ver(version)[:depth] == _parse_ver(body)[:depth]
+
+
 def specs_match_version(version: str, specs: list[str]) -> bool:
     """True when *version* satisfies a CVE record's ``affected_versions`` list.
 
@@ -718,8 +753,15 @@ def specs_match_version(version: str, specs: list[str]) -> bool:
     * when the record is bounded on **both** sides, the version must satisfy at
       least one lower bound **AND** at least one upper bound (so a version above
       the top ceiling no longer matches);
-    * a one-sided record (only ``<=`` branch ceilings, or only ``>=``) stays an
-      **OR** across that side, exactly as before.
+    * a record with **multiple** ``<=``/``<`` ceilings and no lower bound lists
+      one fix level *per maintained branch* (PHP ``['<8.3.8','<8.2.20','<8.1.29']``
+      = the 8.1/8.2/8.3 lines; MySQL ``['<=8.0.28','<=5.7.37']``). Each ceiling
+      scopes ONLY its own ``major.minor`` branch, so a version from an earlier,
+      unlisted branch (PHP **5.2.4**, MySQL **5.0.51**) is out of scope — matching
+      it was a false positive (an ancient install flagged with a modern-branch
+      CVE). A single-ceiling one-sided record stays a plain ``<=`` (its branch is
+      genuinely ambiguous — e.g. nginx ``['<=1.20.0']`` spans its whole line — so
+      flooring it could drop true positives).
     """
     if not specs:
         return False
@@ -733,6 +775,10 @@ def specs_match_version(version: str, specs: list[str]) -> bool:
         lo_ok = any(_version_in_range(version, s) for s in lowers)
         hi_ok = any(_version_in_range(version, s) for s in uppers)
         return lo_ok and hi_ok
+    if uppers and not lowers and len(uppers) > 1:
+        # Per-branch fix levels — a version only matches within its own branch.
+        return any(_version_in_range(version, s) and _same_branch(version, s)
+                   for s in uppers)
     return any(_version_in_range(version, s) for s in lowers + uppers)
 
 
@@ -924,7 +970,20 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                     live_hits = await live_feed.discover_for_service(
                         product_key, "", version_str)
                     host_name = host.get("host", "unknown")
-                    for lc in live_hits:
+                    # A live hit is only asserted as a distinct finding when the
+                    # feed actually matched an affected-version RANGE
+                    # (``version_confirmed``). A bare keyword/product-name match
+                    # with no confirmed version is FP-prone: many public CVEs share
+                    # a product WORD but describe a different implementation or
+                    # platform — the word "vnc" pulls RealVNC-on-Windows onto a
+                    # Linux VNC, "telnet" pulls GNU-inetutils onto netkit telnetd.
+                    # So emit confirmed hits individually and collapse the
+                    # unconfirmed remainder into ONE honest low "potential" finding
+                    # (mirroring the version-less inline path) instead of asserting
+                    # specific, possibly misattributed, CVEs.
+                    confirmed = [lc for lc in live_hits if lc.version_confirmed]
+                    unconfirmed = [lc for lc in live_hits if not lc.version_confirmed]
+                    for lc in confirmed:
                         lc_score, lc_sev = _score_and_severity(lc.cvss, lc.severity)
                         all_vulns.append({
                             "host": host_name,
@@ -947,7 +1006,48 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                             "exploit_available": lc.exploit_available,
                             "exploit_url": lc.exploit_url,
                             "source": f"live:{lc.source}",
-                            "confidence": 0.85 if lc.version_confirmed else 0.5,
+                            "confidence": 0.85,
+                        })
+                    if unconfirmed:
+                        label = _PRODUCT_LABELS.get(
+                            product_key, product_key.replace("_", " ").title())
+                        cand = sorted({lc.cve_id for lc in unconfirmed})
+                        examples = [lc.cve_id for lc in sorted(
+                            unconfirmed, key=lambda x: x.cvss, reverse=True)[:6]]
+                        all_vulns.append({
+                            "host": host_name,
+                            "port": port_info.get("port", 0),
+                            "target": host_name,
+                            "vuln_type": "potential_vulnerable_service",
+                            "title": f"Potential vulnerable service: {label} "
+                                     f"(version unconfirmed)",
+                            "severity": "low",
+                            "description": (
+                                f"{label} was identified on this host but a running "
+                                f"version could not be confirmed against any CVE's "
+                                f"affected range, so applicability cannot be established "
+                                f"from the outside. {len(cand)} CVEs name this product "
+                                f"in public feeds (e.g. {', '.join(examples)}). These "
+                                f"are UNVERIFIED candidates — a public CVE for a product "
+                                f"name may refer to a different implementation or "
+                                f"platform — confirm the exact product and version "
+                                f"before treating any as present."
+                            ),
+                            "product": product_key,
+                            "version": version_str or "undetermined",
+                            "confidence": 0.3,
+                            "source": f"live:{unconfirmed[0].source}",
+                            "evidence": {
+                                "product": label,
+                                "version": version_str or "undetermined",
+                                "candidate_cve_count": len(cand),
+                                "candidate_cves": cand,
+                                "verification": (
+                                    "Unauthenticated product-name matching cannot "
+                                    "confirm these CVEs are present; confirm the exact "
+                                    "product/version via an authenticated check."
+                                ),
+                            },
                         })
                 except Exception as e:
                     logger.debug("live CVE feed error for %s: %s", product_key, e)

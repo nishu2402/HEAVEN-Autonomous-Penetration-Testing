@@ -35,7 +35,7 @@ from heaven.utils.cvss import (
     severity_from_score,
 )
 
-_TOOL_VERSION = "2.1.0"
+_TOOL_VERSION = "3.0.0"
 _INFO_URI = "https://github.com/heaven-security/heaven"
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}

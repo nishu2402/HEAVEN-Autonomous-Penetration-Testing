@@ -685,6 +685,100 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
     return findings
 
 
+# ── 6b. SSI injection (WSTG-INPV-08) ───────────────────────────────────────────
+async def _fuzz_ssi(session: "aiohttp.ClientSession", url: str) -> list[dict]:
+    """Inject a benign Server-Side-Includes directive into reflected params and
+    detect that the server *processed* it (the directive is consumed and an SSI
+    variable is rendered) rather than echoing it verbatim."""
+    findings: list[dict] = []
+    parsed = urllib.parse.urlparse(url)
+    params = list(urllib.parse.parse_qs(parsed.query).keys())
+    if not params:
+        return findings
+    # DATE_LOCAL is read-only and side-effect-free; a canary tail lets us confirm
+    # the injection point reflected at all.
+    canary = "HVNSSI" + "".join(_rng.choices(string.ascii_uppercase, k=6))
+    directive = f'<!--#echo var="DATE_LOCAL"-->{canary}'
+    sem = asyncio.Semaphore(5)
+
+    async def _try(param: str) -> None:
+        async with sem:
+            qs = urllib.parse.parse_qs(parsed.query)
+            qs[param] = [directive]
+            probe = parsed._replace(query=urllib.parse.urlencode(qs, doseq=True))
+            try:
+                async with session.get(urllib.parse.urlunparse(probe),
+                                       timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    body = await r.text()
+            except Exception:
+                return
+            # Vulnerable: our canary is reflected (injection point hit) but the
+            # SSI directive itself was CONSUMED (not echoed literally) — meaning
+            # the server parsed and executed the include.
+            if canary in body and '<!--#echo' not in body and 'echo var=' not in body:
+                findings.append(_finding(
+                    url, "ssi_injection", "high",
+                    f"Server-Side Includes (SSI) injection via '{param}'",
+                    "A Server-Side-Includes directive injected into a parameter was "
+                    "processed by the server (the directive was consumed and its "
+                    "value rendered) rather than echoed literally. SSI injection can "
+                    "escalate to command execution via #exec (WSTG-INPV-08).",
+                    confidence=0.8,
+                    evidence={"parameter": param, "directive": directive[:40],
+                              "signal": "SSI directive consumed, canary reflected"}))
+
+    await asyncio.gather(*[_try(p) for p in params[:4]])
+    return _dedup(findings)
+
+
+# ── 6c. IMAP/SMTP header injection (WSTG-INPV-10) ──────────────────────────────
+async def _fuzz_mail_header_injection(session: "aiohttp.ClientSession",
+                                      url: str) -> list[dict]:
+    """Inject CRLF + a mail header into params on a page that looks like a
+    contact/mail form, and flag when the payload is reflected unfiltered into the
+    response headers (the observable in-band signal of header injection)."""
+    findings: list[dict] = []
+    parsed = urllib.parse.urlparse(url)
+    params = list(urllib.parse.parse_qs(parsed.query).keys())
+    # Only probe params likely to feed a mail routine — keeps this targeted.
+    mail_params = [p for p in params if re.search(
+        r"(?i)mail|email|to|from|subject|cc|bcc|contact|recipient|sender", p)]
+    if not mail_params:
+        return findings
+    canary = "hvn" + "".join(_rng.choices(string.ascii_lowercase, k=6)) + "@heaven.invalid"
+    payload = f"test%0d%0aBcc:{canary}"
+    sem = asyncio.Semaphore(5)
+
+    async def _try(param: str) -> None:
+        async with sem:
+            qs = urllib.parse.parse_qs(parsed.query)
+            qs[param] = [payload]
+            probe = parsed._replace(query=urllib.parse.urlencode(qs, doseq=True, safe="%:@"))
+            try:
+                async with session.get(urllib.parse.urlunparse(probe),
+                                       allow_redirects=False,
+                                       timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    hdr_blob = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
+            except Exception:
+                return
+            # If our injected header/canary lands in the RESPONSE headers, the
+            # CRLF split was honoured — the mail routine will accept it too.
+            if canary in hdr_blob or "bcc:" in hdr_blob.lower():
+                findings.append(_finding(
+                    url, "smtp_header_injection", "high",
+                    f"Mail (SMTP/IMAP) header injection via '{param}'",
+                    "A CRLF-delimited mail header injected into a contact/mail "
+                    "parameter was reflected unfiltered, indicating the value is "
+                    "used to build mail headers without sanitisation — enabling "
+                    "Bcc/recipient injection and mail relay (WSTG-INPV-10).",
+                    confidence=0.7,
+                    evidence={"parameter": param, "injected_header": "Bcc",
+                              "canary": canary}))
+
+    await asyncio.gather(*[_try(p) for p in mail_params[:4]])
+    return _dedup(findings)
+
+
 # ── 7. Content-Type Confusion ──────────────────────────────────────────────────
 
 async def _fuzz_content_type(session: "aiohttp.ClientSession",
@@ -862,6 +956,8 @@ async def fuzz_url(url: str, aggressive: bool = False) -> dict:
             _fuzz_deserialization(session, url),
             _fuzz_method_override(session, url),
             _fuzz_content_type(session, url),
+            _fuzz_ssi(session, url),
+            _fuzz_mail_header_injection(session, url),
         ]
         if aggressive:
             tasks.append(_fuzz_parameters(session, url))

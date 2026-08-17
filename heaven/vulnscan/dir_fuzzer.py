@@ -444,10 +444,18 @@ class DirectoryFuzzer:
 
     # ── ffuf integration ──────────────────────────────────────────
 
-    async def _run_ffuf(self, base_url: str, timeout: int = 300) -> list[dict]:
-        """Delegate to ffuf binary if available."""
+    async def _run_ffuf(self, base_url: str, timeout: int = 300) -> Optional[list[dict]]:
+        """Delegate to the ffuf binary if available.
+
+        Returns the parsed findings on success (an empty list is a *valid* "ffuf
+        ran and found nothing"), or ``None`` when ffuf could not be run to
+        completion — a missing binary, an unsupported flag, a non-zero exit, or a
+        missing/'unparseable output file. A ``None`` tells :meth:`fuzz` to fall
+        back to the native async engine so a broken/mismatched ffuf never silently
+        zeroes out directory discovery.
+        """
         if not shutil.which("ffuf"):
-            return []
+            return None
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as wf:
             wf.write("\n".join(WORDLIST))
@@ -455,6 +463,10 @@ class DirectoryFuzzer:
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
             out_file = tf.name
+        # NB: no `-silent` — that flag was removed in modern ffuf (2.x), and
+        # passing it makes ffuf abort with "flag provided but not defined",
+        # producing zero output. stdout is already routed to DEVNULL below, so
+        # the run stays quiet across every ffuf version.
         cmd = [
             "ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ",
             "-w", wf_path,
@@ -463,8 +475,8 @@ class DirectoryFuzzer:
             "-ac",          # auto-calibrate (wildcard filter)
             "-t", "40",
             "-timeout", "8",
-            "-silent",
         ]
+        rc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -472,13 +484,25 @@ class DirectoryFuzzer:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            rc = proc.returncode
         except Exception:
-            return []
+            Path(out_file).unlink(missing_ok=True)
+            Path(wf_path).unlink(missing_ok=True)
+            return None
+
+        # ffuf exited non-zero (bad flag, connection error, …) → signal fallback.
+        if rc not in (0, None):
+            logger.debug("ffuf exited %s — falling back to native dir engine", rc)
+            Path(out_file).unlink(missing_ok=True)
+            Path(wf_path).unlink(missing_ok=True)
+            return None
 
         findings: list[dict] = []
+        parsed = False
         try:
             import json
             data = json.loads(Path(out_file).read_text())
+            parsed = True
             for result in data.get("results", []):
                 url = result.get("url", "")
                 status = result.get("status", 0)
@@ -503,6 +527,9 @@ class DirectoryFuzzer:
 
         Path(out_file).unlink(missing_ok=True)
         Path(wf_path).unlink(missing_ok=True)
+        # Could not read/parse ffuf's output at all → fall back to native.
+        if not parsed:
+            return None
         return findings
 
     # ── Public API ────────────────────────────────────────────────
@@ -514,43 +541,65 @@ class DirectoryFuzzer:
         if not targets:
             return {"findings": [], "urls_tested": 0, "error": "no targets"}
 
-        # Try ffuf first on first target; fall back to async engine
+        # Try ffuf first (per target); fall back to the native async engine for
+        # any target where ffuf could not run — a missing binary, an unsupported
+        # flag, a non-zero exit or an unparseable output file (``_run_ffuf``
+        # returns None in those cases). A target ffuf handled and simply found
+        # nothing on ([]) is trusted and not re-scanned.
+        all_findings: list[dict] = []
+        native_targets: list[str] = list(targets)
         if shutil.which("ffuf"):
-            logger.info("DirFuzzer: ffuf detected — using ffuf engine")
-            all_findings: list[dict] = []
+            native_targets = []
             for url in targets:
                 results = await self._run_ffuf(url)
-                all_findings.extend(results)
-            logger.info(f"DirFuzzer (ffuf): {len(all_findings)} paths found across {len(targets)} targets")
-            return {"findings": all_findings, "urls_tested": len(targets), "error": None}
+                if results is None:
+                    native_targets.append(url)   # ffuf failed → native fallback
+                else:
+                    all_findings.extend(results)
+            if not native_targets:
+                logger.info(f"DirFuzzer (ffuf): {len(all_findings)} paths across "
+                            f"{len(targets)} targets")
+                return {"findings": self._dedup(all_findings),
+                        "urls_tested": len(targets), "error": None}
+            logger.info("DirFuzzer: ffuf unavailable/failed for %d/%d target(s) — "
+                        "native engine covers them", len(native_targets), len(targets))
 
-        logger.info(f"DirFuzzer: async engine — {len(targets)} targets, {len(WORDLIST)} paths each")
+        logger.info(f"DirFuzzer: async engine — {len(native_targets)} targets, "
+                    f"{len(WORDLIST)} paths each")
         if aiohttp is None:
+            if all_findings:
+                return {"findings": self._dedup(all_findings),
+                        "urls_tested": len(targets), "error": None}
             return {"findings": [], "urls_tested": 0, "error": "aiohttp not installed"}
 
         connector = aiohttp.TCPConnector(ssl=False, limit=80)
         from heaven.recon.auth_session import aiohttp_session_kwargs
         _auth_kw = aiohttp_session_kwargs()
         async with aiohttp.ClientSession(connector=connector, **_auth_kw) as session:
-            tasks = [self._scan_target(session, url) for url in targets]
+            tasks = [self._scan_target(session, url) for url in native_targets]
             raw: list[Any] = list(await asyncio.gather(*tasks, return_exceptions=True))
 
-        all_findings = []
+        # Merge native results ON TOP of any ffuf results already collected —
+        # never overwrite them.
         for r in raw:
             if isinstance(r, list):
                 all_findings.extend(r)
 
-        # Deduplicate
-        seen: set[str] = set()
-        deduped: list[dict] = []
-        for f in all_findings:
-            key = f["target"]
-            if key not in seen:
-                seen.add(key)
-                deduped.append(f)
-
+        deduped = self._dedup(all_findings)
         logger.info(f"DirFuzzer: {len(deduped)} unique paths found")
         return {"findings": deduped, "urls_tested": len(targets), "error": None}
+
+    @staticmethod
+    def _dedup(findings: list[dict]) -> list[dict]:
+        """De-duplicate discovered paths by their target URL, order-preserving."""
+        seen: set[str] = set()
+        deduped: list[dict] = []
+        for f in findings:
+            key = f.get("target", "")
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(f)
+        return deduped
 
 
 # ─────────────────────────────────────────────────────────────────

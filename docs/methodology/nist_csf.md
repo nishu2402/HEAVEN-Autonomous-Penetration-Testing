@@ -6,11 +6,13 @@ Mapping of HEAVEN's detectors against the [NIST CSF
 into Categories.
 
 The CSF is an outcome-based framework spanning governance to recovery. HEAVEN
-provides direct technical evidence for the outcomes that are measurable by
-scanning — chiefly **Identify → Risk Assessment (ID.RA)** and **Asset Management
-(ID.AM)**, and **Protect → Platform Security (PR.PS)**, **Identity &
-Authentication (PR.AA)** and **Data Security (PR.DS)**. Govern, Respond and
-Recover are largely `(organizational)` outcomes attested through process.
+provides direct technical evidence for every outcome that is measurable by
+scanning — supply-chain risk, asset management, vulnerability/risk identification,
+posture-improvement tracking, identity & authentication, transport crypto,
+platform hardening, infrastructure resilience, continuous monitoring, and event
+delivery — each named to a real detector or tool feature. The Govern/Respond/
+Recover outcomes that are pure governance or process are listed as **out-of-band
+(analyst-attested)**.
 
 A control row is **✓ exercised** on the live Methodology page only when the
 HEAVEN detector it names actually produced a finding in the active engagement.
@@ -19,24 +21,23 @@ HEAVEN detector it names actually produced a finding in the active engagement.
 
 | Function | HEAVEN evidence |
 |---|---|
-| GOVERN (GV) | organizational; supply-chain risk partial |
-| IDENTIFY (ID) | extensive — asset discovery & vulnerability/risk identification |
-| PROTECT (PR) | extensive — auth, transport crypto, platform hardening |
-| DETECT (DE) | partial — defense fingerprinting & continuous re-scan |
-| RESPOND (RS) | organizational; alert delivery partial |
-| RECOVER (RC) | organizational — recovery process |
+| GOVERN (GV) | supply-chain risk (dependencies); governance outcomes analyst-attested |
+| IDENTIFY (ID) | extensive — asset discovery, vulnerability/risk ID, improvement tracking |
+| PROTECT (PR) | extensive — auth, transport crypto, platform hardening, resilience |
+| DETECT (DE) | continuous monitoring & defense fingerprinting |
+| RESPOND (RS) | event reporting & delivery; incident-management analyst-attested |
+| RECOVER (RC) | recovery process — analyst-attested |
 
 ## Detailed mapping
 
 ### GOVERN (GV)
-Governance outcomes — organizational context, risk-management strategy, roles,
-policy and oversight — are attested through the security programme.
-
 | Control | Description | HEAVEN coverage |
 |---|---|---|
-| GV.OC | Organizational context established | (organizational — governance) |
-| GV.RM | Risk management strategy | (organizational — governance) |
-| GV.SC | Cybersecurity supply chain risk management | `heaven.devsecops.sca_scanner` (dependency risk, partial) |
+| GV.SC | Cybersecurity supply chain risk management | `heaven.vulnscan.sca_scanner` (dependency / third-party component risk) |
+
+**Out-of-band (analyst-attested):** GV.OC (organizational context) and GV.RM
+(risk-management strategy), along with roles, policy and oversight, are governance
+outcomes attested through the security programme.
 
 ### IDENTIFY (ID)
 HEAVEN's strongest CSF alignment — discovering assets and identifying the
@@ -44,10 +45,10 @@ vulnerabilities that feed risk assessment.
 
 | Control | Description | HEAVEN coverage |
 |---|---|---|
-| ID.AM | Asset management (external inventory) | `heaven.recon.network_scanner` |
+| ID.AM | Asset management (external inventory) | `heaven.recon.network_scanner`, `heaven.devsecops.inventory` |
 | ID.RA-01 | Vulnerabilities in assets are identified | `heaven.vulnscan.cve_mapper`, `heaven.vulnscan.eol_scanner` |
 | ID.RA-05 | Threats, vulnerabilities and impacts used to determine risk | `heaven.orchestrator` (full vulnscan suite + scoring) |
-| ID.IM | Improvement | (organizational — programme improvement) |
+| ID.IM | Improvement | `heaven.devsecops.retest_report`, `heaven diff` (measures remediation progress / posture change across scans) |
 
 ### PROTECT (PR)
 | Control | Description | HEAVEN coverage |
@@ -56,22 +57,27 @@ vulnerabilities that feed risk assessment.
 | PR.DS | Data security (protected in transit) | `heaven.vulnscan.ssl_scanner` |
 | PR.PS | Platform security (secure config & patch) | `heaven.recon.web_crawler`, `heaven.vulnscan.dir_fuzzer`, `heaven.vulnscan.cve_mapper` |
 | PR.IR | Technology infrastructure resilience | `heaven.recon.network_exposure`, `heaven.recon.network_scanner` |
-| PR.AT | Awareness and training | (organizational — training) |
+
+**Out-of-band (analyst-attested):** PR.AT (awareness and training) is an HR/
+training outcome.
 
 ### DETECT (DE)
 | Control | Description | HEAVEN coverage |
 |---|---|---|
-| DE.CM | Continuous monitoring | `heaven.recon.adaptive_intel` (defense fingerprint), `heaven.utils.watcher` (recurring re-scan, partial) |
-| DE.AE | Adverse event analysis | (organizational — SOC / SIEM) |
+| DE.CM | Continuous monitoring | `heaven.recon.adaptive_intel` (defense fingerprint), `heaven.recon.firewall_detector` (perimeter classification), `heaven.utils.watcher` (recurring re-scan) |
+
+**Out-of-band (analyst-attested):** DE.AE (adverse event analysis) is a SOC/SIEM
+process outcome.
 
 ### RESPOND (RS)
 | Control | Description | HEAVEN coverage |
 |---|---|---|
-| RS.MA | Incident management | (organizational — IR process) |
-| RS.CO | Incident response reporting and communication | `heaven.devsecops.alerting` (webhook/SIEM feed, partial) |
+| RS.CO | Incident response reporting and communication | `heaven.devsecops.alerting` (structured webhook / SIEM event delivery) |
+
+**Out-of-band (analyst-attested):** RS.MA (incident management) is an IR-process
+outcome.
 
 ### RECOVER (RC)
-| Control | Description | HEAVEN coverage |
-|---|---|---|
-| RC.RP | Incident recovery plan execution | (organizational — recovery process) |
-| RC.CO | Incident recovery communication | (organizational — recovery process) |
+**Out-of-band (analyst-attested):** RC.RP (incident recovery plan execution) and
+RC.CO (recovery communication) are recovery-process outcomes with no scan
+footprint.

@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1731 tests · 55 CLI commands · 77 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1856 tests · 55 CLI commands · 77 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -21,7 +21,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-170-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-172-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-55-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-24-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
@@ -94,7 +94,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API** — 77 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN — Autonomous Penetration Testing Platform v2.1.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN — Autonomous Penetration Testing Platform v3.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -110,9 +110,9 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 1731 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 1856 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 170 |
+| 🧩 **Modules** | 172 |
 | ⌨️ **CLI Commands** | 55 |
 | 🌐 **API Routes** | 77 RBAC-protected routes |
 | 🖥️ **UI Pages** | 24 (React + Vite, dark glassmorphic) |
@@ -238,6 +238,14 @@ in-house fallback, so nothing is mandatory — they just unlock full power.
 Env toggles: `HEAVEN_SKIP_TOOLS=1` skips the external tools, `HEAVEN_CORE_ONLY=1`
 skips the optional feature packs (`-SkipTools` / `-CoreOnly` / `-SkipUI` on
 Windows). To uninstall: `./scripts/uninstall.sh` (or `scripts\uninstall.ps1`).
+
+**Updating:** once installed, `heaven update` brings HEAVEN itself up to the
+latest released version — a fast-forward `git pull` (the install is an editable
+checkout, so the new code is live on your next command), a `pip install -e .`
+only if dependencies changed, and a web-UI rebuild only if the frontend changed —
+then refreshes the Nuclei/NVD/ExploitDB detection feeds. It never touches
+uncommitted local changes (use `--force` to auto-stash). Check first with
+`heaven update --check`; narrow with `--code-only` / `--data-only`.
 
 Prefer to do it by hand? The base `pip` install already includes every runtime
 capability; only the external binaries are a separate, idempotent step:
@@ -422,7 +430,7 @@ deterministic heuristic (or pass `--no-llm`).
 55 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard — module status + live command reference (v2.1.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard — module status + live command reference (v3.0.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">
@@ -451,7 +459,7 @@ deterministic heuristic (or pass `--no-llm`).
 | `pause` · `resume` · `replay` | Pause · resume · deterministically replay a scan |
 | `download-model` · `train-model` · `train-priors` | Fetch the pre-trained CVSS model · retrain it · learn Bayesian priors |
 | `quickstart` · `demo` | Zero→ready in one command · load sample data to explore |
-| `init` · `init-db` · `update` | Setup wizard · PostgreSQL schema · refresh CVE/Nuclei feeds |
+| `init` · `init-db` · `update` | Setup wizard · PostgreSQL schema · self-update HEAVEN to the latest version + refresh CVE/Nuclei feeds |
 | `config` | Manage API keys & integrations (same keys as the web Settings page) |
 | `self-audit` · `doctor` · `info` | Security self-audit · deployment health check · platform info |
 | `completion` | Tab-completion for the `heaven` command — installed automatically by the installer, or one-command `heaven completion --install` (bash / zsh / fish / PowerShell) |
@@ -696,7 +704,7 @@ The 48 MB model isn't bundled in the wheel or git — fetch it once (SHA-256 ver
 </p>
 
 ```
-heaven/                   ← Python package (170 modules)
+heaven/                   ← Python package (172 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines — Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -710,8 +718,8 @@ heaven/                   ← Python package (170 modules)
 └── cli/                  Click CLI — one module per command group (55 commands)
 
 heaven-ui/                React + Vite web console (24 pages)
-tests/                    1731 pytest tests + native & DVWA benchmark suites
-docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2) · runbooks
+tests/                    1856 pytest tests + native & DVWA benchmark suites
+docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
 ```
@@ -796,7 +804,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>1731 tests · 170 modules · 55 CLI commands · 77 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>1856 tests · 172 modules · 55 CLI commands · 77 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
 python scripts/sync_test_count.py</p>
 
 <p align="center">

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  HEAVEN — Autonomous Penetration Testing Framework
-#  Installer v2.1.0
+#  Installer v3.0.0
 # ==============================================================================
 
 set -euo pipefail

@@ -705,6 +705,95 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
 
 # ── Main scanner entry point ────────────────────────────────────────────────────
 
+# ── WSTG identity/auth-channel surrogates (IDNT-02/03, ATHN-08/10) ─────────────
+# Conservative, GET-only observations — no accounts are created and no
+# credentials are submitted. Each finding fires only on a real, observed surface.
+_REGISTRATION_PATHS = ("/register", "/signup", "/sign-up", "/registration",
+                       "/account/create", "/users/new", "/user/register",
+                       "/join", "/create-account")
+_RESET_PATHS = ("/forgot", "/forgot-password", "/reset", "/reset-password",
+                "/password/reset", "/recover", "/account/recover")
+_SECQ_RE = re.compile(
+    r"(?i)security\s*question|secret\s*question|mother'?s?\s*maiden|"
+    r"name\s*of\s*your|first\s*pet|favou?rite\s*(?:teacher|color|food)|"
+    r"<input[^>]+name\s*=\s*['\"][^'\"]*(?:secq|security_?answer|secret_?answer|"
+    r"kbaanswer)[^'\"]*['\"]")
+_ALT_AUTH_PATHS = ("/api/login", "/api/v1/login", "/api/auth", "/api/v1/auth",
+                   "/api/token", "/oauth/token", "/api/session", "/mobile/login",
+                   "/rest/login", "/api/authenticate")
+
+
+async def _audit_wstg_surrogates(session: "aiohttp.ClientSession",
+                                 url: str) -> list[dict]:
+    """Open registration/provisioning (IDNT-02/03), security-question reset
+    (ATHN-08) and alternate auth-channel (ATHN-10) surrogates."""
+    findings: list[dict] = []
+    p = urllib.parse.urlparse(url)
+    if not p.scheme or not p.netloc:
+        return findings
+    origin = f"{p.scheme}://{p.netloc}"
+
+    async def _get(path: str) -> "tuple[int, str, dict]":
+        try:
+            async with session.get(origin.rstrip("/") + path,
+                                   allow_redirects=True) as r:
+                body = await r.text(errors="replace") if r.status < 400 else ""
+                return r.status, body, dict(r.headers)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("surrogate GET %s failed: %s", path, e)
+            return 0, "", {}
+
+    # IDNT-02/03 — a reachable self-service registration form (open provisioning).
+    for path in _REGISTRATION_PATHS:
+        status, body, _ = await _get(path)
+        if status == 200 and "<form" in body.lower() and \
+                re.search(r"type\s*=\s*['\"]password['\"]", body, re.IGNORECASE) and \
+                re.search(r"(?i)regist|sign[\s\-]?up|create account", body):
+            findings.append(_make_finding(
+                origin, "open_registration", "info",
+                "Self-service user registration is open",
+                "A public self-service registration form is reachable, so accounts "
+                "can be provisioned without operator approval (WSTG-IDNT-02/03). "
+                "Verify the registration/provisioning workflow enforces email "
+                "verification, a strong password policy and least-privilege roles.",
+                0.7, {"endpoint": origin.rstrip('/') + path}))
+            break
+
+    # ATHN-08 — a password-reset flow that relies on security questions.
+    for path in _RESET_PATHS:
+        status, body, _ = await _get(path)
+        if status == 200 and _SECQ_RE.search(body):
+            findings.append(_make_finding(
+                origin, "security_question_reset", "low",
+                "Password reset relies on security questions",
+                "The account-recovery flow uses knowledge-based security questions, "
+                "whose answers are often guessable or discoverable via OSINT "
+                "(WSTG-ATHN-08). Prefer time-limited emailed reset tokens.",
+                0.7, {"endpoint": origin.rstrip('/') + path}))
+            break
+
+    # ATHN-10 — an alternate auth channel (API/mobile) that may enforce weaker
+    # controls than the primary web login. We flag a reachable alternate auth
+    # endpoint that answers without any rate-limit signalling.
+    for path in _ALT_AUTH_PATHS:
+        status, _body, hdrs = await _get(path)
+        if status in (200, 400, 401, 403, 405):
+            has_ratelimit = any(k.lower().startswith("x-ratelimit") or
+                                k.lower() == "retry-after" for k in hdrs)
+            if not has_ratelimit:
+                findings.append(_make_finding(
+                    origin, "alt_channel_auth_weakness", "info",
+                    "Alternate authentication channel present",
+                    "An alternate (API/mobile) authentication endpoint is reachable "
+                    "and advertises no rate-limit controls. Alternate channels often "
+                    "skip the lockout/MFA the web login enforces (WSTG-ATHN-10) — "
+                    "verify control parity across all auth channels.",
+                    0.55, {"endpoint": origin.rstrip('/') + path,
+                           "rate_limit_headers": has_ratelimit}))
+                break
+    return findings
+
+
 async def scan_auth(url: str, forms: Optional[list[dict]] = None,
                     brute_force: bool = True) -> dict:
     """
@@ -742,6 +831,7 @@ async def scan_auth(url: str, forms: Optional[list[dict]] = None,
             _audit_security_headers(session, url),
             _audit_oauth(session, url),
             _audit_password_policy(session, url),
+            _audit_wstg_surrogates(session, url),
             *(
                 [_brute_http_basic(session, url),
                  _brute_login_form(session, url, forms)]

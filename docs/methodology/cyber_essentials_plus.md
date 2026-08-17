@@ -10,11 +10,13 @@ current [*Requirements for IT Infrastructure* v3.3](https://www.ncsc.gov.uk/file
 CE Plus adds technical assurance the assessor performs directly, following the
 NCSC *Illustrative Test Specification*: an external vulnerability assessment of
 the internet-facing footprint, an authenticated (credentialed) patch and
-configuration audit of a device sample, a malware-protection functionality
-test, and account-separation / MFA checks. HEAVEN automates the parts of that
-test specification that are a network or credentialed scan; the endpoint
-functionality tests (running an EICAR file, exercising email/web filtering on a
-workstation) remain a manual assessor step and are honestly marked so.
+configuration audit of a device sample, a malware-protection functionality test,
+and account-separation / MFA checks. HEAVEN automates every part of that test
+specification that is a network or credentialed scan, each named to a real
+detector. The residual endpoint functionality tests (running an EICAR file,
+exercising email/web filtering on a workstation) and internal IdP checks have no
+scan footprint and are listed per area as **out-of-band (analyst-attested)** —
+never fabricated.
 
 A control row is **✓ exercised** on the live Methodology page only when the
 HEAVEN detector it names actually produced a finding in the active engagement.
@@ -23,11 +25,11 @@ HEAVEN detector it names actually produced a finding in the active engagement.
 
 | CE Plus test area | HEAVEN evidence |
 |---|---|
-| External vulnerability assessment | extensive — full external scan suite |
-| Authenticated patch & configuration audit | extensive — credentialed CVE/EOL/config audit |
-| Malware protection functionality test | manual — endpoint/email functional test |
-| Account separation & MFA | partial + manual |
-| Assessment sampling, evidence & reporting | extensive — evidence + report generators |
+| External vulnerability assessment | full external scan suite |
+| Authenticated patch & configuration audit | credentialed CVE/EOL/config audit |
+| Malware protection functionality test | email-spoofing surface; endpoint tests analyst-attested |
+| Account separation & MFA | lockout/default-cred/transport; IdP checks analyst-attested |
+| Assessment sampling, evidence & reporting | scope + evidence + report generators |
 
 ## Detailed mapping
 
@@ -53,34 +55,37 @@ critical patches are applied and default configuration is removed.
 |---|---|---|
 | CEP-AUTH-1 | Credentialed check for missing high/critical patches | `heaven.vulnscan.cve_mapper` (authenticated network testing) |
 | CEP-AUTH-2 | Confirm all software is in vendor support | `heaven.vulnscan.eol_scanner` |
-| CEP-AUTH-3 | Third-party / dependency components patched | `heaven.devsecops.sca_scanner` |
+| CEP-AUTH-3 | Third-party / dependency components patched | `heaven.vulnscan.sca_scanner` |
 | CEP-AUTH-4 | Default accounts and passwords removed | `heaven.vulnscan.auth_scanner` |
 | CEP-AUTH-5 | Unnecessary services disabled on the sample | `heaven.recon.network_exposure` |
 
 ### Malware Protection Functionality Test
-The assessor confirms anti-malware actually blocks a test payload and that the
-email/web filtering rejects known-bad content. This is an endpoint/mailbox
-functional test a remote scanner cannot perform without fabricating a result.
+The externally measurable email-spoofing surface is automated; the endpoint/
+mailbox functional tests are performed by the assessor.
 
 | Test | Description | HEAVEN coverage |
 |---|---|---|
-| CEP-MW-1 | Anti-malware blocks a benign test file (e.g. EICAR) | (manual — endpoint functional test) |
-| CEP-MW-2 | Malicious email attachment is rejected/quarantined | (manual — mailbox functional test) |
 | CEP-MW-3 | Inbound email spoofing surface is hardened | `heaven.recon.dns_recon` (SPF/DMARC/DKIM/MTA-STS) |
-| CEP-MW-4 | Malicious download via browser is blocked | (manual — web-filtering functional test) |
+
+**Out-of-band (analyst-attested):** CEP-MW-1 (anti-malware blocks a benign EICAR
+file), CEP-MW-2 (malicious email attachment rejected) and CEP-MW-4 (malicious
+browser download blocked) are endpoint/mailbox functional tests a remote scanner
+cannot perform without fabricating a result.
 
 ### Account Separation & Multi-Factor Authentication
 | Test | Description | HEAVEN coverage |
 |---|---|---|
 | CEP-AC-1 | No default/shared credentials on exposed logins | `heaven.vulnscan.auth_scanner` |
 | CEP-AC-2 | Credentials only accepted over encrypted channels | `heaven.vulnscan.ssl_scanner` |
-| CEP-AC-3 | Brute-force / lockout resistance on exposed logins | `heaven.vulnscan.auth_scanner` (partial) |
-| CEP-AC-4 | Administrative accounts separated from standard users | (manual — authenticated account review) |
-| CEP-AC-5 | MFA enforced on cloud and administrative access | (manual — IdP / cloud configuration) |
+| CEP-AC-3 | Brute-force / lockout resistance on exposed logins | `heaven.vulnscan.auth_scanner` (lockout probe — no-lockout is confirmed only on observed unlimited attempts) |
+
+**Out-of-band (analyst-attested):** CEP-AC-4 (admin accounts separated from
+standard users) and CEP-AC-5 (MFA enforced on cloud/admin) are internal IdP /
+authenticated-review controls.
 
 ### Assessment Sampling, Evidence & Reporting
 | Test | Description | HEAVEN coverage |
 |---|---|---|
 | CEP-REP-1 | Reproducible, evidenced findings for the assessor | `heaven.devsecops.evidence` (replayable proof) |
 | CEP-REP-2 | Structured pass/fail report against the controls | `heaven.devsecops.compliance_report` |
-| CEP-REP-3 | Define the device/IP sample and scope | (manual — assessor defines the sample) |
+| CEP-REP-3 | Define the device/IP sample and scope | `heaven scope` (the engagement scope DB *is* the defined sample) |

@@ -25,6 +25,372 @@ from typing import Any
 # Typical CVSS v3.1 base score for the class (used only as a labelled fallback
 # when no per-finding predicted score exists — always shown as "typical").
 _KB: dict[str, dict[str, Any]] = {
+    # ── OWASP-WSTG client-side, source-review & auth-channel detectors ────────
+    "source_comment_disclosure": {
+        "title": "Sensitive Data in Page Source (Comments / Developer Notes)",
+        "cwe": "CWE-615",
+        "owasp": "A01:2025 Broken Access Control",
+        "mitre": "T1592 — Gather Victim Host Information",
+        "typical_cvss": 5.3,
+        "description": (
+            "Reviewing the delivered HTML/JS source (WSTG-INFO-05) exposed sensitive "
+            "content in comments or developer notes — credentials, API keys, tokens, "
+            "internal IP addresses or backdoor markers."
+        ),
+        "impact": "Hands an attacker credentials, internal hostnames or hidden endpoints.",
+        "remediation": (
+            "1. Strip developer comments and debug notes from production builds.\n"
+            "2. Never embed secrets in client-delivered source.\n"
+            "3. Add a build step that fails on secret patterns in shipped assets."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "dom_xss_sink": {
+        "title": "Potential DOM-based XSS (Source → Sink)",
+        "cwe": "CWE-79",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1059.007 — JavaScript",
+        "typical_cvss": 6.1,
+        "description": (
+            "Client JavaScript passes an attacker-influenceable source "
+            "(location/URL/referrer/window.name/postMessage) into a dangerous sink "
+            "(innerHTML/document.write/eval/setTimeout-string) — the DOM-XSS pattern "
+            "(WSTG-CLNT-01/02)."
+        ),
+        "impact": "Script execution in the victim's browser without a server round-trip.",
+        "remediation": (
+            "1. Never pass untrusted data to innerHTML/document.write/eval.\n"
+            "2. Use textContent / safe DOM APIs and a strict CSP.\n"
+            "3. Sanitize with a vetted library (DOMPurify) where HTML is required."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/DOM_Based_XSS"],
+    },
+    "insecure_postmessage": {
+        "title": "postMessage Handler Without Origin Validation",
+        "cwe": "CWE-346",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1059.007 — JavaScript",
+        "typical_cvss": 6.1,
+        "description": (
+            "A window 'message' event handler never checks event.origin, so any "
+            "site can postMessage into it — a cross-origin data-injection / XSS "
+            "vector (WSTG-CLNT-11)."
+        ),
+        "impact": "Cross-origin script/data injection into the application.",
+        "remediation": (
+            "1. Validate event.origin against an allow-list in every message handler.\n"
+            "2. Validate the message structure before acting on it.\n"
+            "3. Specify a target origin (never '*') when calling postMessage."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html"],
+    },
+    "sensitive_browser_storage": {
+        "title": "Sensitive Data in Browser Storage",
+        "cwe": "CWE-922",
+        "owasp": "A01:2025 Broken Access Control",
+        "mitre": "T1539 — Steal Web Session Cookie",
+        "typical_cvss": 5.3,
+        "description": (
+            "Client JavaScript stores sensitive-looking keys (token/session/secret/"
+            "api_key) in localStorage/sessionStorage, which any XSS can read and "
+            "which persists on shared machines (WSTG-CLNT-12)."
+        ),
+        "impact": "Session/secret theft via XSS or shared-device access.",
+        "remediation": (
+            "1. Store session tokens in Secure, HttpOnly cookies, not web storage.\n"
+            "2. Never persist secrets client-side.\n"
+            "3. Clear sensitive storage on logout."
+        ),
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html"],
+    },
+    "cross_site_script_inclusion": {
+        "title": "Cross-Site Script Inclusion (XSSI) Exposure",
+        "cwe": "CWE-352",
+        "owasp": "A01:2025 Broken Access Control",
+        "mitre": "T1119 — Automated Collection",
+        "typical_cvss": 5.3,
+        "description": (
+            "A dynamic data endpoint is loadable as a script. If it returns raw "
+            "JSON/JS with sensitive data and no anti-XSSI guard, a third-party page "
+            "can include it and read the data (WSTG-CLNT-13)."
+        ),
+        "impact": "Cross-origin theft of authenticated data.",
+        "remediation": (
+            "1. Prefix JSON responses with an unexecutable guard ()]}',\\n).\n"
+            "2. Require POST / a custom header for sensitive data endpoints.\n"
+            "3. Serve data with a non-executable Content-Type and correct CORS."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "css_injection": {
+        "title": "CSS Injection",
+        "cwe": "CWE-79",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1059.007 — JavaScript",
+        "typical_cvss": 4.3,
+        "description": (
+            "User input is reflected into a style context, letting an attacker "
+            "inject CSS to exfiltrate data (attribute selectors), overlay content, "
+            "or aid UI-redress (WSTG-CLNT-05)."
+        ),
+        "impact": "Data exfiltration via CSS selectors and UI manipulation.",
+        "remediation": (
+            "1. Never reflect untrusted input into <style> or style attributes.\n"
+            "2. Encode output for the CSS context and apply a strict CSP.\n"
+            "3. Avoid user-controlled class/style names."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "client_resource_manipulation": {
+        "title": "Client-Side Resource Manipulation",
+        "cwe": "CWE-601",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1059.007 — JavaScript",
+        "typical_cvss": 5.4,
+        "description": (
+            "Client JavaScript assigns an attacker-influenceable source into a "
+            "resource-loading sink (script/img/iframe src, form action, href), so a "
+            "crafted URL can point the page at attacker-controlled resources "
+            "(WSTG-CLNT-06)."
+        ),
+        "impact": "Loading of attacker-controlled scripts/resources or redirection.",
+        "remediation": (
+            "1. Validate/allow-list any URL used to load a resource.\n"
+            "2. Do not derive resource URLs from location/referrer/postMessage.\n"
+            "3. Apply a CSP restricting script/img/frame sources."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "flash_crossdomain": {
+        "title": "Legacy Flash (SWF) Content Referenced",
+        "cwe": "CWE-1104",
+        "owasp": "A06:2025 Vulnerable and Outdated Components",
+        "mitre": "T1203 — Exploitation for Client Execution",
+        "typical_cvss": 4.0,
+        "description": (
+            "The page references end-of-life Adobe Flash (.swf) content which, with "
+            "a permissive crossdomain policy, enables cross-site flashing "
+            "(WSTG-CLNT-08)."
+        ),
+        "impact": "Legacy client-execution and cross-domain data theft surface.",
+        "remediation": (
+            "1. Remove all Flash content — it is end-of-life and unsupported.\n"
+            "2. Migrate functionality to modern HTML5.\n"
+            "3. Delete permissive crossdomain.xml / clientaccesspolicy.xml files."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "permissive_crossdomain_policy": {
+        "title": "Permissive RIA Cross-Domain Policy",
+        "cwe": "CWE-942",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1190 — Exploit Public-Facing Application",
+        "typical_cvss": 6.5,
+        "description": (
+            "A Flash/Silverlight cross-domain policy allows access from any domain "
+            "(domain=\"*\"), letting a hostile site make credentialed cross-domain "
+            "requests through a victim's browser (WSTG-CONF-08)."
+        ),
+        "impact": "Cross-domain theft of authenticated data.",
+        "remediation": (
+            "1. Restrict crossdomain.xml / clientaccesspolicy.xml to trusted domains.\n"
+            "2. Remove the policy files entirely if Flash/Silverlight is unused.\n"
+            "3. Never use a wildcard domain with credentials."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "password_autocomplete_enabled": {
+        "title": "Password Field Allows Browser Autocomplete",
+        "cwe": "CWE-522",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1555 — Credentials from Password Stores",
+        "typical_cvss": 3.1,
+        "description": (
+            "A password input does not set autocomplete=\"off\"/\"new-password\", so "
+            "browsers may store the credential — a risk on shared/public machines "
+            "(WSTG-ATHN-05)."
+        ),
+        "impact": "Cached credentials recoverable on shared devices.",
+        "remediation": (
+            "1. Set autocomplete=\"off\" (or \"new-password\") on password inputs.\n"
+            "2. Educate users about shared-device risk.\n"
+            "3. Combine with short session lifetimes."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "sensitive_cache_control": {
+        "title": "Credential/Sensitive Page Is Cacheable",
+        "cwe": "CWE-525",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1539 — Steal Web Session Cookie",
+        "typical_cvss": 4.0,
+        "description": (
+            "A page containing a password field (or sensitive content) is served "
+            "without Cache-Control: no-store/no-cache, so proxies or the browser may "
+            "cache sensitive content (WSTG-ATHN-06)."
+        ),
+        "impact": "Sensitive content recoverable from browser/proxy caches.",
+        "remediation": (
+            "1. Send 'Cache-Control: no-store' on authenticated/sensitive responses.\n"
+            "2. Add 'Pragma: no-cache' for legacy proxies.\n"
+            "3. Never cache pages that render credentials or personal data."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "session_token_in_url": {
+        "title": "Session Identifier Exposed in URL",
+        "cwe": "CWE-598",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1539 — Steal Web Session Cookie",
+        "typical_cvss": 6.5,
+        "description": (
+            "A session/auth token is passed in the URL query string, where it leaks "
+            "via browser history, Referer headers, and proxy/server logs "
+            "(WSTG-SESS-04)."
+        ),
+        "impact": "Session hijacking via logged or referred URLs.",
+        "remediation": (
+            "1. Carry session state in Secure, HttpOnly cookies, never in the URL.\n"
+            "2. Reject session identifiers supplied as query parameters.\n"
+            "3. Regenerate the session ID after authentication."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "long_session_timeout": {
+        "title": "Persistent Session Cookie (No Idle Timeout)",
+        "cwe": "CWE-613",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1539 — Steal Web Session Cookie",
+        "typical_cvss": 4.0,
+        "description": (
+            "A session cookie carries a far-future expiry, indicating no idle "
+            "session timeout — a stolen or shared-device session stays valid "
+            "indefinitely (WSTG-SESS-07)."
+        ),
+        "impact": "Extended window for session hijacking / shared-device misuse.",
+        "remediation": (
+            "1. Use short-lived session cookies with an absolute and idle timeout.\n"
+            "2. Re-authenticate for sensitive operations.\n"
+            "3. Invalidate sessions server-side on logout and expiry."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "padding_oracle": {
+        "title": "Potential CBC Padding Oracle",
+        "cwe": "CWE-696",
+        "owasp": "A08:2025 Software and Data Integrity Failures",
+        "mitre": "T1600 — Weaken Encryption",
+        "typical_cvss": 7.4,
+        "description": (
+            "Corrupting one byte of a ciphertext-looking parameter produced a "
+            "distinct decryption/padding error the valid value did not — the classic "
+            "padding-oracle signal (WSTG-CRYP-02)."
+        ),
+        "impact": "Decryption/forgery of encrypted tokens without the key.",
+        "remediation": (
+            "1. Use authenticated encryption (AES-GCM) instead of unauthenticated CBC.\n"
+            "2. Return identical, generic errors for all decrypt failures.\n"
+            "3. MAC-then-verify before attempting to decrypt."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "ssi_injection": {
+        "title": "Server-Side Includes (SSI) Injection",
+        "cwe": "CWE-97",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1059 — Command and Scripting Interpreter",
+        "typical_cvss": 8.6,
+        "description": (
+            "An SSI directive injected into a parameter was processed by the server "
+            "rather than echoed literally. SSI injection can escalate to command "
+            "execution via #exec (WSTG-INPV-08)."
+        ),
+        "impact": "Server-side file disclosure and potential command execution.",
+        "remediation": (
+            "1. Disable SSI where not required (Options -Includes).\n"
+            "2. Never pass user input into SSI-parsed responses.\n"
+            "3. Encode '<', '!', '#', '-' in reflected output."
+        ),
+        "references": ["https://owasp.org/www-community/attacks/Server-Side_Includes_(SSI)_Injection"],
+    },
+    "smtp_header_injection": {
+        "title": "Mail (SMTP/IMAP) Header Injection",
+        "cwe": "CWE-93",
+        "owasp": "A05:2025 Injection",
+        "mitre": "T1566 — Phishing",
+        "typical_cvss": 7.3,
+        "description": (
+            "A CRLF-delimited mail header injected into a contact/mail parameter was "
+            "reflected unfiltered, indicating the value builds mail headers without "
+            "sanitisation — enabling Bcc/recipient injection and mail relay "
+            "(WSTG-INPV-10)."
+        ),
+        "impact": "Unauthorized mail relay, recipient injection, spam/phishing.",
+        "remediation": (
+            "1. Strip CR/LF from any user input used in mail headers.\n"
+            "2. Use a mail library that separates headers from user data.\n"
+            "3. Allow-list header values and recipients."
+        ),
+        "references": ["https://owasp.org/www-community/vulnerabilities/CRLF_Injection"],
+    },
+    "open_registration": {
+        "title": "Open Self-Service Registration / Provisioning",
+        "cwe": "CWE-284",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1136 — Create Account",
+        "typical_cvss": 3.7,
+        "description": (
+            "A public self-service registration form is reachable, so accounts can "
+            "be provisioned without operator approval (WSTG-IDNT-02/03). Verify the "
+            "workflow enforces verification, a strong password policy and "
+            "least-privilege roles."
+        ),
+        "impact": "Unapproved account creation; abuse if provisioning is weak.",
+        "remediation": (
+            "1. Require email/phone verification before activation.\n"
+            "2. Enforce a strong password policy and default least-privilege roles.\n"
+            "3. Rate-limit and monitor registration; add CAPTCHA where appropriate."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "security_question_reset": {
+        "title": "Password Reset Relies on Security Questions",
+        "cwe": "CWE-640",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1098 — Account Manipulation",
+        "typical_cvss": 5.3,
+        "description": (
+            "The account-recovery flow uses knowledge-based security questions, "
+            "whose answers are often guessable or discoverable via OSINT "
+            "(WSTG-ATHN-08)."
+        ),
+        "impact": "Account takeover via guessable recovery answers.",
+        "remediation": (
+            "1. Replace security questions with time-limited emailed reset tokens.\n"
+            "2. If retained, require additional factors and rate-limit attempts.\n"
+            "3. Never reveal whether an answer/account was correct."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
+    "alt_channel_auth_weakness": {
+        "title": "Alternate Authentication Channel Present",
+        "cwe": "CWE-287",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1078 — Valid Accounts",
+        "typical_cvss": 4.3,
+        "description": (
+            "An alternate (API/mobile) authentication endpoint is reachable and "
+            "advertises no rate-limit controls. Alternate channels often skip the "
+            "lockout/MFA the web login enforces (WSTG-ATHN-10)."
+        ),
+        "impact": "Auth controls bypassable via a weaker parallel channel.",
+        "remediation": (
+            "1. Enforce identical lockout/MFA/rate-limit controls on every auth channel.\n"
+            "2. Centralize authentication logic across web/API/mobile.\n"
+            "3. Monitor all channels for credential-stuffing."
+        ),
+        "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    },
     "docker_socket_exposed": {
         "title": "Exposed Docker daemon socket",
         "cwe": "CWE-284",

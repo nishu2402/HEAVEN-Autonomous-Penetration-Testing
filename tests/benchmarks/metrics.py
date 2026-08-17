@@ -88,6 +88,10 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     "missing_security_headers": "security_misconfig",
     "security headers": "security_misconfig",
     "missing headers": "security_misconfig",
+    # Clickjacking (missing X-Frame-Options / CSP frame-ancestors) is a
+    # security misconfiguration (OWASP A02) — same class as the header bundle.
+    "clickjacking": "security_misconfig",
+    "clickjacking_no_xfo": "security_misconfig",
     # Authentication weaknesses
     "weak_auth": "weak_auth", "weak_credentials": "weak_auth",
     "default_credentials": "weak_auth", "no_rate_limit": "weak_auth",

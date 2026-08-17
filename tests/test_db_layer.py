@@ -472,7 +472,8 @@ class TestSchemaSQLIntegrity:
     """Parse schema.sql and verify structural properties without a real DB."""
 
     @pytest.fixture(scope="class")
-    def schema_sql(self):
+    @classmethod
+    def schema_sql(cls):
         p = Path(__file__).parent.parent / "heaven" / "db" / "schema.sql"
         assert p.exists(), "schema.sql not found"
         return p.read_text()
@@ -558,7 +559,8 @@ class TestSchemaSQLIntegrity:
 
 class TestMigration0002:
     @pytest.fixture(scope="class")
-    def migration_src(self):
+    @classmethod
+    def migration_src(cls):
         p = Path(__file__).parent.parent / "migrations" / "versions" / "0002_extended_schema.py"
         assert p.exists(), "0002 migration not found"
         return p.read_text()

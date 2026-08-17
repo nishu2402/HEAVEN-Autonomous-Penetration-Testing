@@ -914,6 +914,44 @@ class InjectionScanner:
                 )
                 return
 
+    async def _test_xss_stored(self, session, url: str, param: str,
+                               other_fields: dict) -> None:
+        """Stored XSS (WSTG-INPV-02) / incubated payload (WSTG-INPV-14):
+        submit a UNIQUE executable canary via POST, then RE-FETCH the page and
+        confirm the canary persists in an executable context — proving the
+        payload was stored, not merely reflected in the POST response."""
+        import secrets
+        canary = "HVNSTORED" + secrets.token_hex(4)
+        payload = f"<script>{canary}</script>"
+        data = {**other_fields, param: payload}
+        async with self._sem:
+            if self._delay:
+                await asyncio.sleep(self._delay)
+            await _post(session, url, data, self._headers)
+        # Re-fetch the page fresh (GET) — persistence is proven only if the
+        # canary comes back on a request that did NOT carry the payload.
+        async with self._sem:
+            if self._delay:
+                await asyncio.sleep(self._delay)
+            _, refetched = await _get(session, url, self._headers)
+        if canary in refetched and _xss_is_executable(payload, refetched):
+            self._add_finding(
+                target=url,
+                vuln_type="xss_stored",
+                title=f"Stored XSS — param '{param}'",
+                severity="critical",
+                confidence=0.85,
+                evidence={
+                    "param": param,
+                    "payload": payload,
+                    "method": "POST→GET refetch",
+                    "canary": canary,
+                    "stored": True,
+                },
+                remediation="Encode stored output on render and validate on input. Apply CSP.",
+                cwe="CWE-79",
+            )
+
     # ── Header injection ──────────────────────────────────────────
 
     async def _test_header_injection(self, session, url: str) -> None:
@@ -1148,6 +1186,7 @@ class InjectionScanner:
                     others = {k: v for k, v in fields.items() if k != param}
                     tasks.append(self._test_sqli_post(session, action, param, baseline, others))
                     tasks.append(self._test_xss_post(session, action, param, others))
+                    tasks.append(self._test_xss_stored(session, action, param, others))
                     tasks.append(self._test_inclusion_param(
                         session, action, param, baseline, post=True, other_fields=others))
                     tasks.append(self._test_cmdi_param(

@@ -304,14 +304,20 @@ def create_app() -> Flask:
             return _PAGE.format(body=f"{form}<pre>{leaked}</pre>")
         return _PAGE.format(body=f"{form}<pre>File not found: {escape(page)}</pre>")
 
-    @app.route("/vulnerabilities/exec/")
+    @app.route("/vulnerabilities/exec/", methods=["GET", "POST"])
     def exec_() -> str:
         # OS Command Injection: shell_exec("ping -c 4 " + ip). No reflection.
-        form = ('<form action="#" method="GET">'
+        # Faithful to DVWA, whose ping form POSTs `ip` + `Submit` and reads
+        # $_REQUEST['ip']. Modelling it as a POST form (not GET) exercises the
+        # scanner's POST-form command-injection path — the real-world case a
+        # GET-only model silently skipped. request.values mirrors $_REQUEST
+        # (GET+POST); the POST form is what the crawler hands the scanner, so the
+        # injected `;id` reaches the shell over POST exactly as on real DVWA.
+        form = ('<form action="#" method="POST">'
                 'IP: <input type="text" name="ip">'
                 '<input type="submit" name="Submit" value="Submit"></form>')
-        ip = request.args.get("ip")
-        if ip is None or request.args.get("Submit") is None:
+        ip = request.values.get("ip")
+        if ip is None or request.values.get("Submit") is None:
             return _PAGE.format(body=form)
         return _PAGE.format(body=f"{form}<pre>{_simulate_ping(ip)}</pre>")
 

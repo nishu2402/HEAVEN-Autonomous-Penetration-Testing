@@ -630,6 +630,12 @@ async def scan_ssl_targets(targets: list[str],
     if ports is None:
         ports = [443]
 
+    # Defensive dedup: a caller may pass the same host:port many times (e.g. one
+    # per crawled URL sharing an origin). Re-scanning a port yields identical
+    # results and only risks blowing the phase timeout, so collapse to the unique
+    # target set while preserving order.
+    targets = list(dict.fromkeys(targets))
+
     sem = asyncio.Semaphore(20)
     all_findings: list[dict] = []
 

@@ -148,6 +148,91 @@ VULN_KILLCHAIN_MAP: dict[str, list[KillChainPhase]] = {
     "smb": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
     "rdp": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
     "misconfig": [KillChainPhase.RECONNAISSANCE, KillChainPhase.DELIVERY],
+    # ── Real scanner vuln_type slugs that previously fell through to the
+    # Reconnaissance default (grounded by grepping *every* emitter in
+    # heaven/vulnscan, heaven/recon, heaven/cloud — not guessed). Each maps to
+    # the phase(s) the *exposure* enables. Reporting-only: the module never
+    # executes a phase; it maps the enabling condition to where it belongs.
+    # Injection / RCE / privilege → Exploitation (+ Installation for footholds)
+    "cmdi": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "privesc": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "crlf_injection": [KillChainPhase.EXPLOITATION, KillChainPhase.DELIVERY],
+    "mass_assignment": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "bola": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "no_rate_limit": [KillChainPhase.EXPLOITATION, KillChainPhase.DELIVERY],
+    "race_condition": [KillChainPhase.EXPLOITATION],
+    "ssh_hardening": [KillChainPhase.EXPLOITATION, KillChainPhase.INSTALLATION],
+    "nuclei": [KillChainPhase.EXPLOITATION],
+    # Missing authentication / direct-access exposures
+    "missing_authentication": [KillChainPhase.EXPLOITATION, KillChainPhase.RECONNAISSANCE],
+    "database_exposed": [KillChainPhase.ACTIONS_ON_OBJECTIVES, KillChainPhase.RECONNAISSANCE],
+    "ftp_anonymous": [KillChainPhase.RECONNAISSANCE, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    # Unsupported / end-of-life software fills the Weaponization phase honestly
+    # (an EOL product ships known, unpatched, weaponizable vulnerabilities).
+    "unsupported_software": [KillChainPhase.WEAPONIZATION, KillChainPhase.EXPLOITATION],
+    # Exposed management / orchestration control planes → Command & Control
+    # (an attacker drives these as the control channel) + Recon.
+    "docker": [KillChainPhase.COMMAND_AND_CONTROL, KillChainPhase.INSTALLATION,
+               KillChainPhase.RECONNAISSANCE],  # docker_api_exposed / docker_socket_exposed
+    "kubelet_exposed": [KillChainPhase.COMMAND_AND_CONTROL, KillChainPhase.EXPLOITATION,
+                        KillChainPhase.RECONNAISSANCE],
+    "etcd_exposed": [KillChainPhase.COMMAND_AND_CONTROL, KillChainPhase.ACTIONS_ON_OBJECTIVES,
+                     KillChainPhase.RECONNAISSANCE],
+    "registry_exposed": [KillChainPhase.COMMAND_AND_CONTROL, KillChainPhase.RECONNAISSANCE],
+    "cadvisor_exposed": [KillChainPhase.RECONNAISSANCE, KillChainPhase.COMMAND_AND_CONTROL],
+    "api_actuator_exposed": [KillChainPhase.RECONNAISSANCE, KillChainPhase.COMMAND_AND_CONTROL],
+    "k8s_anon_auth": [KillChainPhase.EXPLOITATION, KillChainPhase.COMMAND_AND_CONTROL],
+    "k8s_insecure_port": [KillChainPhase.COMMAND_AND_CONTROL, KillChainPhase.RECONNAISSANCE],
+    "k8s_rbac_overprivileged": [KillChainPhase.INSTALLATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "k8s_secrets_exposed": [KillChainPhase.ACTIONS_ON_OBJECTIVES, KillChainPhase.RECONNAISSANCE],
+    "privileged_container": [KillChainPhase.INSTALLATION, KillChainPhase.EXPLOITATION],
+    "dangerous_mount": [KillChainPhase.INSTALLATION, KillChainPhase.EXPLOITATION],
+    "ipmi_exposed": [KillChainPhase.COMMAND_AND_CONTROL, KillChainPhase.RECONNAISSANCE],
+    "ipmi_hash_disclosure": [KillChainPhase.EXPLOITATION, KillChainPhase.RECONNAISSANCE],
+    "wireless_mgmt_exposed": [KillChainPhase.COMMAND_AND_CONTROL, KillChainPhase.RECONNAISSANCE],
+    "wireless_mgmt_unauthenticated": [KillChainPhase.COMMAND_AND_CONTROL,
+                                      KillChainPhase.EXPLOITATION, KillChainPhase.RECONNAISSANCE],
+    # Cleartext / weak remote-admin services (credential interception + access)
+    "telnet": [KillChainPhase.DELIVERY, KillChainPhase.EXPLOITATION],
+    "cleartext_service": [KillChainPhase.DELIVERY, KillChainPhase.EXPLOITATION],
+    "rlogin": [KillChainPhase.DELIVERY, KillChainPhase.EXPLOITATION],
+    "rsh": [KillChainPhase.DELIVERY, KillChainPhase.EXPLOITATION],
+    "rexec": [KillChainPhase.DELIVERY, KillChainPhase.EXPLOITATION],
+    "cisco_smart_install": [KillChainPhase.EXPLOITATION, KillChainPhase.COMMAND_AND_CONTROL],
+    # Secrets exposure → parallels hardcoded_secret
+    "exposed_secret": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "secret_exposure": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "api_key_leakage": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    # Cloud storage exposure → parallels public_s3
+    "exposed_storage_bucket": [KillChainPhase.ACTIONS_ON_OBJECTIVES, KillChainPhase.RECONNAISSANCE],
+    # Identity / federation attack surface (tenant recon + auth entry point)
+    "azure_ad_tenant_exposed": [KillChainPhase.RECONNAISSANCE, KillChainPhase.DELIVERY],
+    "adfs_idp_signon_enabled": [KillChainPhase.RECONNAISSANCE, KillChainPhase.DELIVERY],
+    "federation_sts_exposed": [KillChainPhase.RECONNAISSANCE, KillChainPhase.DELIVERY],
+    # GraphQL
+    "graphql_introspection": [KillChainPhase.RECONNAISSANCE],
+    "graphql_dos": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "graphql_complexity": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    "graphql_batching": [KillChainPhase.EXPLOITATION, KillChainPhase.ACTIONS_ON_OBJECTIVES],
+    # Email / DNS security posture — negative controls enable the email/DNS
+    # delivery/spoofing vector. Positive-posture findings ("spf present",
+    # "dnssec enabled") are deliberately NOT mapped here — calling a *good*
+    # control an attacker enabler would be a fabrication; they stay Recon.
+    "spf_missing": [KillChainPhase.DELIVERY],
+    "dkim_missing": [KillChainPhase.DELIVERY],
+    "dkim_weak_key": [KillChainPhase.DELIVERY],
+    "dmarc_missing": [KillChainPhase.DELIVERY],
+    "mta_sts_missing": [KillChainPhase.DELIVERY],
+    "dnssec_missing": [KillChainPhase.DELIVERY, KillChainPhase.COMMAND_AND_CONTROL],
+    "smtp_open_relay": [KillChainPhase.DELIVERY],
+    "open_relay": [KillChainPhase.DELIVERY],
+    "mx_enumeration": [KillChainPhase.RECONNAISSANCE],
+    # ICS / OT exposed control services (also scored vs IEC 62443 elsewhere)
+    "ics_exposed_service": [KillChainPhase.RECONNAISSANCE, KillChainPhase.COMMAND_AND_CONTROL],
+    "ics_modbus_exposed": [KillChainPhase.RECONNAISSANCE, KillChainPhase.COMMAND_AND_CONTROL],
+    "ics_port_open_unconfirmed": [KillChainPhase.RECONNAISSANCE],
+    # Perimeter-defense classification is a recon-context observation
+    "perimeter_defense": [KillChainPhase.RECONNAISSANCE],
 }
 
 
@@ -282,6 +367,23 @@ class KillChainAnalyzer:
             str(finding.get("title", "")),
             str(finding.get("description", "")),
         ]).lower()
+
+        # 3a. Strong post-exploitation signals ALWAYS add Installation + C2, even
+        # when the vuln_type already mapped a phase. A backdoor / bindshell / web
+        # shell is both an implanted foothold (Installation) and an interactive
+        # command channel (Command & Control) — the enabling exposure this module
+        # maps to a phase; it never claims to have executed one. Without this the
+        # C2 phase stays dark on a host riddled with backdoors: Metasploitable's
+        # vsftpd 2.3.4 / UnrealIRCd command-execution backdoors and its 1524 root
+        # bindshell all classify as "vulnerable_service" (Weaponization +
+        # Exploitation) and would otherwise never light Installation or C2.
+        if any(k in text for k in (
+            "backdoor", "bindshell", "bind shell", "reverse shell",
+            "web shell", "webshell", "root shell", "implant", "rootkit",
+        )):
+            phases.add(KillChainPhase.INSTALLATION)
+            phases.add(KillChainPhase.COMMAND_AND_CONTROL)
+
         if not phases:
             if any(k in text for k in ("phishing", "spear", "drive-by")):
                 phases.add(KillChainPhase.DELIVERY)

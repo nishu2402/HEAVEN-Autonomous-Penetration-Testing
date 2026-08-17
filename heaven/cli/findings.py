@@ -136,8 +136,16 @@ def replay(finding_id: str, engagement: Optional[str]) -> None:
         "evidence": f.evidence, **(f.evidence or {}),
     }
     pkg = package_finding(finding_dict)
+    # HTTP findings reproduce with curl; non-HTTP findings (DNS/TLS/DB/host
+    # services) reproduce with a class-appropriate command instead of a bogus
+    # curl. Fall through to the honest note when no single command reproduces it.
     if pkg.curl_command:
         print(pkg.curl_command)
+    elif pkg.repro_command:
+        print(pkg.repro_command)
+    elif pkg.repro_note:
+        _print(f"[yellow]{pkg.repro_note}[/yellow]")
+        sys.exit(1)
     else:
         _print(f"[yellow]No reproducible request stored for {finding_id}.[/yellow]")
         sys.exit(1)

@@ -155,6 +155,19 @@ def test_parse_package_lock_v3_and_v1():
     assert ("minimist", "1.2.0") in got1 and ("nested", "0.1.0") in got1
 
 
+def test_parse_extract_zip_lockfile_extracts_npm_package():
+    """A target's package-lock.json pinning the vulnerable extract-zip@2.0.1
+    (CVE-2026-56876, symlink path traversal) must be extracted as an npm package
+    so the OSV query can flag it. This is the SCA half of Ask 1 — HEAVEN doesn't
+    ship extract-zip, but it must *detect* it on a target."""
+    lock = ('{"lockfileVersion":3,"packages":{"":{"name":"target-app"},'
+            '"node_modules/extract-zip":{"version":"2.0.1"},'
+            '"node_modules/yauzl":{"version":"2.10.0"}}}')
+    got = {(p.name, p.version, p.ecosystem)
+           for p in sca_scanner.parse_manifest("package-lock.json", lock)}
+    assert ("extract-zip", "2.0.1", "npm") in got
+
+
 def test_parse_yarn_lock():
     text = ('lodash@^4.17.0:\n  version "4.17.4"\n  resolved "x"\n\n'
             '"@babel/core@^7.0.0":\n  version "7.1.0"\n')
@@ -291,6 +304,31 @@ async def test_scan_packages_dedupes_same_cve_keeping_highest():
     assert len(findings) == 1                 # collapsed to one
     assert findings[0]["severity"] == "high"  # kept the scored record
     assert findings[0]["evidence"]["fixed_version"] == "0.12.3"
+
+
+@pytest.mark.asyncio
+async def test_scan_flags_extract_zip_cve_2026_56876():
+    """End-to-end (minus the network): an extract-zip@2.0.1 npm package fed
+    through scan_packages with the real CVE-2026-56876 advisory yields a
+    vulnerable_dependency finding carrying that CVE and its fix. The live OSV.dev
+    query is exercised separately in the verification run; here the plumbing +
+    finding shape are asserted deterministically."""
+    vuln = OSVVuln(
+        osv_id="GHSA-extract-zip", package="extract-zip", version="2.0.1",
+        ecosystem="npm", summary="Arbitrary file write via symlink in the archive",
+        aliases=["CVE-2026-56876"],
+        cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:L",
+        cvss_score=8.6, severity="high", fixed_version="2.0.2",
+        source="package-lock.json",
+    )
+    pkgs = [Package("extract-zip", "2.0.1", "npm", source="package-lock.json")]
+    findings = await sca_scanner.scan_packages(pkgs, client=_FakeOSVClient([vuln]))
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["vuln_type"] == "vulnerable_dependency"
+    assert f["cve_id"] == "CVE-2026-56876"
+    assert f["severity"] == "high"
+    assert "2.0.2" in f["remediation"]
 
 
 @pytest.mark.asyncio

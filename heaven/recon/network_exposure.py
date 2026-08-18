@@ -579,11 +579,28 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     continue
                 label = db_spec[0]
                 noauth = real_port in _NOAUTH_DEFAULT_DB
-                extra = (" This engine historically binds with no authentication "
-                         "by default, so exposure can mean direct, unauthenticated "
-                         "read/write access to all data." if noauth else "")
-                findings.append(_finding(
-                    f"{ip}:{real_port}", "database_exposed", "high",
+                # A database reachable from an untrusted network is at least a
+                # High exposure. When the engine *defaults to no authentication*
+                # (Redis, Memcached, MongoDB, Elasticsearch, CouchDB, Cassandra),
+                # public exposure means unauthenticated read/write of ALL data —
+                # an unambiguous Critical. An auth-gated engine (MySQL/Postgres/
+                # MSSQL/Oracle) stays High: a serious pre-auth attack surface
+                # (credential brute-force, pre-auth CVEs) but not instant data
+                # loss. The per-finding ``typical_cvss`` pins the number so
+                # ``reconcile_severity`` keeps the label — a bare "critical" with
+                # no score is otherwise realigned down to the class's 8.6 High band.
+                if noauth:
+                    sev, base_cvss = "critical", 9.8
+                    extra = (" This engine binds with no authentication by default, "
+                             "so exposure can mean direct, unauthenticated read/write "
+                             "access to all data.")
+                else:
+                    sev, base_cvss = "high", 8.6
+                    extra = (" Even with authentication required, a public database "
+                             "port invites credential brute-forcing and pre-auth CVE "
+                             "exploitation.")
+                _db_f = _finding(
+                    f"{ip}:{real_port}", "database_exposed", sev,
                     f"Database Exposed to Untrusted Network: {label} (port {real_port})",
                     f"A {label} service is reachable on a public/routable address. "
                     "Databases must never be directly exposed to untrusted networks — "
@@ -592,8 +609,11 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     f"application hosts only.{extra}",
                     confidence=0.8,
                     evidence={"port": real_port, "service": svc or label.lower(),
-                              "product": label, "no_auth_by_default": noauth},
-                ))
+                              "product": label, "no_auth_by_default": noauth,
+                              "public_exposure": True},
+                )
+                _db_f["typical_cvss"] = base_cvss
+                findings.append(_db_f)
 
         # 2) High-risk appliance management planes
         for port, (label, vt, sev, why, names) in _MGMT_PORTS.items():

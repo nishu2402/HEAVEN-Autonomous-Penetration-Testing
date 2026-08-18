@@ -214,8 +214,14 @@ class TestScanResume:
         result = asyncio.run(db_tasks[0].coro_factory(**db_tasks[0].kwargs))
         harvested = [f for k in HARVESTED for f in result.get(k, [])]
         assert harvested, f"exposed-DB finding not under a harvested key: {result}"
-        assert harvested[0]["vuln_type"] == "exposed_database"
+        # Canonical slug is ``database_exposed`` (NOT the reversed
+        # ``exposed_database``) so it dedups against network_exposure's richer
+        # emitter for the same host:port instead of double-reporting.
+        assert harvested[0]["vuln_type"] == "database_exposed"
         assert "MYSQL" in harvested[0]["title"]
+        # It now carries evidence so an INTERNAL-host DB exposure (where
+        # network_exposure stays silent) is still an evidence-backed finding.
+        assert harvested[0].get("evidence", {}).get("port") == 3306
 
 
 # ── FP suppression wired into validator ────────────────────────────────

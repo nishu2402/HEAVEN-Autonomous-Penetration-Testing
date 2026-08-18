@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Exposed-database findings no longer double-report, and their severity is
+  now honest.** A directly-reachable database service was flagged by two
+  detectors under two reversed spellings — `network_exposure` emitted
+  `database_exposed` (rich evidence, public-host-scoped) while the orchestrator's
+  per-port `_db_check` emitted the reversed `exposed_database` with an empty
+  evidence blob — so a single exposed MySQL/Postgres surfaced **twice** and never
+  deduped. The orchestrator now emits the canonical `database_exposed` slug with
+  evidence, so the two collapse to one finding (the richer copy wins) while an
+  internal-host DB exposure — where `network_exposure` stays silent — is still an
+  evidence-backed finding. Severity is now context-aware: an **auth-gated** engine
+  (MySQL/Postgres/MSSQL/Oracle) reachable from a public address stays **High**,
+  while a **no-auth-by-default** engine (Redis, MongoDB, Elasticsearch, Memcached,
+  CouchDB, Cassandra) exposed to the public Internet is **Critical** — and the
+  label survives `reconcile_severity` because the finding pins a matching
+  `typical_cvss` (a bare "critical" with no score was previously realigned back
+  down to the class's High band). No inflation: an authenticated database is not
+  forced to Critical just because it is reachable.
+- **The Anomaly Probe can no longer dominate a scan when the target throttles
+  us.** On a heavy full scan a defensive target starts silently dropping our
+  connections; the Anomaly Probe (the highest-request-volume web task) would then
+  stall every request to its connect timeout and burn its **entire 600 s budget
+  for zero extra findings**, accounting for more than half the wall-clock of a
+  full scan. It now uses a short per-request connect timeout, a monotonic
+  wall-budget that stops the sweep early once the target is plainly not
+  answering, and a consecutive-stall breaker — with the hard task ceiling lowered
+  from 600 s to 300 s. A healthy target is unaffected (it answers fast and the
+  budget is never reached); a throttling one no longer holds the whole scan
+  hostage.
+
+---
+
 ## [3.0.0] — 2026-08-17
 
 ### Added

@@ -666,19 +666,31 @@ class ScanOrchestrator:
                     db in service for db in ("mysql", "postgres", "mssql", "mongodb", "redis")
                 ):
                     async def _db_check(ip=ip, port=port, service=service, **kw):
-                        name = (service or {
+                        svc = (service or {
                             3306: "mysql", 5432: "postgresql", 1433: "mssql",
                             27017: "mongodb", 6379: "redis",
-                        }.get(port, "database")).upper()
+                        }.get(port, "database"))
+                        name = svc.upper()
                         # Emit under a plural key the aggregator harvests
                         # (line ~585); a singular "finding" is silently dropped.
+                        #
+                        # Canonical slug is ``database_exposed`` (NOT the reversed
+                        # ``exposed_database``) so this collapses with the richer,
+                        # public-host-scoped emitter in ``network_exposure.py`` under
+                        # one identity — otherwise the SAME exposed DB is reported
+                        # twice under two spellings (one of them evidence-less). Carry
+                        # evidence so that on an INTERNAL host — where network_exposure
+                        # deliberately stays silent — this is still an evidence-backed
+                        # finding rather than a bare title.
                         return {
                             "findings": [{
                                 "target": f"{ip}:{port}",
-                                "vuln_type": "exposed_database",
+                                "vuln_type": "database_exposed",
                                 "title": f"Exposed {name} service on port {port}",
                                 "severity": "high",
                                 "confidence": 0.8,
+                                "evidence": {"port": port, "service": svc,
+                                             "product": svc},
                             }]
                         }
                     self.add_task(f"Exposed DB {ip}:{port}", _db_check,
@@ -1736,12 +1748,49 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         try:
             from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
             import aiohttp
+            import time
             scanner = WebAnomalyProbe()
             candidates = []
+            # The anomaly probe fires the MOST requests of any web task (payloads ×
+            # params × URLs). When a target starts throttling / dropping our
+            # connections mid-scan — a real defensive response to a heavy scan —
+            # every one of those requests stalls to its connect timeout, and the
+            # task would otherwise burn its entire 600 s budget for ZERO extra
+            # findings (a throttled target answers nothing new), dominating the
+            # scan wall-clock and starving nothing but the clock. Two guards keep
+            # it bounded and honest: a short per-request connect timeout so a
+            # dropped SYN fails fast, and a monotonic wall-budget that stops the
+            # sweep once the probe alone has run too long — the point at which the
+            # target is plainly not answering, so continuing only delays the report.
+            _budget_s = 180.0
+            _started = time.monotonic()
+            _stalls = 0
             async with aiohttp.ClientSession(
-                            timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
+                            timeout=aiohttp.ClientTimeout(total=15, connect=5)) as session:
                 for url in targets.get("urls", []):
-                    found = await scanner.scan_endpoint(session, url, ["id", "q", "page", "file", "url"])
+                    if time.monotonic() - _started > _budget_s:
+                        logger.warning(
+                            "Anomaly Probe: %.0fs wall-budget reached (target likely "
+                            "throttling) — stopping the sweep early with %d candidate(s) "
+                            "instead of stalling on unanswered requests.",
+                            _budget_s, len(candidates))
+                        break
+                    try:
+                        found = await scanner.scan_endpoint(
+                            session, url, ["id", "q", "page", "file", "url"])
+                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                        # A URL the target dropped: count it and bail out of the
+                        # whole probe if the target has gone dark for several in a
+                        # row (nothing more to learn, only time to lose).
+                        _stalls += 1
+                        if _stalls >= 3:
+                            logger.warning(
+                                "Anomaly Probe: %d consecutive unanswered targets — "
+                                "target appears to be dropping our connections; "
+                                "stopping early.", _stalls)
+                            break
+                        continue
+                    _stalls = 0
                     candidates.extend([{
                         "target": c.target, "category": c.category,
                         # vuln_type drives KB enrichment (CWE/OWASP/MITRE/CVSS-vector);
@@ -1762,7 +1811,11 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "Anomaly Probe", _anomaly_probe,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id],
         modes=WEBAPI_MODES,
-        timeout=600,
+        # Hard ceiling well under the old 600 s: the internal wall-budget +
+        # consecutive-stall breaker should stop the probe long before this, but a
+        # single very slow ``scan_endpoint`` call can't be interrupted mid-flight,
+        # so keep a firm cap so one hung sweep can never dominate the scan again.
+        timeout=300,
     )
 
     # ═══ Phase: ADVANCED ATTACKS ═══

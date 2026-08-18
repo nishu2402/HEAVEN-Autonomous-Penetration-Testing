@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1856 tests · 55 CLI commands · 77 API routes · 24 UI pages · 12 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1856 tests · 55 CLI commands · 77 API routes · 25 UI pages · 13 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -23,7 +23,7 @@
   <p>
     <img src="https://img.shields.io/badge/Modules-172-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-55-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
-    <img src="https://img.shields.io/badge/UI_Pages-24-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
+    <img src="https://img.shields.io/badge/UI_Pages-25-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
   </p>
@@ -90,7 +90,7 @@ HEAVEN is a **production-grade penetration-testing platform** that automates the
 It runs three ways from the **same engagement dataset**:
 
 - **CLI** — 55 commands for scriptable, CI-friendly workflows.
-- **Web UI** — a 24-page React command centre (scan launcher, live findings, kill-chain, reports).
+- **Web UI** — a 25-page React command centre (scan launcher, live findings, kill-chain, reports).
 - **REST + WebSocket API** — 77 RBAC-protected routes for automation and integration.
 
 <div align="center">
@@ -115,7 +115,7 @@ It runs three ways from the **same engagement dataset**:
 | 🧩 **Modules** | 172 |
 | ⌨️ **CLI Commands** | 55 |
 | 🌐 **API Routes** | 77 RBAC-protected routes |
-| 🖥️ **UI Pages** | 24 (React + Vite, dark glassmorphic) |
+| 🖥️ **UI Pages** | 25 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
 | 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · **deterministic fallback (no API key needed)** |
@@ -500,7 +500,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 <img width="900" alt="HEAVEN web UI — Dashboard: 3D attack-surface topology, severity distribution, and Fix-This-First priorities" src="docs/screenshots/web-app_dashboard.png" />
 </div>
 
-**24 pages:**
+**25 pages:**
 
 <div align="center">
 
@@ -521,6 +521,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 | **CVE Lookup** | Dynamic live CVE search (NVD + CIRCL) for any product/version — version-confirmed, KEV-flagged, EPSS-scored, Exploit-DB PoC links |
 | **Autonomous** | LLM observe→plan→act loop with bounded budget |
 | **AI Plans** | Saved attack plans from autonomous sessions |
+| **Assistant** | Engagement-grounded AI chat assistant (also a floating widget on every page) |
 | **Coverage** | OWASP coverage grade per engagement |
 | **Post-Ex** | linPEAS + BloodHound results |
 | **Lateral** | SSH/SMB/PsExec lateral movement paths |
@@ -717,7 +718,7 @@ heaven/                   ← Python package (172 modules)
 ├── api/                  FastAPI server + WebSocket (77 routes)
 └── cli/                  Click CLI — one module per command group (55 commands)
 
-heaven-ui/                React + Vite web console (24 pages)
+heaven-ui/                React + Vite web console (25 pages)
 tests/                    1856 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
@@ -737,7 +738,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~8 s
+pytest tests/                  # full suite, ~3.5 min (1853 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -804,8 +805,8 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>1856 tests · 172 modules · 55 CLI commands · 77 API routes · 24 UI pages · PostgreSQL + SQLite · MIT</strong>
-python scripts/sync_test_count.py</p>
+<strong>1856 tests · 172 modules · 55 CLI commands · 77 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
+</p>
 
 <p align="center">
 <img src="https://img.shields.io/github/stars/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Stars"/>

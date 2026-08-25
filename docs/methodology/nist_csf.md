@@ -1,16 +1,16 @@
 # HEAVEN ↔ NIST Cybersecurity Framework (CSF) 2.0
 
 Mapping of HEAVEN's detectors against the [NIST CSF
-2.0](https://www.nist.gov/cyberframework) — six Functions (**Govern**,
+2.0](https://www.nist.gov/cyberframework), six Functions (**Govern**,
 **Identify**, **Protect**, **Detect**, **Respond**, **Recover**), each broken
 into Categories.
 
 The CSF is an outcome-based framework spanning governance to recovery. HEAVEN
 provides direct technical evidence for every outcome that is measurable by
-scanning — supply-chain risk, asset management, vulnerability/risk identification,
+scanning, supply-chain risk, asset management, vulnerability/risk identification,
 posture-improvement tracking, identity & authentication, transport crypto,
 platform hardening, infrastructure resilience, continuous monitoring, and event
-delivery — each named to a real detector or tool feature. The Govern/Respond/
+delivery, each named to a real detector or tool feature. The Govern/Respond/
 Recover outcomes that are pure governance or process are listed as **out-of-band
 (analyst-attested)**.
 
@@ -22,11 +22,11 @@ HEAVEN detector it names actually produced a finding in the active engagement.
 | Function | HEAVEN evidence |
 |---|---|
 | GOVERN (GV) | supply-chain risk (dependencies); governance outcomes analyst-attested |
-| IDENTIFY (ID) | extensive — asset discovery, vulnerability/risk ID, improvement tracking |
-| PROTECT (PR) | extensive — auth, transport crypto, platform hardening, resilience |
+| IDENTIFY (ID) | extensive, asset discovery, vulnerability/risk ID, improvement tracking |
+| PROTECT (PR) | extensive, auth, transport crypto, platform hardening, resilience |
 | DETECT (DE) | continuous monitoring & defense fingerprinting |
 | RESPOND (RS) | event reporting & delivery; incident-management analyst-attested |
-| RECOVER (RC) | recovery process — analyst-attested |
+| RECOVER (RC) | recovery process, analyst-attested |
 
 ## Detailed mapping
 
@@ -40,7 +40,7 @@ HEAVEN detector it names actually produced a finding in the active engagement.
 outcomes attested through the security programme.
 
 ### IDENTIFY (ID)
-HEAVEN's strongest CSF alignment — discovering assets and identifying the
+HEAVEN's strongest CSF alignment, discovering assets and identifying the
 vulnerabilities that feed risk assessment.
 
 | Control | Description | HEAVEN coverage |

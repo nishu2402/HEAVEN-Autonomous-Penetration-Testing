@@ -244,6 +244,19 @@ class RaceConditionDetector:
         # reported as a low-confidence lead requiring manual verification (a
         # single-packet / last-byte-sync PoC), never a standalone high.
         if len(succ_hashes) > 1:
+            # Guard against merely dynamic pages. A body that already differs
+            # between two SEQUENTIAL requests — phpinfo(), CSRF tokens, per-request
+            # timestamps/nonces, memory addresses — varies for reasons that have
+            # nothing to do with concurrency, so its divergence under load is not
+            # a race. Only divergence that appears under concurrency but NOT when
+            # the same request is serialised points at a genuine TOCTOU.
+            seq_hashes = set()
+            for _ in range(2):
+                r = await send_request()
+                if r and 200 <= r["status"] < 300:
+                    seq_hashes.add(r["body_hash"])
+            if len(seq_hashes) != 1:
+                return None   # inherently dynamic response, not a race signal
             return AdvancedFinding(
                 target=url, vuln_type="race_condition", severity="low",
                 title="Possible Race Condition (TOCTOU) Indicator",

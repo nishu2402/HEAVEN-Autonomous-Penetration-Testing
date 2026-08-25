@@ -267,6 +267,32 @@ async def _http_get(session: Any, url: str, *, headers: Optional[dict] = None,
         return 0, {}, ""
 
 
+async def _http_get_final(session: Any, url: str, *, timeout: float = 8.0
+                          ) -> tuple[int, dict[str, str], str, str]:
+    """Read-only GET following redirects → ``(status, headers, body, final_url)``.
+
+    Unlike :func:`_http_get` this also reports the URL the request *finally*
+    landed on, so a catch-all that redirects an unknown/sensitive path to the
+    homepage can be told apart from the resource genuinely being served."""
+    try:
+        async with session.get(
+            url, allow_redirects=True,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            body = await resp.text(errors="replace")
+            hdrs = {k.lower(): v for k, v in resp.headers.items()}
+            return resp.status, hdrs, body, str(resp.url)
+    except Exception as exc:  # noqa: BLE001 — a failed probe is not fatal
+        logger.debug("confirm GET(final) failed for %s: %s", url, exc)
+        return 0, {}, "", ""
+
+
+def _norm_body(body: str) -> str:
+    """Whitespace-collapsed, length-bounded body for soft-404 equality checks."""
+    import re as _re
+    return _re.sub(r"\s+", " ", body or "").strip()[:3000]
+
+
 async def _tcp_reachable(host: str, port: int, timeout: float = 6.0) -> bool:
     """True if a TCP connection to ``host:port`` succeeds (immediately closed)."""
     try:
@@ -388,11 +414,51 @@ _FILE_SIGNATURES: dict[str, tuple[str, ...]] = {
     "id_rsa": ("PRIVATE KEY",),
 }
 
+# Management / DB-admin tools whose exposed page carries an unmistakable body
+# signature. If a probed path *names* one of these but the served body isn't
+# actually that tool (e.g. a catch-all served the site homepage instead), the
+# tool is NOT exposed — this kills the classic "/phpmyadmin/ → homepage" false
+# positive. Keyed by a path fragment; matched case-insensitively.
+_TOOL_SIGNATURES: dict[str, tuple[str, ...]] = {
+    "phpmyadmin": ("phpmyadmin", "pma_", "set_session"),
+    "adminer": ("adminer", "adminer.org"),
+    "phpinfo": ("phpinfo()", "php version"),
+}
+
+
+def _required_signature(url: str) -> tuple[str, tuple[str, ...]]:
+    """The content signature a path *must* exhibit to count as exposed, if any.
+
+    Returns ``(label, markers)`` for a path that names a known file/tool whose
+    genuine body is unmistakable, else ``("", ())`` — for which we fall back to
+    the soft-404 / redirect checks instead of a body signature."""
+    low = url.lower()
+    for frag, sigs in _TOOL_SIGNATURES.items():
+        if frag in low:
+            return frag, sigs
+    for frag, sigs in _FILE_SIGNATURES.items():
+        if frag in low:
+            return frag, sigs
+    return "", ()
+
 
 async def _confirm_http_endpoint(session: Any, finding: dict[str, Any]) -> ConfirmResult:
-    """Exposed file or management endpoint: prove it is genuinely served now."""
+    """Exposed file or management endpoint: prove it is genuinely served now.
+
+    Read-only, false-positive-safe. A finding is confirmed only when the live
+    resource is truly served at its own URL — not when a catch-all / soft-404
+    redirects the probe to the site homepage (the common SPA/framework default),
+    and not when a path that names a specific tool serves something that isn't it.
+    """
+    from urllib.parse import urljoin, urlparse
     url = _finding_url(finding)
-    status, hdrs, body = await _http_get(session, url)
+    status, hdrs, body, final_url = await _http_get_final(session, url)
+    if status == 0:
+        return ConfirmResult(
+            UNCONFIRMED, method="http-recheck", technique="endpoint_recheck", reprobed=True,
+            summary="Target did not respond to the re-check request.",
+            detail=f"GET {url} returned no response — it may be down or unreachable now.",
+            evidence=[{"request": f"GET {url}", "response_status": status}])
     if status != 200:
         return ConfirmResult(
             UNCONFIRMED, method="http-recheck", technique="endpoint_recheck", reprobed=True,
@@ -400,32 +466,82 @@ async def _confirm_http_endpoint(session: Any, finding: dict[str, Any]) -> Confi
             detail=f"GET {url} → HTTP {status} — the resource is not being served now "
                    "(access may have been restricted, or it never was this host).",
             evidence=[{"request": f"GET {url}", "response_status": status}])
-    low_url = url.lower()
+
     ctype = hdrs.get("content-type", "")
-    # Guard against a soft-404 / login page masquerading as 200.
-    looks_like_html_error = ("<html" in body[:400].lower() and status == 200
-                             and any(w in body.lower()[:2000] for w in
+    req_p, fin_p = urlparse(url), urlparse(final_url or url)
+    req_path = (req_p.path or "/").rstrip("/") or "/"
+    fin_path = (fin_p.path or "/").rstrip("/") or "/"
+    same_host = (fin_p.hostname or "").lower() == (req_p.hostname or "").lower()
+    landed_on_root = fin_path in ("", "/")
+    redirected_home = (not same_host or fin_path != req_path) and landed_on_root
+
+    # Soft-404 calibration: a sibling path that cannot exist. If the endpoint's
+    # body is identical to a known-nonexistent one, the server is a catch-all and
+    # nothing is actually exposed at this path.
+    import secrets as _secrets
+    junk_url = urljoin(url if url.endswith("/") else url + "/",
+                       f"heaven-{_secrets.token_hex(6)}.nope")
+    _js, _jh, junk_body, _jf = await _http_get_final(session, junk_url)
+    same_as_junk = bool(junk_body) and _norm_body(junk_body) == _norm_body(body)
+
+    # Required content signature for a named file/tool.
+    label, sigs = _required_signature(url)
+    low_body = body.lower()
+    signature_hit = label if (sigs and any(s.lower() in low_body for s in sigs)) else ""
+    signature_missing = bool(sigs) and not signature_hit
+
+    tech = "file_exposure_recheck" if label else "endpoint_recheck"
+    ev = [{"request": f"GET {url}", "response_status": status,
+           "final_url": final_url, "bytes": len(body),
+           "signature": signature_hit, "response_excerpt": body[:200]}]
+
+    # ── Disqualifiers (any one → not exposed) ─────────────────────────────────
+    if same_as_junk:
+        return ConfirmResult(
+            UNCONFIRMED, method="http-recheck", technique=tech, reprobed=True,
+            summary="Response is identical to a known-nonexistent path — the server "
+                    "is a catch-all (soft-404); nothing is exposed here.",
+            detail=f"GET {url} → HTTP 200 but its body matches a random nonexistent "
+                   f"sibling path, so this is the catch-all page, not a real resource.",
+            evidence=ev)
+    if redirected_home:
+        return ConfirmResult(
+            UNCONFIRMED, method="http-recheck", technique=tech, reprobed=True,
+            summary="The probe was redirected to the site homepage — the resource is "
+                    "not exposed at its own URL.",
+            detail=f"GET {url} → HTTP 200 only after redirecting to {final_url} "
+                   "(the homepage / catch-all), so the requested resource is not served.",
+            evidence=ev)
+    if signature_missing:
+        return ConfirmResult(
+            UNCONFIRMED, method="http-recheck", technique=tech, reprobed=True,
+            summary=f"Served a 200 but the body is not {label} (no signature match) — "
+                    "this looks like a catch-all page, not the tool/file itself.",
+            detail=f"GET {url} → HTTP 200, {len(body)} bytes, but none of the expected "
+                   f"{label} content markers are present, so it is not actually exposed.",
+            evidence=ev)
+    # An error/login page masquerading as 200 — but a *matched* tool/file
+    # signature means the body genuinely IS the artefact (a real phpMyAdmin login
+    # page contains "login"), so the signature wins over this generic heuristic.
+    looks_like_html_error = (not signature_hit
+                             and "<html" in body[:400].lower()
+                             and any(w in low_body[:2000] for w in
                                      ("not found", "404", "sign in", "login")))
-    signature_hit = ""
-    for frag, sigs in _FILE_SIGNATURES.items():
-        if frag in low_url:
-            if any(sig in body for sig in sigs):
-                signature_hit = frag
-            break
-    proved = bool(body) and not looks_like_html_error
-    tech = "file_exposure_recheck" if any(f in low_url for f in _FILE_SIGNATURES) else "endpoint_recheck"
-    summary = ("Resource is served (HTTP 200"
-               + (f", matched {signature_hit} signature" if signature_hit else "")
-               + ") — confirmed." if proved else
-               "Endpoint returned 200 but the body looks like an error/login page.")
+    if looks_like_html_error:
+        return ConfirmResult(
+            UNCONFIRMED, method="http-recheck", technique=tech, reprobed=True,
+            summary="Endpoint returned 200 but the body looks like an error/login page.",
+            detail=f"GET {url} → HTTP 200, {len(body)} bytes, content-type {ctype or 'unknown'}.",
+            evidence=ev)
+
     return ConfirmResult(
-        CONFIRMED if proved else UNCONFIRMED, proved=proved,
+        CONFIRMED, proved=True,
         method="http-recheck", technique=tech, reprobed=True,
-        summary=summary,
+        summary=("Resource is served (HTTP 200"
+                 + (f", matched {signature_hit} signature" if signature_hit else "")
+                 + ") — confirmed."),
         detail=f"GET {url} → HTTP 200, {len(body)} bytes, content-type {ctype or 'unknown'}.",
-        evidence=[{"request": f"GET {url}", "response_status": status,
-                   "bytes": len(body), "signature": signature_hit,
-                   "response_excerpt": body[:200]}])
+        evidence=ev)
 
 
 async def _confirm_http_cors(session: Any, finding: dict[str, Any]) -> ConfirmResult:

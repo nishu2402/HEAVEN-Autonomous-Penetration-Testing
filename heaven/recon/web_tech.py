@@ -27,6 +27,7 @@ nmap-detected service.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import re
 from typing import Any, Awaitable, Callable, Mapping, Optional
@@ -247,7 +248,7 @@ async def scan_web_tech(
             return {"findings": [], "vulnerabilities": [], "web_components": [],
                     "hosts": [], "total": 0}
         if session is None:
-            session = aiohttp.ClientSession(
+            session = _egress_cs(
                 connector=aiohttp.TCPConnector(ssl=False, limit=10),
                 headers={"User-Agent": "HEAVEN-WebTech/1.0"},
             )

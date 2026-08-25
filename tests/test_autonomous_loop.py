@@ -331,10 +331,16 @@ class TestAuthSession:
         with pytest.raises(ValueError):
             parse_auth_string("url=/x,user=a")   # missing pass
 
-    def test_empty_session_yields_empty_kwargs(self):
+    def test_empty_session_yields_no_auth_kwargs(self):
+        # With no active session, no AUTH material (cookies/headers) is
+        # contributed. The global per-target throttle rides along as a
+        # trace_config regardless — that's the only key allowed here.
         from heaven.recon.auth_session import aiohttp_session_kwargs, clear_active_session
         clear_active_session()
-        assert aiohttp_session_kwargs() == {}
+        kw = aiohttp_session_kwargs()
+        assert "cookies" not in kw
+        assert "headers" not in kw
+        assert set(kw) <= {"trace_configs", "trust_env"}
 
     def test_cookie_file_missing_raises(self, tmp_path):
         from heaven.recon.auth_session import load_cookie_file

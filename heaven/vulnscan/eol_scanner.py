@@ -89,6 +89,12 @@ _OS_EOL: list[tuple[str, str, str, str]] = [
      "Windows Server 2008/2008 R2 reached end of support on 2020-01-14."),
     (r"windows\s+server\s+2012", "2023-10-10", "high",
      "Windows Server 2012/2012 R2 reached end of support on 2023-10-10."),
+    # macOS 10.0–10.15: every 10.x release is past Apple's ~3-year security
+    # window (10.15 Catalina's last update shipped 2022). Requires the "10.x"
+    # token so a supported macOS 11+ (Big Sur and later) never matches.
+    (r"mac\s*os\s*x?\s*10\.(?:[0-9]|1[0-5])\b", "2022-09-12", "medium",
+     "macOS 10.x (Catalina and earlier) no longer receives Apple security "
+     "updates. Upgrade to a supported macOS release."),
 ]
 
 # ── Product end-of-life table ────────────────────────────────────────────────

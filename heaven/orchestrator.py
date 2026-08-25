@@ -15,6 +15,7 @@ from typing import Any, Callable, Coroutine, Optional
 
 from heaven.config import HeavenConfig, ScanMode, get_config
 from heaven.feedback import HOST, URL, FeedbackEngine
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 from heaven.ml.ai_brain import BayesianPrioritiser
 from heaven.utils.logger import get_logger
 
@@ -629,7 +630,7 @@ class ScanOrchestrator:
                         try:
                             from heaven.vulnscan.advanced_attacks import CredentialSprayer
                             import aiohttp
-                            async with aiohttp.ClientSession(
+                            async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                                 sprayer = CredentialSprayer()
                                 return await sprayer.spray(session, f"ssh://{ip}:{port}")
@@ -653,7 +654,7 @@ class ScanOrchestrator:
                         try:
                             from heaven.vulnscan.advanced_attacks import CredentialSprayer
                             import aiohttp
-                            async with aiohttp.ClientSession(
+                            async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                                 sprayer = CredentialSprayer()
                                 return await sprayer.spray(session, f"http://{ip}:{port}")
@@ -1055,6 +1056,38 @@ class ScanOrchestrator:
         """
         logger.info(f"╔══ HEAVEN Scan {self.scan_id[:8]} starting ══╗")
         self.progress.start_time = time.time()
+
+        # ── Egress preflight (kill-switch) ──────────────────────────────────
+        # Only when an anonymity egress is armed — a direct scan does no network
+        # check here. Confirms the tunnel/proxy is actually carrying traffic
+        # BEFORE any packet leaves; with the kill-switch on, a mis-set or dropped
+        # egress aborts the scan cleanly instead of leaking the operator's real
+        # IP. Returns a clean aborted summary (never a traceback).
+        try:
+            from heaven.net import egress as _egress
+            _egc = _egress.resolve_egress()
+            if _egc.armed:
+                try:
+                    _eres = await _egress.assert_ready(timeout=12.0)
+                    logger.info(
+                        f"🛡  Egress {_egc.mode}: exit "
+                        f"{_eres.get('public_ip') or '?'} via {_eres.get('via')} "
+                        f"— {_eres.get('detail')}")
+                except _egress.EgressError as _ee:
+                    logger.error(f"✗ Egress kill-switch aborted the scan: {_ee}")
+                    return {
+                        "scan_id": self.scan_id, "status": "aborted",
+                        "aborted": True, "abort_reason": str(_ee),
+                        "elapsed_seconds": 0.0,
+                        "total_tasks": self.progress.total_tasks,
+                        "completed": 0, "failed": 0,
+                        "vulnerabilities": [], "findings": [], "assets": [],
+                        "dns_records": [],
+                        "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+                        "results": {},
+                    }
+        except Exception:  # noqa: BLE001 — egress must never break a direct scan
+            logger.debug("egress preflight skipped", exc_info=True)
 
         phase_order = [
             ScanPhase.INIT,
@@ -1591,12 +1624,20 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             )
             import aiohttp
             results = {"subdomains": [], "js_secrets": [], "endpoints": []}
-            async with aiohttp.ClientSession(
+            # Subdomain enumeration (CT-log + DNS brute) maps a domain's whole
+            # subdomain tree — appropriate only when the operator authorised
+            # subdomain-wide scope. For a bare single-host / URL target
+            # (exact-host scope) it is skipped, so a one-host engagement never
+            # discovers, counts, logs or feeds back ~hundreds of out-of-scope
+            # subdomains (many on third-party infra). Scope discipline mirrors
+            # ScopeGuard exactly (see feedback.ScopeGuard.allows_subdomains).
+            scope = orch.feedback.scope if orch.feedback else None
+            async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     from urllib.parse import urlparse
                     domain = urlparse(url).hostname or ""
-                    if domain:
+                    if domain and (scope is None or scope.allows_subdomains(domain)):
                         subs = await enumerate_subdomains(domain, session, concurrency=50)
                         results["subdomains"].extend([s.value for s in subs])
                     secrets = await extract_js_secrets(session, url)
@@ -1650,7 +1691,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             import aiohttp
             intel = AdaptiveIntelligence()
             profiles = []
-            async with aiohttp.ClientSession(
+            async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     p = await intel.profile_target(session, url)
@@ -1765,7 +1806,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             _budget_s = 180.0
             _started = time.monotonic()
             _stalls = 0
-            async with aiohttp.ClientSession(
+            async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=15, connect=5)) as session:
                 for url in targets.get("urls", []):
                     if time.monotonic() - _started > _budget_s:
@@ -1834,7 +1875,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 scan_data["critical_endpoints"].extend(data.get("endpoints", []))
                 for ep in data.get("forms", []):
                     scan_data["critical_endpoints"].append(ep.get("action", ""))
-            async with aiohttp.ClientSession(
+            async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     found = await run_advanced_tests(session, url, scan_data=scan_data)
@@ -1879,7 +1920,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             return {}
 
         findings: list[dict] = []
-        async with aiohttp.ClientSession(
+        async with _egress_cs(
                         timeout=aiohttp.ClientTimeout(total=15, connect=8)) as session:
             for origin in origins:
                 for name in SUPPORTED_MANIFEST_NAMES:
@@ -2334,6 +2375,36 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="web", timeout=600,
     )
 
+    # ═══ Phase: FILE-UPLOAD PROBE ═══
+    async def _upload_scan(**kw):
+        # Active but safe: uploads an inert marker file to any discovered upload
+        # form and checks whether a server-executable type is accepted (CWE-434).
+        try:
+            from heaven.vulnscan.upload_scanner import scan_upload_forms
+        except ImportError:
+            return {}
+        endpoints: list[dict] = []
+        for _tid, res in orch.results.items():
+            if getattr(res, "state", None) != TaskState.COMPLETED:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                if isinstance(ep, dict):
+                    endpoints.append(ep)
+        if not endpoints:
+            return {"skipped": True, "reason": "no endpoints for upload probe"}
+        # The scan pipeline runs under an established authorization (the CLI
+        # `--i-have-authorization` gate has already passed), like the other
+        # active web tasks; the probe writes only a benign inert marker file.
+        return await scan_upload_forms(endpoints, authorized=True)
+
+    orch.add_task(
+        "File Upload Probe", _upload_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=300,
+    )
+
     # ═══ Phase: DIRECTORY & FILE FUZZING ═══
     async def _dir_fuzz(**kw):
         try:
@@ -2488,8 +2559,19 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                         domains.append(d)
             if not domains:
                 return {"skipped": True, "reason": "no domains for DNS recon"}
+            # DNS *records* (A/MX/NS/TXT/SOA — the target's own naming & mail
+            # infra) are enumerated for every in-scope domain. The subdomain
+            # brute-force, which discovers *other* hosts, runs only where the
+            # operator authorised subdomain-wide scope — so an exact-host
+            # engagement's DNS section lists records but no adjacent subdomains,
+            # keeping "Subdomains discovered" consistent with the scan's scope.
+            if orch.feedback is not None:
+                sub_scope: "bool | set[str]" = {
+                    d for d in domains if orch.feedback.scope.allows_subdomains(d)}
+            else:
+                sub_scope = True
             # dns_recon_targets returns {"findings": [...], "vulnerabilities": [...], "total": int}
-            return await dns_recon_targets(domains)
+            return await dns_recon_targets(domains, subdomains=sub_scope)
         except ImportError:
             return {}
 

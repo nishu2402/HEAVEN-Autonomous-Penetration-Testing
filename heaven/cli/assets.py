@@ -14,6 +14,9 @@ from typing import Optional
 import click
 
 from heaven.cli._helpers import _engagement_db_path, _print, json_output
+from heaven.utils.logger import get_logger
+
+logger = get_logger("cli.assets")
 
 
 def _collect_engagement_assets(engagement: Optional[str],
@@ -32,6 +35,7 @@ def _collect_engagement_assets(engagement: Optional[str],
              else store.list_scans(limit=200))  # newest first
     raw: list[dict] = []
     fallback: list[dict] = []  # newest asset-bearing scan, used only if none has ports
+    result: Optional[list[dict]] = None
     for s in scans:
         if not s:
             continue
@@ -53,10 +57,26 @@ def _collect_engagement_assets(engagement: Optional[str],
         # it made the inventory look empty even when an earlier scan had data.
         has_ports = any(a.get("open_ports") or a.get("ports") for a in found)
         if has_ports:
-            return found
+            result = found
+            break
         if not fallback:
             fallback = found
-    return raw if (all_scans or scan_id) else fallback
+    if result is None:
+        result = raw if (all_scans or scan_id) else fallback
+    # Overlay operator-set device names/types (the Assets manual override) so the
+    # CLI inventory AND the CLI report path reflect them too — not only the web
+    # report. Mirrors the web ``_collect_raw_assets`` overlay: this is the single
+    # point where the CLI reads raw host assets, and best-effort so an old DB with
+    # no ``host_labels`` table simply shows no manual labels rather than erroring.
+    try:
+        labels = store.get_host_labels()
+        if labels:
+            from heaven.devsecops.inventory import merge_host_labels
+            merge_host_labels(result, labels)
+    except Exception:
+        logger.debug("suppressed non-fatal exception overlaying host labels",
+                     exc_info=True)
+    return result
 
 
 def _collect_engagement_dns(engagement: Optional[str],

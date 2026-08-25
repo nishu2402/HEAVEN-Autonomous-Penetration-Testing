@@ -38,6 +38,7 @@ const CATALOGUE = [
   { group: "Navigate", icon: "🎫", label: "Tickets",      hint: "g t",        nav: "/tickets" },
   { group: "Navigate", icon: "≡",  label: "Benchmark",    hint: "g b",        nav: "/benchmark" },
   { group: "Navigate", icon: "§",  label: "Methodology",  hint: "g m",        nav: "/methodology" },
+  { group: "Navigate", icon: "🛡", label: "Compliance",   hint: "",           nav: "/compliance" },
   { group: "Navigate", icon: "📄", label: "Reports",      hint: "",           nav: "/reports" },
   { group: "Navigate", icon: "🩺", label: "System Health", hint: "",           nav: "/health" },
   { group: "Navigate", icon: "⚙",  label: "Settings",     hint: "",           nav: "/settings" },

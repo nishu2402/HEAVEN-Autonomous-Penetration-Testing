@@ -19,7 +19,7 @@ export default function TicketsPage() {
         <h2 style={{ color: "var(--med)", marginTop: 0 }}>🎫 Ticketing</h2>
         <p className="page-lead">
           Auto-create Jira / Linear issues from findings. Backends are
-          env-configured — once set, the "Push to ticketing" button on
+          env-configured, once set, the "Push to ticketing" button on
           FindingDetail and bulk push via CLI start working.
         </p>
 

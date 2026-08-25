@@ -9,7 +9,7 @@ HEAVEN itself doesn't have security holes. Please report responsibly.
 
 Instead, contact the maintainer directly:
 
-- **LinkedIn DM**: [linkedin.com/in/nisarg-chasmawala](https://www.linkedin.com/in/nisarg-chasmawala) (preferred — fastest response)
+- **LinkedIn DM**: [linkedin.com/in/nisarg-chasmawala](https://www.linkedin.com/in/nisarg-chasmawala) (preferred, fastest response)
 - **GitHub Security Advisory**: open a private security advisory at
   [github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/security/advisories/new](https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/security/advisories/new)
 
@@ -24,7 +24,7 @@ You can expect:
 
 - An acknowledgment within **5 business days**
 - A status update or fix plan within **14 business days**
-- Public disclosure coordinated with you, typically 30–90 days after
+- Public disclosure coordinated with you, typically 30 to 90 days after
   acknowledgment
 
 ## What counts as a vulnerability
@@ -52,37 +52,37 @@ Out of scope (but please still report via DM if you're unsure):
 
 ## What HEAVEN does to keep itself safe
 
-- **Secrets never go to logs unredacted** — the LLM gateway
+- **Secrets never go to logs unredacted.** The LLM gateway
   (`heaven/ai/llm_gateway.py`) has a 13-pattern redaction layer that
   catches AWS / OpenAI / Anthropic / GitHub / Slack / GCP keys, JWTs,
   URL credentials, and Bearer tokens before any prompt hits a
   third-party endpoint.
-- **AES-256-GCM credential vault** — `heaven/security/vault.py` for
+- **AES-256-GCM credential vault.** `heaven/security/vault.py` covers
   the few cases where HEAVEN must persist credentials (Shodan API key,
   AD service account, etc.).
-- **HMAC-signed append-only audit log** — every destructive action
-  ends up in `data/audit/` signed with the audit key.
+- **HMAC-signed append-only audit log.** Every destructive action
+  ends up in `data/audit/`, signed with the audit key.
 - **Authorization gate is the first thing every destructive command
-  does** — see `heaven/cli/_helpers.py::_verify_authorization()`.
-- **RBAC on every API endpoint** — see `heaven/security/auth.py`
+  does.** See `heaven/cli/_helpers.py::_verify_authorization()`.
+- **RBAC on every API endpoint.** See `heaven/security/auth.py`
   for the permission matrix. Admin-only actions (postex, lateral,
   train-priors) require `config.modify`.
-- **SSRF / injection guard on scan targets** — every target submitted to
+- **SSRF / injection guard on scan targets.** Every target submitted to
   the API (`POST /api/scans`) is validated before it reaches nmap / nuclei /
   sqlmap or any HTTP client: argument-injection (a leading `-`), shell/SQL
   metacharacters, and reserved ranges (cloud metadata `169.254.169.254`,
   multicast, TEST-NETs) are rejected. See
   `heaven/security/sanitizer.py::InputSanitizer.sanitize_target`.
-- **Path-traversal hardening** — an engagement name becomes a DB filename and
+- **Path-traversal hardening.** An engagement name becomes a DB filename and
   a scan id becomes part of a report filename, so both are validated at the
   HTTP boundary; values with `..`, path separators or an absolute path are
   rejected before any filesystem operation.
-- **Defense-in-depth HTTP headers** — the API sets a strict
+- **Defense-in-depth HTTP headers.** The API sets a strict
   `Content-Security-Policy` (script-src `'self'`), `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, HSTS (outside dev) and a locked-down
   `Permissions-Policy` on every response.
-- **Self-audit on every release** — `heaven self-audit` returns a
-  graded score; CI enforces grade ≥ A.
+- **Self-audit on every release.** `heaven self-audit` returns a
+  graded score; CI enforces grade of A or better.
 
 ## Hardening a shared / hosted deployment
 
@@ -92,15 +92,20 @@ For a multi-user or internet-exposed deployment, also:
 - Set `HEAVEN_ALLOW_LOCALHOST=0` and `HEAVEN_ALLOW_PRIVATE=0` so an operator
   can't pivot the scanner at loopback / internal-network services (cloud
   metadata and reserved ranges are blocked regardless).
-- **Never** set `HEAVEN_DISABLE_AUTH=1` — it bypasses all authentication and
+- Set `HEAVEN_DISABLE_WEB_UPDATE=1` to turn off the browser-triggered code
+  update (git fast-forward + rebuild). Admins can still *see* that an update
+  exists, but applying it must be done from the shell (`heaven update`). The
+  variable is read from the environment at request time and is not web-editable,
+  so a browser session cannot re-enable it.
+- **Never** set `HEAVEN_DISABLE_AUTH=1`. It bypasses all authentication and
   is for local tests/CI only. The server logs an error at startup when it's on.
 - Set a strong `HEAVEN_ADMIN_PASSWORD` (the seeded `admin/admin` forces a
   change on first login, but don't rely on that in production).
-- If you use PostgreSQL, set `ssl_mode=verify-full` with `ssl_ca_cert` — the
+- If you use PostgreSQL, set `ssl_mode=verify-full` with `ssl_ca_cert`. The
   weaker modes encrypt but do **not** verify the server certificate (MITM
   exposure); HEAVEN warns once at connect time when verification is off.
 - Verify the shipped `NVD_model.pkl` against the checksum in its model card
-  before use — it is deserialised with joblib/pickle, so only load a model
+  before use. It is deserialised with joblib/pickle, so only load a model
   file you trust (an attacker who can replace it on disk gains code execution).
 
 ## Supported versions
@@ -108,7 +113,7 @@ For a multi-user or internet-exposed deployment, also:
 | Version | Supported |
 |---|---|
 | 1.0.x  | ✅ |
-| < 1.0  | ❌ — please upgrade |
+| < 1.0  | ❌ please upgrade |
 
 ## Security release process
 

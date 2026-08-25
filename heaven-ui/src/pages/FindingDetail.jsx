@@ -3,6 +3,48 @@ import { useParams, Link } from "react-router";
 import { Engagement, ExploitProof, AI, ExploitDB } from "../api";
 import Markdown from "../components/Markdown";
 
+// Evidence-package keys that are rendered by their own dedicated cards (the
+// candidate-CVE table, HTTP transaction, etc.) and so must NOT be repeated in
+// the flat "Observed" proof block.
+const OBSERVED_SKIP_KEYS = new Set([
+  "candidate_details", "candidate_cves", "how_to_confirm", "verification",
+]);
+
+// snake_case / kebab-case evidence key → a readable label ("spf_record" →
+// "Spf record"). Acronyms we care about are upper-cased for a professional look.
+function humanizeKey(k) {
+  const s = String(k || "").replace(/[_-]+/g, " ").trim();
+  const titled = s.charAt(0).toUpperCase() + s.slice(1);
+  return titled.replace(
+    /\b(spf|dns|dkim|dmarc|tls|ssl|ip|url|cve|cwe|http|https|api|os|mac|cpe|smb|rdp|ftp|snmp|id|mx|ns|ca|sni)\b/gi,
+    (m) => m.toUpperCase(),
+  );
+}
+
+// Render one observed-evidence value compactly for the proof block.
+function formatEvidenceValue(v) {
+  if (v === null || v === undefined) return "—";
+  if (Array.isArray(v)) return v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ");
+  if (typeof v === "object") {
+    return Object.entries(v).map(([k, val]) => `${k}=${typeof val === "object" ? JSON.stringify(val) : val}`).join(", ");
+  }
+  return String(v);
+}
+
+// The concrete observed evidence for a non-HTTP finding: the real key/values
+// HEAVEN captured (banner, port, service, records…), minus the keys rendered by
+// their own cards and any empty values.
+function observedEntries(ev) {
+  const data = ev.evidence_data || {};
+  return Object.entries(data).filter(([k, v]) => {
+    if (OBSERVED_SKIP_KEYS.has(k)) return false;
+    if (v === null || v === undefined || v === "") return false;
+    if (Array.isArray(v) && v.length === 0) return false;
+    if (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) return false;
+    return true;
+  });
+}
+
 // Finding classes that are tied to a specific published CVE (a version of a
 // product). Everything else — misconfigurations, missing headers, weak TLS,
 // email/DNS policy, exposure — is a class of issue, not a CVE, so a blank CVE is
@@ -50,9 +92,9 @@ function cveCell(f) {
       className="dim"
       title={cveClass
         ? "No matching CVE was resolved for this service/version."
-        : "This finding is a configuration, policy, or hygiene issue — it is not tracked by a specific CVE."}
+        : "This finding is a configuration, policy, or hygiene issue, it is not tracked by a specific CVE."}
     >
-      —{" "}
+, {" "}
       <span style={{ fontSize: 11 }}>
         {cveClass ? "(no CVE resolved)" : "(not a CVE-class finding)"}
       </span>
@@ -71,13 +113,21 @@ export default function FindingDetail() {
   const [data, setData]       = useState(null);
   const [error, setError]     = useState(null);
   const [notes, setNotes]     = useState("");
+  const [savedNotes, setSavedNotes] = useState("");   // last-persisted value
   const [updating, setUpdating] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [noteMsg, setNoteMsg] = useState("");
   const [copiedKey, setCopiedKey] = useState("");
 
   function load() {
     setError(null);
     Engagement.evidence(id)
-      .then((d) => { setData(d); setNotes(d.finding?.operator_notes || ""); })
+      .then((d) => {
+        setData(d);
+        const n = d.finding?.operator_notes || "";
+        setNotes(n);
+        setSavedNotes(n);
+      })
       .catch((e) => setError(e.message));
   }
 
@@ -85,13 +135,33 @@ export default function FindingDetail() {
 
   async function changeStatus(newStatus) {
     setUpdating(true);
+    setNoteMsg("");
     try {
       await Engagement.setStatus(id, newStatus, notes);
+      setSavedNotes(notes);   // status change also persists the note
       load();
     } catch (e) {
       setError(e.message);
     } finally {
       setUpdating(false);
+    }
+  }
+
+  // Save the note WITHOUT changing status — the fix for notes silently
+  // vanishing when the operator didn't also flip a status button.
+  async function saveNotes() {
+    setSavingNotes(true);
+    setNoteMsg("");
+    try {
+      await Engagement.saveNotes(id, notes);
+      setSavedNotes(notes);
+      setNoteMsg("saved");
+      setTimeout(() => setNoteMsg(""), 2500);
+    } catch (e) {
+      setNoteMsg("error");
+      setError(e.message);
+    } finally {
+      setSavingNotes(false);
     }
   }
 
@@ -137,7 +207,7 @@ export default function FindingDetail() {
                 <span className={`conf-badge conf-${String(f.confirmation).toLowerCase()}`}
                       style={{ marginRight: 8 }}
                       title={f.confirmation === "Potential"
-                        ? "Inferred from a service version banner — not confirmed from the outside. Verify the running version before treating as present."
+                        ? "Inferred from a service version banner: not confirmed from the outside. Verify the running version before treating as present."
                         : "Proven by direct observation or active validation."}>
                   {f.confirmation}
                 </span>
@@ -162,7 +232,7 @@ export default function FindingDetail() {
                 </span>
                 <span className="dim" style={{ marginLeft: 8, fontSize: 11.5 }}>
                   {f.confirmation === "Potential"
-                    ? "inferred from a version banner — verify the running version"
+                    ? "inferred from a version banner, verify the running version"
                     : "proven by direct observation or active validation"}
                 </span>
               </td></tr>
@@ -186,7 +256,7 @@ export default function FindingDetail() {
             <tr><td>Contextual CVSS</td><td>
               {f.contextual_cvss_score?.toFixed?.(1) ?? "—"}
               <span className="dim" style={{ marginLeft: 6 }}>
-                (temporal + environmental — this finding&apos;s exploit maturity, confidence &amp; asset criticality)
+                (temporal + environmental, this finding&apos;s exploit maturity, confidence &amp; asset criticality)
               </span>
             </td></tr>
             <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "—"}</td></tr>
@@ -243,15 +313,34 @@ export default function FindingDetail() {
         <div className="card-title">Triage</div>
         <div style={{ marginBottom: 10 }}>
           <label className="form-label" style={{ marginBottom: 4, display: "block" }}>
-            Operator notes (saved with status change)
+            Operator notes
           </label>
           <textarea
             className="form-input"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="e.g. confirmed via Burp Repeater — response includes admin hashes"
+            placeholder="e.g. confirmed via Burp Repeater, response includes admin hashes"
             rows={3}
           />
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+            <button
+              className="btn"
+              onClick={saveNotes}
+              disabled={savingNotes || notes === savedNotes}
+              title="Save this note without changing the finding's status"
+            >
+              {savingNotes ? "Saving…" : "Save note"}
+            </button>
+            {noteMsg === "saved" && (
+              <span style={{ color: "var(--green, #12b981)", fontSize: 12.5 }}>✓ Note saved</span>
+            )}
+            {noteMsg !== "saved" && notes !== savedNotes && (
+              <span className="dim" style={{ fontSize: 12.5 }}>Unsaved changes</span>
+            )}
+            <span className="dim" style={{ fontSize: 11.5, marginLeft: "auto" }}>
+              A status change below also saves the note.
+            </span>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {STATUSES.map((s) => (
@@ -294,7 +383,7 @@ export default function FindingDetail() {
               {ev.raw_http_request && (
                 <>
                   <div style={{ margin: "16px 0 8px", fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
-                    RAW HTTP REQUEST — Burp → "Paste as request"
+                    RAW HTTP REQUEST, Burp → "Paste as request"
                   </div>
                   <div className="evidence-block">{ev.raw_http_request}</div>
                   <button className="btn" onClick={() => copyText(ev.raw_http_request, "raw")} style={{ marginTop: 10 }}>
@@ -318,7 +407,7 @@ export default function FindingDetail() {
             </>
           ) : (
             <p className="dim" style={{ fontSize: 12, fontStyle: "italic" }}>
-              {ev.repro_note || "Observed passively — no single-command reproduction."}
+              {ev.repro_note || "Observed passively: no single-command reproduction."}
             </p>
           )}
         </div>
@@ -327,7 +416,11 @@ export default function FindingDetail() {
       {/* Request / Response — only for real HTTP transactions */}
       {ev.is_http && (ev.request_url || ev.response_status > 0 || ev.response_excerpt) && (
         <div className="card">
-          <div className="card-title">Evidence</div>
+          <div className="card-title">Proof of issue</div>
+          <p className="dim" style={{ fontSize: 12, margin: "0 0 12px", lineHeight: 1.6 }}>
+            The exact HTTP transaction that proved this finding, the request HEAVEN
+            sent and the response it got back. Replay it from the Reproduce card above.
+          </p>
           <div style={{ marginBottom: 8, fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
             REQUEST
           </div>
@@ -338,7 +431,7 @@ export default function FindingDetail() {
           </div>
 
           <div style={{ margin: "12px 0 8px", fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
-            RESPONSE — HTTP {ev.response_status} ({ev.response_size_bytes ?? "?"} bytes)
+            RESPONSE, HTTP {ev.response_status} ({ev.response_size_bytes ?? "?"} bytes)
           </div>
           <div className="evidence-block">
             {ev.response_excerpt?.slice(0, 2000) || "(no response captured)"}
@@ -346,16 +439,96 @@ export default function FindingDetail() {
         </div>
       )}
 
-      {/* Observed evidence — non-HTTP findings (banners, ports, records) */}
-      {!ev.is_http && ev.response_excerpt && (
+      {/* Observed evidence — non-HTTP findings (banners, ports, records). This is
+          the proof for host/DNS/TLS/service findings that made no HTTP request:
+          the concrete facts HEAVEN captured, shown in full so the reader can
+          judge the finding the way they would in a real pentest report. */}
+      {!ev.is_http && (ev.response_excerpt || observedEntries(ev).length > 0) && (
         <div className="card">
-          <div className="card-title">Evidence</div>
-          <div style={{ marginBottom: 8, fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
-            OBSERVED
+          <div className="card-title">Proof of issue</div>
+          <p className="dim" style={{ fontSize: 12, margin: "0 0 12px", lineHeight: 1.6 }}>
+            Observed directly by HEAVEN, no HTTP request was made for this class of
+            finding. The evidence below is exactly what was seen on the target.
+          </p>
+
+          {observedEntries(ev).length > 0 && (
+            <>
+              <div style={{ marginBottom: 6, fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
+                OBSERVED
+              </div>
+              <div style={{ overflowX: "auto", maxWidth: "100%", marginBottom: ev.response_excerpt ? 14 : 0 }}>
+                <table className="kv-table" style={{ width: "100%" }}>
+                  <tbody>
+                    {observedEntries(ev).map(([k, v]) => (
+                      <tr key={k}>
+                        <td style={{ whiteSpace: "nowrap", verticalAlign: "top" }}>{humanizeKey(k)}</td>
+                        <td style={{ color: "var(--text-0)", wordBreak: "break-word" }}>
+                          {formatEvidenceValue(v)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {ev.response_excerpt && (
+            <>
+              <div style={{ marginBottom: 6, fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
+                CAPTURED OUTPUT
+              </div>
+              <div className="evidence-block">
+                {ev.response_excerpt.slice(0, 2000)}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Candidate CVEs — version-undetermined "potential" finding. Full
+          awareness of what the service MIGHT be vulnerable to (with the exact
+          affected version each requires), none asserted as confirmed. */}
+      {ev.evidence_data?.candidate_details?.length > 0 && (
+        <div className="card">
+          <div className="card-title">Candidate CVEs: unverified</div>
+          <p className="dim" style={{ fontSize: 12, marginBottom: 12 }}>
+            The exact version couldn't be confirmed from the banner, so these
+            CVEs <strong>cannot</strong> be treated as present. Each applies only
+            to the affected-version range shown, confirm the running version
+            first.
+          </p>
+          <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "var(--text-1)" }}>
+                  {["CVE", "CVSS", "Severity", "Affected versions", "Exploit", "Description"].map((h) => (
+                    <th key={h} style={{ padding: "6px 10px", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ev.evidence_data.candidate_details.map((d, i) => (
+                  <tr key={d.cve || i} style={{ borderBottom: "1px solid var(--line)" }}>
+                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}>
+                      <a href={`https://nvd.nist.gov/vuln/detail/${d.cve}`} target="_blank" rel="noopener noreferrer"
+                         style={{ color: "var(--cyan)" }}>{d.cve}</a>
+                    </td>
+                    <td style={{ padding: "6px 10px" }}>{d.cvss}</td>
+                    <td style={{ padding: "6px 10px", textTransform: "capitalize" }}>{d.severity}</td>
+                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}>{d.affected_versions || "—"}</td>
+                    <td style={{ padding: "6px 10px" }}>{d.exploit_available ? "public" : "—"}</td>
+                    <td style={{ padding: "6px 10px", color: "var(--text-0)" }}>{d.title}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="evidence-block">
-            {ev.response_excerpt.slice(0, 2000)}
-          </div>
+          {ev.evidence_data?.how_to_confirm && (
+            <p style={{ fontSize: 12, marginTop: 12, color: "var(--text-0)" }}>
+              <strong>How to confirm the version:</strong> {ev.evidence_data.how_to_confirm}
+            </p>
+          )}
         </div>
       )}
 
@@ -430,7 +603,7 @@ function RemediationCard({ id, staticText }) {
         <div className="evidence-block">{staticText}</div>
       ) : (!ai && !error && !loading) ? (
         <div className="dim" style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.5 }}>
-          No knowledge-base remediation for this finding class yet — generate
+          No knowledge-base remediation for this finding class yet, generate
           AI-tailored guidance below.
         </div>
       ) : null}
@@ -450,8 +623,8 @@ function RemediationCard({ id, staticText }) {
       {aiUnavailable && (
         <div className="dim" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.55 }}>
           {staticText
-            ? "The knowledge-base guidance above is the best available — "
-            : "That's the knowledge-base guidance — "}
+            ? "The knowledge-base guidance above is the best available, "
+            : "That's the knowledge-base guidance, "}
           no LLM key is configured, so there's no AI-tailored version to add. Add a
           Gemini / OpenAI / Anthropic key in{" "}
           <Link to="/settings" style={{ color: "var(--cyan)" }}>Settings</Link> to enable it.
@@ -570,9 +743,9 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
     <div className="card">
       <div className="card-title">Active Confirmation</div>
       <div className="dim" style={{ fontSize: 12, marginBottom: 10 }}>
-        Run the safest available live proof for this finding — an exploitation
+        Run the safest available live proof for this finding, an exploitation
         canary, a behavioural CVE probe, an HTTP/TLS re-check, or a TCP
-        reachability test — and get an honest verdict. Where no safe automated
+        reachability test, and get an honest verdict. Where no safe automated
         proof exists you'll get the manual next step instead. You can also ask the
         LLM reviewer (if configured) to second-opinion the rule-based verdict. Both
         require the operator to have written authorization for the target.
@@ -599,8 +772,8 @@ function ExploitAndReviewActions({ id, finding, onChange }) {
         <div style={{ marginTop: 12 }}>
           {result.payload.skipped ? (
             <div className="dim">
-              LLM review is unavailable — add an AI provider key in Settings to
-              enable a second-opinion verdict.
+              {result.payload.message
+                || "LLM review is unavailable: add an AI provider key in Settings to enable a second-opinion verdict."}
             </div>
           ) : (
             <>

@@ -1,7 +1,7 @@
 # HEAVEN ↔ Cyber Essentials Plus (NCSC)
 
 Mapping of HEAVEN's detectors against the UK NCSC [Cyber Essentials
-**Plus**](https://www.ncsc.gov.uk/cyberessentials/overview) assessment — the
+**Plus**](https://www.ncsc.gov.uk/cyberessentials/overview) assessment: the
 hands-on audit that *independently verifies* the same five controls a Cyber
 Essentials self-assessment claims (see `cyber_essentials`). It assesses the same
 current [*Requirements for IT Infrastructure* v3.3](https://www.ncsc.gov.uk/files/cyber-essentials-requirements-for-it-infrastructure-v3-3.pdf)
@@ -15,7 +15,7 @@ and account-separation / MFA checks. HEAVEN automates every part of that test
 specification that is a network or credentialed scan, each named to a real
 detector. The residual endpoint functionality tests (running an EICAR file,
 exercising email/web filtering on a workstation) and internal IdP checks have no
-scan footprint and are listed per area as **out-of-band (analyst-attested)** —
+scan footprint and are listed per area as **out-of-band (analyst-attested)**, 
 never fabricated.
 
 A control row is **✓ exercised** on the live Methodology page only when the
@@ -35,7 +35,7 @@ HEAVEN detector it names actually produced a finding in the active engagement.
 
 ### External Vulnerability Assessment
 The assessor scans every internet-facing IP in scope for missing patches and
-insecure configuration — HEAVEN's default external run *is* this test.
+insecure configuration, HEAVEN's default external run *is* this test.
 
 | Test | Description | HEAVEN coverage |
 |---|---|---|
@@ -77,7 +77,7 @@ cannot perform without fabricating a result.
 |---|---|---|
 | CEP-AC-1 | No default/shared credentials on exposed logins | `heaven.vulnscan.auth_scanner` |
 | CEP-AC-2 | Credentials only accepted over encrypted channels | `heaven.vulnscan.ssl_scanner` |
-| CEP-AC-3 | Brute-force / lockout resistance on exposed logins | `heaven.vulnscan.auth_scanner` (lockout probe — no-lockout is confirmed only on observed unlimited attempts) |
+| CEP-AC-3 | Brute-force / lockout resistance on exposed logins | `heaven.vulnscan.auth_scanner` (lockout probe, no-lockout is confirmed only on observed unlimited attempts) |
 
 **Out-of-band (analyst-attested):** CEP-AC-4 (admin accounts separated from
 standard users) and CEP-AC-5 (MFA enforced on cloud/admin) are internal IdP /

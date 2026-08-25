@@ -7,7 +7,7 @@ import Logo from "../components/Logo.jsx";
 const CAPS = [
   { icon: "🛰", title: "Autonomous recon", body: "LLM-driven attack-chain planning across scope" },
   { icon: "🧠", title: "ML risk triage", body: "13-feature CVSS model scores every finding" },
-  { icon: "⛓", title: "Verified exploitation", body: "RCE canaries & SSRF callbacks — proven, not guessed" },
+  { icon: "⛓", title: "Verified exploitation", body: "RCE canaries & SSRF callbacks: proven, not guessed" },
   { icon: "📡", title: "Continuous monitoring", body: "Scheduled re-scans with differential alerts" },
 ];
 
@@ -60,7 +60,7 @@ export default function LoginPage() {
           <span className="gradient-text">thinks like an operator.</span>
         </h1>
         <p className="login-sub">
-          Recon, exploitation, post-ex, lateral movement and reporting — orchestrated
+          Recon, exploitation, post-ex, lateral movement and reporting, orchestrated
           end-to-end, scored by ML, and verified with real proofs. One console for the
           whole engagement.
         </p>

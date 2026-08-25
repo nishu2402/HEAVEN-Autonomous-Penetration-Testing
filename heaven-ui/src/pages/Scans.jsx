@@ -11,10 +11,10 @@ import { MODE_OPTIONS, MODE_VALUES } from "../scanModes.js";
 // launcher <select> and the Dashboard quick-launch grid can never drift apart.
 const MODES = MODE_OPTIONS;
 const STEALTH = [
-  { value: "1", label: "1 — Paranoid (very slow, evasive)" },
-  { value: "2", label: "2 — Stealth (slow, low noise)" },
-  { value: "3", label: "3 — Normal (balanced)" },
-  { value: "4", label: "4 — Aggressive (fast, loud)" },
+  { value: "1", label: "1, Paranoid (very slow, evasive)" },
+  { value: "2", label: "2, Stealth (slow, low noise)" },
+  { value: "3", label: "3, Normal (balanced)" },
+  { value: "4", label: "4, Aggressive (fast, loud)" },
 ];
 
 export default function Scans() {
@@ -106,7 +106,7 @@ export default function Scans() {
     setDemoRunning(true);
     try {
       await Demo.scan();
-      toast.success("Demo scan started — watch it run in the list below");
+      toast.success("Demo scan started: watch it run in the list below");
       // Re-poll a few times so the running → completed loop is visible quickly.
       [500, 2500, 5000, 8000, 11000, 14000].forEach((ms) => setTimeout(bumpList, ms));
     } catch (e) {
@@ -154,7 +154,7 @@ export default function Scans() {
       const result = await ScansApi.create(payload);
       setLaunchSuccess(
         `Scan launched · ID: ${result.scan_id || result.id || "—"}` +
-        (destEngagement ? ` · saving to “${destEngagement}”` : "")
+        (destEngagement ? ` · saving to "${destEngagement}"` : "")
       );
       setTargets("");
       setAuthorized(false);
@@ -176,7 +176,7 @@ export default function Scans() {
         <form onSubmit={launchScan} className="scan-form">
           <div className="form-group form-full">
             <label className="form-label" htmlFor="scan-targets">
-              Targets <span className="dim">— type a URL, IP or CIDR and press Enter · or paste a list</span>
+              Targets <span className="dim">, type a URL, IP or CIDR and press Enter · or paste a list</span>
             </label>
             <TargetsInput
               id="scan-targets"
@@ -199,21 +199,21 @@ export default function Scans() {
                 )}
                 {parsed.valid.length > 0 && (
                   <span className="dim">
-                    → added to scope{engName ? ` in “${engName}”` : ""} on launch
+                    → added to scope{engName ? ` in "${engName}"` : ""} on launch
                   </span>
                 )}
               </div>
             )}
             <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
               Scope: {scopeCount} target{scopeCount !== 1 ? "s" : ""} currently in
-              {engName ? ` “${engName}”` : " this engagement"}.
+              {engName ? ` "${engName}"` : " this engagement"}.
             </span>
           </div>
 
           <label className="form-group">
             <span className="form-label">
               Scan Mode
-              <HelpTip text="FULL runs every module (recommended). The focused modes name the surface you're primarily assessing — web app, network, API, cloud, containers, IoT/OT, Active Directory or email posture." />
+              <HelpTip text="FULL runs every module (recommended). The focused modes name the surface you're primarily assessing, web app, network, API, cloud, containers, IoT/OT, Active Directory or email posture." />
             </span>
             <select className="form-select" value={mode} onChange={e => setMode(e.target.value)}>
               {MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
@@ -233,11 +233,11 @@ export default function Scans() {
           <label className="form-group">
             <span className="form-label">
               Port scope
-              <HelpTip text="Which TCP ports the network sweep covers. Full scans all 65,535 ports — the same coverage as `nmap -p-` — and is the default so nothing is missed. Fast limits to the common 1–1024 range for a quicker pass. Custom takes an nmap-style spec (e.g. 1-65535, or 22,80,443,8000-8100). High-value web/DB/cPanel ports are always included regardless of choice." />
+              <HelpTip text="Which TCP ports the network sweep covers. Full scans all 65,535 ports, the same coverage as `nmap -p-`, and is the default so nothing is missed. Fast limits to the common 1-1024 range for a quicker pass. Custom takes an nmap-style spec (e.g. 1-65535, or 22,80,443,8000-8100). High-value web/DB/cPanel ports are always included regardless of choice." />
             </span>
             <select className="form-select" value={portScope} onChange={e => setPortScope(e.target.value)}>
-              <option value="full">Full — all 65,535 ports (like nmap -p-)</option>
-              <option value="fast">Fast — common ports (1–1024)</option>
+              <option value="full">Full: all 65,535 ports (like nmap -p-)</option>
+              <option value="fast">Fast: common ports (1-1024)</option>
               <option value="custom">Custom range…</option>
             </select>
             {portScope === "custom" && (
@@ -251,7 +251,7 @@ export default function Scans() {
             )}
             {portScope === "full" && (
               <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
-                Thorough — a full-port sweep of one host can take several minutes.
+                Thorough, a full-port sweep of one host can take several minutes.
               </span>
             )}
           </label>
@@ -265,14 +265,14 @@ export default function Scans() {
             />
             <span className="form-label" style={{ margin: 0 }}>
               Firewall / IDS evasion
-              <HelpTip text="Authorized testing only. Applies nmap evasion (packet fragmentation, padding, a trusted source port, decoys) to every host so a filtering firewall is more likely to pass the probes. Even off, HEAVEN auto-detects a filtering perimeter and runs a bounded evasion re-probe of the affected hosts — so services hidden behind a firewall still surface." />
+              <HelpTip text="Authorized testing only. Applies nmap evasion (packet fragmentation, padding, a trusted source port, decoys) to every host so a filtering firewall is more likely to pass the probes. Even off, HEAVEN auto-detects a filtering perimeter and runs a bounded evasion re-probe of the affected hosts, so services hidden behind a firewall still surface." />
             </span>
           </label>
 
           <label className="form-group form-full">
             <span className="form-label">
               Save findings to engagement
-              <HelpTip text="The engagement the scan's findings, scope and report are saved into. Defaults to the one you're currently viewing — change it here so a scan never lands in the wrong engagement. Pick “＋ New engagement…” to start a fresh one." />
+              <HelpTip text="The engagement the scan's findings, scope and report are saved into. Defaults to the one you're currently viewing, change it here so a scan never lands in the wrong engagement. Pick '＋ New engagement…' to start a fresh one." />
             </span>
             <select
               className="form-select"
@@ -281,7 +281,7 @@ export default function Scans() {
             >
               {engList.map(e => (
                 <option key={e.name} value={e.name}>
-                  {(e.display_name || e.name)}{e.active ? " — current" : ""}
+                  {(e.display_name || e.name)}{e.active ? ", current" : ""}
                   {` (${e.findings} finding${e.findings === 1 ? "" : "s"})`}
                 </option>
               ))}
@@ -300,7 +300,7 @@ export default function Scans() {
             )}
             {destEngagement && (
               <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
-                Findings, scope and report will be saved to “{destEngagement}”.
+                Findings, scope and report will be saved to "{destEngagement}".
               </span>
             )}
           </label>
@@ -309,13 +309,13 @@ export default function Scans() {
               common (unauthenticated) launch stays uncluttered. */}
           <details className="form-full" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
             <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-              🔐 Authenticated scan <span className="dim" style={{ fontWeight: 400 }}>— optional · reach pages behind a login (enables IDOR &amp; access-control audits)</span>
+              🔐 Authenticated scan <span className="dim" style={{ fontWeight: 400 }}>, optional · reach pages behind a login (enables IDOR &amp; access-control audits)</span>
             </summary>
             <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
               <span className="dim" style={{ fontSize: 11, lineHeight: 1.6 }}>
-                Supply the <b>target’s</b> credentials so HEAVEN can crawl and test
-                authenticated pages. Use either a raw cookie header or a form login —
-                same as the CLI’s <code>--cookie-file</code> / <code>--auth</code>.
+                Supply the <b>target's</b> credentials so HEAVEN can crawl and test
+                authenticated pages. Use either a raw cookie header or a form login, 
+                same as the CLI's <code>--cookie-file</code> / <code>--auth</code>.
               </span>
 
               <label className="form-group form-full">
@@ -339,7 +339,7 @@ export default function Scans() {
               </label>
 
               <span className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-                <b>Lower-privilege identity (optional)</b> — a second, less-privileged
+                <b>Lower-privilege identity (optional)</b>, a second, less-privileged
                 account. Enables the multi-role Broken Access Control audit to
                 <i> prove</i> when a low-priv user reaches protected content.
               </span>
@@ -391,7 +391,7 @@ export default function Scans() {
             </button>
             <span className="dim" style={{ fontSize: 11 }}>
               New here? <b>Run demo scan</b> simulates the full loop against sample
-              data — no target, no authorization needed.
+              data, no target, no authorization needed.
             </span>
           </div>
         </form>

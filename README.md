@@ -1,10 +1,10 @@
-# ☠️ HEAVEN — AUTONOMOUS PENETRATION-TESTING FRAMEWORK
+# ☠️ HEAVEN: AUTONOMOUS PENETRATION-TESTING FRAMEWORK
 
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN — Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 1860 tests · 55 CLI commands · 77 API routes · 25 UI pages · 13 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2057 tests · 56 CLI commands · 91 API routes · 25 UI pages · 13 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -14,15 +14,15 @@
 
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-    <img src="https://img.shields.io/badge/API-FastAPI_77_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+    <img src="https://img.shields.io/badge/API-FastAPI_91_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
     <img src="https://img.shields.io/github/actions/workflow/status/nishu2402/HEAVEN-Autonomous-Penetration-Testing/ci.yml?style=for-the-badge&logo=pytest&logoColor=black&label=Tests" alt="Tests"/>
     <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
     <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-172-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
-    <img src="https://img.shields.io/badge/CLI_Commands-55-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
+    <img src="https://img.shields.io/badge/Modules-179-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/CLI_Commands-56-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-25-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.9925-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
@@ -85,16 +85,16 @@
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF36AB,50:7400B8,100:B8FF00"/>
 </p>
 
-HEAVEN is a **production-grade penetration-testing platform** that automates the repeatable, time-consuming parts of a professional engagement — reconnaissance, vulnerability detection, exploitation proof, risk triage, and reporting — so the operator can focus on the judgment work only a human can do.
+HEAVEN is a **production-grade penetration-testing platform** that automates the repeatable, time-consuming parts of a professional engagement (reconnaissance, vulnerability detection, exploitation proof, risk triage, and reporting) so the operator can focus on the judgment work only a human can do.
 
 It runs three ways from the **same engagement dataset**:
 
-- **CLI** — 55 commands for scriptable, CI-friendly workflows.
-- **Web UI** — a 25-page React command centre (scan launcher, live findings, kill-chain, reports).
-- **REST + WebSocket API** — 77 RBAC-protected routes for automation and integration.
+- **CLI**: 56 commands for scriptable, CI-friendly workflows.
+- **Web UI**: a 25-page React command centre (scan launcher, live findings, kill-chain, reports).
+- **REST + WebSocket API**: 91 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN — Autonomous Penetration Testing Platform v3.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v3.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -110,11 +110,11 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 1860 tests (pytest matrix: Python 3.11 / 3.12) |
-| 📈 **Benchmark** | Verified against **live DVWA** — autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 172 |
-| ⌨️ **CLI Commands** | 55 |
-| 🌐 **API Routes** | 77 RBAC-protected routes |
+| 🧪 **Tests** | 2057 tests (pytest matrix: Python 3.11 / 3.12) |
+| 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
+| 🧩 **Modules** | 179 |
+| ⌨️ **CLI Commands** | 56 |
+| 🌐 **API Routes** | 91 RBAC-protected routes |
 | 🖥️ **UI Pages** | 25 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
@@ -144,16 +144,16 @@ It runs three ways from the **same engagement dataset**:
 |---|---|
 | 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud (AWS/GCP/Azure) · containers & Kubernetes (Docker socket / K8s API / RBAC) · IoT/SCADA · Git secrets · email OSINT · honeypot detection · firewall / IDS-IPS / WAF detection + adaptive evasion re-probe (`--evade`) |
 | 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS (reflected-origin + credentials) · CRLF · open redirect (canary-confirmed) · IDOR · mass assignment · dir/file fuzzing · JWT attacks (alg:none · weak-secret crack) · insecure session cookies · race conditions · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
-| 🧬 **API Security** | OWASP API Top 10 — BOLA/IDOR · broken auth · mass assignment · excessive data exposure (REST + GraphQL) |
-| 🧾 **CVE Intelligence** | Curated **offline** inline CVE DB (~150 CVEs, version-range matched) **+ dynamic live fallback** — any product/version *not* in the local DB is looked up in real time against **NVD + CIRCL**, merged/de-duped, version-confirmed, **KEV-flagged, EPSS-scored (real-world exploitation probability) and Exploit-DB-correlated (public PoC link)**, and disk-cached (7-day TTL) · degrades gracefully offline · `heaven cve <product> [version] [--engagement]` |
-| 💥 **Verified Exploitation** | Active proof, not guesses — sqlmap SQLi dump · RCE canary file drop/read · **in-house OAST collaborator** proving SSRF **and** XXE out-of-band (no Burp Collaborator / interactsh dependency) |
-| 🔓 **Post-Exploitation** | **self-contained privesc engines for Linux _and_ Windows** — Linux: GTFOBins-scored SUID/sudo/caps · docker/lxd escape · writable `/etc/passwd` · cron/PATH hijack; Windows: unquoted service paths · writable service binaries · `SeImpersonate`/`SeBackup` token privileges · AlwaysInstallElevated · autologon/registry creds · UAC posture — no linPEAS/WinPEAS download · **loot harvester** (SSH keys · AWS/GCP/Azure creds · kubeconfig · `.env`/`.netrc`/`.pgpass`/history — secrets redacted, plaintext never persisted) · **credential-reuse loop** feeding SSH/SMB/PsExec lateral movement + pass-the-hash · **ATT&CK-tagged kill-chain** · optional LLM path prioritisation · BloodHound AD collection — `heaven postex {enum,loot,full}` (`--os windows` / auto-detected) |
-| ☁️ **Cloud Misconfiguration** | **credential-free** public storage-bucket exposure (S3 / GCS / Azure Blob — listable vs private proven from the provider's own response, not guessed) · cloud-metadata SSRF catalog (AWS IMDS / GCP / Azure) that turns an SSRF into confirmed credential theft · plus **authenticated** account audit (EC2/S3 public ACL & policy & encryption · security-group `0.0.0.0/0` on sensitive ports · public RDS · IAM admin policies) · read-only **IAM privilege audit** of the *authenticated identity* — over-privileged principals (`*`/`*`) · console users without MFA · stale/unrotated & root access keys · weak password policy (`heaven cloud iam`, secret never read/logged) — `heaven cloud storage <target>` |
+| 🧬 **API Security** | OWASP API Top 10: BOLA/IDOR · broken auth · mass assignment · excessive data exposure (REST + GraphQL) |
+| 🧾 **CVE Intelligence** | Curated **offline** inline CVE DB (~150 CVEs, version-range matched) **+ dynamic live fallback**: any product/version *not* in the local DB is looked up in real time against **NVD + CIRCL**, merged/de-duped, version-confirmed, **KEV-flagged, EPSS-scored (real-world exploitation probability) and Exploit-DB-correlated (public PoC link)**, and disk-cached (7-day TTL) · degrades gracefully offline · `heaven cve <product> [version] [--engagement]` |
+| 💥 **Verified Exploitation** | Active proof, not guesses: sqlmap SQLi dump · RCE canary file drop/read · **in-house OAST collaborator** proving SSRF **and** XXE out-of-band (no Burp Collaborator / interactsh dependency) |
+| 🔓 **Post-Exploitation** | **self-contained privesc engines for Linux _and_ Windows**. Linux: GTFOBins-scored SUID/sudo/caps · docker/lxd escape · writable `/etc/passwd` · cron/PATH hijack; Windows: unquoted service paths · writable service binaries · `SeImpersonate`/`SeBackup` token privileges · AlwaysInstallElevated · autologon/registry creds · UAC posture, no linPEAS/WinPEAS download · **loot harvester** (SSH keys · AWS/GCP/Azure creds · kubeconfig · `.env`/`.netrc`/`.pgpass`/history; secrets redacted, plaintext never persisted) · **credential-reuse loop** feeding SSH/SMB/PsExec lateral movement + pass-the-hash · **ATT&CK-tagged kill-chain** · optional LLM path prioritisation · BloodHound AD collection. Run `heaven postex {enum,loot,full}` (`--os windows` / auto-detected) |
+| ☁️ **Cloud Misconfiguration** | **credential-free** public storage-bucket exposure (S3 / GCS / Azure Blob, listable vs private proven from the provider's own response, not guessed) · cloud-metadata SSRF catalog (AWS IMDS / GCP / Azure) that turns an SSRF into confirmed credential theft · plus **authenticated** account audit (EC2/S3 public ACL & policy & encryption · security-group `0.0.0.0/0` on sensitive ports · public RDS · IAM admin policies) · read-only **IAM privilege audit** of the *authenticated identity*: over-privileged principals (`*`/`*`) · console users without MFA · stale/unrotated & root access keys · weak password policy (`heaven cloud iam`, secret never read/logged). Run `heaven cloud storage <target>` |
 | 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini) · **deterministic fallback needs no API key** |
 | 📊 **Risk Scoring** | CVSS-v3 ML predictor (R²=0.9925, 13-feature ExtraTrees) · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
-| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA — dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
-| 📄 **Reporting** | 8 formats from CLI and web UI — PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL |
+| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA: dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
+| 📄 **Reporting** | 8 formats from CLI and web UI: PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL |
 | 🔇 **FP Suppression** | Two-stage confirmation pass · sub-0.40-confidence results discarded · optional LLM second opinion |
 
 </div>
@@ -171,7 +171,7 @@ It runs three ways from the **same engagement dataset**:
             ┌───────────────────────────────────────────────────────┐
   CLI ──────┤   ORCHESTRATOR  (async dependency-aware task graph)   │
   Web UI ───┤                resumable · checkpointed               │
-  REST API ─┤                   stealth timing 1–5                  │
+  REST API ─┤                   stealth timing 1-5                  │
             └───────────────────────────┬───────────────────────────┘
                                         │
    ┌─────────────┬──────────────┬───────┴──────┬──────────────┬──────────────┐
@@ -183,9 +183,9 @@ It runs three ways from the **same engagement dataset**:
    └─────────────┴──────────────┴───────┬──────┴──────────────┴──────────────┘
                                         │
    ┌────────────────────────────────────┴────────────────────────────────────────┐
-   │  STORAGE — PostgreSQL (async, 29-table schema, partitioned audit log)       │
+   │  STORAGE - PostgreSQL (async, 29-table schema, partitioned audit log)       │
    │  with a zero-config SQLite fallback (same interface, file = one engagement) │
-   │  SECURITY — JWT RBAC · AES-256-GCM credential vault · HMAC-signed audit log │
+   │  SECURITY - JWT RBAC · AES-256-GCM credential vault · HMAC-signed audit log │
    └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -200,17 +200,17 @@ It runs three ways from the **same engagement dataset**:
 
 ### Requirements
 
-- **Python 3.11+** (3.11–3.13 recommended; the installer prefers a tested line —
-  a brand-new major such as 3.14 can leave native security libraries ABI-unstable)
+- **Python 3.11+** (3.11 to 3.13 recommended; the installer prefers a tested line,
+  because a brand-new major such as 3.14 can leave native security libraries ABI-unstable)
   · `git` · works on **macOS, Linux, and Windows**
 - External scanner binaries (`nmap` · `nuclei` · `sqlmap` · `ffuf` · `searchsploit`
-  · `semgrep` · `docker`) — installed for you automatically by the one-command
+  · `semgrep` · `docker`), installed for you automatically by the one-command
   installer (see below), using your OS package manager. Each has an in-house
   fallback, so HEAVEN runs without them; installing them unlocks full power.
 
 ### Install
 
-**One command sets up everything** — a virtualenv, every runtime dependency
+**One command sets up everything**: a virtualenv, every runtime dependency
 (full power by default), the external scanner tools, the web UI, and a
 ready-to-use `.env`. Pick your OS:
 
@@ -222,28 +222,28 @@ chmod +x scripts/install.sh && ./scripts/install.sh
 ```
 
 ```powershell
-# Windows (PowerShell — no admin needed)
+# Windows (PowerShell, no admin needed)
 git clone https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git
 cd HEAVEN-Autonomous-Penetration-Testing
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
-The installer is **fully unattended** — the external-tool step never blocks on a
+The installer is **fully unattended**: the external-tool step never blocks on a
 password prompt and every download is bounded by a timeout
 (`HEAVEN_TOOL_INSTALL_TIMEOUT`, default 900s), so it can't hang. Tools install
 with your package manager: **brew** (macOS), **apt / dnf / pacman** (Linux), or
 **winget / choco / scoop** (Windows), falling back to **pip / go**. Each has an
-in-house fallback, so nothing is mandatory — they just unlock full power.
+in-house fallback, so nothing is mandatory; they just unlock full power.
 
 Env toggles: `HEAVEN_SKIP_TOOLS=1` skips the external tools, `HEAVEN_CORE_ONLY=1`
 skips the optional feature packs (`-SkipTools` / `-CoreOnly` / `-SkipUI` on
 Windows). To uninstall: `./scripts/uninstall.sh` (or `scripts\uninstall.ps1`).
 
 **Updating:** once installed, `heaven update` brings HEAVEN itself up to the
-latest released version — a fast-forward `git pull` (the install is an editable
+latest released version: a fast-forward `git pull` (the install is an editable
 checkout, so the new code is live on your next command), a `pip install -e .`
-only if dependencies changed, and a web-UI rebuild only if the frontend changed —
-then refreshes the Nuclei/NVD/ExploitDB detection feeds. It never touches
+only if dependencies changed, and a web-UI rebuild only if the frontend changed,
+then a refresh of the Nuclei/NVD/ExploitDB detection feeds. It never touches
 uncommitted local changes (use `--force` to auto-stash). Check first with
 `heaven update --check`; narrow with `--code-only` / `--data-only`.
 
@@ -260,16 +260,16 @@ heaven install-tools          # the external scanner binaries (nmap, sqlmap, ffu
 specific tools (`heaven install-tools sqlmap ffuf`) or preview with `--dry-run`,
 and `heaven doctor` shows what's missing. The only remaining opt-ins are dev
 tooling and alternate LLM providers (`pip install -e ".[anthropic]"` /
-`".[openai]"`) — Gemini ships by default. The old feature extras (`.[recon]`,
+`".[openai]"`). Gemini ships by default. The old feature extras (`.[recon]`,
 `.[reports]`, …) still resolve as backward-compatible aliases.
 
 ### See it in 60 seconds
 
 <p align="center">
-<img src="docs/assets/demo.svg" alt="HEAVEN demo — heaven quickstart loads sample data, heaven serve starts the web UI, and the dashboard shows ranked findings" width="820"/>
+<img src="docs/assets/demo.svg" alt="HEAVEN demo: heaven quickstart loads sample data, heaven serve starts the web UI, and the dashboard shows ranked findings" width="820"/>
 </p>
 
-One command takes a fresh clone to a populated dashboard — **nothing is scanned**:
+One command takes a fresh clone to a populated dashboard, and **nothing is scanned**:
 
 ```bash
 heaven quickstart    # ensures .env + loads sample data (a critical→info spread)
@@ -279,7 +279,7 @@ heaven serve         # opens http://localhost:8443 in your browser · dashboard 
 
 In the web UI you can also click **Load sample data** on the dashboard, watch a
 **Run demo scan** play the full loop on the Scans page, and open **System
-Health** (under *System*) to see which tools and API keys are active — the web
+Health** (under *System*) to see which tools and API keys are active, the web
 equivalent of `heaven doctor`.
 
 > The animation above is a lightweight SVG cast (it plays on GitHub). To swap in
@@ -287,7 +287,7 @@ equivalent of `heaven doctor`.
 
 ### Configure
 
-The friendliest path is the interactive wizard — it prompts for the admin
+The friendliest path is the interactive wizard: it prompts for the admin
 password and any API keys you want, then writes a `.env` for you:
 
 ```bash
@@ -300,7 +300,7 @@ Prefer to do it by hand? Only the admin password is needed to start:
 # Web UI login (admin/admin on first run → forced change). Set this to skip that.
 export HEAVEN_ADMIN_PASSWORD="your-strong-password"
 
-# Optional — turn on the AI layers (Gemini has a generous free tier):
+# Optional: turn on the AI layers (Gemini has a generous free tier):
 export GEMINI_API_KEY="your-gemini-key"     # from https://aistudio.google.com/apikey
 pip install -e ".[gemini]"                    # install the Gemini SDK
 ```
@@ -309,10 +309,10 @@ pip install -e ".[gemini]"                    # install the Gemini SDK
 > heuristic, or pass `--no-llm`:
 > `heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization`
 
-### 🖥️ Local AI — no API key, no rate limits, private
+### 🖥️ Local AI: no API key, no rate limits, private
 
-Prefer a model on your own machine? One command sets it up — no key, no quotas,
-and your findings never leave the host (great under NDA):
+Prefer a model on your own machine? One command sets it up, with no key, no quotas,
+and your findings never leaving the host (great under NDA):
 
 ```bash
 heaven ai setup        # installs Ollama + pulls qwen2.5:7b, then wires .env
@@ -320,7 +320,7 @@ heaven chat            # talk to the engagement-grounded AI assistant
 ```
 
 Prefer clicking? **Settings → AI / LLM → Local AI** in the web app is a full
-point-and-click wizard — detect Ollama, pull a model with a live progress bar,
+point-and-click wizard: detect Ollama, pull a model with a live progress bar,
 and one click to go live, no terminal needed.
 
 That points HEAVEN's **entire** AI layer (FP triage, remediation, attack-chain
@@ -337,7 +337,7 @@ ways to set them) is in **[API Keys & Configuration](#api-keys)** below.
 ```bash
 heaven --version
 heaven engage init my-engagement
-heaven use my-engagement                # set it active — no more --engagement
+heaven use my-engagement                # set it active, no more --engagement
 heaven scan -u https://target.example.com -m web --i-have-authorization
 heaven scan -t 10.0.0.0/24 -m network --i-have-authorization
 heaven serve            # opens http://localhost:8443 in your browser
@@ -349,7 +349,7 @@ heaven serve            # opens http://localhost:8443 in your browser
 ## 🔑 API Keys & Configuration
 
 **HEAVEN runs with zero API keys.** Scanning, the web UI, reports, and ML risk
-scoring all work offline. Keys only unlock *optional* enrichments — most
+scoring all work offline. Keys only unlock *optional* enrichments, most
 importantly the AI layers (autonomous mode, AI attack plans, LLM
 false-positive review). Add only what you want.
 
@@ -369,9 +369,9 @@ false-positive review). Add only what you want.
 > You only need **one** of the three LLM keys. HEAVEN auto-detects whichever is
 > set (Anthropic → OpenAI → Gemini), or pin one with `HEAVEN_LLM_PROVIDER`.
 
-### Add a Gemini key (free) — 3 steps
+### Add a Gemini key (free): 3 steps
 
-1. **Get the key** — open <https://aistudio.google.com/apikey>, sign in with a
+1. **Get the key**: open <https://aistudio.google.com/apikey>, sign in with a
    Google account, click **Create API key**, and copy it.
 2. **Install the Gemini SDK:**
    ```bash
@@ -379,7 +379,7 @@ false-positive review). Add only what you want.
    ```
 3. **Give it to HEAVEN** (pick one):
    ```bash
-   heaven init                                   # a) wizard — writes .env for you
+   heaven init                                   # a) wizard, writes .env for you
    echo 'GEMINI_API_KEY=your-key' >> .env        # b) .env file
    export GEMINI_API_KEY="your-key"              # c) shell (this session only)
    ```
@@ -394,18 +394,18 @@ heaven doctor        # shows  ✓ LLM  gemini (gemini-flash-latest)  when workin
 
 | Method | How | Best for |
 |---|---|---|
-| **Web UI** | **Settings** page → paste key → **Save** | Easiest — no terminal; persists to `.env`, live immediately |
+| **Web UI** | **Settings** page → paste key → **Save** | Easiest: no terminal; persists to `.env`, live immediately |
 | **CLI** | `heaven config set GEMINI_API_KEY` | Scriptable; same keys as the Settings page |
-| **Wizard** | `heaven init` | First-time setup — prompts for everything, writes `.env` |
+| **Wizard** | `heaven init` | First-time setup: prompts for everything, writes `.env` |
 | **`.env` file** | copy [`.env.example`](.env.example) → `.env`, edit | Persistent local / dev |
 | **Shell export** | `export GEMINI_API_KEY=…` | One-off / CI |
 
 The **Web UI**, **CLI** and **wizard** all write the **same `.env`**, so a key
-set in any one is live for the CLI, the API and the web UI at once — set it
+set in any one is live for the CLI, the API and the web UI at once. Set it
 once, it works everywhere and survives a restart. The web UI's **Settings**
-page lists every key with a *“how to get it”* link and shows which are already
+page lists every key with a *"how to get it"* link and shows which are already
 configured (secrets masked). HEAVEN auto-loads `.env` from the working
-directory. **Never commit `.env`** — it's already in `.gitignore`.
+directory. **Never commit `.env`**: it's already in `.gitignore`.
 
 ### Pinning a provider / model (optional)
 
@@ -427,10 +427,10 @@ deterministic heuristic (or pass `--no-llm`).
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,33:7400B8,66:FF36AB,100:FF6E00"/>
 </p>
 
-55 commands. Run `heaven <command> --help` for full options.
+56 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard — module status + live command reference (v3.0.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard: module status + live command reference (v3.0.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">
@@ -444,13 +444,13 @@ deterministic heuristic (or pass `--no-llm`).
 | `export` · `report` · `sbom` | Export findings (8 formats) · compliance HTML/PDF · CycloneDX SBOM |
 | `kill-chain` · `coverage` | Kill-chain phase coverage · OWASP coverage grade |
 | `autonomous` | LLM-driven observe→plan→act loop (bounded budget) |
-| `watch` | Continuous monitoring — diffs each run, alerts only on change |
+| `watch` | Continuous monitoring: diffs each run, alerts only on change |
 | `diff` | Compare two scans (new / resolved / regressed / unchanged) |
 | `sast` | Semgrep static analysis + curated OWASP rule pack |
-| `sca` | Software Composition Analysis — dependency manifests vs. OSV.dev advisories |
-| `cve <product> [version]` | **Dynamic live CVE lookup** — query NVD + CIRCL for any product/version *not* in the local DB (merged, de-duped, version-confirmed, EPSS-scored, Exploit-DB-correlated; `--engagement` persists them) |
-| `dns <domain>` | **DNS enumeration** — A/AAAA/MX/NS/TXT/SOA/CNAME records, resolvable subdomains, mail servers, DNSSEC & wildcard, plus DNS security posture; surfaces in the **Assets** view and reports (`--engagement` persists them) |
-| `postex enum/loot/full` | Post-exploitation — privesc enumeration (Linux + Windows via `--os`) · loot harvest · full playbook (kill-chain + AI) |
+| `sca` | Software Composition Analysis: dependency manifests vs. OSV.dev advisories |
+| `cve <product> [version]` | **Dynamic live CVE lookup**: query NVD + CIRCL for any product/version *not* in the local DB (merged, de-duped, version-confirmed, EPSS-scored, Exploit-DB-correlated; `--engagement` persists them) |
+| `dns <domain>` | **DNS enumeration**: A/AAAA/MX/NS/TXT/SOA/CNAME records, resolvable subdomains, mail servers, DNSSEC & wildcard, plus DNS security posture; surfaces in the **Assets** view and reports (`--engagement` persists them) |
+| `postex enum/loot/full` | Post-exploitation: privesc enumeration (Linux + Windows via `--os`) · loot harvest · full playbook (kill-chain + AI) |
 | `cloud storage` | Credential-free public S3/GCS/Azure bucket-exposure scan derived from a target domain |
 | `cloud iam` | Read-only IAM privilege audit of the authenticated AWS identity (over-privileged principals · missing MFA · stale/root keys · weak password policy) |
 | `lateral` · `knowledge` | Lateral movement · cross-engagement knowledge graph |
@@ -462,7 +462,7 @@ deterministic heuristic (or pass `--no-llm`).
 | `init` · `init-db` · `update` | Setup wizard · PostgreSQL schema · self-update HEAVEN to the latest version + refresh CVE/Nuclei feeds |
 | `config` | Manage API keys & integrations (same keys as the web Settings page) |
 | `self-audit` · `doctor` · `info` | Security self-audit · deployment health check · platform info |
-| `completion` | Tab-completion for the `heaven` command — installed automatically by the installer, or one-command `heaven completion --install` (bash / zsh / fish / PowerShell) |
+| `completion` | Tab-completion for the `heaven` command, installed automatically by the installer, or one-command `heaven completion --install` (bash / zsh / fish / PowerShell) |
 
 </div>
 
@@ -471,7 +471,7 @@ deterministic heuristic (or pass `--no-llm`).
 heaven scan -u https://app.example.com --auto-prove --i-have-authorization
 heaven autonomous -t 10.0.0.5 --engagement test --i-have-authorization
 
-# Fully deterministic — no API key required
+# Fully deterministic, no API key required
 heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 ```
 
@@ -479,11 +479,11 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 
 | Level | Description |
 |---|---|
-| 1 — Ghost | Maximum evasion · randomised timing · slowest |
-| 2 — Cautious | Slow · randomised · honeypot avoidance |
-| 3 — Normal | Balanced speed/stealth |
-| 4 — Aggressive | Faster · minimal evasion |
-| 5 — Loud | Full speed · no evasion (lab / CTF only) |
+| 1 · Ghost | Maximum evasion · randomised timing · slowest |
+| 2 · Cautious | Slow · randomised · honeypot avoidance |
+| 3 · Normal | Balanced speed/stealth |
+| 4 · Aggressive | Faster · minimal evasion |
+| 5 · Loud | Full speed · no evasion (lab / CTF only) |
 
 ---
 
@@ -497,7 +497,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 `heaven serve` **auto-opens `http://localhost:8443`** in your default browser once the server is up (pass `--no-open` to skip). A dark, glassmorphic React console (Inter + JetBrains Mono) with a command palette (⌘K), live log streaming, and a 3D network-topology view.
 
 <div align="center">
-<img width="900" alt="HEAVEN web UI — Dashboard: 3D attack-surface topology, severity distribution, and Fix-This-First priorities" src="docs/screenshots/web-app_dashboard.png" />
+<img width="900" alt="HEAVEN web UI Dashboard: 3D attack-surface topology, severity distribution, and Fix-This-First priorities" src="docs/screenshots/web-app_dashboard.png" />
 </div>
 
 **25 pages:**
@@ -508,7 +508,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 |---|---|
 | **Dashboard** | Severity distribution · MITRE ATT&CK heat-map |
 | **Engagement** | Active engagement · in-scope targets · asset criticality |
-| **Assets** | Host & service inventory — open ports · service versions · OS fingerprint · device name · device type · MAC address (same-subnet, when observed) |
+| **Assets** | Host & service inventory: open ports · service versions · OS fingerprint · device name · device type · MAC address (same-subnet, when observed) |
 | **Scans** | Launch · history · live progress |
 | **Findings** | Filter · triage · **download report** |
 | **Finding Detail** | Description · impact · remediation · CWE/OWASP/MITRE · evidence · curl repro |
@@ -517,8 +517,8 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 | **Watch** | Continuous monitoring · differential alert feed |
 | **Scan Diff** | New / resolved / regressed / unchanged findings |
 | **SAST** | Semgrep results + OWASP rule pack |
-| **SCA · Deps** | Dependency audit vs. OSV.dev — vulnerable packages + fix versions |
-| **CVE Lookup** | Dynamic live CVE search (NVD + CIRCL) for any product/version — version-confirmed, KEV-flagged, EPSS-scored, Exploit-DB PoC links |
+| **SCA · Deps** | Dependency audit vs. OSV.dev: vulnerable packages + fix versions |
+| **CVE Lookup** | Dynamic live CVE search (NVD + CIRCL) for any product/version: version-confirmed, KEV-flagged, EPSS-scored, Exploit-DB PoC links |
 | **Autonomous** | LLM observe→plan→act loop with bounded budget |
 | **AI Plans** | Saved attack plans from autonomous sessions |
 | **Assistant** | Engagement-grounded AI chat assistant (also a floating widget on every page) |
@@ -529,25 +529,25 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 | **Tickets** | Jira / Linear sync status |
 | **Benchmark** | DVWA precision/recall numbers |
 | **Methodology** | Live coverage vs OWASP WSTG · NIST 800-115 · PTES + Cyber Essentials · ISO 27001 · PCI DSS · CIS v8 · NIST CSF · SOC 2 |
-| **System Health** | `doctor` in the browser — tools / keys / module status + install hints |
-| **Settings** | API keys & integrations — paste keys, masked state, how-to-get links |
+| **System Health** | `doctor` in the browser: tools / keys / module status + install hints |
+| **Settings** | API keys & integrations: paste keys, masked state, how-to-get links |
 
 </div>
 
 <div align="center">
 <table>
 <tr>
-<td align="center" width="50%"><img alt="Findings — triage table with severity, confidence, status and report download" src="docs/screenshots/findings_dashboard.png" /><br/><sub><b>Findings</b> — filter · triage · download report</sub></td>
-<td align="center" width="50%"><img alt="Kill Chain — Lockheed Martin 7-phase coverage with chained attack path" src="docs/screenshots/kill_chain_dashboard.png" /><br/><sub><b>Kill Chain</b> — phase coverage · chained attack path</sub></td>
+<td align="center" width="50%"><img alt="Findings: triage table with severity, confidence, status and report download" src="docs/screenshots/findings_dashboard.png" /><br/><sub><b>Findings</b>: filter · triage · download report</sub></td>
+<td align="center" width="50%"><img alt="Kill Chain: Lockheed Martin 7-phase coverage with chained attack path" src="docs/screenshots/kill_chain_dashboard.png" /><br/><sub><b>Kill Chain</b>: phase coverage · chained attack path</sub></td>
 </tr>
 <tr>
-<td align="center" width="50%"><img alt="Scans page — guided scan launcher with authorization gate + CLI reference" src="docs/screenshots/scanning_dashboard.png" /><br/><sub><b>Scans</b> — guided launcher · authorization gate</sub></td>
-<td align="center" width="50%"><img alt="Reports — client-ready PDF/HTML and 8 export formats incl. CycloneDX SBOM" src="docs/screenshots/reports_dashboard.png" /><br/><sub><b>Reports</b> — client-ready PDF/HTML · 8 export formats</sub></td>
+<td align="center" width="50%"><img alt="Scans page: guided scan launcher with authorization gate + CLI reference" src="docs/screenshots/scanning_dashboard.png" /><br/><sub><b>Scans</b>: guided launcher · authorization gate</sub></td>
+<td align="center" width="50%"><img alt="Reports: client-ready PDF/HTML and 8 export formats incl. CycloneDX SBOM" src="docs/screenshots/reports_dashboard.png" /><br/><sub><b>Reports</b>: client-ready PDF/HTML · 8 export formats</sub></td>
 </tr>
 </table>
 </div>
 
-> **First login:** ships with `admin/admin` and **forces a password change** on first sign-in. Set `HEAVEN_ADMIN_PASSWORD` (and optionally `HEAVEN_ADMIN_USERNAME`) beforehand to skip the prompt. A password changed in the Web UI is **persisted to `.env`**, so it survives a server restart (`.env` is the source of truth that `heaven serve` re-reads on boot). JWTs are held in memory only — never `localStorage`.
+> **First login:** ships with `admin/admin` and **forces a password change** on first sign-in. Set `HEAVEN_ADMIN_PASSWORD` (and optionally `HEAVEN_ADMIN_USERNAME`) beforehand to skip the prompt. A password changed in the Web UI is **persisted to `.env`**, so it survives a server restart (`.env` is the source of truth that `heaven serve` re-reads on boot). JWTs are held in memory only, never `localStorage`.
 
 ---
 
@@ -558,7 +558,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7400B8,50:00D2FF,100:B8FF00"/>
 </p>
 
-77 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
+91 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
 
 ```bash
 # Health (no auth)
@@ -592,8 +592,8 @@ curl http://localhost:8443/api/engagement/findings \
 | `GET /api/report/export?format=…` | `report.view` | **Download report** (8 formats) |
 | `POST /api/auth/change-password` | session | Change password |
 | `GET` · `POST /api/settings` | `config.modify` | **API keys & integrations** (secrets masked) |
-| `GET /api/engagement/top-findings` | `vuln.view` | **"Fix this first"** — highest-risk findings + remediation |
-| `GET /api/system/health` | `scan.view` | System health (tools / keys / modules) — web `doctor` |
+| `GET /api/engagement/top-findings` | `vuln.view` | **"Fix this first"**: highest-risk findings + remediation |
+| `GET /api/system/health` | `scan.view` | System health (tools / keys / modules): web `doctor` |
 | `POST /api/demo/seed` · `/api/demo/scan` | `scan.create` | Load sample data · run an animated demo scan |
 | `GET /api/ws/logs` · `/api/ws/scan/{id}` | token (query) | WebSocket live streams |
 
@@ -608,7 +608,7 @@ curl http://localhost:8443/api/engagement/findings \
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF36AB,50:FF6E00,100:B8FF00"/>
 </p>
 
-Generate from the **CLI** or the **web UI** (Findings → *Download report*) — identical output, eight formats:
+Generate from the **CLI** or the **web UI** (Findings → *Download report*). Identical output, eight formats:
 
 <div align="center">
 
@@ -670,7 +670,7 @@ HEAVEN predicts a CVSS-v3 base score for every finding using a 13-feature `Extra
 - An **asset-criticality** multiplier (`scope add --criticality crown_jewel`)
 - Empirical **Bayesian priors** learned from your past engagements (`heaven train-priors`)
 
-The 48 MB model isn't bundled in the wheel or git — fetch it once (SHA-256 verified) with **`heaven download-model`**, or train your own with `heaven train-model`. Without it, CVSS gracefully falls back to each finding's own base score. Model provenance and caveats are documented in [`data/models/NVD_model.MODEL_CARD.md`](data/models/NVD_model.MODEL_CARD.md).
+The 48 MB model isn't bundled in the wheel or git, so fetch it once (SHA-256 verified) with **`heaven download-model`**, or train your own with `heaven train-model`. Without it, CVSS gracefully falls back to each finding's own base score. Model provenance and caveats are documented in [`data/models/NVD_model.MODEL_CARD.md`](data/models/NVD_model.MODEL_CARD.md).
 
 ---
 
@@ -705,21 +705,21 @@ The 48 MB model isn't bundled in the wheel or git — fetch it once (SHA-256 ver
 </p>
 
 ```
-heaven/                   ← Python package (172 modules)
+heaven/                   ← Python package (179 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
-├── postex/               privesc enum engines — Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
+├── postex/               privesc enum engines - Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
 ├── ai/                   LLM gateway · recon agent · attack-chain planner · FP review · knowledge graph
 ├── ml/                   CVSS model · feature engine · Bayesian priors · training pipeline
 ├── mitre/                ATT&CK mapping · kill chain · TAXII threat-intel
 ├── devsecops/            PDF/compliance reports · vuln KB · SBOM · diff · alerting · ticketing
 ├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
-├── api/                  FastAPI server + WebSocket (77 routes)
-└── cli/                  Click CLI — one module per command group (55 commands)
+├── api/                  FastAPI server + WebSocket (91 routes)
+└── cli/                  Click CLI - one module per command group (56 commands)
 
 heaven-ui/                React + Vite web console (25 pages)
-tests/                    1860 pytest tests + native & DVWA benchmark suites
+tests/                    2057 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -738,7 +738,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (1853 tests)
+pytest tests/                  # full suite, ~3.5 min (2012 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -768,7 +768,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CODE_OF_CONDUCT.md`](CODE_OF_CONDU
 | Document | Purpose |
 |---|---|
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 5-minute end-to-end walkthrough |
-| [`docs/FAQ.md`](docs/FAQ.md) | FAQ & troubleshooting — common fixes |
+| [`docs/FAQ.md`](docs/FAQ.md) | FAQ & troubleshooting: common fixes |
 | [`docs/BENCHMARK_HOWTO.md`](docs/BENCHMARK_HOWTO.md) | Reproduce DVWA precision/recall numbers |
 | [`docs/COMPARISON.md`](docs/COMPARISON.md) | Head-to-head vs Burp Suite / ZAP / Nessus / sqlmap |
 | [`docs/methodology/`](docs/methodology/) | Live coverage maps: OWASP WSTG · NIST 800-115 · PTES · Cyber Essentials (+Plus) · ISO 27001 · PCI DSS · CIS v8.1 · NIST CSF 2.0 · SOC 2 |
@@ -805,7 +805,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>1860 tests · 172 modules · 55 CLI commands · 77 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>2057 tests · 179 modules · 56 CLI commands · 91 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

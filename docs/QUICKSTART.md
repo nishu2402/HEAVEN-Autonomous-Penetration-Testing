@@ -1,4 +1,4 @@
-# HEAVEN — 5-minute Quick Start
+# HEAVEN: 5-minute Quick Start
 
 Goal: scan your first target and view the report. No production setup
 required.
@@ -23,16 +23,19 @@ cd HEAVEN-Autonomous-Penetration-Testing
 
 ## 2 · First scan (30 seconds)
 
-Spin up a deliberately-vulnerable target:
+Spin up a deliberately-vulnerable target (the official DVWA image plus a
+MariaDB backend, which runs native on Apple Silicon and x86 rather than under
+emulation):
 
 ```bash
-docker run --rm -d -p 8080:80 --name dvwa vulnerables/web-dvwa
+docker compose -f tests/benchmarks/docker-compose.yml up -d
 ```
 
-Wait ~10 seconds for it to boot, then scan it:
+Give it ~20 seconds to boot, then open http://127.0.0.1:8080/setup.php once and
+click "Create / Reset Database". Now scan it:
 
 ```bash
-heaven scan -u http://localhost:8080 -m web --i-have-authorization
+heaven scan -u http://127.0.0.1:8080 -m web --i-have-authorization
 ```
 
 You'll see a live HUD with phase progress, severity counts, and a
@@ -48,9 +51,9 @@ and operator notes:
 
 ```bash
 heaven engage init my-first-pentest --client "Personal" --sow "evaluation"
-heaven use my-first-pentest          # make it active — no more --engagement
-heaven scope add http://localhost:8080 --kind url
-heaven scan -u http://localhost:8080 -m web --i-have-authorization
+heaven use my-first-pentest          # make it active, no more --engagement
+heaven scope add http://127.0.0.1:8080 --kind url
+heaven scan -u http://127.0.0.1:8080 -m web --i-have-authorization
 ```
 
 `heaven use` sets a git-branch-style sticky context, so every following
@@ -77,7 +80,7 @@ This **opens <http://localhost:8443> in your browser automatically** once the
 server is ready (use `heaven serve --no-open` to suppress that). Log in with:
 
 - Username: `admin`
-- Password: `admin` on a fresh install — the UI then forces a password change
+- Password: `admin` on a fresh install, the UI then forces a password change
   on first login. Set `HEAVEN_ADMIN_PASSWORD` beforehand to use a strong
   password from the start and skip the prompt.
 
@@ -93,7 +96,7 @@ You'll see 24 pages:
 | SAST | Semgrep launcher + results |
 | Autonomous | LLM-driven iterative pen-test loop |
 | AI Plans | Multi-step attack-chain reasoner |
-| Coverage | Self-grading — "what didn't we test?" |
+| Coverage | Self-grading, "what didn't we test?" |
 | Methodology | OWASP / NIST / PTES mapping viewer |
 | Benchmark | Latest DVWA precision / recall / F1 |
 | … + 13 more |
@@ -119,9 +122,9 @@ so the README's benchmark badge has a target to link to.
 
 | You want to … | Read |
 |---|---|
-| Set up production HEAVEN | [README — Quick Start](../README.md#quick-start) |
-| Add an LLM to the AI layer | `pip install -e ".[gemini]"`, set `GEMINI_API_KEY` (or Anthropic/OpenAI), re-run. Full guide: [README — API Keys](../README.md#api-keys) |
-| Continuously monitor a target | [README — CLI Reference (`watch`)](../README.md#cli) |
+| Set up production HEAVEN | [README: Quick Start](../README.md#quick-start) |
+| Add an LLM to the AI layer | `pip install -e ".[gemini]"`, set `GEMINI_API_KEY` (or Anthropic/OpenAI), re-run. Full guide: [README: API Keys](../README.md#api-keys) |
+| Continuously monitor a target | [README, CLI Reference (`watch`)](../README.md#cli) |
 | Compare HEAVEN vs Burp / ZAP / sqlmap | [COMPARISON.md](COMPARISON.md) |
 | Contribute code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Report a vulnerability in HEAVEN | [SECURITY.md](../SECURITY.md) |
@@ -131,8 +134,8 @@ so the README's benchmark badge has a target to link to.
 | Symptom | Fix |
 |---|---|
 | `heaven: command not found` | `pip install -e .` from the repo root, or open a new shell so `~/.local/bin` is on PATH |
-| A scanner tool shows "missing" (`nmap`, `sqlmap`, `ffuf`, `searchsploit`, `semgrep`) | `heaven install-tools` — installs them all with your package manager (idempotent). HEAVEN still runs without them, just at reduced power |
+| A scanner tool shows "missing" (`nmap`, `sqlmap`, `ffuf`, `searchsploit`, `semgrep`) | `heaven install-tools`, installs them all with your package manager (idempotent). HEAVEN still runs without them, just at reduced power |
 | Web UI shows blank page | `cd heaven-ui && npm install && npm run build` |
 | `HEAVEN_ADMIN_PASSWORD not set` warning | Run `heaven init` for an interactive setup, or `export HEAVEN_ADMIN_PASSWORD=…` |
 | Scan exits "Authorization required" | Add `--i-have-authorization` flag (mandatory and intentional) |
-| Not sure what's wired up | Run `heaven doctor` — shows LLM / SIEM / tickets / tool / engagement state |
+| Not sure what's wired up | Run `heaven doctor`, shows LLM / SIEM / tickets / tool / engagement state |

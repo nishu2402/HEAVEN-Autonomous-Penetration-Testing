@@ -15,6 +15,9 @@ import { sevColor } from "../theme";
 const SEV_ORDER = ["critical", "high", "medium", "low", "info"];
 
 const isRunning = (s) => s.status === "running" || s.status === "pending";
+// Interrupted (a scan the app was closed on) or paused — not live, but resumable
+// from its last checkpoints via the Resume action.
+const isResumable = (s) => s.status === "interrupted" || s.status === "paused";
 
 // Smoothly eases the fill toward the real server percentage each time it
 // changes, so a jump like 12% → 35% animates over ~1s instead of teleporting.
@@ -79,10 +82,12 @@ function scanTargets(s) {
 }
 
 function statusClass(s) {
-  if (s === "running")   return "running";
-  if (s === "completed") return "completed";
-  if (s === "failed")    return "failed";
-  if (s === "paused")    return "paused";
+  if (s === "running")     return "running";
+  if (s === "completed")   return "completed";
+  if (s === "failed")      return "failed";
+  if (s === "paused")      return "paused";
+  if (s === "interrupted") return "interrupted";
+  if (s === "cancelled")   return "cancelled";
   return "";
 }
 
@@ -172,12 +177,28 @@ export default function ScanList({
     setDeleting((d) => ({ ...d, [id]: true }));
     try {
       const r = await ScansApi.remove(id);
-      toast.success(r.status === "cancelled" ? "Scan cancelled" : "Scan removed");
+      const label = { cancelled: "Scan cancelled", interrupted: "Scan interrupted" }[r.status]
+        || "Scan removed";
+      toast.success(label);
       if (selected === id) setSelected(null);
       setDetails((d) => { const n = { ...d }; delete n[id]; return n; });
       load();
     } catch (e) {
       toast.error("Could not remove scan", e.message);
+    } finally {
+      setDeleting((d) => { const n = { ...d }; delete n[id]; return n; });
+    }
+  }
+
+  // Resume an interrupted / paused scan from its last checkpoints.
+  async function resumeScan(id) {
+    setDeleting((d) => ({ ...d, [id]: true }));   // reuse the busy flag on the row
+    try {
+      await ScansApi.resume(id);
+      toast.success("Scan resumed", "Continuing from its last checkpoint");
+      load();
+    } catch (e) {
+      toast.error("Could not resume scan", e.message);
     } finally {
       setDeleting((d) => { const n = { ...d }; delete n[id]; return n; });
     }
@@ -293,6 +314,16 @@ export default function ScanList({
                   )}
 
                   <div className="scan-actions" onClick={(e) => e.stopPropagation()}>
+                    {isResumable(s) && (
+                      <button
+                        className="btn-small scan-resume"
+                        disabled={!!deleting[id]}
+                        title="Resume this scan from its last checkpoint"
+                        onClick={() => resumeScan(id)}
+                      >
+                        {deleting[id] ? "…" : "▸ Resume"}
+                      </button>
+                    )}
                     {showReplay && (s.status === "completed" || s.status === "failed") && (
                       <button
                         className="btn-small"
@@ -356,7 +387,7 @@ function ScanDetail({ det, status, navigate }) {
     return (
       <div className="scan-detail-msg">
         {running
-          ? "Scan in progress — findings will appear here as they're confirmed."
+          ? "Scan in progress: findings will appear here as they're confirmed."
           : "No findings recorded for this scan."}
       </div>
     );
@@ -376,7 +407,7 @@ function ScanDetail({ det, status, navigate }) {
     <div className="scan-detail">
       <div className="scan-detail-top">
         <span className="dim" style={{ fontSize: 11.5 }}>
-          {findings.length} finding{findings.length !== 1 ? "s" : ""} — click any row to open it
+          {findings.length} finding{findings.length !== 1 ? "s" : ""}, click any row to open it
         </span>
         <div className="scan-sev-strip">
           {bySev.map((k) => (

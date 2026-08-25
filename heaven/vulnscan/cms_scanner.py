@@ -24,6 +24,7 @@ The XML-RPC probe sends ``system.listMethods`` — it never issues an actual
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import re
 from urllib.parse import urlparse
@@ -313,7 +314,7 @@ async def scan_cms(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
     findings: list[dict] = []
     conn = aiohttp.TCPConnector(ssl=False, limit=15)
     client_timeout = aiohttp.ClientTimeout(total=timeout)
-    async with aiohttp.ClientSession(connector=conn, timeout=client_timeout,
+    async with _egress_cs(connector=conn, timeout=client_timeout,
                                      headers={"User-Agent": _UA}) as session:
         sem = asyncio.Semaphore(6)
 

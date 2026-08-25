@@ -208,17 +208,32 @@ async def enumerate_subdomains(domain: str, session: aiohttp.ClientSession,
         logger.warning(f"Wildcard DNS detected for {domain} → IPs {wildcard_ips}; "
                        "brute-force results will be filtered")
 
-    # 1. Passive — Certificate Transparency Logs
+    sem = asyncio.Semaphore(concurrency)
+
+    # 1. Passive — Certificate Transparency Logs. A CT log records every name that
+    #    ever appeared in a certificate, so it is riddled with long-dead hosts and
+    #    third-party SaaS SANs. We only surface a CT name that *still resolves*
+    #    right now (and isn't a wildcard address), so the discovered set is a live
+    #    attack surface, not certificate archaeology.
     ct_subs = await _ct_log_search(domain, session)
-    for sub in ct_subs:
+    ct_checks = await asyncio.gather(
+        *[_resolve_subdomain(sub, sem) for sub in ct_subs],
+        return_exceptions=True,
+    )
+    for sub, res in zip(ct_subs, ct_checks):
+        if not isinstance(res, DiscoveredAsset):
+            continue  # CT name no longer resolves — a dead ghost, dropped
+        resolved_ip = res.metadata.get("ip", "")
+        if wildcard_ips and resolved_ip in wildcard_ips:
+            continue
         discovered.append(DiscoveredAsset(
             asset_type="subdomain", value=sub, host=domain,
             source="certificate_transparency", confidence=1.0,
-            metadata={"wildcard_domain": wildcard_ips is not None},
+            metadata={"wildcard_domain": wildcard_ips is not None,
+                      "ip": resolved_ip},
         ))
 
     # 2. Active — DNS brute force (filtered against wildcard IPs)
-    sem = asyncio.Semaphore(concurrency)
     tasks = [_resolve_subdomain(f"{word}.{domain}", sem) for word in words]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 

@@ -57,7 +57,7 @@ export default function AIPlans() {
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>✦ AI Attack-Chain Planner</h2>
         <p className="page-lead">
           Proposes multi-step attack chains from a list of findings. HEAVEN
-          builds a plan on its own — adding an AI provider key
+          builds a plan on its own, adding an AI provider key
           (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code> or{" "}
           <code>GEMINI_API_KEY</code>) on the server enriches that reasoning
           with an LLM.
@@ -67,7 +67,7 @@ export default function AIPlans() {
           <div className="dim" style={{ fontSize: 11, marginBottom: 8 }}>
             SIEM backends active: {siemStatus.siem_backends_active.length
               ? siemStatus.siem_backends_active.join(", ")
-              : "(none — set HEAVEN_SPLUNK_HEC_* or HEAVEN_ELASTIC_* env vars)"}
+              : "(none, set HEAVEN_SPLUNK_HEC_* or HEAVEN_ELASTIC_* env vars)"}
           </div>
         )}
 
@@ -116,7 +116,7 @@ export default function AIPlans() {
           <h3 style={{ color: "var(--cyan)" }}>Planner output</h3>
           {output.skipped && (
             <div className="dim">
-              AI enrichment is unavailable — add an AI provider key in Settings
+              AI enrichment is unavailable, add an AI provider key in Settings
               to enrich these plans with an LLM.
             </div>
           )}

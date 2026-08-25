@@ -40,7 +40,7 @@ function hydrateAuth() {
     authToken = d.token || null;
     currentUser = d.user || null;
     mustChangePassword = Boolean(d.mustChangePassword);
-  } catch { /* corrupt/blocked storage — start logged out */ }
+  } catch { /* corrupt/blocked storage, start logged out */ }
 }
 
 // Restore any existing session before the app first renders.
@@ -179,7 +179,7 @@ export async function previewReport(opts = {}) {
   const url = URL.createObjectURL(blob);
   const w = window.open(url, "_blank", "noopener");
   setTimeout(() => URL.revokeObjectURL(url), 60000);
-  if (!w) throw new Error("Popup blocked — allow popups to preview the report");
+  if (!w) throw new Error("Popup blocked: allow popups to preview the report");
   return true;
 }
 
@@ -236,11 +236,11 @@ async function api(path, opts = {}) {
     currentUser = null;
     persistAuth();
     notify();
-    emitSessionExpired("Your session expired — please sign in again.");
+    emitSessionExpired("Your session expired: please sign in again.");
     throw new Error("Authentication expired");
   }
   if (r.status === 429) {
-    throw new Error("Rate limited — slow down");
+    throw new Error("Rate limited: slow down");
   }
   if (!r.ok) {
     let detail;
@@ -275,6 +275,13 @@ export const Engagement = {
       method: "PUT",
       body: JSON.stringify({ status, notes }),
     }),
+  // Save operator notes WITHOUT changing status (the explicit "Save note"
+  // action). Notes typed without a status change used to be discarded.
+  saveNotes: (id, notes = "") =>
+    api(`/engagement/findings/${id}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ notes }),
+    }),
   // Edit the active engagement's Client / Statement-of-work. Send either or
   // both; omitted fields are left unchanged. → { ok, engagement }.
   updateDetails: (fields) =>
@@ -295,6 +302,8 @@ export const Scans = {
   // Cancel a running scan, or permanently remove a finished one.
   cancel: (id) => api(`/scans/${encodeURIComponent(id)}`, { method: "DELETE" }),
   remove: (id) => api(`/scans/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // Resume an interrupted / paused scan from its last checkpoints.
+  resume: (id) => api(`/scans/${encodeURIComponent(id)}/resume`, { method: "POST" }),
 };
 
 // Host & service inventory — open ports, service versions and OS per host, as
@@ -306,6 +315,17 @@ export const Assets = {
   list: (scanId, { all = false } = {}) =>
     api(`/assets?limit=500${all ? "&all=1" : ""}` +
         `${scanId ? `&scan_id=${encodeURIComponent(scanId)}` : ""}`),
+  // Operator-set device name/type for a host (manual override, synced to report).
+  // Send host + any of { device_name, device_type }; "" clears a field.
+  setLabel: (host, { device_name, device_type } = {}) =>
+    api("/assets/label", {
+      method: "PATCH",
+      body: JSON.stringify({
+        host,
+        ...(device_name !== undefined && { device_name }),
+        ...(device_type !== undefined && { device_type }),
+      }),
+    }),
 };
 
 // Engagements — list all scanned engagements and switch which one the whole
@@ -314,7 +334,7 @@ export const Assets = {
 // engagement changed without a route change, so they can re-fetch immediately.
 function notifyEngagementChanged() {
   try { window.dispatchEvent(new Event("heaven:engagement-changed")); }
-  catch { /* non-browser / SSR — no-op */ }
+  catch { /* non-browser / SSR, no-op */ }
 }
 
 export const Engagements = {
@@ -381,11 +401,25 @@ export const Settings = {
   // Local-LLM runtime status for the "Local AI" card (installed / reachable /
   // models / recommended default).
   aiLocalStatus: () => api("/ai/local/status"),
+  // Model catalog for the provider-aware model picker. → { provider, model,
+  // provider_default, providers: { <p>: { models:[{id,label,note}], default,
+  //   keyless } } }.  Ollama's list is merged with the operator's pulled models.
+  aiModels: () => api("/ai/models"),
   // One-click: point HEAVEN at a local model + live-test it.
   // payload: { provider:'ollama'|'local', model?, host?, base_url? }
   // → { ok, provider, model, test:{available,reason}, status }
   aiLocalConfigure: (payload) =>
     api("/ai/local/configure", { method: "POST", body: JSON.stringify(payload || {}) }),
+};
+
+// Egress / anonymity — route scan traffic through TOR / VPN / WireGuard while
+// the dashboard stays local. Config lives in Settings (the catalog above); these
+// are the live actions.
+export const Egress = {
+  status: () => api("/egress"),
+  confirm: () => api("/egress/confirm", { method: "POST" }),
+  tunnel: (action) =>
+    api("/egress/tunnel", { method: "POST", body: JSON.stringify({ action }) }),
 };
 
 // AI security assistant (chatbot). `reply` is the non-streaming fallback;
@@ -523,11 +557,98 @@ export const SIEM = {
 export const Methodology = {
   // Returns { standards: [{name, meta_title, subtitle, summary, categories:[
   //   {code, title, rows:[{id, item, description, coverage, status, exercised,
-  //   exercised_count}]}]}], engagement: {name, findings_total, vuln_types,
-  //   owasp_categories, modules_active}, docs:[...] }.  The `standards` matrices
-  //   are computed from the mapping docs; each row's `exercised` flag reflects
-  //   whether the detector it names produced a finding in the active engagement.
+  //   exercised_count, findings:[{id,title,severity,target,vuln_type}]}]}]}],
+  //   engagement: {name, findings_total, vuln_types, owasp_categories,
+  //   modules_active}, docs:[...] }.  The `standards` matrices are computed from
+  //   the mapping docs; each row's `exercised` flag reflects whether the detector
+  //   it names produced a finding in the active engagement, and `findings` lists
+  //   the concrete findings that exercised it.
   list: () => api(`/methodology`),
+};
+
+// Download ONE standard's live coverage matrix as a report (html/markdown/json).
+// Auth-aware blob download, same pattern as downloadReport.
+export async function downloadMethodology(standard, format = "html", opts = {}) {
+  const q = new URLSearchParams({ standard, format });
+  if (opts.engagement) q.append("engagement", opts.engagement);
+  const r = await fetch(`${API_BASE}/methodology/export?${q.toString()}`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+  });
+  if (!r.ok) {
+    let detail;
+    try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(detail || `Coverage export failed (${r.status})`);
+  }
+  const blob = await r.blob();
+  const cd = r.headers.get("content-disposition") || "";
+  const m = /filename="?([^"]+)"?/.exec(cd);
+  const filename = m ? m[1] : `heaven-methodology-${standard}.${format}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}
+
+// Compliance frameworks — the finding-mapped report catalog (HIPAA, UK/EU GDPR,
+// PCI DSS, ISO 27001, SOC 2, NIST CSF). Returns { frameworks: [{id, title,
+// subtitle, reference, controls_total}] }. Download a mapped report via
+// downloadReport(fmt, { engagement, framework: id }).
+export const Compliance = {
+  frameworks: () => api(`/compliance/frameworks`),
+  // Live control-coverage overlay for ONE framework (the interactive Compliance
+  // page). Returns { id, title, subtitle, reference, controls_total,
+  // controls_covered, findings_total, controls:[{id,name,status,count,
+  // findings:[{id,title,severity,target,vuln_type}]}] }.
+  coverage: (framework, opts = {}) => {
+    const q = new URLSearchParams({ framework });
+    if (opts.engagement) q.append("engagement", opts.engagement);
+    return api(`/compliance/coverage?${q.toString()}`);
+  },
+};
+
+// Download ONE framework's live control-coverage matrix (html/markdown/json/pdf).
+// Auth-aware blob download, same pattern as downloadMethodology.
+export async function downloadCompliance(framework, format = "html", opts = {}) {
+  const q = new URLSearchParams({ framework, format });
+  if (opts.engagement) q.append("engagement", opts.engagement);
+  const r = await fetch(`${API_BASE}/compliance/export?${q.toString()}`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+  });
+  if (!r.ok) {
+    let detail;
+    try { detail = (await r.json()).detail; } catch { detail = r.statusText; }
+    throw new Error(detail || `Compliance export failed (${r.status})`);
+  }
+  const blob = await r.blob();
+  const cd = r.headers.get("content-disposition") || "";
+  const m = /filename="?([^"]+)"?/.exec(cd);
+  const filename = m ? m[1] : `heaven-compliance-${framework}.${format}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}
+
+// HEAVEN self-update from the web app. status() checks the remote (network), so
+// it can take a few seconds; pass { fetch:false } for a cheap local re-check.
+// apply() launches the code update in the background (admin only); poll
+// applyStatus() for the live log.
+export const Update = {
+  status: (opts = {}) =>
+    api(`/update/status${opts.fetch === false ? "?fetch=false" : ""}`),
+  apply: (body = {}) =>
+    api(`/update/apply`, { method: "POST", body: JSON.stringify(body) }),
+  applyStatus: () => api(`/update/apply/status`),
 };
 
 export const Benchmark = {
@@ -649,7 +770,7 @@ export async function previewRetestReport(currentScanId, baselineScanId, opts = 
   const url = URL.createObjectURL(blob);
   const w = window.open(url, "_blank", "noopener");
   setTimeout(() => URL.revokeObjectURL(url), 60000);
-  if (!w) throw new Error("Popup blocked — allow popups to open the report");
+  if (!w) throw new Error("Popup blocked: allow popups to open the report");
   return true;
 }
 

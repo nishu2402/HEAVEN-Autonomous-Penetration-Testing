@@ -164,7 +164,7 @@ def _classify_ot(proto: str, title: str) -> dict[str, str]:
             "device_class": "ot",
             "vuln_type": "ics_port_open_unconfirmed",
             "iec62443": "FR5 Restricted Data Flow",
-            "mitre_technique": "T0846 — Remote System Discovery",
+            "mitre_technique": "T0846 · Remote System Discovery",
         }
     # Modbus is read/write and unauthenticated → an attacker can issue commands.
     if "modbus" in proto or "modbus" in title:
@@ -172,14 +172,14 @@ def _classify_ot(proto: str, title: str) -> dict[str, str]:
             "device_class": "ot",
             "vuln_type": "ics_modbus_exposed",
             "iec62443": "FR1 Identification & Authentication Control",
-            "mitre_technique": "T0855 — Unauthorized Command Message",
+            "mitre_technique": "T0855 · Unauthorized Command Message",
         }
     # Every other confirmed ICS service reachable without authentication.
     return {
         "device_class": "ot",
         "vuln_type": "ics_exposed_service",
         "iec62443": "FR1 Identification & Authentication Control",
-        "mitre_technique": "T0846 — Remote System Discovery",
+        "mitre_technique": "T0846 · Remote System Discovery",
     }
 
 

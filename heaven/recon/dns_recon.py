@@ -778,15 +778,31 @@ async def enumerate_dns(domain: str, *, subdomains: bool = True,
     }
 
 
+def _wants_subdomains(subdomains: "bool | set[str] | frozenset[str]",
+                      domain: str) -> bool:
+    """Resolve the per-domain subdomain-brute decision.
+
+    ``subdomains`` is either a plain bool (applies to every domain — the default,
+    and what the CLI / direct callers pass) or a *set of domains* for which the
+    brute-force is authorised (the scan pipeline passes this so that subdomain
+    discovery is confined to the operator's authorised subdomain scope).
+    """
+    if isinstance(subdomains, (set, frozenset)):
+        return domain in subdomains
+    return bool(subdomains)
+
+
 async def enumerate_dns_targets(domains: list[str], *,
-                                subdomains: bool = True) -> list[dict]:
+                                subdomains: "bool | set[str] | frozenset[str]" = True
+                                ) -> list[dict]:
     """Enumerate DNS for multiple domains concurrently (deduplicated input)."""
     sem = asyncio.Semaphore(5)
     out: list[dict] = []
 
     async def _one(domain: str) -> None:
         async with sem:
-            rec = await enumerate_dns(domain, subdomains=subdomains)
+            rec = await enumerate_dns(domain,
+                                      subdomains=_wants_subdomains(subdomains, domain))
             if rec:
                 out.append(rec)
 
@@ -796,13 +812,20 @@ async def enumerate_dns_targets(domains: list[str], *,
     return out
 
 
-async def dns_recon_targets(domains: list[str]) -> dict:
+async def dns_recon_targets(domains: list[str], *,
+                            subdomains: "bool | set[str] | frozenset[str]" = True
+                            ) -> dict:
     """Run DNS recon + enumeration against multiple domains concurrently.
 
     Returns both the security ``findings`` (zone transfer, SPF/DMARC, takeover…)
     and the structured ``dns_records`` enumeration (records + subdomains) that
     the orchestrator persists into the scan summary for the Assets view and the
     report's DNS Enumeration section.
+
+    ``subdomains`` gates the subdomain brute-force: a plain bool applies to every
+    domain (default), while a *set of domains* confines subdomain discovery to
+    the operator's authorised subdomain scope (records are still enumerated for
+    every domain).
     """
     uniq = list(dict.fromkeys(domains))
     sem = asyncio.Semaphore(5)
@@ -814,7 +837,7 @@ async def dns_recon_targets(domains: list[str]) -> dict:
             all_findings.extend(r.get("findings", []))
 
     await asyncio.gather(*[_one(d) for d in uniq], return_exceptions=True)
-    dns_records = await enumerate_dns_targets(uniq)
+    dns_records = await enumerate_dns_targets(uniq, subdomains=subdomains)
     return {
         "total": len(all_findings),
         "findings": all_findings,

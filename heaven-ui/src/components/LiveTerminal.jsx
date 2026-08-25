@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { openLogStream, getToken } from '../api'
 
 const DEMO_LINES = [
-  { type: 'info',    text: 'HEAVEN initialized — operator-driven mode' },
+  { type: 'info',    text: 'HEAVEN initialized: operator-driven mode' },
   { type: 'success', text: 'Bayesian prioritiser loaded' },
   { type: 'info',    text: 'Evasion engine: NORMAL profile' },
   { type: 'success', text: 'Security headers middleware active' },

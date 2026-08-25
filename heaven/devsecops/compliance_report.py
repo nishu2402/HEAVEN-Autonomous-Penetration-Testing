@@ -36,19 +36,20 @@ from heaven.devsecops.dns_inventory import normalize_dns as _normalize_dns
 from heaven.devsecops.inventory import device_name_label as _device_name_label
 from heaven.devsecops.inventory import device_type_label as _device_type_label
 from heaven.devsecops.inventory import inventory_totals as _inventory_totals
+from heaven.devsecops.inventory import looks_like_ip as _looks_like_ip
 from heaven.devsecops.inventory import mac_label as _mac_label
 from heaven.devsecops.inventory import normalize_assets as _normalize_assets
 from heaven.utils.cvss import is_confirmed_finding as _is_confirmed
 
 # Severity → presentation. Colours are chosen to print cleanly on white paper.
 SEVERITY_META: dict[str, dict[str, Any]] = {
-    "critical": {"label": "Critical", "color": "#b00020", "cvss": "9.0 – 10.0",
-                 "sla": "24–48 hours", "order": 0},
-    "high":     {"label": "High",     "color": "#e8590c", "cvss": "7.0 – 8.9",
+    "critical": {"label": "Critical", "color": "#b00020", "cvss": "9.0-10.0",
+                 "sla": "24-48 hours", "order": 0},
+    "high":     {"label": "High",     "color": "#e8590c", "cvss": "7.0-8.9",
                  "sla": "1 week",      "order": 1},
-    "medium":   {"label": "Medium",   "color": "#b8860b", "cvss": "4.0 – 6.9",
+    "medium":   {"label": "Medium",   "color": "#b8860b", "cvss": "4.0-6.9",
                  "sla": "1 month",     "order": 2},
-    "low":      {"label": "Low",      "color": "#2563eb", "cvss": "0.1 – 3.9",
+    "low":      {"label": "Low",      "color": "#2563eb", "cvss": "0.1-3.9",
                  "sla": "90 days",     "order": 3},
     "info":     {"label": "Info",     "color": "#6b7280", "cvss": "0.0",
                  "sla": "Best effort", "order": 4},
@@ -84,6 +85,37 @@ _LOGO_SVG = (
 def _esc(value: Any) -> str:
     """HTML-escape any value (scan output is untrusted)."""
     return html.escape("" if value is None else str(value), quote=True)
+
+
+def _fmt_cvss(value: Any) -> str:
+    """Render a CVSS score as a clean 1-dp string.
+
+    A raw float from an upstream feed can carry binary-representation noise
+    (``9.2000000000001``); shown verbatim in a narrow report column it wraps
+    across three lines. Always round to one decimal; non-numeric values pass
+    through unchanged so a text score like ``"n/a"`` is preserved.
+    """
+    if value is None or value == "":
+        return ""
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _short(text: Any, limit: int = 220) -> str:
+    """Summarise long text at a WORD boundary (never mid-word).
+
+    Used for at-a-glance table cells (e.g. the remediation roadmap) where the
+    full text lives elsewhere. A hard ``text[:limit]`` produced the "…ends in
+    the middle of a word" artifact; this trims back to the last space so the
+    ellipsis only ever follows a whole word.
+    """
+    s = " ".join(str(text or "").split())
+    if len(s) <= limit:
+        return s
+    cut = s[:limit].rsplit(" ", 1)[0].rstrip(",;:.")
+    return (cut or s[:limit]) + "…"
 
 
 def _sev_of(f: dict) -> str:
@@ -241,7 +273,8 @@ class ComplianceReportGenerator:
                              output_path: Optional[Path] = None,
                              meta: Optional[dict] = None,
                              assets: Optional[list[dict]] = None,
-                             dns_records: Optional[list[dict]] = None) -> str:
+                             dns_records: Optional[list[dict]] = None,
+                             compliance_framework: Optional[str] = None) -> str:
         """Render the full professional report as one HTML string.
 
         `meta` (all optional) may carry: client, assessor, period, version,
@@ -251,10 +284,18 @@ class ComplianceReportGenerator:
         a "Host & Service Inventory" section (open ports / service versions /
         OS) is inserted, so the report documents the attack surface, not just
         the findings.
+
+        `compliance_framework` (optional) is a framework id (``hipaa``,
+        ``uk_gdpr``, …); when valid, a control-coverage section mapping the
+        findings to that framework's controls is added, and the cover / TOC name
+        it. Unknown ids are ignored (a normal report).
         """
+        from heaven.devsecops import compliance_frameworks as _cf
         meta = meta or {}
         findings = findings or []
         eng = engagement_name or meta.get("client") or "HEAVEN Engagement"
+        fw = _cf.get_framework(compliance_framework) if compliance_framework else None
+        compliance_title = fw.title if fw else ""
 
         ordered = sorted(findings, key=lambda f: (
             self.SEV_ORDER.get(_sev_of(f), 4),
@@ -292,15 +333,21 @@ class ComplianceReportGenerator:
             self._styles(),
             self._toolbar(),
             self._cover(eng, overall, counts, len(findings), len(scope),
-                        generated, version, confirmed_total, potential_total),
+                        generated, version, confirmed_total, potential_total,
+                        compliance_title),
             self._confidentiality(eng),
             self._doc_control(eng, assessor, version, generated, len(scope), len(findings), overall),
-            self._toc(bool(inventory), has_api, has_iot, has_ot, bool(dns_inv)),
+            self._toc(bool(inventory), has_api, has_iot, has_ot, bool(dns_inv),
+                      has_content=any(
+                          (f.get("vuln_type") or f.get("type") or "") in
+                          ("directory_listing", "sensitive_file") for f in findings),
+                      compliance_title=compliance_title),
             self._exec_summary(eng, counts, len(findings), overall, ordered,
                                len(scope), confirmed_counts, confirmed_total,
                                potential_total),
             self._scope_methodology(scope),
             self._inventory(inventory),
+            self._content_discovery(findings),
             self._dns_enumeration(dns_inv),
             self._risk_methodology(),
             self._findings_summary(ordered),
@@ -315,6 +362,10 @@ class ComplianceReportGenerator:
             sections.append(self._owasp_iot_coverage(findings))
         if has_ot:
             sections.append(self._ot_ics_coverage(findings))
+        # Compliance-framework control coverage (HIPAA / GDPR / PCI / …) — only
+        # when the operator requested a specific framework.
+        if fw is not None:
+            sections.append(self._compliance_coverage(findings, fw))
         sections += [
             self._roadmap(ordered),
             self._appendix(),
@@ -328,7 +379,7 @@ class ComplianceReportGenerator:
         html_doc = (
             "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             f"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-            f"<title>Penetration Test Report — {_esc(eng)}</title>"
+            f"<title>Penetration Test Report · {_esc(eng)}</title>"
             + sections[0]
             + "</head><body>"
             + body
@@ -429,13 +480,17 @@ class ComplianceReportGenerator:
 
     def _cover(self, eng: str, overall: str, counts: dict, total: int,
                scope_n: int, generated: str, version: str,
-               confirmed_total: int = 0, potential_total: int = 0) -> str:
+               confirmed_total: int = 0, potential_total: int = 0,
+               compliance_title: str = "") -> str:
         col = next((m["color"] for m in SEVERITY_META.values()
                     if m["label"] == overall), _BRAND)
         # The headline reflects confirmed risk; potential (version-based /
         # unverified) findings are called out so nothing is hidden.
         pot_note = (f' &nbsp;·&nbsp; {potential_total} potential (unverified)'
                     if potential_total else "")
+        compliance_line = (
+            f'<div><strong style="color:var(--ink)">Compliance mapping:</strong> '
+            f'{_esc(compliance_title)}</div>' if compliance_title else "")
         return f"""<div class="page"><div class="cover">
           <div class="brandbar">{_LOGO_SVG}
             <div><div class="bn">HEAVEN</div>
@@ -454,6 +509,7 @@ class ComplianceReportGenerator:
             <div><strong style="color:var(--ink)">Confirmed vs potential:</strong>
                {confirmed_total} confirmed{pot_note}</div>
             <div><strong style="color:var(--ink)">Targets in scope:</strong> {scope_n}</div>
+            {compliance_line}
             <div><strong style="color:var(--ink)">Report date:</strong> {_esc(generated)}</div>
             <div><strong style="color:var(--ink)">Version:</strong> {_esc(version)}</div>
             <div><strong style="color:var(--ink)">Prepared by:</strong> HEAVEN Autonomous Penetration-Testing Platform</div>
@@ -495,13 +551,16 @@ class ComplianceReportGenerator:
     @staticmethod
     def _toc(has_inventory: bool = False, has_api: bool = False,
              has_iot: bool = False, has_ot: bool = False,
-             has_dns: bool = False) -> str:
+             has_dns: bool = False, has_content: bool = False,
+             compliance_title: str = "") -> str:
         items = [
             ("exec", "Executive Summary"),
             ("scope", "Scope & Methodology"),
         ]
         if has_inventory:
             items.append(("inventory", "Host & Service Inventory"))
+        if has_content:
+            items.append(("content-discovery", "Content Discovery"))
         if has_dns:
             items.append(("dns", "DNS Enumeration"))
         items += [
@@ -516,6 +575,8 @@ class ComplianceReportGenerator:
             items.append(("owasp-iot", "OWASP IoT Top 10 (2018) Coverage"))
         if has_ot:
             items.append(("ot-ics", "OT / ICS Security Coverage (IEC 62443)"))
+        if compliance_title:
+            items.append(("compliance", f"{compliance_title} Compliance Mapping"))
         items += [
             ("roadmap", "Remediation Roadmap"),
             ("appendix", "Appendix"),
@@ -546,8 +607,8 @@ class ComplianceReportGenerator:
                        "assessment. The environment demonstrated a strong security posture.")
         if potential_total:
             posture += (f" A further <strong>{potential_total}</strong> potential "
-                        "finding(s) — inferred from service version banners and not "
-                        "confirmed from the outside — are listed separately; verify the "
+                        "finding(s), inferred from service version banners and not "
+                        "confirmed from the outside, are listed separately; verify the "
                         "running versions (authenticated check or vendor advisory) before "
                         "treating them as present.")
 
@@ -652,6 +713,9 @@ class ComplianceReportGenerator:
             else:
                 tbl = '<p class="muted small">No open ports observed.</p>'
             meta_bits: list[str] = []
+            ip = h.get("ip") or ""
+            if ip and _looks_like_ip(ip) and ip != h.get("host"):
+                meta_bits.append(f'IP: {_esc(ip)}')
             if _device_name_label(h):
                 meta_bits.append(f'Device: {_esc(_device_name_label(h))}')
             if _device_type_label(h):
@@ -675,6 +739,56 @@ class ComplianceReportGenerator:
           address appears only for a host on the same local segment scanned with sufficient
           privileges (it is an ARP fact, so routed/remote hosts have none).</p>
           {''.join(host_blocks)}
+        </div>"""
+
+    @staticmethod
+    def _content_discovery(findings: list[dict]) -> str:
+        """Content Discovery — every interesting path directory brute-forcing found.
+
+        Consolidates the ``directory_listing`` / ``sensitive_file`` findings (the
+        200 / 3xx / 401 / 403 / … hits from the dir fuzzer) into one table — Path,
+        Status, Severity, URL — so an operator sees all discovered paths together
+        instead of scattered through the detailed findings. Renders nothing when
+        no directory hits exist. The findings themselves still appear (and are
+        scored) in the detailed section; this is an at-a-glance index.
+        """
+        _rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+        hits = [f for f in findings
+                if (f.get("vuln_type") or f.get("type") or "") in
+                ("directory_listing", "sensitive_file")]
+        if not hits:
+            return ""
+        hits.sort(key=lambda f: (
+            -_rank.get(str(f.get("severity") or "info").lower(), 0),
+            int((f.get("evidence") or {}).get("status_code") or 0),
+        ))
+        rows: list[str] = []
+        for f in hits:
+            ev = f.get("evidence") or {}
+            status = ev.get("status_code") or "—"
+            path = ev.get("path") or f.get("target") or "—"
+            m = SEVERITY_META[_sev_of(f)]
+            url = f.get("target") or ""
+            loc = ev.get("location")
+            url_cell = _esc(url)
+            if loc:
+                url_cell += f' <span class="muted small">&rarr; {_esc(loc)}</span>'
+            rows.append(
+                f'<tr><td class="small">{_esc(path)}</td>'
+                f'<td class="small">{_esc(status)}</td>'
+                f'<td><span class="pill" style="background:{m["color"]}">{m["label"]}</span></td>'
+                f'<td class="small">{url_cell}</td></tr>'
+            )
+        return f"""<div class="page section" id="content-discovery">
+          <h2>Content Discovery</h2>
+          <p>Directory and file brute-forcing discovered
+          <strong>{len(hits)}</strong> interesting path(s) — admin panels, exposed
+          files, backups, API docs and other resources returning a live status
+          code (200 / 3xx / 401 / 403 …). Each is listed below and detailed, with
+          remediation, in the Findings section.</p>
+          <table><tr><th>Path</th><th style="width:70px">Status</th>
+          <th style="width:90px">Severity</th><th>URL</th></tr>
+          {''.join(rows)}</table>
         </div>"""
 
     @staticmethod
@@ -811,7 +925,7 @@ class ComplianceReportGenerator:
             ("Severity", m["label"], False),
             ("Confirmation", _conf_pill(f), True),
             ("CVSS base (class)", cvss, False),
-            ("Contextual CVSS (temporal+environmental)", contextual, False),
+            ("Contextual CVSS", contextual, False),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—", False),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—", False),
             ("CWE", f.get("cwe") or "—", False),
@@ -839,18 +953,49 @@ class ComplianceReportGenerator:
         rem_html = (f'<div class="block-label">Remediation</div>'
                     f'<p>{self._steps_html(remediation)}</p>') if remediation else ""
 
-        # Evidence / PoC — show whichever technical artefacts exist
+        # Evidence / PoC — EVERY finding gets at least one proof block (explicit
+        # artefacts when present, else synthesised honest evidence), so no finding
+        # in the report is left without a "how this was determined".
         poc_parts = []
-        for key, label in (("payload", "Payload"), ("request", "HTTP Request"),
-                           ("response", "HTTP Response"), ("curl", "Reproduction (curl)"),
-                           ("proof", "Proof"), ("poc", "Proof of Concept")):
-            val = ev.get(key)
-            if val:
-                snippet = str(val)
-                if len(snippet) > 4000:
-                    snippet = snippet[:4000] + "\n… (truncated)"
-                poc_parts.append(f'<div class="block-label">{_esc(label)}</div><pre>{_esc(snippet)}</pre>')
+        for label, is_code, text in self._proof_blocks(f):
+            if is_code:
+                poc_parts.append(
+                    f'<div class="block-label">{_esc(label)}</div><pre>{_esc(text)}</pre>')
+            else:
+                poc_parts.append(
+                    f'<div class="block-label">{_esc(label)}</div>'
+                    f'<p>{_esc(text).replace(chr(10), "<br>")}</p>')
         poc_html = "".join(poc_parts)
+
+        # Candidate-CVE awareness table (version-undetermined "potential" finding):
+        # every CVE known for the product with its published score and the exact
+        # affected-version range it REQUIRES — full awareness, none asserted present.
+        candidates_html = ""
+        cand = ev.get("candidate_details") or []
+        if cand:
+            rows = "".join(
+                "<tr>"
+                f"<td><a href=\"https://nvd.nist.gov/vuln/detail/{_esc(str(d.get('cve','')))}\">"
+                f"{_esc(str(d.get('cve','')))}</a></td>"
+                f"<td>{_esc(_fmt_cvss(d.get('cvss')))}</td>"
+                f"<td>{_esc(str(d.get('severity','')).title())}</td>"
+                f"<td>{_esc(str(d.get('affected_versions','') or '—'))}</td>"
+                f"<td>{'public' if d.get('exploit_available') else '—'}</td>"
+                f"<td>{_esc(str(d.get('title','')))}</td>"
+                "</tr>"
+                for d in cand
+            )
+            hint = ev.get("how_to_confirm")
+            hint_html = (f'<p class="small muted">How to confirm the version: '
+                         f'{_esc(hint)}</p>') if hint else ""
+            candidates_html = (
+                '<div class="block-label">Candidate CVEs '
+                '(unverified, version not confirmed)</div>'
+                '<div class="tablewrap"><table><thead><tr>'
+                '<th>CVE</th><th>CVSS</th><th>Severity</th>'
+                '<th>Affected versions</th><th>Exploit</th><th>Description</th>'
+                f'</tr></thead><tbody>{rows}</tbody></table></div>{hint_html}'
+            )
 
         # References
         refs = ev.get("references") or f.get("references") or []
@@ -872,11 +1017,77 @@ class ComplianceReportGenerator:
             {block("Description", description)}
             {block("Impact", impact)}
             {poc_html}
+            {candidates_html}
             {rem_html}
             {refs_html}
             {block("Assessor Notes", notes)}
           </div>
         </div>"""
+
+    def _proof_blocks(self, f: dict) -> list[tuple[str, bool, str]]:
+        """Ordered proof/evidence blocks for one finding as ``(label, is_code,
+        text)`` — GUARANTEED non-empty.
+
+        Every finding in the report must show how it was determined, not just the
+        ones that carry a full HTTP transaction. Precedence:
+          1. explicit technical artefacts (payload / request / response / curl /
+             proof / poc) shown verbatim — the strongest evidence;
+          2. otherwise a synthesised, honest set: an ``Observed`` summary of the
+             non-HTTP evidence fields, the detection rationale, and a read-only
+             command that re-observes the finding (never a fabricated curl);
+          3. an absolute one-line fallback, so NO finding is proof-less.
+        Shared by the HTML and PDF reporters so both stay identical.
+        """
+        ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+        blocks: list[tuple[str, bool, str]] = []
+        for key, label in (("payload", "Payload"), ("request", "HTTP Request"),
+                           ("response", "HTTP Response"),
+                           ("curl", "Reproduction (curl)"),
+                           ("proof", "Proof"), ("poc", "Proof of Concept")):
+            val = ev.get(key)
+            if val:
+                snippet = str(val)
+                if len(snippet) > 4000:
+                    snippet = snippet[:4000] + "\n… (truncated)"
+                blocks.append((label, True, snippet))
+        if blocks:
+            return blocks
+
+        from heaven.devsecops.evidence import (  # local import avoids a cycle
+            _HTTP_EVIDENCE_KEYS,
+            _evidence_value,
+            build_repro_command,
+        )
+        _skip = _HTTP_EVIDENCE_KEYS | {
+            "candidate_details", "how_to_confirm", "signals", "reasons",
+            "fp_check_reasons", "candidate_cves", "candidate_cve_count",
+            "highest_candidate_cvss", "verification",
+        }
+        observed = [
+            f"{k.replace('_', ' ')}: {_evidence_value(v)}"
+            for k, v in (ev or {}).items()
+            if k not in _skip and v not in (None, "", [], {})
+        ]
+        if observed:
+            blocks.append(("Observed", True, "\n".join(observed[:12])))
+        reasons = (f.get("reasons") or ev.get("reasons")
+                   or f.get("fp_check_reasons") or [])
+        if reasons:
+            blocks.append(("Detection Rationale", False,
+                           "\n".join(f"• {r}" for r in reasons[:8])))
+        cmd, _note = build_repro_command(
+            f.get("vuln_type") or "", f.get("target") or "", ev)
+        if cmd:
+            blocks.append(("Reproduce (read-only)", True, cmd))
+        if not blocks:
+            vt = (f.get("vuln_type") or "issue").replace("_", " ")
+            tgt = f.get("target") or "the target"
+            blocks.append((
+                "Evidence", False,
+                f"Identified by HEAVEN's {vt} check against {tgt}. See the "
+                "description, classification and references above; this finding "
+                "class has no single-command reproduction."))
+        return blocks
 
     def _finding_cvss(self, f: dict) -> str:
         """Best per-finding CVSS base score to display (1-dp string), or '—'.
@@ -1151,6 +1362,58 @@ class ComplianceReportGenerator:
           </table>
         </div>"""
 
+    def _compliance_coverage(self, findings: list[dict], fw) -> str:
+        """Control-coverage matrix for one compliance framework.
+
+        Maps every finding onto the framework's controls (via
+        ``compliance_frameworks.covered_controls``) and renders a present /
+        not-observed matrix with linked example findings — the same visual grammar
+        as the OWASP matrix. Explicitly an evidence-coverage view, never an
+        attestation of compliance."""
+        from heaven.devsecops import compliance_frameworks as _cf
+        buckets = _cf.covered_controls(fw, findings)
+        total = len(fw.controls)
+        covered = sum(1 for cid, _ in fw.controls if buckets[cid])
+        rows = ""
+        for cid, cn in fw.controls:
+            hits = buckets[cid]
+            n = len(hits)
+            status = "Findings present" if hits else "Not observed"
+            color = "#b00020" if hits else "#1a7f37"
+            examples = ""
+            if hits:
+                worst = sorted(hits, key=lambda x: SEVERITY_META.get(
+                    _sev_of(x), {}).get("order", 4))[:4]
+                items = "".join(
+                    f"<li>{_esc(h.get('title') or h.get('vuln_type') or 'Finding')}"
+                    f" <span class='small muted'>({_esc(_sev_of(h))}"
+                    f"{' · ' + _esc(str(h.get('target'))) if h.get('target') else ''})</span></li>"
+                    for h in worst)
+                more = f"<li class='small muted'>+{n - len(worst)} more…</li>" if n > len(worst) else ""
+                examples = f"<ul class='small' style='margin:4px 0 0 16px'>{items}{more}</ul>"
+            rows += (f'<tr><td class="small">{_esc(cid)}</td>'
+                     f'<td>{_esc(cn)}{examples}</td>'
+                     f'<td style="color:{color};font-weight:600">{status}</td>'
+                     f'<td class="small">{n}</td></tr>')
+        ref = (f' <a href="{_esc(fw.reference)}" target="_blank" rel="noopener noreferrer">'
+               f'{_esc(fw.title)}</a>' if fw.reference else _esc(fw.title))
+        return f"""<div class="page section" id="compliance"><h2>{_esc(fw.title)} Compliance Mapping</h2>
+          <p class="small muted">Identified findings mapped to{ref}
+          ({_esc(fw.subtitle)}) — {covered} of {total} controls have findings providing
+          evidence of a gap in this engagement. A control marked <em>Not observed</em> had no
+          matching finding: either tested-clean, out of this scan's scope, or a
+          governance / physical / policy control this technical assessment cannot evidence.</p>
+          <p class="note">This is a <strong>control-coverage view</strong> to guide remediation
+          and audit preparation — it maps technical findings to controls and is <strong>not an
+          attestation of compliance</strong>, which requires a full audit of policy, process and
+          physical safeguards beyond the scope of an automated assessment.</p>
+          <table>
+            <tr><th style="width:120px">Control</th><th>Requirement &amp; findings</th>
+                <th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
+            {rows}
+          </table>
+        </div>"""
+
     def _roadmap(self, ordered: list[dict]) -> str:
         actionable = [f for f in ordered if _sev_of(f) in ("critical", "high", "medium")]
         if not actionable:
@@ -1161,9 +1424,9 @@ class ComplianceReportGenerator:
             m = SEVERITY_META[sev]
             ev = f.get("evidence") or {}
             action = ev.get("remediation") or f.get("remediation") or "Review and remediate per finding detail."
-            action = str(action)
-            if len(action) > 180:
-                action = action[:180] + "…"
+            # Summarise at a word boundary — a hard slice cut mid-word ("Rotate
+            # any s…"); the full remediation is in the detailed finding above.
+            action = _short(action, 220)
             rows += (f'<tr><td class="small">{i}</td>'
                      f'<td><span class="pill" style="background:{m["color"]}">{m["label"]}</span></td>'
                      f'<td>{_esc(f.get("title") or f.get("vuln_type") or "Finding")}</td>'
@@ -1182,16 +1445,16 @@ class ComplianceReportGenerator:
     @staticmethod
     def _appendix() -> str:
         gloss = [
-            ("CVSS", "Common Vulnerability Scoring System — a 0–10 severity score."),
-            ("CVSS base", "The base score — a property of the weakness class, so two findings "
+            ("CVSS", "Common Vulnerability Scoring System, a 0-10 severity score."),
+            ("CVSS base", "The base score: a property of the weakness class, so two findings "
                           "of the same class share it."),
-            ("Contextual CVSS", "The CVSS Temporal + Environmental score — the base adjusted for "
+            ("Contextual CVSS", "The CVSS Temporal plus Environmental score: the base adjusted for "
                                 "THIS finding's exploit maturity (EPSS / public exploit / CISA KEV), "
-                                "detection confidence and the asset's criticality & exposure. "
+                                "detection confidence and the asset's criticality and exposure. "
                                 "Genuinely per-finding, so it varies even within one weakness class."),
-            ("EPSS", "Exploit Prediction Scoring System — probability a vuln will be exploited."),
+            ("EPSS", "Exploit Prediction Scoring System, the probability a vuln will be exploited."),
             ("CISA KEV", "Catalog of vulnerabilities known to be actively exploited."),
-            ("CWE", "Common Weakness Enumeration — category of the underlying weakness."),
+            ("CWE", "Common Weakness Enumeration, the category of the underlying weakness."),
             ("OWASP Top 10", "The ten most critical web application security risks."),
             ("False positive", "A reported issue that is not actually exploitable."),
         ]

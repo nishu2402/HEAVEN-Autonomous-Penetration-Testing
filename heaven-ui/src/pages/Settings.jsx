@@ -7,10 +7,12 @@
 // sent back to the browser in full; we only show a masked preview + "is it set".
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Settings as SettingsApi, changePassword, getUser } from "../api";
+import { Settings as SettingsApi, Egress as EgressApi, changePassword, getUser } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import LocalAISetup from "../components/LocalAISetup.jsx";
+import AIModelPicker from "../components/AIModelPicker.jsx";
+import UpdatesPanel from "../components/UpdatesPanel.jsx";
 
 export default function Settings() {
   const [status, setStatus] = useState(null);
@@ -20,10 +22,15 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [llm, setLlm] = useState(null);          // test-llm result
   const [testing, setTesting] = useState(false);
-  const [local, setLocal] = useState(null);      // aiLocalStatus() — local runtime
+  const [local, setLocal] = useState(null);      // aiLocalStatus(), local runtime
   const [nvd, setNvd] = useState(null);          // test-nvd result
   const [testingNvd, setTestingNvd] = useState(false);
   const nvdAutoTested = useRef(false);           // run the auto-check at most once
+  // Egress / anonymity live actions (config itself is a normal settings group)
+  const [egress, setEgress] = useState(null);        // GET /api/egress snapshot
+  const [egressChk, setEgressChk] = useState(null);  // POST /api/egress/confirm result
+  const [egressBusy, setEgressBusy] = useState(false);
+  const [tunnelBusy, setTunnelBusy] = useState(false);
   // Voluntary password change (distinct from the forced-change-on-first-login flow)
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNext, setPwNext] = useState("");
@@ -62,6 +69,19 @@ export default function Settings() {
   useEffect(() => { reloadLocal(); }, [reloadLocal]);
 
   const dirtyKeys = useMemo(() => Object.keys(draft), [draft]);
+
+  // The LLM provider currently chosen (draft override wins over the saved value)
+  // — drives which model list the AI model picker shows.
+  const llmProvider = useMemo(() => {
+    if ("HEAVEN_LLM_PROVIDER" in draft) return draft.HEAVEN_LLM_PROVIDER;
+    if (!status) return "";
+    for (const g of status.groups) {
+      for (const s of g.settings) {
+        if (s.key === "HEAVEN_LLM_PROVIDER") return s.value || "";
+      }
+    }
+    return "";
+  }, [draft, status]);
 
   // Is an NVD API key actually configured? (used to proactively validate it)
   const nvdKeySet = useMemo(() => {
@@ -134,6 +154,41 @@ export default function Settings() {
     }
   }
 
+  async function loadEgress() {
+    try {
+      setEgress(await EgressApi.status());
+    } catch {
+      /* egress panel is best-effort — a load failure just hides live status */
+    }
+  }
+  useEffect(() => { loadEgress(); }, []);
+
+  async function confirmEgress() {
+    setEgressBusy(true);
+    setEgressChk(null);
+    try {
+      setEgressChk(await EgressApi.confirm());
+    } catch (e) {
+      setEgressChk({ ok: false, detail: e.message });
+    } finally {
+      setEgressBusy(false);
+    }
+  }
+
+  async function tunnel(action) {
+    setTunnelBusy(true);
+    try {
+      const res = await EgressApi.tunnel(action);
+      if (res.ok) toast.success(`Tunnel ${action}`);
+      else toast.error(`Tunnel ${action} failed`, res.error || "");
+      await loadEgress();
+    } catch (e) {
+      toast.error(`Tunnel ${action} failed`, e.message);
+    } finally {
+      setTunnelBusy(false);
+    }
+  }
+
   if (error) {
     return (
       <div className="page">
@@ -148,9 +203,9 @@ export default function Settings() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>⚙ Settings — API keys & integrations</h2>
+        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>⚙ Settings, API keys & integrations</h2>
         <p className="dim" style={{ fontSize: 12, lineHeight: 1.6 }}>
-          Everything here is <strong style={{ color: "var(--text-0)" }}>optional</strong> — HEAVEN
+          Everything here is <strong style={{ color: "var(--text-0)" }}>optional</strong>, HEAVEN
           scans, reports and the ML risk scoring all work with no keys. Add a key to unlock its
           feature (an LLM key turns on autonomous mode &amp; AI attack plans). Saved values are
           written to <code>.env</code> and applied to the running server immediately, so they
@@ -223,8 +278,8 @@ export default function Settings() {
             <span className="dim" style={{ fontSize: 12, lineHeight: 1.6 }}>
               NVD answered <code>HTTP {nvd.status_code || "404"}</code> for this key, which it
               returns for a malformed or rejected key. Because that looks identical to
-              “no vulnerabilities found,” CVE enrichment is <strong style={{ color: "var(--text-0)" }}>
-              silently degraded</strong> — scans may under-report. Replace it below with a valid
+              "no vulnerabilities found," CVE enrichment is <strong style={{ color: "var(--text-0)" }}>
+              silently degraded</strong>, scans may under-report. Replace it below with a valid
               key, or clear it (NVD still works without a key, just rate-limited).{" "}
               <a href="https://nvd.nist.gov/developers/request-an-api-key" target="_blank"
                  rel="noopener noreferrer" style={{ color: "var(--brand)" }}>
@@ -279,8 +334,14 @@ export default function Settings() {
                     ) : null}
                   </div>
 
-                  {/* Choice (dropdown) vs free text */}
-                  {s.choices && s.choices.length ? (
+                  {/* AI model → provider-aware picker (not a free-text box) */}
+                  {s.key === "HEAVEN_LLM_MODEL" ? (
+                    <AIModelPicker
+                      provider={llmProvider}
+                      value={touched ? draft[s.key] : (s.value || "")}
+                      onChange={(v) => setVal(s.key, v)}
+                    />
+                  ) : s.choices && s.choices.length ? (
                     <select
                       id={s.key}
                       value={touched ? draft[s.key] : (s.value || "")}
@@ -344,7 +405,7 @@ export default function Settings() {
                 <span style={{ marginLeft: 10, fontSize: 12,
                                color: llm.available ? "var(--ok, #46d39a)" : "var(--crit)" }}>
                   {llm.available ? "✓" : "✗"} {llm.provider ? `${llm.provider}` : "no provider"}
-                  {llm.model ? ` (${llm.model})` : ""} — {llm.reason}
+                  {llm.model ? ` (${llm.model})` : ""}, {llm.reason}
                 </span>
               ) : null}
 
@@ -371,14 +432,92 @@ export default function Settings() {
                   {nvd.sample_results != null ? ` (${nvd.sample_results} sample CVEs)` : ""}
                   {nvd.ok && nvd.rate_limit_s != null ? (
                     <span className="dim"> · {nvd.rate_limit_s}s between requests
-                      {nvd.has_key ? "" : " — add a key to go ~10× faster"}</span>
+                      {nvd.has_key ? "" : ", add a key to go ~10× faster"}</span>
                   ) : null}
                 </span>
               ) : (
                 <span className="dim" style={{ marginLeft: 10, fontSize: 11 }}>
-                  Confirms CVE enrichment will return real results — and whether your key is valid.
+                  Confirms CVE enrichment will return real results, and whether your key is valid.
                 </span>
               )}
+            </div>
+          ) : null}
+
+          {/* Updates — version status, check-now, and admin apply */}
+          {group.name === "Updates" ? (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              <UpdatesPanel />
+            </div>
+          ) : null}
+
+          {/* Egress / anonymity — live actions (leak check + WireGuard tunnel) */}
+          {group.name === "Egress / anonymity" ? (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              <div className="dim" style={{ fontSize: 11.5, lineHeight: 1.6, marginBottom: 10 }}>
+                The dashboard stays on <code>localhost</code>; only outbound <b>scan</b> traffic is
+                routed. Save your changes above first, then verify the exit path here.
+                {egress && ["socks5", "tor"].includes(egress.mode) ? (
+                  <div style={{ marginTop: 6, color: "var(--text-2)" }}>
+                    SOCKS/Tor routes nuclei, nmap (via proxychains) and in-process HTTP checks
+                    (built-in SOCKS5, no extra install). Raw SYN/UDP scans and authenticated
+                    SOCKS proxies need <b>WireGuard</b>.
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button type="button" onClick={confirmEgress} disabled={egressBusy} style={smallBtn}>
+                  {egressBusy ? "Checking…" : "Confirm egress (leak check)"}
+                </button>
+                {egress && egress.mode === "wireguard" ? (
+                  <>
+                    <button type="button" onClick={() => tunnel("up")} disabled={tunnelBusy} style={smallBtn}>
+                      {tunnelBusy ? "…" : "Tunnel up"}
+                    </button>
+                    <button type="button" onClick={() => tunnel("down")} disabled={tunnelBusy} style={smallBtn}>
+                      {tunnelBusy ? "…" : "Tunnel down"}
+                    </button>
+                  </>
+                ) : null}
+                <button type="button" onClick={loadEgress} style={linkBtn}>Refresh status</button>
+              </div>
+
+              {egressChk ? (
+                <div style={{ marginTop: 10, fontSize: 12,
+                              color: egressChk.ok ? "var(--ok, #46d39a)" : "var(--crit)" }}>
+                  {egressChk.ok ? "✓" : "✗"} {egressChk.detail}
+                  <div className="dim" style={{ marginTop: 4, fontSize: 11.5, lineHeight: 1.7 }}>
+                    Apparent public IP: <b>{egressChk.public_ip || "unknown"}</b>
+                    {"  ·  "}Direct baseline: {egressChk.baseline_ip || "unknown"}
+                    {"  ·  "}via {egressChk.via}
+                    {egressChk.mode && egressChk.mode !== "off" && !egressChk.changed ? (
+                      <div style={{ color: "var(--warn, #e0b341)", marginTop: 4 }}>
+                        ⚠ exit IP did not change vs the baseline, traffic may not be anonymised.
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {egress && egress.tunnel ? (
+                <div className="dim" style={{ marginTop: 8, fontSize: 11.5 }}>
+                  Tunnel: {egress.tunnel.up
+                    ? <span style={{ color: "var(--ok, #46d39a)" }}>up
+                        {egress.tunnel.interface ? ` (${egress.tunnel.interface})` : ""}</span>
+                    : "down"}
+                </div>
+              ) : null}
+
+              {egress && egress.tools ? (
+                <div className="dim" style={{ marginTop: 8, fontSize: 11 }}>
+                  Tools: {["wg", "wg-quick", "proxychains", "curl", "tor"].map((t) => (
+                    <span key={t} style={{ marginRight: 10,
+                      color: egress.tools[t] ? "var(--text-1)" : "var(--text-3, #6b7280)" }}>
+                      {egress.tools[t] ? "✓" : "✕"} {t}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

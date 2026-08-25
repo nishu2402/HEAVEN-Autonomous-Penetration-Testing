@@ -81,9 +81,9 @@ export default function KillChain() {
                    }} />
             </div>
             <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-1)' }}>
-              {pct > 60 ? '⚠ HIGH COVERAGE — attacker has a clear path' :
-               pct > 30 ? '⚡ PARTIAL COVERAGE — gaps exist' :
-               '✓ LOW COVERAGE — limited attack surface observed'}
+              {pct > 60 ? '⚠ HIGH COVERAGE, attacker has a clear path' :
+               pct > 30 ? '⚡ PARTIAL COVERAGE, gaps exist' :
+               '✓ LOW COVERAGE, limited attack surface observed'}
             </div>
           </div>
         </div>

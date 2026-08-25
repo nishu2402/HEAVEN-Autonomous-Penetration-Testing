@@ -150,6 +150,14 @@ async def scan_nuclei(targets: list[str], severity: str = "low,medium,high,criti
         }
         extra_args = rate_configs.get(stealth_level, rate_configs["normal"])
 
+        # Route nuclei through the configured egress (proxy/Tor). Empty under
+        # 'off'/'wireguard' — a WireGuard tunnel carries nuclei transparently.
+        try:
+            from heaven.net.egress import nuclei_proxy_args
+            proxy_args = nuclei_proxy_args()
+        except Exception:  # noqa: BLE001 — egress must never break the scan
+            proxy_args = []
+
         cmd = [
             "nuclei",
             "-l", target_file,
@@ -159,7 +167,7 @@ async def scan_nuclei(targets: list[str], severity: str = "low,medium,high,criti
             "-etags", "fuzz",
             "-c", "50",
             "-stats",
-        ] + extra_args
+        ] + proxy_args + extra_args
         
         logger.info(f"Starting Nuclei scan on {len(targets)} targets...")
         proc = await asyncio.create_subprocess_exec(

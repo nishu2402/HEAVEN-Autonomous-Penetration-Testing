@@ -159,7 +159,7 @@ export default function WatchPage() {
     if (!authorized) { setError("You must confirm written authorization before running."); return; }
     const targets = targetsText.split(/[\n,]+/).map((t) => t.trim()).filter(Boolean);
     if (!targets.length) { setError("Enter at least one target."); return; }
-    if (!engagement) { setError("Pick an engagement — the watch loop persists every run into one."); return; }
+    if (!engagement) { setError("Pick an engagement: the watch loop persists every run into one."); return; }
     const body = {
       engagement,
       ips: targets.filter((t) => !/^https?:\/\//i.test(t)),
@@ -225,7 +225,7 @@ export default function WatchPage() {
         <p className="page-lead">
           Continuous monitoring with auto-diff. Runs scans on an interval,
           diffs each against the previous, and alerts <strong>only</strong> when
-          something changes (a new or regressed finding) — no Slack spam from
+          something changes (a new or regressed finding), no Slack spam from
           unchanged re-scans. Runs in the background with <strong>live
           streaming</strong>: leave this page and come back, the loop keeps going.
         </p>
@@ -233,7 +233,7 @@ export default function WatchPage() {
         <div className="scan-form" style={{ marginBottom: 4 }}>
           <div className="form-group form-full">
             <label className="form-label" htmlFor="watch-targets">
-              Targets <span className="dim">— type a URL or IP and press Enter · or paste a list</span>
+              Targets <span className="dim">, type a URL or IP and press Enter · or paste a list</span>
             </label>
             <TargetsInput
               id="watch-targets"
@@ -262,7 +262,7 @@ export default function WatchPage() {
           </label>
           <label className="form-group">
             <span className="form-label">
-              Iterations <span className="dim">— then it stops (1–500)</span>
+              Iterations <span className="dim">, then it stops (1-500)</span>
             </span>
             <input className="form-input" type="number" min={1} max={500} value={maxIter}
                    onChange={(e) => setMaxIter(e.target.value)} />
@@ -272,7 +272,7 @@ export default function WatchPage() {
         <label className="consent-row">
           <input type="checkbox" checked={heartbeat}
                  onChange={(e) => setHeartbeat(e.target.checked)} />
-          <span>Heartbeat — alert every run (default: only on change)</span>
+          <span>Heartbeat: alert every run (default: only on change)</span>
         </label>
         <label className="consent-row">
           <input type="checkbox" checked={autoTickets}
@@ -326,7 +326,7 @@ export default function WatchPage() {
             <div style={{ marginTop: 8 }}>
               <SkeletonCard lines={2} />
               <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-                First scan running — the baseline. Alerts start from the next run.
+                First scan running, the baseline. Alerts start from the next run.
               </div>
             </div>
           )}
@@ -346,7 +346,7 @@ export default function WatchPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <h3 style={{ color: "var(--text-0)", margin: 0 }}>
               {result ? (
-                <>Watch summary — <span style={{ color: "var(--cyan)" }}>{result.stop_reason || "finished"}</span></>
+                <>Watch summary: <span style={{ color: "var(--cyan)" }}>{result.stop_reason || "finished"}</span></>
               ) : "Live iterations"}
             </h3>
             {!isRunning && <button className="btn-small" onClick={clearJob}>Clear</button>}
@@ -375,7 +375,7 @@ export default function WatchPage() {
                 {rows.map((r) => (
                   <tr key={r.n} style={r.changed ? { background: "var(--hover)" } : undefined}>
                     <td className="num">
-                      {r.n}{r.baseline ? <span className="dim" title="baseline — nothing to diff against yet"> (base)</span> : ""}
+                      {r.n}{r.baseline ? <span className="dim" title="baseline, nothing to diff against yet"> (base)</span> : ""}
                     </td>
                     <td><code>{(r.scan_id || "").slice(0, 8) || "—"}</code></td>
                     <td className="num" style={r.new ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{r.new ?? 0}</td>
@@ -415,7 +415,7 @@ export default function WatchPage() {
           <EmptyState
             icon="🔁"
             headline="No watch loop running"
-            body="Fill in the targets above and start a loop — its iterations, diffs, and alerts stream here live."
+            body="Fill in the targets above and start a loop: its iterations, diffs, and alerts stream here live."
           />
         </div>
       )}
@@ -425,7 +425,7 @@ export default function WatchPage() {
         <div className="card-title">Outgoing alert channels</div>
         <p className="dim" style={{ fontSize: 12, marginTop: 0 }}>
           Change alerts are pushed to whichever of these is configured. All are
-          optional — with none set, the loop still runs and records its diff
+          optional, with none set, the loop still runs and records its diff
           history here.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>

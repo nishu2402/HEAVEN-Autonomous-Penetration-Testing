@@ -1,33 +1,53 @@
-# HEAVEN benchmark — DVWA target stack
+# HEAVEN benchmark: DVWA target stack
 #
-# Brings up DVWA on http://localhost:8080. The image bundles MariaDB so
-# no separate DB service is needed.
+# Brings up DVWA on http://127.0.0.1:8080 with a MariaDB backend.
 #
-# Pinned to `vulnerables/web-dvwa` — the canonical DockerHub image, used
-# in every academic DVWA-based study since 2017. For reproducibility,
-# the GitHub Actions workflow resolves the @sha256 digest and pins it.
+# Image: the OFFICIAL `ghcr.io/digininja/dvwa` (maintained by DVWA's author).
+# It is a multi-arch image with a NATIVE linux/arm64 build, so on Apple Silicon
+# it runs directly instead of under QEMU. That matters for accuracy: the old
+# amd64-only `vulnerables/web-dvwa` image had to be emulated on arm64, and the
+# emulation's timing jitter made time-based blind SQLi detection unreliable
+# (a delay of a few seconds is indistinguishable from QEMU scheduling noise).
+# Running native, baselines are sub-second and the timing oracle is stable.
+# The image needs a separate database (it carries no bundled MariaDB), so this
+# stack pairs it with the official multi-arch `mariadb` image. Both run native
+# on amd64 CI too, so the benchmark is reproducible on either architecture.
 
 services:
   dvwa:
-    image: vulnerables/web-dvwa:latest
+    image: ghcr.io/digininja/dvwa:latest
     container_name: heaven-bench-dvwa
+    environment:
+      DB_SERVER: db
+      DB_DATABASE: dvwa
+      DB_USER: dvwa
+      DB_PASSWORD: p@ssw0rd
     ports:
       # SECURITY: bind to loopback ONLY. DVWA is deliberately vulnerable
       # (SQLi / command-injection → RCE, default admin/password creds). A bare
-      # "8080:80" publishes it on 0.0.0.0, so anyone on the LAN — or the
-      # internet if the host is exposed — could pop the machine running the
-      # benchmark. The benchmark only ever reaches it via localhost:8080.
+      # "8080:80" publishes it on 0.0.0.0, so anyone on the LAN (or the
+      # internet if the host is exposed) could pop the machine running the
+      # benchmark. The benchmark only ever reaches it via 127.0.0.1:8080.
       - "127.0.0.1:8080:80"
-    # This image ships neither curl nor wget (it is a 2017-era Debian build), so
-    # the obvious `CMD curl -sf …` can never run: every probe dies with
-    # `exec: "curl": executable file not found` and pins the container at
-    # "unhealthy" forever while the app serves perfectly. bash *is* present, so
-    # probe over /dev/tcp. Not CMD-SHELL — /bin/sh here is dash, which has no
-    # /dev/tcp support.
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  db:
+    image: mariadb:11
+    container_name: heaven-bench-dvwa-db
+    environment:
+      MARIADB_ROOT_PASSWORD: dvwa
+      MARIADB_DATABASE: dvwa
+      MARIADB_USER: dvwa
+      MARIADB_PASSWORD: p@ssw0rd
+    # The DB is only ever reached by the dvwa service on the compose network;
+    # it is deliberately NOT published to the host.
     healthcheck:
-      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/80; printf "GET /login.php HTTP/1.0\r\n\r\n" >&3; head -1 <&3 | grep -q "200 OK"']
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
       timeout: 3s
-      retries: 12
-      start_period: 10s
+      retries: 24
+      start_period: 15s
     restart: "no"

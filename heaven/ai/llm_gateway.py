@@ -61,6 +61,42 @@ PROVIDER_DEFAULT_MODELS = {
     "local": "",
 }
 
+# Curated model choices per provider, for the Settings model picker. Conservative
+# and current — the operator can always type a custom id (HEAVEN_LLM_MODEL takes
+# any value), so this never blocks a model, it just makes the common ones one
+# click away. The default (PROVIDER_DEFAULT_MODELS) is flagged in the UI. Ollama's
+# list is merged with the operator's actually-pulled models at request time.
+KNOWN_MODELS: dict[str, tuple[dict[str, str], ...]] = {
+    "anthropic": (
+        {"id": "claude-opus-5", "label": "Claude Opus 5", "note": "Most capable"},
+        {"id": "claude-sonnet-5", "label": "Claude Sonnet 5", "note": "Balanced — recommended"},
+        {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "note": "Fast & economical"},
+    ),
+    "openai": (
+        {"id": "gpt-4o", "label": "GPT-4o", "note": "Balanced — recommended"},
+        {"id": "gpt-4o-mini", "label": "GPT-4o mini", "note": "Fast & economical"},
+        {"id": "o3-mini", "label": "o3-mini", "note": "Reasoning, economical"},
+    ),
+    "gemini": (
+        {"id": "gemini-flash-latest", "label": "Gemini Flash (latest)",
+         "note": "Fast rolling alias — recommended"},
+        {"id": "gemini-pro-latest", "label": "Gemini Pro (latest)", "note": "Deeper reasoning"},
+    ),
+    "ollama": (
+        {"id": "qwen2.5:7b", "label": "Qwen2.5 7B", "note": "Recommended — clean JSON"},
+        {"id": "llama3.1:8b", "label": "Llama 3.1 8B", "note": "General purpose"},
+        {"id": "qwen2.5:14b", "label": "Qwen2.5 14B", "note": "Higher quality, slower"},
+        {"id": "mistral:7b", "label": "Mistral 7B", "note": "Compact"},
+    ),
+    "local": (),
+}
+
+
+def known_models(provider: str) -> list[dict[str, str]]:
+    """Curated model choices for a provider (may be empty for 'local')."""
+    return [dict(m) for m in KNOWN_MODELS.get((provider or "").lower(), ())]
+
+
 PROVIDER_KEY_ENVS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
@@ -744,6 +780,42 @@ class LLMGateway:
             return "Respond ONLY with a single JSON object. No prose, no markdown fences."
 
     @staticmethod
+    def _extract_json_object(text: str) -> Optional[str]:
+        """Return the first balanced top-level ``{...}`` object in ``text``.
+
+        Small local models (Ollama's qwen2.5, LM Studio, etc.) routinely wrap
+        the JSON in prose ("Sure, here is the verdict: {...} Hope that helps.")
+        or add trailing commentary, which strict ``json.loads`` rejects. A
+        brace-balanced scan that respects string literals recovers the object
+        without needing a full parser. Returns ``None`` when no object is found.
+        """
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        return None
+
+    @staticmethod
     def _parse_structured(text: str, schema: Type[Any]) -> Any:
         # Tolerate fenced output (```json ... ```) defensively.
         cleaned = text.strip()
@@ -752,8 +824,19 @@ class LLMGateway:
             cleaned = re.sub(r"\s*```\s*$", "", cleaned)
         try:
             data = json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            raise LLMProviderError(f"response not valid JSON: {e}") from e
+        except json.JSONDecodeError:
+            # Local/open models often surround the object with prose. Recover
+            # the first balanced {...} object rather than losing the verdict.
+            snippet = LLMGateway._extract_json_object(cleaned)
+            if snippet is None:
+                raise LLMProviderError(
+                    f"response not valid JSON and no JSON object found: "
+                    f"{cleaned[:200]!r}"
+                )
+            try:
+                data = json.loads(snippet)
+            except json.JSONDecodeError as e:
+                raise LLMProviderError(f"recovered JSON still invalid: {e}") from e
         try:
             return schema.model_validate(data)  # type: ignore[attr-defined]
         except AttributeError:
@@ -951,10 +1034,37 @@ class LLMGateway:
             "max_tokens": req.max_tokens,
             "stream": False,
         }
+        # When we need structured output, ask the OpenAI-compatible local server
+        # (Ollama, LM Studio, vLLM, LocalAI) for JSON mode. Small local models
+        # otherwise pad the JSON with prose, which the strict parser rejected —
+        # the exact cause of the "no usable verdict" FP-review failure. The
+        # robust extractor in `_parse_structured` is the safety net if a server
+        # ignores the hint.
+        if req.response_schema is not None:
+            payload["response_format"] = {"type": "json_object"}
         url = f"{self._local_base}/chat/completions"
+
+        def _post(body: dict[str, Any]) -> "httpx.Response":
+            resp = self._client.post(url, json=body)
+            resp.raise_for_status()
+            return resp
+
         try:
-            r = self._client.post(url, json=payload)
-            r.raise_for_status()
+            try:
+                r = _post(payload)
+            except httpx.HTTPStatusError as e:
+                # A few older local servers 400 on an unknown response_format.
+                # Retry once without JSON mode; the extractor still recovers the
+                # object from the model's prose-wrapped reply.
+                if e.response.status_code == 400 and "response_format" in payload:
+                    logger.debug(
+                        "local server rejected response_format; retrying without "
+                        "JSON mode"
+                    )
+                    payload.pop("response_format", None)
+                    r = _post(payload)
+                else:
+                    raise
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
                 httpx.PoolTimeout) as e:
             raise LLMProviderError(

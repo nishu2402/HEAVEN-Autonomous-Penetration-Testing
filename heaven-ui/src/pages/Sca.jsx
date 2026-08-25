@@ -31,7 +31,7 @@ export default function ScaPage() {
       // The audit just persisted into (and activated) an engagement — tell the
       // header chip and dashboard so they reflect the run without a reload.
       try { window.dispatchEvent(new Event("heaven:engagement-changed")); }
-      catch { /* non-browser — no-op */ }
+      catch { /* non-browser, no-op */ }
     }
   }, [result?.engagement_scan_id]);
 
@@ -61,7 +61,7 @@ export default function ScaPage() {
           Software Composition Analysis. Parses dependency manifests
           (<code>requirements.txt</code>, <code>package-lock.json</code>,{" "}
           <code>go.sum</code>, <code>pom.xml</code>, …) and cross-references every
-          pinned package against the OSV.dev advisory database — the feed that
+          pinned package against the OSV.dev advisory database, the feed that
           covers known-vulnerable dependencies NVD's CPE search cannot.
         </p>
 
@@ -93,7 +93,7 @@ export default function ScaPage() {
         <>
           <div className="card" style={{ marginTop: 12 }}>
             <div className="card-title">
-              Dependency audit — {result.packages} package(s) across{" "}
+              Dependency audit, {result.packages} package(s) across{" "}
               {(result.manifests || []).length} manifest(s)
               {result.engagement_scan_id && (
                 <span className="dim" style={{ marginLeft: 8 }}>
@@ -170,7 +170,7 @@ export default function ScaPage() {
           emptyState={{
             icon: "📦",
             title: "No SCA audits recorded",
-            hint: "Run an SCA audit with an engagement set — persisted audits appear here.",
+            hint: "Run an SCA audit with an engagement set: persisted audits appear here.",
           }}
         />
       </div>

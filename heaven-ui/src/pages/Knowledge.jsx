@@ -118,7 +118,7 @@ export default function KnowledgePage() {
               Fingerprint: <code>{ranking.fingerprint}</code>
             </div>
             {ranking.rankings.length === 0
-              ? <div className="dim">No data yet — run more scans first.</div>
+              ? <div className="dim">No data yet: run more scans first.</div>
               : ranking.rankings.map((r) => (
                 <div key={r.technique} style={{ marginBottom: 4 }}>
                   <span style={{ display: "inline-block", width: 220 }}>{r.technique}</span>

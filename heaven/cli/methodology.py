@@ -124,7 +124,9 @@ def coverage(engagement: str | None, standard: str | None, as_json: bool) -> Non
         eng_name = engagement or get_active_engagement() or ""
         store = EngagementStore(_engagement_db_path(engagement))
         findings = [
-            {"vuln_type": f.vuln_type, "owasp": getattr(f, "owasp", "")}
+            {"id": f.id, "vuln_type": f.vuln_type, "title": f.title,
+             "severity": f.severity, "target": f.target,
+             "owasp": getattr(f, "owasp", "")}
             for f in store.list_findings(limit=10000)
         ]
     except Exception:

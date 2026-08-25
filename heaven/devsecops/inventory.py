@@ -15,8 +15,83 @@ the whole point: an operator must be able to tell a proven fact from a guess.
 
 from __future__ import annotations
 
+import ipaddress
+import os
+import threading
 from typing import Any, Optional
 from urllib.parse import urlparse
+
+
+def looks_like_ip(value: str) -> bool:
+    """True when ``value`` is an IPv4/IPv6 literal (not a hostname)."""
+    v = (value or "").strip()
+    if not v:
+        return False
+    # Strip an IPv6 bracket/zone or a bare ``[::1]`` literal before checking.
+    if v.startswith("[") and v.endswith("]"):
+        v = v[1:-1]
+    v = v.split("%", 1)[0]
+    try:
+        ipaddress.ip_address(v)
+        return True
+    except ValueError:
+        return False
+
+
+# Resolved-IP cache so a report / assets render never re-resolves the same host,
+# and so a single unresolvable host costs one bounded lookup, not one per row.
+_IP_CACHE: dict[str, str] = {}
+_IP_CACHE_LOCK = threading.Lock()
+
+
+def _dns_resolution_enabled() -> bool:
+    """Whether render-time host→IP resolution may run.
+
+    A bare DNS A-record lookup of the *target* is core inventory data (not the
+    passive-OSINT enrichment governed by ``HEAVEN_NO_PASSIVE_INTEL``), so it is on
+    by default. Set ``HEAVEN_NO_DNS_RESOLVE=1`` on an air-gapped / offline host to
+    turn it off and keep the inventory purely to what the scan already captured.
+    """
+    return (os.environ.get("HEAVEN_NO_DNS_RESOLVE") or "").strip().lower() not in (
+        "1", "true", "yes", "on")
+
+
+def resolve_host_ip(host: str, timeout: float = 2.0) -> str:
+    """Best-effort A-record IP for a hostname; '' when it can't be resolved.
+
+    An IP literal returns itself. Resolution is cached and runs in a daemon
+    thread with a hard timeout so an unreachable DNS server can never hang a
+    report render (the daemon thread is abandoned and dies with the process).
+    """
+    h = (host or "").strip().lower()
+    if not h:
+        return ""
+    if looks_like_ip(h):
+        return h
+    with _IP_CACHE_LOCK:
+        if h in _IP_CACHE:
+            return _IP_CACHE[h]
+    if not _dns_resolution_enabled():
+        with _IP_CACHE_LOCK:
+            _IP_CACHE[h] = ""
+        return ""
+
+    import socket
+    result: dict[str, str] = {}
+
+    def _worker() -> None:
+        try:
+            result["ip"] = socket.gethostbyname(h)
+        except Exception:
+            result["ip"] = ""
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout)
+    ip = result.get("ip", "")
+    with _IP_CACHE_LOCK:
+        _IP_CACHE[h] = ip
+    return ip
 
 
 def host_key(target: str) -> str:
@@ -108,6 +183,7 @@ def device_name_label(host: dict) -> str:
         "netbios": name,
         "ptr": f"{name} (reverse DNS)",
         "passive": f"{name} (passive OSINT)",
+        "manual": f"{name} (operator-set)",
     }.get((host.get("device_name_source") or "").strip(), name)
 
 
@@ -129,6 +205,10 @@ def device_type_label(host: dict) -> str:
         return f"{dtype} (fingerprinted)"
     if src == "mac-vendor":
         return f"{dtype} (per MAC vendor)"
+    if src == "service-heuristic":
+        return f"{dtype} (inferred from services)"
+    if src == "manual":
+        return f"{dtype} (operator-set)"
     return dtype
 
 
@@ -144,9 +224,13 @@ def mac_label(host: dict) -> str:
 # ── internal ────────────────────────────────────────────────────────────────
 
 _OS_SOURCE_RANK = {"": 0, "heuristic": 1, "nmap": 2}
-# How much to trust each device-name / device-type source (higher = better).
-_DEVICE_NAME_RANK = {"": 0, "passive": 1, "ptr": 2, "netbios": 3}
-_DEVICE_TYPE_RANK = {"": 0, "mac-vendor": 1, "nmap": 2}
+# How much to trust each device-name / device-type source (higher = better). An
+# operator-set value ("manual") outranks everything — the human is authoritative.
+# A service-heuristic type is a role inferred from open ports, weaker than a
+# MAC-vendor maker hint, which is weaker than an nmap -O classification.
+_DEVICE_NAME_RANK = {"": 0, "passive": 1, "ptr": 2, "netbios": 3, "manual": 4}
+_DEVICE_TYPE_RANK = {"": 0, "service-heuristic": 1, "mac-vendor": 2, "nmap": 3,
+                     "manual": 4}
 
 
 def _port_dict(p: Any) -> Optional[dict]:
@@ -256,6 +340,34 @@ def _merge_device_identity(node: dict, asset: dict) -> None:
             node["device_type_source"] = (asset.get("device_type_source") or "").strip()
 
 
+def merge_host_labels(assets: Optional[list], labels: Optional[dict]) -> list[dict]:
+    """Overlay operator-set device labels onto raw host asset dicts, in place.
+
+    ``labels`` is ``{bare_host: {device_name, device_type, notes}}`` from
+    :meth:`heaven.engagement.EngagementStore.get_host_labels`. For every asset
+    whose host matches a label, the operator's name/type are written with
+    ``*_source='manual'`` so :func:`normalize_assets` ranks them above any
+    scan-inferred value. Applied at the single point both the Assets view and the
+    report read raw assets, so a manually-set name/type shows up everywhere.
+    Returns the (same) list for convenience; a no-op when there are no labels.
+    """
+    if not assets or not labels:
+        return assets or []
+    for a in assets:
+        if not isinstance(a, dict):
+            continue
+        lbl = labels.get(host_key(a.get("ip") or a.get("host") or ""))
+        if not lbl:
+            continue
+        if lbl.get("device_name"):
+            a["device_name"] = lbl["device_name"]
+            a["device_name_source"] = "manual"
+        if lbl.get("device_type"):
+            a["device_type"] = lbl["device_type"]
+            a["device_type_source"] = "manual"
+    return assets
+
+
 def normalize_assets(assets: Optional[list]) -> list[dict]:
     """Merge raw host asset dicts into a clean per-host inventory.
 
@@ -277,7 +389,7 @@ def normalize_assets(assets: Optional[list]) -> list[dict]:
             continue
         node = hosts.get(key)
         if node is None:
-            node = {"host": key, "ip": key, "os": "", "os_source": "",
+            node = {"host": key, "ip": key, "hostname": "", "os": "", "os_source": "",
                     "os_accuracy": 0, "alive": False, "ports": {},
                     "honeypot_indicators": [],
                     "mac_address": "", "mac_vendor": "",
@@ -285,6 +397,17 @@ def normalize_assets(assets: Optional[list]) -> list[dict]:
                     "device_type": "", "device_type_source": "",
                     "web_components": {}}
             hosts[key] = node
+        # Capture a real IP whenever an asset supplies one, so a hostname target
+        # (a website / webapp scan) still records the address it resolved to.
+        aip = (a.get("ip") or "").strip()
+        if aip and looks_like_ip(aip):
+            node["ip"] = aip
+        # Preserve a hostname label separately: when an asset carries both a name
+        # and an IP the dedup key is the IP, but the row should still show the
+        # domain that was scanned (not just the address).
+        rawhost = host_key(a.get("host") or "")
+        if rawhost and not looks_like_ip(rawhost) and not node.get("hostname"):
+            node["hostname"] = rawhost
         _merge_os(node, a)
         _merge_device_identity(node, a)
         node["alive"] = node["alive"] or bool(a.get("is_alive"))
@@ -312,6 +435,18 @@ def normalize_assets(assets: Optional[list]) -> list[dict]:
 
     out: list[dict] = []
     for node in hosts.values():
+        # Prefer the hostname as the display label when one was captured (a
+        # website/webapp scan keyed by its resolved IP still shows its domain).
+        hostname = node.pop("hostname", "")
+        if hostname:
+            node["host"] = hostname
+        # When the host is a hostname (website / webapp target) and no scan
+        # supplied a numeric address, resolve its A record so the report and the
+        # Assets view show the IP too — not just the domain.
+        if not looks_like_ip(node["ip"]):
+            resolved = resolve_host_ip(node["host"])
+            if resolved:
+                node["ip"] = resolved
         ports = sorted(node["ports"].values(), key=lambda x: (x["port"], x["protocol"]))
         node = dict(node)
         node["ports"] = ports
@@ -404,7 +539,12 @@ def render_markdown(assets: Optional[list], *, already_normalized: bool = False)
     lines = ["## Host & Service Inventory", "", note, ""]
     for h in inv:
         os_txt = h.get("os_label") or "OS not determined"
-        header = [f"### {h['host']}", f"**OS:** {os_txt}"]
+        header = [f"### {h['host']}"]
+        # Show the resolved IP when the host is a name (website/webapp target) and
+        # it differs from the address — so the reader sees exactly what was hit.
+        if h.get("ip") and looks_like_ip(h["ip"]) and h["ip"] != h["host"]:
+            header.append(f"**IP:** {h['ip']}")
+        header.append(f"**OS:** {os_txt}")
         if h.get("device_name_label"):
             header.append(f"**Device:** {h['device_name_label']}")
         if h.get("device_type_label"):

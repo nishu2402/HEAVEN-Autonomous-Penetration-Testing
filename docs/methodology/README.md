@@ -1,4 +1,4 @@
-# HEAVEN — Methodology & Framework Mapping
+# HEAVEN: Methodology & Framework Mapping
 
 HEAVEN's scanners are mapped against the pen-testing methodologies **and** the
 compliance/control frameworks a publication-grade tool is expected to address.
@@ -34,12 +34,12 @@ via `heaven mitre-report`.
 
 Each doc contains a table of (standard control / test ID) → (HEAVEN detector
 module that provides evidence for it). When HEAVEN can **not** evidence a
-control from a network or credentialed scan, the row says so explicitly —
+control from a network or credentialed scan, the row says so explicitly, 
 `(manual)` for endpoint/host tests, `(organizational)` for governance and
 policy controls, `(physical)` for physical controls. **Coverage is never
 fabricated.** This is so:
 
-- Auditors can see coverage — and its honest limits — at a glance.
+- Auditors can see coverage, and its honest limits, at a glance.
 - Operators know which sections they still have to cover manually.
 - Reviewers can confirm the tool isn't padding claims.
 
@@ -55,8 +55,8 @@ summary counts are computed from the rows, so they can't drift from the detail.
 ## How to update
 
 When you add a new scanner module, edit the relevant row(s) so the coverage
-cell names the module's basename (the token the live overlay matches on), and —
-if the detector emits a new `vuln_type` — add it to `VULN_MODULE` in
+cell names the module's basename (the token the live overlay matches on), and, 
+if the detector emits a new `vuln_type`, add it to `VULN_MODULE` in
 `heaven/methodology.py` so the row lights up. Control↔detector binding requires
 human judgment, so the tables themselves are hand-maintained; only the summary
 counts and the live overlay are automated.

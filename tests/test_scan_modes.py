@@ -136,6 +136,10 @@ def _fake_aiohttp_session(fingerprint: dict, login: dict | None = None):
         async def text(self, errors="ignore"): return self._s.get("text", "")
 
     class _Session:
+        # Accept (and ignore) any ClientSession constructor kwargs — real aiohttp
+        # takes connector/timeout/trace_configs/etc., and HEAVEN now attaches the
+        # per-target throttle as a trace_config on every session.
+        def __init__(self, *a, **k): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
         def get(self, url, **kw):

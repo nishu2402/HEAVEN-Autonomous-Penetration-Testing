@@ -150,3 +150,81 @@ def test_live_feed_version_confirmed_hit_emitted_individually():
     assert len(hits) == 1
     assert hits[0]["vuln_type"] == "vulnerable_service"
     assert hits[0]["confidence"] == 0.85
+
+
+# ── 4. Old-version live-feed fallback (`not inline_cves`, not `product not in DB`) ─
+def test_live_feed_fires_for_known_product_unmatched_old_version():
+    """A product that IS in the inline DB but whose observed version matches NONE
+    of its inline CVEs (ancient Apache 1.3.42 against a DB of 2.2/2.4 entries) must
+    STILL fall through to the live feed. Gating the fallback on the product key
+    alone silently dropped these decade-old services — they got neither an inline
+    hit nor a live lookup, so their era-appropriate CVE was never found."""
+    consulted: dict = {}
+
+    class Feed:
+        available = True
+
+        async def discover_for_service(self, service, banner="", version=""):
+            consulted["service"] = service
+            consulted["version"] = version
+            return [_FakeLiveCVE("CVE-2002-0392", 7.5, True)]  # Apache 1.3 chunked-encoding RCE
+
+    host = {"host": "10.0.0.7", "open_ports": [
+        {"port": 80, "service": "http", "banner": "Apache/1.3.42",
+         "version": "1.3.42", "product": "Apache httpd"},
+    ]}
+    out = asyncio.run(CM.map_vulnerabilities([host], nvd_client=None,
+                                             live_feed=Feed(), max_live_lookups=5))
+    assert consulted.get("service") == "apache_http_server"
+    assert consulted.get("version") == "1.3.42"
+    assert any(v.get("cve") == "CVE-2002-0392" for v in out)
+
+
+def test_live_feed_skipped_when_inline_version_matches():
+    """When the inline DB DID match the observed version, inline stays
+    authoritative and the live feed is NOT consulted (no double-reporting)."""
+    called = {"v": False}
+
+    class Feed:
+        available = True
+
+        async def discover_for_service(self, service, banner="", version=""):
+            called["v"] = True
+            return [_FakeLiveCVE("CVE-9999-0001", 9.9, True)]
+
+    host = {"host": "10.0.0.7", "open_ports": [
+        {"port": 21, "service": "ftp", "banner": "220 (vsFTPd 2.3.4)",
+         "version": "2.3.4", "product": "vsftpd"},
+    ]}
+    out = asyncio.run(CM.map_vulnerabilities([host], nvd_client=None,
+                                             live_feed=Feed(), max_live_lookups=5))
+    assert called["v"] is False
+    assert any(v.get("cve") == "CVE-2011-2523" for v in out)   # inline hit stands
+    assert not any(v.get("cve") == "CVE-9999-0001" for v in out)
+
+
+# ── 5. MySQL Connector/J CVE is not a server finding ─────────────────────────
+def test_mysql_server_never_flags_connectorj_cve():
+    """CVE-2021-2471 is a MySQL Connector/J (JDBC client) CVE. HEAVEN only ever
+    fingerprints the server (port 3306), so it must never appear on a MySQL host."""
+    assert "CVE-2021-2471" not in {r.cve_id for r in lookup_inline_cves("mysql", "8.0.20")}
+
+
+# ── 6. Samba banner fingerprinting + era-appropriate CVE scoping ─────────────
+def test_samba_banner_fingerprints_with_version():
+    assert CM._fingerprint_from_banner("Samba smbd 3.0.20-Debian") == ("samba", "3.0.20")
+    assert CM._fingerprint_from_banner("Samba smbd 4.15.13-Ubuntu") == ("samba", "4.15.13")
+
+
+def test_samba_3020_gets_usermap_rce_not_modern_cves():
+    ids = {r.cve_id for r in lookup_inline_cves("samba", "3.0.20")}
+    assert "CVE-2007-2447" in ids          # username-map-script RCE — era-appropriate
+    assert "CVE-2017-7494" not in ids      # SambaCry needs >=3.5.0
+    assert "CVE-2020-1472" not in ids      # Zerologon is a 4.x AD-DC bug
+
+
+def test_samba_zerologon_scoped_to_vulnerable_ad_dc_range():
+    # 4.0–4.7 vulnerable by default; 4.8+ ships a secure schannel; 3.0.x has no DC.
+    assert "CVE-2020-1472" in {r.cve_id for r in lookup_inline_cves("samba", "4.5.0")}
+    assert "CVE-2020-1472" not in {r.cve_id for r in lookup_inline_cves("samba", "4.15.13")}
+    assert "CVE-2020-1472" not in {r.cve_id for r in lookup_inline_cves("samba", "3.0.20")}

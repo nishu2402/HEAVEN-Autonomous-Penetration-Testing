@@ -1090,25 +1090,40 @@ class WebAnomalyProbe:
         variants.extend(["..\\..\\..\\windows\\system32\\drivers\\etc\\hosts",
                          "....//....//....//etc/passwd"])
 
-        indicators = ["root:x:0", "daemon:x:", "/bin/bash", "/bin/sh",
-                       "localhost", "# Copyright"]  # Windows hosts file
+        # Only STRUCTURAL file signatures count as proof, never a bare word. The
+        # old indicators included "localhost" and "/bin/sh", which appear in
+        # ordinary pages (READMEs, help text, DVWA's own instructions), so the
+        # traversal payload was reflected onto a normal 200 page and the word
+        # "localhost" alone declared a high-severity read that never happened.
+        # A real /etc/passwd exposes the `name:x:uid:gid:` line shape; a real
+        # Windows hosts file maps an IP to a hostname on one line.
+        import re
+        passwd_re = re.compile(r"^[a-z_][a-z0-9_-]*:[^:\n]*:\d+:\d+:", re.M)
+        win_hosts_re = re.compile(r"^\s*\d{1,3}(?:\.\d{1,3}){3}\s+\S", re.M)
+
+        def _leak_signal(body: str) -> str:
+            if "root:x:0:0:" in body or ("daemon:" in body and passwd_re.search(body)):
+                return "etc_passwd"
+            if win_hosts_re.search(body) and "localhost" in body.lower():
+                return "windows_hosts"
+            return ""
 
         try:
             for payload in variants[:6]:
                 async with session.request(method, url, params={param: payload},
                                             timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                     body = await resp.text()
-                    for indicator in indicators:
-                        if indicator in body:
-                            return AnomalyCandidate(
-                                target=url, category="path_traversal",
-                                confidence=0.9, severity="high",
-                                description=f"Path traversal on param '{param}' — file contents exposed",
-                                evidence={"param": param, "payload": payload,
-                                          "indicator": indicator},
-                                remediation="Validate and sanitise file paths. Use chroot or path canonicalisation.",
-                                cwe_id="CWE-22", technique="path_traversal_fuzzing",
-                            )
+                    signal = _leak_signal(body)
+                    if signal:
+                        return AnomalyCandidate(
+                            target=url, category="path_traversal",
+                            confidence=0.9, severity="high",
+                            description=f"Path traversal on param '{param}' — file contents exposed",
+                            evidence={"param": param, "payload": payload,
+                                      "indicator": signal},
+                            remediation="Validate and sanitise file paths. Use chroot or path canonicalisation.",
+                            cwe_id="CWE-22", technique="path_traversal_fuzzing",
+                        )
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
         return None
@@ -1187,15 +1202,22 @@ class WebAnomalyProbe:
                 except Exception:
                     logger.debug("suppressed non-fatal exception", exc_info=True)
                     continue
+                # The canary must land in a SECURITY-SENSITIVE position: a redirect
+                # Location built from the header, or an absolute URL / link
+                # attribute in the body. A host merely DISPLAYED in the page
+                # (phpinfo's HTTP_HOST, a debug dump) is not exploitable, and
+                # matching a bare occurrence flagged every such page.
                 in_location = canary in location
-                if in_location or canary in body:
+                in_url_context = (f"//{canary}" in body
+                                  or f'="{canary}' in body or f"='{canary}" in body)
+                if in_location or in_url_context:
                     candidates.append(AnomalyCandidate(
                         target=url, category="host_header_injection",
                         confidence=0.85, severity="medium",
                         description=(f"Host-header injection — injected host '{canary}' "
-                                     f"was reflected via the {hdr} header"),
+                                     f"was used to build a redirect or link via the {hdr} header"),
                         evidence={"header": hdr, "canary": canary,
-                                  "reflected_in": "location" if in_location else "body",
+                                  "reflected_in": "location" if in_location else "body_url",
                                   "signals": ["injected_host_reflected"]},
                         remediation="Validate the Host header against an allow-list; never "
                                     "build absolute URLs from client-supplied host headers.",

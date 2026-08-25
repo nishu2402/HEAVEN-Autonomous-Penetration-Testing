@@ -22,6 +22,7 @@ attacker-favourable behaviour, never on the mere absence of a "good" value.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import base64
 import binascii
@@ -682,7 +683,13 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
 
     seen: set[str] = set()
     unique: list[str] = []
-    for u in urls:
+    # Probe parameter-bearing URLs first. The per-URL checks that actually read a
+    # query parameter — open redirect especially — can only fire on a URL that
+    # carries one, so a large crawl of parameterless pages must not push the few
+    # vulnerable param URLs past the cap. Stable sort keeps crawl order within
+    # each group.
+    prioritised = sorted(urls, key=lambda u: 0 if urlparse(u).query else 1)
+    for u in prioritised:
         key = u.split("#", 1)[0]
         if key in seen:
             continue
@@ -695,7 +702,7 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
     conn = aiohttp.TCPConnector(ssl=False, limit=15)
     client_timeout = aiohttp.ClientTimeout(total=timeout)
     headers = {"User-Agent": "Mozilla/5.0 (compatible; HEAVEN-Misconfig/1.0)"}
-    async with aiohttp.ClientSession(connector=conn, timeout=client_timeout,
+    async with _egress_cs(connector=conn, timeout=client_timeout,
                                      headers=headers) as session:
         sem = asyncio.Semaphore(8)
 

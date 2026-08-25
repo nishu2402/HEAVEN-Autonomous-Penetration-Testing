@@ -1,4 +1,4 @@
-# HEAVEN Benchmark — How to Produce Real Numbers
+# HEAVEN Benchmark: How to Produce Real Numbers
 
 The framework is shipped (`tests/benchmarks/`). What's missing is the
 actual `tests/benchmarks/reports/dvwa_aggregated.md` with measured
@@ -35,10 +35,10 @@ heaven --version             # 1.0+
 ```bash
 cd /path/to/HEAVEN-Autonomous-Penetration-Testing
 
-# Single run — fastest, no stddev
+# Single run: fastest, no stddev
 HEAVEN_RUN_BENCHMARKS=1 pytest tests/benchmarks/test_dvwa_baseline.py -v -s
 
-# Production-grade — 5 runs, real mean ± stddev
+# Production-grade: 5 runs, real mean ± stddev
 HEAVEN_RUN_BENCHMARKS=1 HEAVEN_BENCH_RUNS=5 \
     pytest tests/benchmarks/test_dvwa_baseline.py -v -s
 ```
@@ -47,13 +47,13 @@ What happens:
 
 1. `docker compose up -d` brings DVWA up on port 8080
 2. DVWA's setup.php is initialised automatically
-3. `heaven scan` runs N times against `http://localhost:8080`
+3. `heaven scan` runs N times against `http://127.0.0.1:8080`
 4. Each run's findings are matched against `tests/benchmarks/ground_truth/dvwa.yaml`
 5. Precision, recall, F1 are computed per category + aggregate
 6. Reports are written to `tests/benchmarks/reports/`
 7. `docker compose down -v` tears down DVWA
 
-Expected runtime: 5–10 minutes for N=5 runs.
+Expected runtime: 5-10 minutes for N=5 runs.
 
 ---
 
@@ -74,7 +74,7 @@ tests/benchmarks/reports/
 The aggregated file looks like:
 
 ```markdown
-# Benchmark — HEAVEN vs. DVWA (aggregated)
+# Benchmark: HEAVEN vs. DVWA (aggregated)
 
 Aggregated over **5** runs. Mean scan duration: 38.2s ± 4.1s.
 
@@ -98,14 +98,14 @@ Aggregated over **5** runs. Mean scan duration: 38.2s ± 4.1s.
 | open_redirect | 50.0% |
 ```
 
-(numbers above are illustrative — yours will differ)
+(numbers above are illustrative, yours will differ)
 
 ---
 
 ## 3 · Publish the numbers
 
 Fold the headline metrics into [`docs/BENCHMARK_RESULTS.md`](BENCHMARK_RESULTS.md)
-— the file the README's **Benchmark** row links to — then commit
+, the file the README's **Benchmark** row links to, then commit
 `dvwa_aggregated.md` so the GitHub Actions benchmark workflow has a
 baseline to diff future runs against.
 
@@ -142,7 +142,7 @@ EOF
 
 Open the resulting `*_run1_gt_coverage.csv` files in a spreadsheet,
 add a column per scanner, pivot on `detected`. The interesting cells
-are the asymmetries — "HEAVEN caught this; Burp didn't" and vice versa.
+are the asymmetries, "HEAVEN caught this; Burp didn't" and vice versa.
 
 Populate the empirical-numbers table in
 [docs/COMPARISON.md](COMPARISON.md) from this data.
@@ -161,31 +161,34 @@ workflow will:
 4. Comment on the latest commit with the headline numbers
 5. Upload the full reports as a 90-day artifact
 
-Treat any regression of more than 5% recall as a P0 — open an issue
+Treat any regression of more than 5% recall as a P0, open an issue
 immediately.
 
 ---
 
-## Honest caveat: DVWA authenticated scanning
+## DVWA authenticated scanning
 
-Most of DVWA's vulnerable endpoints live under `/vulnerabilities/*`
-which require login. HEAVEN's `--cookie-file` flag makes this work,
-but the benchmark fixture doesn't yet auto-login by default — so your
-first run will show low recall (single digits).
+Most of DVWA's vulnerable endpoints live under `/vulnerabilities/*`, behind a
+login, and DVWA serves them at the "impossible" security level unless a
+`security=low` cookie says otherwise. The benchmark fixture
+(`tests/benchmarks/conftest.py`) handles all of this for you: it initialises the
+database (POSTs `/setup.php`), logs in as admin/password (scraping DVWA's
+anti-CSRF `user_token` first), and hands the scan a cookie jar carrying the
+session cookie plus `security=low`. So the command above measures the real
+authenticated recall (100%, 10 / 10 required classes) with no manual steps.
 
-To get the real numbers:
+To scan DVWA by hand instead of through the fixture, mirror what
+`_authenticate_dvwa` in that file does, and reach the target over `127.0.0.1`,
+not `localhost`: the image sets its session cookie with `domain=localhost`, which
+Python's cookie jar drops, so a `localhost` scan silently loses the session. Once
+you have a cookie file carrying `PHPSESSID` and `security=low`:
 
 ```bash
-# 1. Log into DVWA manually:
-curl -c /tmp/dvwa.cookies -d "username=admin&password=password" \
-    http://localhost:8080/login.php
-
-# 2. Hand the cookie jar to HEAVEN:
-heaven scan -u http://localhost:8080/vulnerabilities/ \
+heaven scan -u http://127.0.0.1:8080/vulnerabilities/ \
     --cookie-file /tmp/dvwa.cookies \
     --i-have-authorization
 ```
 
-The benchmark fixture (`tests/benchmarks/conftest.py`) has a TODO to
-automate this. Recall numbers without auth typically come in around
-15–20%; with auth they climb to 70–90%. Document which you used.
+Without auth the scan only reaches DVWA's public login page and recall is single
+digits; with auth it reaches the full `/vulnerabilities/*` surface. Document which
+you used.

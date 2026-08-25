@@ -202,7 +202,7 @@ export default function AutonomousPage() {
           Iterative observe → plan → act loop. The LLM-driven planner picks
           the next action each iteration; falls back to a deterministic
           rule-based playbook when no <code>ANTHROPIC/OPENAI/GEMINI</code> key
-          is set. Runs in the background with <strong>live streaming</strong> —
+          is set. Runs in the background with <strong>live streaming</strong>, 
           you can leave this page and come back; the run keeps going.
         </p>
         <pre className="cli-block" style={{ marginBottom: 14 }}>{`heaven autonomous -t <target> --engagement <name> --max-iterations 8 --i-have-authorization`}</pre>
@@ -210,7 +210,7 @@ export default function AutonomousPage() {
         <div className="scan-form" style={{ marginBottom: 4 }}>
           <div className="form-group form-full">
             <label className="form-label" htmlFor="auto-targets">
-              Targets <span className="dim">— type a URL or IP and press Enter · or paste a list</span>
+              Targets <span className="dim">, type a URL or IP and press Enter · or paste a list</span>
             </label>
             <TargetsInput
               id="auto-targets"
@@ -289,7 +289,7 @@ export default function AutonomousPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <h3 style={{ color: "var(--text-0)", margin: 0 }}>
               {result ? (
-                <>Run summary — <span style={{ color: "var(--cyan)" }}>{result.stop_reason}</span></>
+                <>Run summary: <span style={{ color: "var(--cyan)" }}>{result.stop_reason}</span></>
               ) : "Live progress"}
             </h3>
             {!isRunning && <button className="btn-small" onClick={clearJob}>Clear</button>}

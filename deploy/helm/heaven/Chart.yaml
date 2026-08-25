@@ -4,8 +4,8 @@ description: |
   HEAVEN — Autonomous penetration-testing framework with AI-driven attack-chain
   planning, continuous monitoring, SAST/DAST, and ticketing integration.
 type: application
-version: 3.0.0           # chart version (SemVer)
-appVersion: "3.0.0"      # HEAVEN application version
+version: 3.1.0           # chart version (SemVer)
+appVersion: "3.1.0"      # HEAVEN application version
 
 keywords:
   - security

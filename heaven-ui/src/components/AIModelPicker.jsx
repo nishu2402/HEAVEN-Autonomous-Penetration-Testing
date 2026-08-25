@@ -159,8 +159,8 @@ export default function AIModelPicker({ provider, value, onChange }) {
   );
 }
 
-const _PROVIDER_ORDER = ["anthropic", "openai", "gemini", "ollama"];
+const _PROVIDER_ORDER = ["anthropic", "openai", "gemini", "deepseek", "ollama"];
 const _PROVIDER_LABELS = {
   anthropic: "Anthropic (Claude)", openai: "OpenAI (GPT)",
-  gemini: "Google Gemini", ollama: "Ollama (local)",
+  gemini: "Google Gemini", deepseek: "DeepSeek", ollama: "Ollama (local)",
 };

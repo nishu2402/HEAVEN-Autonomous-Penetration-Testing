@@ -9,7 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0]: 2026-08-25
+
 ### Added
+
+- **DeepSeek is now a first-class LLM provider.** Set `HEAVEN_LLM_PROVIDER=deepseek`
+  and `DEEPSEEK_API_KEY` to route the AI layers (autonomous mode, attack plans, LLM
+  false-positive review, chat, remediation) through DeepSeek's OpenAI-compatible
+  Chat Completions API. It rides HEAVEN's built-in HTTP client, so there is no
+  extra SDK to install; the default model is `deepseek-chat` (`deepseek-reasoner`
+  is also offered in the model picker), the base URL defaults to
+  `https://api.deepseek.com` and is overridable with `DEEPSEEK_BASE_URL`. The key
+  is sent only as an `Authorization` header and never logged; auto-detection,
+  the Settings provider dropdown, the model picker, `heaven init`, the deterministic
+  no-key fallback, and the rate-limit circuit breaker all recognize it. The LLM
+  stays advisory: HEAVEN's deterministic scanners remain the source of truth.
+
+- **True one-command install.** `scripts/install.sh` and `scripts/install.ps1` now
+  self-bootstrap: run them straight from a pipe with no prior clone
+  (`curl -fsSL <raw>/scripts/install.sh | bash` on macOS/Linux,
+  `irm <raw>/scripts/install.ps1 | iex` on Windows) and the installer clones the
+  repo (into `./HEAVEN-Autonomous-Penetration-Testing`, override with `HEAVEN_DIR`)
+  and re-execs itself from inside it. Run from an existing checkout it is a no-op,
+  so the documented `git clone` + `./scripts/install.sh` flow is unchanged. From
+  there the installer still does the whole job unattended: virtualenv, every
+  runtime dependency, the external scanner tools, the web UI, and a ready-to-use
+  `.env`.
 
 - **Methodology coverage now links to the findings that exercised each test.**
   The Methodology page's live overlay already flagged which standard tests an
@@ -149,6 +174,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the detailed findings, and a 3xx hit records where it redirects.
 
 ### Fixed
+
+- **CI is green again: mypy, the unit-test matrix, and the Docker image build.**
+  Three real `mypy` errors were fixed (a dynamic `TraceConfig` marker in
+  `heaven/net/throttle.py`, and a variable-type clash in the AI-layer endpoint in
+  `heaven/api/server.py`). A flaky unit test (`test_update_apply_runs_and_reports`,
+  failing only on the loaded 3.11 runner) traced to a real bug: the web "Update
+  now" background task was launched with `asyncio.create_task(...)` **without
+  keeping a reference**, so under GC pressure it could be collected mid-flight and
+  cancelled, leaving the apply reporting `done` but not `ok`. The apply task (and
+  the replay-scan task, which had the same latent bug) now hold a strong reference
+  until completion, matching the pattern the scan/autonomous/watch tasks already
+  use. With the test job passing, the Docker image build (which `needs` it) no
+  longer skips.
 
 - **IP addresses are shown for website / webapp targets, in the report and the
   Assets view.** When the target was a hostname the inventory only ever showed the

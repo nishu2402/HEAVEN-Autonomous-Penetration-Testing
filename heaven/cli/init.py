@@ -177,18 +177,23 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
            "Press Enter to skip.[/dim]")
     _print("  [dim]Get a key:  Gemini (free) https://aistudio.google.com/apikey"
            "  ·  Anthropic https://console.anthropic.com"
-           "  ·  OpenAI https://platform.openai.com/api-keys[/dim]")
-    provider = _prompt("Provider [anthropic/openai/gemini] (Enter to skip)",
+           "  ·  OpenAI https://platform.openai.com/api-keys"
+           "  ·  DeepSeek https://platform.deepseek.com/api_keys[/dim]")
+    provider = _prompt("Provider [anthropic/openai/gemini/deepseek] (Enter to skip)",
                        default=existing.get("HEAVEN_LLM_PROVIDER", ""),
                        allow_empty=True).lower().strip()
-    if provider in ("anthropic", "openai", "gemini"):
+    if provider in ("anthropic", "openai", "gemini", "deepseek"):
         values["HEAVEN_LLM_PROVIDER"] = provider
         key_var = {"anthropic": "ANTHROPIC_API_KEY",
                    "openai": "OPENAI_API_KEY",
-                   "gemini": "GEMINI_API_KEY"}[provider]
+                   "gemini": "GEMINI_API_KEY",
+                   "deepseek": "DEEPSEEK_API_KEY"}[provider]
+        # DeepSeek is OpenAI-compatible over httpx (a base dependency), so unlike
+        # the other clouds it needs no extra SDK install.
         pip_pkg = {"anthropic": "anthropic",
                    "openai": "openai",
-                   "gemini": "google-genai"}[provider]
+                   "gemini": "google-genai",
+                   "deepseek": ""}[provider]
         api_key = _prompt(f"{key_var}",
                           default=existing.get(key_var, ""),
                           hide=True, allow_empty=True)
@@ -198,7 +203,11 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
         # plain-text fallback) both treat the square brackets as markup and
         # eat them, so it rendered as `pip install -e "."`. The plain package
         # name is unambiguous and is all the user needs.
-        _print(f"  [dim]Install the SDK:  [cyan]pip install {pip_pkg}[/cyan][/dim]")
+        if pip_pkg:
+            _print(f"  [dim]Install the SDK:  [cyan]pip install {pip_pkg}[/cyan][/dim]")
+        else:
+            _print("  [dim]No extra SDK needed. DeepSeek uses the built-in HTTP "
+                   "client.[/dim]")
 
     # ── Optional: API keys & integrations (recon / alerting / SIEM / ticketing) ──
     # This is the wizard's API-key setup. It's driven by the shared settings

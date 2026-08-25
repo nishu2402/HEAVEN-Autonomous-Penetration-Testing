@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
+from heaven import __version__
 from heaven.utils.logger import get_logger
 
 logger = get_logger("devsecops.aggregator")
@@ -22,7 +23,7 @@ def compile_json_report(scan_data: dict, output_path: Optional[str] = None) -> d
         "schema_version": "1.0",
         "tool": {
             "name": "HEAVEN",
-            "version": "3.0.0",
+            "version": __version__,
             "author": "Nisarg Chasmawala (Shroff)"
         },
         "scan_id": scan_data.get("scan_id", str(uuid4())),

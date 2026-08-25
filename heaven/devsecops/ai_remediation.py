@@ -47,7 +47,8 @@ class AIRemediationEngine:
         if not self.available:
             logger.warning(
                 "AI Remediation gateway unavailable — set ANTHROPIC_API_KEY, "
-                "OPENAI_API_KEY, or GEMINI_API_KEY (and install the matching SDK)."
+                "OPENAI_API_KEY, GEMINI_API_KEY, or DEEPSEEK_API_KEY (and install "
+                "the matching SDK; DeepSeek needs none)."
             )
 
     def generate_patch(self, vuln: dict[str, Any]) -> str:

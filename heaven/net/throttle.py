@@ -310,7 +310,7 @@ def throttle_trace_config() -> Optional[Any]:
     tc.on_request_start.append(on_request_start)
     tc.on_request_end.append(on_request_end)
     tc.on_request_exception.append(on_request_exception)
-    tc._heaven_throttle = True   # marker so we never double-install
+    setattr(tc, "_heaven_throttle", True)   # marker so we never double-install
     return tc
 
 

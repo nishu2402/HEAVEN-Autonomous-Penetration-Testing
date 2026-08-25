@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  HEAVEN — Autonomous Penetration Testing Framework
-#  Installer v3.0.0
+#  Installer v3.1.0
 # ==============================================================================
 
 set -euo pipefail
@@ -28,6 +28,35 @@ echo -e "${CYAN}${BOLD}║   ╚═╝  ╚═╝╚══════╝╚═�
 echo -e "${CYAN}${BOLD}║        Autonomous Penetration Testing Framework          ║${NC}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
 echo -e ""
+
+# ── Self-bootstrap — enables a true one-command install via `curl | bash` ─────
+# `curl -fsSL <raw>/scripts/install.sh | bash` has no script file on disk, so the
+# repo-root resolution below can't work. When that (or any run from outside a
+# HEAVEN checkout) is detected, clone the repo first and re-exec this installer
+# from inside it. A normal `git clone … && ./scripts/install.sh` skips this block
+# entirely (the checkout is already present). Override the clone target with
+# HEAVEN_DIR and the source repo with HEAVEN_REPO_URL.
+HEAVEN_REPO_URL="${HEAVEN_REPO_URL:-https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git}"
+_self="${BASH_SOURCE[0]:-}"
+if [ -n "$_self" ] && [ -f "$_self" ] \
+   && [ -f "$(cd "$(dirname "$_self")/.." 2>/dev/null && pwd)/pyproject.toml" ]; then
+    :   # running from a real checkout — continue normally
+else
+    command -v git >/dev/null 2>&1 \
+        || fail "git is required for the one-command install. Install git and re-run (or clone the repo and run scripts/install.sh)."
+    CLONE_DIR="${HEAVEN_DIR:-$PWD/HEAVEN-Autonomous-Penetration-Testing}"
+    if [ -d "$CLONE_DIR/.git" ]; then
+        info "Using existing checkout at ${BOLD}$CLONE_DIR${NC}"
+        git -C "$CLONE_DIR" pull --ff-only >/dev/null 2>&1 \
+            || warn "Could not fast-forward the existing checkout — installing it as-is"
+    else
+        info "Cloning HEAVEN into ${BOLD}$CLONE_DIR${NC} ..."
+        git clone --depth 1 "$HEAVEN_REPO_URL" "$CLONE_DIR" \
+            || fail "git clone failed — check your network and the repo URL."
+    fi
+    ok "Source ready — handing off to the in-repo installer"
+    exec bash "$CLONE_DIR/scripts/install.sh" "$@"
+fi
 
 # ── Resolve install directory (repo root — this script lives in scripts/) ──
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

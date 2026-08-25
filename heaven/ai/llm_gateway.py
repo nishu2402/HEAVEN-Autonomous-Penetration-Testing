@@ -50,6 +50,10 @@ PROVIDER_DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-5",     # balanced default; Opus 4.8 / Haiku 4.5 also valid
     "openai": "gpt-4o",
     "gemini": "gemini-flash-latest",    # rolling alias → current Flash; gemini-pro-latest for deeper reasoning
+    # DeepSeek: a remote OpenAI-compatible cloud API (https://api-docs.deepseek.com/).
+    # deepseek-chat = DeepSeek-V3 (general); deepseek-reasoner = DeepSeek-R1 (deeper
+    # reasoning). Reached over the shared httpx OpenAI-compatible path — no SDK.
+    "deepseek": "deepseek-chat",
     # Local runtimes (no API key, no rate limits — see LOCAL_PROVIDERS below).
     # `ollama` defaults to a fast, accurate 7B: qwen2.5 follows instructions and
     # emits clean JSON, which is what HEAVEN's structured AI layers (FP review,
@@ -82,6 +86,10 @@ KNOWN_MODELS: dict[str, tuple[dict[str, str], ...]] = {
          "note": "Fast rolling alias — recommended"},
         {"id": "gemini-pro-latest", "label": "Gemini Pro (latest)", "note": "Deeper reasoning"},
     ),
+    "deepseek": (
+        {"id": "deepseek-chat", "label": "DeepSeek Chat (V3)", "note": "Balanced — recommended"},
+        {"id": "deepseek-reasoner", "label": "DeepSeek Reasoner (R1)", "note": "Deeper reasoning"},
+    ),
     "ollama": (
         {"id": "qwen2.5:7b", "label": "Qwen2.5 7B", "note": "Recommended — clean JSON"},
         {"id": "llama3.1:8b", "label": "Llama 3.1 8B", "note": "General purpose"},
@@ -101,6 +109,8 @@ PROVIDER_KEY_ENVS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    # DeepSeek: a remote cloud provider, so it needs its own key.
+    "deepseek": "DEEPSEEK_API_KEY",
     # Local runtimes: Ollama is keyless (""). A self-hosted OpenAI-compatible
     # endpoint may take an optional bearer token via HEAVEN_LLM_API_KEY.
     "ollama": "",
@@ -116,6 +126,8 @@ PROVIDER_PIP_PACKAGES = {
     "anthropic": "anthropic",
     "openai": "openai",
     "gemini": "google-genai",
+    # DeepSeek speaks plain OpenAI-compatible HTTP over httpx — no SDK required.
+    "deepseek": "httpx",
     "ollama": "httpx",
     "local": "httpx",
 }
@@ -131,21 +143,35 @@ PROVIDER_PIP_PACKAGES = {
 # Both speak the OpenAI-compatible `/v1/chat/completions` schema, so a single
 # `_call_local` dispatch covers Ollama, LM Studio, llama.cpp, vLLM and LocalAI.
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 LOCAL_PROVIDERS = frozenset({"ollama", "local"})
+# Providers reached over the shared httpx OpenAI-compatible `/chat/completions`
+# path (`_call_local` / `_stream_local`): the two local runtimes plus DeepSeek,
+# a remote cloud API that is OpenAI-compatible. DeepSeek differs from the local
+# pair only in that it needs an API key and has a public default base URL — it is
+# NOT in LOCAL_PROVIDERS, so it keeps cloud semantics (key required, transient
+# errors retried rather than fast-failed) and the rate-limit breaker applies.
+OPENAI_HTTP_PROVIDERS = frozenset(LOCAL_PROVIDERS | {"deepseek"})
 
 
 def _local_base_url(provider: str) -> str:
-    """OpenAI-compatible base URL for a local provider (no trailing slash).
+    """OpenAI-compatible base URL for an httpx provider (no trailing slash).
 
-    ollama → ``HEAVEN_OLLAMA_HOST`` (default localhost:11434) + ``/v1``.
-    local  → ``HEAVEN_LLM_BASE_URL`` verbatim (operator supplies the full base,
-             e.g. ``http://localhost:1234/v1``).
+    ollama   → ``HEAVEN_OLLAMA_HOST`` (default localhost:11434) + ``/v1``.
+    local    → ``HEAVEN_LLM_BASE_URL`` verbatim (operator supplies the full base,
+               e.g. ``http://localhost:1234/v1``).
+    deepseek → ``DEEPSEEK_BASE_URL`` when set, else ``https://api.deepseek.com``.
+               The chat endpoint is ``{base}/chat/completions``, so no ``/v1``
+               suffix is needed (DeepSeek accepts the bare host).
     """
     if provider == "ollama":
         host = (os.environ.get("HEAVEN_OLLAMA_HOST") or DEFAULT_OLLAMA_HOST).strip().rstrip("/")
         return f"{host}/v1"
     if provider == "local":
         return (os.environ.get("HEAVEN_LLM_BASE_URL") or "").strip().rstrip("/")
+    if provider == "deepseek":
+        return (os.environ.get("DEEPSEEK_BASE_URL")
+                or DEFAULT_DEEPSEEK_BASE_URL).strip().rstrip("/")
     return ""
 
 # Per-call network timeout (seconds) applied to every provider client. Without
@@ -401,7 +427,7 @@ class LLMGateway:
     @staticmethod
     def _auto_detect_provider() -> str:
         # Cloud keys win first (an explicit key = intent to use that provider).
-        for name in ("anthropic", "openai", "gemini"):
+        for name in ("anthropic", "openai", "gemini", "deepseek"):
             if os.environ.get(PROVIDER_KEY_ENVS[name]):
                 return name
         # Then a configured local runtime. Keyless, so we key off the endpoint
@@ -460,11 +486,12 @@ class LLMGateway:
                     legacy_genai.configure(api_key=self.api_key)
                     self._client = legacy_genai.GenerativeModel(self.model)
                     self._gemini_sdk = "legacy"
-            elif self.provider in LOCAL_PROVIDERS:
-                # Local runtimes speak the OpenAI-compatible HTTP schema — no SDK,
-                # just httpx (a base dependency). We keep the resolved base URL on
-                # the instance and POST absolute URLs (avoids httpx base_url path-
-                # join surprises where "/chat/completions" would drop "/v1").
+            elif self.provider in OPENAI_HTTP_PROVIDERS:
+                # OpenAI-compatible HTTP providers (local runtimes + DeepSeek) speak
+                # the same `/chat/completions` schema — no SDK, just httpx (a base
+                # dependency). We keep the resolved base URL on the instance and POST
+                # absolute URLs (avoids httpx base_url path-join surprises where
+                # "/chat/completions" would drop "/v1").
                 import httpx
                 base = _local_base_url(self.provider)
                 if not base:
@@ -480,7 +507,10 @@ class LLMGateway:
                     )
                     return
                 headers: dict[str, str] = {}
-                if self.api_key:  # optional bearer for a secured local endpoint
+                # DeepSeek requires a bearer key; a secured local endpoint may take an
+                # optional one. The key rides an Authorization header only — never in
+                # the prompt body, and never logged (see _audit).
+                if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
                 self._local_base = base
                 self._client = httpx.Client(timeout=timeout_s, headers=headers)
@@ -656,7 +686,7 @@ class LLMGateway:
                          req: LLMRequest) -> Iterator[str]:
         """Provider-native token stream. Raises for providers that can't stream
         (the caller catches and falls back to a single-chunk completion)."""
-        if self.provider in LOCAL_PROVIDERS:
+        if self.provider in OPENAI_HTTP_PROVIDERS:
             yield from self._stream_local(prompt, system, req)
             return
         if self.provider == "openai":
@@ -744,9 +774,17 @@ class LLMGateway:
                         yield piece
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
                 httpx.PoolTimeout) as e:
-            raise LLMProviderError(
-                f"local LLM unreachable at {self._local_base}: {e}"
-            ) from e
+            raise LLMProviderError(self._unreachable_msg(e)) from e
+
+    def _unreachable_msg(self, exc: Exception) -> str:
+        """Provider-appropriate 'unreachable' message for an httpx connect failure
+        on the shared OpenAI-compatible path. Always contains the word
+        'unreachable' so the connection-error classifier recognizes it."""
+        if self.provider in LOCAL_PROVIDERS:
+            return (f"local LLM unreachable at {self._local_base} — is the server "
+                    f"running? (start Ollama, or run `heaven ai setup`): {exc}")
+        return (f"{self.provider} endpoint unreachable at {self._local_base} — "
+                f"check the network / DEEPSEEK_BASE_URL and the API key: {exc}")
 
     # ── internals ────────────────────────────────────────────────────────
 
@@ -851,7 +889,7 @@ class LLMGateway:
             return self._call_openai(prompt, system, req)
         if self.provider == "gemini":
             return self._call_gemini(prompt, system, req)
-        if self.provider in LOCAL_PROVIDERS:
+        if self.provider in OPENAI_HTTP_PROVIDERS:
             return self._call_local(prompt, system, req)
         raise LLMProviderError(f"no dispatcher for provider '{self.provider}'")
 
@@ -1014,14 +1052,14 @@ class LLMGateway:
         )
 
     def _call_local(self, prompt: str, system: Optional[str], req: LLMRequest) -> LLMResponse:
-        """Call an OpenAI-compatible local endpoint (Ollama / LM Studio /
-        llama.cpp / vLLM / LocalAI) over plain HTTP.
+        """Call an OpenAI-compatible `/chat/completions` endpoint over plain HTTP.
 
-        Structured output rides the existing schema-hint-in-system +
-        JSON-parse path (see `_prepare`/`_parse_structured`) — no provider-native
-        JSON mode, so this one code path works across every local server. A dead
-        endpoint raises a distinct 'unreachable' error so `complete()` fails fast
-        (and falls back) instead of retrying."""
+        Serves the local runtimes (Ollama / LM Studio / llama.cpp / vLLM / LocalAI)
+        and the remote DeepSeek cloud API — all share this one schema. Structured
+        output asks for JSON mode when a schema is set and otherwise rides the
+        schema-hint-in-system + JSON-parse path (see `_prepare`/`_parse_structured`).
+        A dead local endpoint raises a distinct 'unreachable' error so `complete()`
+        fails fast; a remote provider's transient errors are retried normally."""
         import httpx
         messages: list[dict[str, str]] = []
         if system:
@@ -1067,17 +1105,15 @@ class LLMGateway:
                     raise
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
                 httpx.PoolTimeout) as e:
-            raise LLMProviderError(
-                f"local LLM unreachable at {self._local_base} — is the server "
-                f"running? (start Ollama, or run `heaven ai setup`): {e}"
-            ) from e
+            raise LLMProviderError(self._unreachable_msg(e)) from e
         except httpx.HTTPStatusError as e:
             body = ""
             try:
                 body = e.response.text[:300]
             except Exception:  # noqa: BLE001 — best-effort error body
                 logger.debug("suppressed non-fatal exception", exc_info=True)
-            raise LLMProviderError(f"local LLM HTTP {e.response.status_code}: {body}") from e
+            raise LLMProviderError(
+                f"{self.provider} HTTP {e.response.status_code}: {body}") from e
         data = r.json()
         choices = data.get("choices") or []
         message = (choices[0].get("message") if choices else {}) or {}
@@ -1258,6 +1294,7 @@ _GATEWAY_ENV_KEYS = (
     "HEAVEN_LLM_MODEL",
     "HEAVEN_OLLAMA_HOST",           # local: Ollama endpoint
     "HEAVEN_LLM_BASE_URL",          # local: generic OpenAI-compatible endpoint
+    "DEEPSEEK_BASE_URL",            # deepseek: base-URL override
     "HEAVEN_LLM_FALLBACK_PROVIDER", # hybrid fallback target
     # Cloud keys + HEAVEN_LLM_API_KEY (local bearer). The "" for keyless Ollama
     # is filtered out — it's not a real env var.

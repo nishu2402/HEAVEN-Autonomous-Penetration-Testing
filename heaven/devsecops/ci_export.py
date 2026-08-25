@@ -35,7 +35,7 @@ from heaven.utils.cvss import (
     severity_from_score,
 )
 
-_TOOL_VERSION = "3.0.0"
+from heaven import __version__ as _TOOL_VERSION   # SARIF/JUnit driver version tracks the app
 _INFO_URI = "https://github.com/heaven-security/heaven"
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}

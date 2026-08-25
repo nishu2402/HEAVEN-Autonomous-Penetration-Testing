@@ -56,7 +56,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         "limits, run `heaven ai setup`); 'local' = any OpenAI-compatible server "
         "(LM Studio / llama.cpp / vLLM). Leave blank to auto-detect.",
         secret=False, placeholder="ollama",
-        choices=("", "ollama", "local", "gemini", "anthropic", "openai"),
+        choices=("", "ollama", "local", "gemini", "anthropic", "openai", "deepseek"),
     ),
     SettingSpec(
         "HEAVEN_OLLAMA_HOST", "Ollama host", "AI / LLM",
@@ -93,9 +93,22 @@ SETTINGS: tuple[SettingSpec, ...] = (
         url="https://platform.openai.com/api-keys", placeholder="sk-…",
     ),
     SettingSpec(
+        "DEEPSEEK_API_KEY", "DeepSeek API key", "AI / LLM",
+        "Enables the AI layers via DeepSeek (OpenAI-compatible). Set provider to "
+        "'deepseek' and pick a model (deepseek-chat / deepseek-reasoner).",
+        url="https://platform.deepseek.com/api_keys", placeholder="sk-…",
+    ),
+    SettingSpec(
+        "DEEPSEEK_BASE_URL", "DeepSeek base URL", "AI / LLM",
+        "Optional override for the DeepSeek API base URL. Blank uses "
+        "https://api.deepseek.com.",
+        secret=False, placeholder="https://api.deepseek.com",
+    ),
+    SettingSpec(
         "HEAVEN_LLM_MODEL", "LLM model override", "AI / LLM",
         "Optional. Pin a specific model id; blank uses the provider default "
-        "(qwen2.5:7b for Ollama / gemini-flash-latest / claude-sonnet-5 / gpt-4o).",
+        "(qwen2.5:7b for Ollama / gemini-flash-latest / claude-sonnet-5 / gpt-4o / "
+        "deepseek-chat).",
         secret=False, placeholder="qwen2.5:7b",
     ),
     SettingSpec(
@@ -104,7 +117,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
         "nothing, fall back to this one (needs its own key/endpoint). E.g. local "
         "primary + gemini fallback.",
         secret=False, placeholder="gemini",
-        choices=("", "ollama", "local", "gemini", "anthropic", "openai"),
+        choices=("", "ollama", "local", "gemini", "anthropic", "openai", "deepseek"),
     ),
 
     # ── Updates ──

@@ -301,8 +301,8 @@ def remediate(finding_id: str, engagement: Optional[str]) -> None:
 
     if not engine.available:
         _print("[yellow]No LLM configured — showing knowledge-base remediation. "
-               "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY for "
-               "AI-tailored guidance.[/yellow]")
+               "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / "
+               "DEEPSEEK_API_KEY for AI-tailored guidance.[/yellow]")
     if HAS_RICH:
         from rich.markdown import Markdown
         from heaven.utils.logger import console

@@ -287,7 +287,7 @@ def test_update_apply_runs_and_reports(api_client, monkeypatch, tmp_path):
             break
         time.sleep(0.1)
     assert done is not None, "update apply never finished"
-    assert done["ok"] is True
+    assert done["ok"] is True, f"apply reported not-ok; log={done['log']!r}"
     assert any("3.1.0" in ln for ln in done["log"])
 
 

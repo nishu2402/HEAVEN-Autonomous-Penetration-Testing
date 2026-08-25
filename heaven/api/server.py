@@ -262,6 +262,12 @@ _update_apply_state: dict[str, Any] = {
     "running": False, "done": False, "ok": False,
     "log": [], "result": None, "job_id": None, "started_at": None,
 }
+# Strong reference to the in-flight apply task. asyncio only holds a weak ref to
+# a fire-and-forget create_task(), so under GC pressure the task can be collected
+# mid-flight — it then receives CancelledError (a BaseException the worker's
+# `except Exception` won't catch) and the run ends with done=True but ok=False.
+# Holding the reference until the task completes prevents that.
+_update_apply_tasks: set = set()
 
 
 def _web_update_apply_enabled() -> bool:
@@ -2646,7 +2652,9 @@ def create_app() -> FastAPI:
                 _update_apply_state["running"] = False
                 _update_apply_state["done"] = True
 
-        asyncio.create_task(_run())
+        _apply_task = asyncio.create_task(_run())
+        _update_apply_tasks.add(_apply_task)
+        _apply_task.add_done_callback(_update_apply_tasks.discard)
         logger.info("Code update launched by %s (job %s)", user.username, job_id)
         return {"job_id": job_id, "running": True,
                 "from_version": check.current_version, "to_version": check.latest_version}
@@ -2734,7 +2742,7 @@ def create_app() -> FastAPI:
         provider = (os.environ.get("HEAVEN_LLM_PROVIDER") or "").lower()
         model = (os.environ.get("HEAVEN_LLM_MODEL") or "").strip()
         providers: dict[str, Any] = {}
-        for p in ("anthropic", "openai", "gemini", "ollama", "local"):
+        for p in ("anthropic", "openai", "gemini", "deepseek", "ollama", "local"):
             models = _gw.known_models(p)
             if p == "ollama":
                 try:
@@ -3263,7 +3271,14 @@ def create_app() -> FastAPI:
             except Exception as e:
                 logger.error(f"replay scan {orch.scan_id} failed: {e}")
 
-        asyncio.create_task(_run())
+        # Keep a strong reference: asyncio only weak-refs a fire-and-forget task,
+        # so without this the GC can collect the replay scan mid-run.
+        _replay_task = asyncio.create_task(_run())
+        _background_scan_tasks.add(_replay_task)
+        _scan_tasks_by_id[orch.scan_id] = _replay_task
+        _replay_task.add_done_callback(_background_scan_tasks.discard)
+        _replay_task.add_done_callback(
+            lambda _t: _scan_tasks_by_id.pop(orch.scan_id, None))
         return {"new_scan_id": orch.scan_id, "replayed_from": target_scan["id"], "seed": seed}
 
     # ── Gap 4: Exploitation proof — actively confirm a finding ──
@@ -3469,9 +3484,9 @@ def create_app() -> FastAPI:
                             "message": ("The LLM did not return a usable verdict — "
                                         "try again, or check the AI provider status "
                                         "in Settings.")}
-                out = verdict.model_dump() if hasattr(verdict, "model_dump") else verdict.__dict__
-                out["skipped"] = False
-                return out
+                verdict_out = verdict.model_dump() if hasattr(verdict, "model_dump") else verdict.__dict__
+                verdict_out["skipped"] = False
+                return verdict_out
             if kind == "hypothesize":
                 # Propose-only: the LLM ranks vuln classes worth probing. Active
                 # verification runs in the authorised scan path, never here.

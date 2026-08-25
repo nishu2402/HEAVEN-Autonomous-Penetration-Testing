@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2057 tests · 56 CLI commands · 91 API routes · 25 UI pages · 13 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2070 tests · 56 CLI commands · 91 API routes · 25 UI pages · 13 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -94,7 +94,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API**: 91 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v3.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v3.1.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -110,7 +110,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 2057 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 2070 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 179 |
 | ⌨️ **CLI Commands** | 56 |
@@ -118,7 +118,7 @@ It runs three ways from the **same engagement dataset**:
 | 🖥️ **UI Pages** | 25 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
-| 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · **deterministic fallback (no API key needed)** |
+| 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · DeepSeek · local (Ollama / any OpenAI-compatible server) · **deterministic fallback (no API key needed)** |
 | 📊 **CVSS Predictor** | ExtraTreesRegressor · R²=0.9925 · 13 features · trained on NVD |
 | 🗺️ **Threat Intel** | MITRE ATT&CK mapping · Lockheed Kill Chain · TAXII feed |
 | 📄 **Report Formats** | 8 (PDF · HTML · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL) |
@@ -149,7 +149,7 @@ It runs three ways from the **same engagement dataset**:
 | 💥 **Verified Exploitation** | Active proof, not guesses: sqlmap SQLi dump · RCE canary file drop/read · **in-house OAST collaborator** proving SSRF **and** XXE out-of-band (no Burp Collaborator / interactsh dependency) |
 | 🔓 **Post-Exploitation** | **self-contained privesc engines for Linux _and_ Windows**. Linux: GTFOBins-scored SUID/sudo/caps · docker/lxd escape · writable `/etc/passwd` · cron/PATH hijack; Windows: unquoted service paths · writable service binaries · `SeImpersonate`/`SeBackup` token privileges · AlwaysInstallElevated · autologon/registry creds · UAC posture, no linPEAS/WinPEAS download · **loot harvester** (SSH keys · AWS/GCP/Azure creds · kubeconfig · `.env`/`.netrc`/`.pgpass`/history; secrets redacted, plaintext never persisted) · **credential-reuse loop** feeding SSH/SMB/PsExec lateral movement + pass-the-hash · **ATT&CK-tagged kill-chain** · optional LLM path prioritisation · BloodHound AD collection. Run `heaven postex {enum,loot,full}` (`--os windows` / auto-detected) |
 | ☁️ **Cloud Misconfiguration** | **credential-free** public storage-bucket exposure (S3 / GCS / Azure Blob, listable vs private proven from the provider's own response, not guessed) · cloud-metadata SSRF catalog (AWS IMDS / GCP / Azure) that turns an SSRF into confirmed credential theft · plus **authenticated** account audit (EC2/S3 public ACL & policy & encryption · security-group `0.0.0.0/0` on sensitive ports · public RDS · IAM admin policies) · read-only **IAM privilege audit** of the *authenticated identity*: over-privileged principals (`*`/`*`) · console users without MFA · stale/unrotated & root access keys · weak password policy (`heaven cloud iam`, secret never read/logged). Run `heaven cloud storage <target>` |
-| 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini) · **deterministic fallback needs no API key** |
+| 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini / DeepSeek / local) · **deterministic fallback needs no API key** |
 | 📊 **Risk Scoring** | CVSS-v3 ML predictor (R²=0.9925, 13-feature ExtraTrees) · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
 | 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA: dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
@@ -210,9 +210,23 @@ It runs three ways from the **same engagement dataset**:
 
 ### Install
 
-**One command sets up everything**: a virtualenv, every runtime dependency
-(full power by default), the external scanner tools, the web UI, and a
-ready-to-use `.env`. Pick your OS:
+**One command sets up everything**: it clones the repo (if needed), builds a
+virtualenv, installs every runtime dependency (full power by default), the
+external scanner tools, and the web UI, and writes a ready-to-use `.env`. Pick
+your OS:
+
+```bash
+# macOS / Linux — one line, no clone needed (git is the only prerequisite)
+curl -fsSL https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/main/scripts/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell, no admin needed)
+irm https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/main/scripts/install.ps1 | iex
+```
+
+The one-liner clones into `./HEAVEN-Autonomous-Penetration-Testing` (override with
+`HEAVEN_DIR`). Prefer to clone yourself first? That works too:
 
 ```bash
 # macOS / Linux
@@ -360,14 +374,15 @@ false-positive review). Add only what you want.
 | `GEMINI_API_KEY` | AI layers via Google Gemini (**free tier**) | Optional | <https://aistudio.google.com/apikey> |
 | `ANTHROPIC_API_KEY` | AI layers via Claude | Optional | <https://console.anthropic.com> |
 | `OPENAI_API_KEY` | AI layers via GPT | Optional | <https://platform.openai.com/api-keys> |
+| `DEEPSEEK_API_KEY` | AI layers via DeepSeek (OpenAI-compatible, no SDK) | Optional | <https://platform.deepseek.com/api_keys> |
 | `NVD_API_KEY` | 30× faster CVE-feed ingestion | Optional | <https://nvd.nist.gov/developers/request-an-api-key> |
 | `SHODAN_API_KEY` | Passive recon (exposed-host intel) | Optional | <https://account.shodan.io> |
 | `WEBHOOK_URL` | Slack / Teams / Discord alerts | Optional | Your workspace's incoming-webhook URL |
 | `HEAVEN_ADMIN_USERNAME` | Web UI login name (shown in the header badge) | Optional (defaults to `admin`) | You choose it |
 | `HEAVEN_ADMIN_PASSWORD` | Web UI login (skips the admin/admin forced-change) | Recommended | You choose it |
 
-> You only need **one** of the three LLM keys. HEAVEN auto-detects whichever is
-> set (Anthropic → OpenAI → Gemini), or pin one with `HEAVEN_LLM_PROVIDER`.
+> You only need **one** LLM key. HEAVEN auto-detects whichever is set
+> (Anthropic → OpenAI → Gemini → DeepSeek), or pin one with `HEAVEN_LLM_PROVIDER`.
 
 ### Add a Gemini key (free): 3 steps
 
@@ -407,6 +422,21 @@ page lists every key with a *"how to get it"* link and shows which are already
 configured (secrets masked). HEAVEN auto-loads `.env` from the working
 directory. **Never commit `.env`**: it's already in `.gitignore`.
 
+### Add a DeepSeek key: no SDK needed
+
+DeepSeek is an OpenAI-compatible cloud API, so HEAVEN talks to it over the
+built-in HTTP client. There is **no extra package to install**.
+
+1. **Get the key**: open <https://platform.deepseek.com/api_keys> and create one.
+2. **Give it to HEAVEN** (pick one) and select the provider + model:
+   ```bash
+   export HEAVEN_LLM_PROVIDER=deepseek
+   export DEEPSEEK_API_KEY="your-key"
+   export HEAVEN_LLM_MODEL=deepseek-chat        # or deepseek-reasoner
+   # optional: point at a proxy/self-hosted gateway
+   # export DEEPSEEK_BASE_URL=https://api.deepseek.com
+   ```
+
 ### Pinning a provider / model (optional)
 
 ```bash
@@ -415,8 +445,8 @@ export HEAVEN_LLM_MODEL=gemini-pro-latest # override the default model
 ```
 
 Default models: Claude `claude-sonnet-5` · OpenAI `gpt-4o` · Gemini
-`gemini-flash-latest`. With no key set anywhere, every AI feature falls back to a
-deterministic heuristic (or pass `--no-llm`).
+`gemini-flash-latest` · DeepSeek `deepseek-chat`. With no key set anywhere, every
+AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 
 ---
 
@@ -430,7 +460,7 @@ deterministic heuristic (or pass `--no-llm`).
 56 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard: module status + live command reference (v3.0.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard: module status + live command reference (v3.1.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">
@@ -719,7 +749,7 @@ heaven/                   ← Python package (179 modules)
 └── cli/                  Click CLI - one module per command group (56 commands)
 
 heaven-ui/                React + Vite web console (25 pages)
-tests/                    2057 pytest tests + native & DVWA benchmark suites
+tests/                    2070 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -805,7 +835,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>2057 tests · 179 modules · 56 CLI commands · 91 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>2070 tests · 179 modules · 56 CLI commands · 91 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

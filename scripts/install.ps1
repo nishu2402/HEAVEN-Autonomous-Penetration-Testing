@@ -2,7 +2,7 @@
 <#
 ==============================================================================
   HEAVEN - Autonomous Penetration Testing Framework
-  Windows installer (PowerShell) v3.0.0
+  Windows installer (PowerShell) v3.1.0
 
   ONE command sets up everything, the same as scripts/install.sh does on
   macOS / Linux:
@@ -66,8 +66,40 @@ Write-Host "   Windows installer" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Repo root - this script lives in scripts\, so resolve one level up.
-$InstallDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# Repo root - this script lives in scripts\, so resolve one level up. When this
+# installer is run via `irm <raw>/scripts/install.ps1 | iex` there is no script
+# file on disk ($PSScriptRoot is empty), so clone the repo first and re-invoke the
+# in-repo installer. Running normally from a checkout skips this entirely (no-op).
+# Override the clone target with $env:HEAVEN_DIR and the source with $env:HEAVEN_REPO_URL.
+$HeavenRepoUrl = if ($env:HEAVEN_REPO_URL) { $env:HEAVEN_REPO_URL } else { 'https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing.git' }
+$InstallDir = $null
+if ($PSScriptRoot) {
+    $maybeRoot = Resolve-Path (Join-Path $PSScriptRoot '..') -ErrorAction SilentlyContinue
+    if ($maybeRoot -and (Test-Path (Join-Path $maybeRoot.Path 'pyproject.toml'))) {
+        $InstallDir = $maybeRoot.Path
+    }
+}
+if (-not $InstallDir) {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Die "git is required for the one-command install. Install Git for Windows and re-run (or download the repo and run scripts\install.ps1)."
+    }
+    $CloneDir = if ($env:HEAVEN_DIR) { $env:HEAVEN_DIR } else { Join-Path (Get-Location) 'HEAVEN-Autonomous-Penetration-Testing' }
+    if (Test-Path (Join-Path $CloneDir '.git')) {
+        Write-Info "Using existing checkout at $CloneDir"
+        git -C $CloneDir pull --ff-only 2>$null | Out-Null
+    } else {
+        Write-Info "Cloning HEAVEN into $CloneDir ..."
+        git clone --depth 1 $HeavenRepoUrl $CloneDir
+        if ($LASTEXITCODE -ne 0) { Die "git clone failed - check your network and the repo URL." }
+    }
+    Write-Ok "Source ready - handing off to the in-repo installer"
+    $bootArgs = @()
+    if ($CoreOnly)  { $bootArgs += '-CoreOnly' }
+    if ($SkipTools) { $bootArgs += '-SkipTools' }
+    if ($SkipUI)    { $bootArgs += '-SkipUI' }
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $CloneDir 'scripts\install.ps1') @bootArgs
+    exit $LASTEXITCODE
+}
 Write-Info "Install directory: $InstallDir"
 
 # Honour the same env-var opt-outs as install.sh, so docs/CI stay consistent.

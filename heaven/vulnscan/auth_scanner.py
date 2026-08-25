@@ -4,6 +4,7 @@ Tests: cookie security flags, CSRF protection, session fixation, HTTP auth brute
 form-based login brute force, account lockout, password policy, OAuth 2.0 misconfigs.
 """
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 import hashlib
@@ -99,6 +100,40 @@ _PASS_FIELDS  = re.compile(r"pass(word)?|pwd|secret|credential", re.IGNORECASE)
 _CSRF_FIELDS  = re.compile(r"csrf|_token|authenticity_token|__RequestVerificationToken|nonce",
                             re.IGNORECASE)
 _CSRF_HEADERS = re.compile(r"x-csrf|x-xsrf|x-anti-forgery", re.IGNORECASE)
+
+# Field names that mark a GET form as state-changing (worth a CSRF check). A GET
+# form is normally safe (search, filter, navigation) and must NOT be flagged, or
+# every search box becomes a false positive. But a GET form that mutates server
+# state (the classic "password change over GET", trivially exploitable through a
+# bare <img src>) is a real CSRF hole, so those are audited too.
+_STATE_CHANGE_FIELD = re.compile(
+    r"pass(word|wd)?|newpass|oldpass|secret|credential|email|"
+    r"delete|remove|destroy|drop|"
+    r"transfer|amount|balance|payee|recipient|iban|"
+    r"role|admin|privilege|grant|revoke|enable|disable|activate|deactivate|"
+    r"reset|update|modify|rename|register",
+    re.IGNORECASE)
+
+
+def _get_form_is_state_changing(fields: list[dict], action: str) -> bool:
+    """True when a GET form plausibly changes server state and so deserves a
+    CSRF check. Keyed conservatively so ordinary search / filter / navigation
+    GET forms (`q`, `search`, `sort`, `page`, ...) are never flagged.
+
+    A login form (a user identifier next to a password) is deliberately NOT
+    treated as a state change: submitting credentials is authentication, and
+    login CSRF is a separate, lower-severity class, so flagging it here would be
+    a false positive. A password field with no user identifier is a
+    password change / reset, which is a genuine state-changing target."""
+    names = [(f.get("name") or "") for f in fields]
+    has_user = any(_USER_FIELDS.search(n) for n in names)
+    has_pw = any((f.get("type") or "").lower() == "password" for f in fields)
+    if has_user and has_pw:
+        return False  # login / authentication form, not a CSRF state change
+    if has_pw:
+        return True   # password change / reset (no user field present)
+    return any(_STATE_CHANGE_FIELD.search(n) for n in names)
+
 
 # ── OAuth / OpenID endpoints ───────────────────────────────────────────────────
 _OAUTH_PATHS = [
@@ -206,9 +241,18 @@ async def _audit_csrf(session: "aiohttp.ClientSession", url: str,
     for form in forms:
         method = (form.get("method") or "get").lower()
         action = form.get("action") or url
-        fields = form.get("fields", [])
+        # Crawler-produced forms carry their inputs under "inputs"; other callers
+        # use "fields". Accept either so a state-changing form is never skipped
+        # just because of the key name.
+        fields = form.get("fields") or form.get("inputs") or []
 
-        if method not in state_changing_methods:
+        if method in state_changing_methods:
+            pass
+        elif method == "get" and _get_form_is_state_changing(fields, action):
+            # A GET form that mutates state (e.g. a password change over GET) is
+            # a genuine CSRF hole, more trivially forgeable than a POST one.
+            pass
+        else:
             continue
 
         # Check if the form contains a CSRF token field
@@ -820,7 +864,7 @@ async def scan_auth(url: str, forms: Optional[list[dict]] = None,
     connector = aiohttp.TCPConnector(ssl=False, limit=20)
     timeout   = aiohttp.ClientTimeout(total=30)
 
-    async with aiohttp.ClientSession(headers=headers,
+    async with _egress_cs(headers=headers,
                                      connector=connector,
                                      timeout=timeout) as session:
         # Run all checks concurrently

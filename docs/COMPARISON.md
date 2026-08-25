@@ -1,7 +1,7 @@
 # HEAVEN vs Other Vulnerability Scanners
 
 Head-to-head matrix against the tools every pen-tester already has on
-their laptop. **The numbers below are placeholders** — fill them in by
+their laptop. **The numbers below are placeholders**, fill them in by
 running the benchmark suite ([tests/benchmarks/README.md](../tests/benchmarks/README.md))
 against the same target with each tool. HEAVEN ships the adapters for
 all three competitors so the comparison is a one-command diff.
@@ -44,7 +44,7 @@ Legend: ✅ first-class · ⚠️ available but limited · ❌ not in product
 
 ## Empirical numbers
 
-### HEAVEN — measured, always-on native benchmark
+### HEAVEN: measured, always-on native benchmark
 
 These are **real, reproducible** numbers, not placeholders: the scored,
 Docker-free `test_native_benchmark.py` run that executes in CI on every push
@@ -63,11 +63,11 @@ it end-to-end and are scored by the metrics layer.
 
 Per-category recall: SQLi (error/blind/UNION) · reflected XSS · command
 injection · LFI · **SSRF** · **XXE** · **CORS** · **open redirect** · **weak
-JWT** · **insecure cookie** · **missing security headers** — all 100%. Full
+JWT** · **insecure cookie** · **missing security headers**, all 100%. Full
 breakdown in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
 
-> SSRF and XXE are proven **out-of-band** — the target calls back to HEAVEN's
-> in-house OAST collaborator — so they are confirmed interactions, not heuristics.
+> SSRF and XXE are proven **out-of-band**, the target calls back to HEAVEN's
+> in-house OAST collaborator, so they are confirmed interactions, not heuristics.
 
 ### Head-to-head vs Burp / ZAP / sqlmap (run it yourself)
 
@@ -88,7 +88,7 @@ get an apples-to-apples table:
 
 The HEAVEN column is the measured native-benchmark result above; the competitor
 columns are left for you to fill by exporting each tool's results and feeding the
-adapter (see "How to reproduce" below). That keeps the comparison honest —
+adapter (see "How to reproduce" below). That keeps the comparison honest, 
 every number in this repo comes from a run you can reproduce.
 
 ---
@@ -97,22 +97,26 @@ every number in this repo comes from a run you can reproduce.
 
 | If you need to … | Use |
 |---|---|
-| One-off web app pen-test, human-driven | **Burp Pro** — best Repeater / Intruder UX |
+| One-off web app pen-test, human-driven | **Burp Pro**: best Repeater / Intruder UX |
 | Run a continuous scan against a single CI target | **OWASP ZAP** via its API |
-| Confirm + dump SQLi specifically | **sqlmap** — still the gold standard |
-| Compliance scan for a fleet of servers | **Nessus** — strongest CVE coverage on infra |
-| Full-stack engagement with reporting + monitoring | **HEAVEN** — one tool covers recon → DAST → SAST → post-ex → continuous monitoring → ticketing |
-| AI-augmented attack-chain planning | **HEAVEN** — Layers B + D, no commercial equivalent today |
-| Reproducible scans for a research paper | **HEAVEN** — `--seed` flag, no other tool offers this |
+| Confirm + dump SQLi specifically | **sqlmap**: still the gold standard |
+| Compliance scan for a fleet of servers | **Nessus**: strongest CVE coverage on infra |
+| Full-stack engagement with reporting + monitoring | **HEAVEN**: one tool covers recon → DAST → SAST → post-ex → continuous monitoring → ticketing |
+| AI-augmented attack-chain planning | **HEAVEN**: Layers B + D, no commercial equivalent today |
+| Reproducible scans for a research paper | **HEAVEN**: `--seed` flag, no other tool offers this |
 
 ---
 
 ## How to reproduce these numbers
 
-1. Bring up the same DVWA container:
+1. Bring up the same DVWA stack (the official multi-arch image plus a MariaDB
+   backend, run native so timing checks are not distorted by emulation). The
+   benchmark in step 2 brings this up on its own, so you only need this for the
+   other-scanner runs in step 3:
 
    ```bash
-   docker run --rm -d -p 8080:80 --name dvwa vulnerables/web-dvwa
+   docker compose -f tests/benchmarks/docker-compose.yml up -d
+   # first boot only: open http://127.0.0.1:8080/setup.php, click "Create / Reset Database"
    ```
 
 2. Run HEAVEN's benchmark suite (see [BENCHMARK_HOWTO.md](BENCHMARK_HOWTO.md)):
@@ -122,7 +126,8 @@ every number in this repo comes from a run you can reproduce.
        pytest tests/benchmarks/test_dvwa_baseline.py -v -s
    ```
 
-3. Run Burp Active Scan, OWASP ZAP, and sqlmap against the same DVWA URL.
+3. Run Burp Active Scan, OWASP ZAP, and sqlmap against the same DVWA URL
+   (`http://127.0.0.1:8080`).
    Export each tool's results in its native format (Burp XML, ZAP JSON,
    sqlmap session log).
 
@@ -139,14 +144,14 @@ every number in this repo comes from a run you can reproduce.
    ```
 
 5. Open the resulting `gt_coverage.csv` files in a spreadsheet and pivot
-   on the `detected` column. The interesting cells are the asymmetries —
+   on the `detected` column. The interesting cells are the asymmetries, 
    "HEAVEN found this and Burp didn't" or vice versa.
 
 ---
 
 ## Honest framing
 
-HEAVEN doesn't beat Burp Pro at being Burp Pro — Burp is a 20-year-old
+HEAVEN doesn't beat Burp Pro at being Burp Pro, Burp is a 20-year-old
 masterpiece for human-driven web testing. HEAVEN's bet is that the
 combination of **AI-driven planning + continuous monitoring + reproducible
 benchmarks + open-source auditability** is a meaningfully different
@@ -155,4 +160,4 @@ shape, not a slightly better Burp.
 If your workflow is "log into Burp, click around, read the results,"
 keep using Burp. If your workflow is "this tool should figure out
 what to test, write the report, and tell me when something changes
-without me babysitting it" — that's what HEAVEN is for.
+without me babysitting it", that's what HEAVEN is for.

@@ -25,13 +25,17 @@ and CLI commands by introspecting the root Click group (exactly what
 repo and counts gets exactly the printed number and none can silently drift.
 
 The hero poster SVGs (``docs/assets/heaven-poster*.svg``) are hand-authored
-design artefacts with positionally-placed text, so their numbers are **not**
-rewritten here; they are maintained by hand when the poster is regenerated.
+design artefacts with positionally-placed text, but their three
+mechanically-derived counts (tests, CLI commands, API routes) are **also** kept
+in sync here — both in the stat block (anchored by each ``<text>`` node's design
+x-coordinate) and in the accessibility ``aria-label`` — so the marketing poster
+can no longer silently drift from the code the way it used to. The poster's two
+hand-set figures (UI pages, scan modes) have no collector and are left untouched.
 
 Usage
 -----
-    python scripts/sync_test_count.py          # rewrite README to the real counts
-    python scripts/sync_test_count.py --check  # exit 1 if stale (for CI)
+    python scripts/sync_test_count.py          # rewrite README + posters to real counts
+    python scripts/sync_test_count.py --check  # exit 1 if any is stale (for CI)
 """
 from __future__ import annotations
 
@@ -44,6 +48,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
 SERVER = ROOT / "heaven" / "api" / "server.py"
+POSTERS = (
+    ROOT / "docs" / "assets" / "heaven-poster.svg",
+    ROOT / "docs" / "assets" / "heaven-poster-light.svg",
+)
 
 _ROUTE_METHODS = {"get", "post", "put", "patch", "delete", "websocket"}
 
@@ -89,6 +97,37 @@ _CLI_PATTERNS_NUM_LAST = (
     r"(CLI_Commands-)(\d+)",           # shields.io CLI badge
     r"(\*\*CLI Commands\*\* \| )(\d+)",  # Project Summary table
 )
+
+# ── Hero poster (SVG) ────────────────────────────────────────────────────────
+# The poster's aria-label lists the same counts with comma separators (not the
+# README's middots), and the stat block prints each figure as a bare number in a
+# positionally-placed <text> node anchored by its design x-coordinate. Only the
+# three collected counts are synced; UI-pages/scan-modes are hand-set.
+_POSTER_ARIA = (
+    (r"(\d+)( tests, )", "tests"),
+    (r"(\d+)( CLI commands, )", "cli"),
+    (r"(\d+)( API routes, )", "routes"),
+)
+_POSTER_TEXT_ANCHORS = (   # (design x-coord of the stat's <text> node, count key)
+    ("155", "tests"),
+    ("349", "cli"),
+    ("543", "routes"),
+)
+
+
+def sync_poster(text: str, values: dict[str, int]) -> str:
+    """Rewrite the three collected counts in a hero-poster SVG, in place.
+
+    Touches only the count digits — in the aria-label and in each stat's
+    x-anchored ``<text>`` node — leaving the design, the ML R² and the hand-set
+    UI-pages/scan-modes figures untouched.
+    """
+    for pat, key in _POSTER_ARIA:
+        text = re.sub(pat, lambda m, v=values[key]: f"{v}{m.group(2)}", text)
+    for x, key in _POSTER_TEXT_ANCHORS:
+        pat = rf'(<text x="{x}"\s+y="426"[^>]*>)(\d+)(</text>)'
+        text = re.sub(pat, lambda m, v=values[key]: f"{m.group(1)}{v}{m.group(3)}", text)
+    return text
 
 
 def count_tests() -> int:
@@ -190,20 +229,31 @@ def main(argv: list[str]) -> int:
     modules = count_modules()
     routes = count_routes()
     cli_commands = count_cli_commands()
-    original = README.read_text()
-    updated = sync_text(original, tests, modules, routes, cli_commands)
     counts = f"tests={tests}, modules={modules}, routes={routes}, cli={cli_commands}"
-    if original == updated:
-        print(f"README counts already in sync ({counts}).")
+    poster_values = {"tests": tests, "cli": cli_commands, "routes": routes}
+
+    # Every doc surface that prints a derived count, with its rewrite transform.
+    targets: list[tuple[Path, str]] = [
+        (README, sync_text(README.read_text(), tests, modules, routes, cli_commands)),
+    ]
+    for poster in POSTERS:
+        targets.append((poster, sync_poster(poster.read_text(), poster_values)))
+
+    stale = [(path, updated) for path, updated in targets
+             if path.read_text() != updated]
+    if not stale:
+        print(f"Docs counts already in sync ({counts}).")
         return 0
+    names = ", ".join(p.relative_to(ROOT).as_posix() for p, _ in stale)
     if check:
         sys.stderr.write(
-            f"README counts are stale — actual {counts}. "
+            f"Docs counts are stale in: {names} — actual {counts}. "
             f"Run: python scripts/sync_test_count.py\n"
         )
         return 1
-    README.write_text(updated)
-    print(f"README counts synced ({counts}).")
+    for path, updated in stale:
+        path.write_text(updated)
+    print(f"Docs counts synced ({counts}) → {names}.")
     return 0
 
 

@@ -5,6 +5,7 @@ Full OWASP API Security Top 10 coverage.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 import re
@@ -657,7 +658,7 @@ class APISecurityScanner:
         logger.info(f"🔍 API Security Scan: {url}")
         self._findings = []
 
-        async with aiohttp.ClientSession() as session:
+        async with _egress_cs() as session:
             # GraphQL tests
             gql_intro = await GraphQLScanner.test_introspection(session, url)
             self._findings.extend(gql_intro)

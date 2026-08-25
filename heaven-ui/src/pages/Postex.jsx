@@ -9,8 +9,8 @@ import Markdown from "../components/Markdown.jsx";
 
 const MODULES = [
   { key: "full", label: "★ Full playbook (enum + loot + AI kill-chain)" },
-  { key: "enum", label: "Privesc enum — Linux (self-contained)" },
-  { key: "win-enum", label: "Privesc enum — Windows (services/privs/AIE)" },
+  { key: "enum", label: "Privesc enum: Linux (self-contained)" },
+  { key: "win-enum", label: "Privesc enum: Windows (services/privs/AIE)" },
   { key: "loot", label: "Loot harvest (creds, redacted)" },
   { key: "linpeas", label: "Linpeas (SSH → privesc enum)" },
   { key: "bloodhound", label: "BloodHound (AD enumeration)" },
@@ -120,7 +120,7 @@ export default function PostexPage() {
         )}
         {loading && (
           <div className="dim" style={{ marginTop: 10, fontSize: 12 }}>
-            This runs on the server — you can switch pages and come back; it keeps running.
+            This runs on the server, you can switch pages and come back; it keeps running.
           </div>
         )}
       </div>
@@ -226,7 +226,7 @@ function ResultView({ result }) {
         <div className="card" style={{ marginTop: 12 }}>
           <div className="card-title">
             Loot ({loot.item_count} items · {loot.credential_count} creds)
-            <span className="dim" style={{ fontSize: 11 }}> — secrets redacted</span>
+            <span className="dim" style={{ fontSize: 11 }}>, secrets redacted</span>
           </div>
           {(loot.items || []).map((it, i) => (
             <div key={i} style={{ fontSize: 12, padding: "3px 0" }}>

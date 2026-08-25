@@ -61,7 +61,7 @@ export default function Health() {
         </div>
         <p className="dim" style={{ fontSize: 12, marginTop: 6 }}>
           HEAVEN {h.version} · Python {h.python}. This is the web equivalent of{" "}
-          <code>heaven doctor</code> — everything optional degrades gracefully, so a
+          <code>heaven doctor</code>, everything optional degrades gracefully, so a
           missing tool just disables one capability, it doesn't break the app.
         </p>
       </div>
@@ -85,7 +85,7 @@ export default function Health() {
             border: "1px solid var(--warn-border, rgba(240,180,60,0.30))",
           }}>
             <span style={{ fontSize: 12.5, color: "var(--text-0)" }}>
-              {missing} tool{missing > 1 ? "s" : ""} missing — install {missing > 1 ? "them all" : "it"} at once:
+              {missing} tool{missing > 1 ? "s" : ""} missing, install {missing > 1 ? "them all" : "it"} at once:
             </span>
             <code style={{ fontSize: 12.5, color: "var(--brand)" }}>{h.install_command || "heaven install-tools"}</code>
             <button
@@ -94,7 +94,7 @@ export default function Health() {
               onClick={() => {
                 const cmd = h.install_command || "heaven install-tools";
                 navigator.clipboard?.writeText(cmd).then(
-                  () => toast.success?.("Copied — run it in your terminal"),
+                  () => toast.success?.("Copied: run it in your terminal"),
                   () => toast.info?.(cmd),
                 );
               }}

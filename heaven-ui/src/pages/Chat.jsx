@@ -30,7 +30,7 @@ export default function Chat() {
           <h1>AI Assistant</h1>
           <p className="muted" style={{ margin: "4px 0 0" }}>
             Ask about your findings, CVEs, attack chains, and fixes. Runs on your
-            configured model — a local one keeps everything private and rate-limit-free.
+            configured model, a local one keeps everything private and rate-limit-free.
           </p>
         </div>
         <label className="chat-toggle" title="Feed the active engagement's findings to the assistant">
@@ -42,7 +42,7 @@ export default function Chat() {
 
       {showSetupHint && (
         <div className="card chat-setup-hint">
-          <strong>💡 Set up a free local model</strong> — no API key, no rate limits.
+          <strong>💡 Set up a free local model</strong>, no API key, no rate limits.
           Run <code>heaven ai setup</code> in your terminal (installs Ollama +
           pulls <code>{local.default_model}</code>), or configure a provider in{" "}
           <Link to="/settings">Settings</Link>.

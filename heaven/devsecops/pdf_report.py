@@ -31,7 +31,12 @@ import os
 from typing import Any, Optional
 from xml.sax.saxutils import escape as _xml_escape  # nosec B406 -- escape() is OUTPUT encoding (a security control), not XML parsing
 
-from heaven.devsecops.compliance_report import SEVERITY_META, ComplianceReportGenerator
+from heaven.devsecops.compliance_report import (
+    SEVERITY_META,
+    ComplianceReportGenerator,
+    _fmt_cvss,
+    _short,
+)
 from heaven.utils.cvss import is_confirmed_finding as _is_confirmed
 from heaven.utils.logger import get_logger
 
@@ -119,25 +124,38 @@ class PDFReportGenerator:
             self.available = True
         except ImportError:
             self.available = False
-            logger.warning("reportlab not installed — PDF export will fall back to HTML "
+            logger.warning("reportlab not installed, so PDF export will fall back to HTML "
                            "(pip install reportlab)")
 
     # ── public API ──────────────────────────────────────────────────
 
-    def generate(self, data: dict[str, Any], output_path: str) -> bool:
+    def generate(self, data: dict[str, Any], output_path: str,
+                 strict: bool = False) -> bool:
         """Render the report to ``output_path`` (.pdf). Returns True on success.
 
         Without reportlab, writes the professional HTML report to a sibling
         ``.html`` file (same content, different container) and returns True.
+
+        ``strict=True`` (used by the web API, which has already verified reportlab
+        is installed) re-raises a genuine build error instead of silently falling
+        back to HTML — so the caller can surface the *real* reason rather than a
+        misleading "reportlab installed?" message and an empty .pdf.
         """
         os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
         if not self.available:
+            if strict:
+                raise RuntimeError(
+                    "reportlab is not installed, so it cannot render PDF "
+                    "(pip install reportlab).")
             return self._html_fallback(data, output_path)
         try:
             self._build_pdf(data, output_path)
             logger.info(f"PDF report written to {output_path}")
             return True
         except Exception as exc:  # noqa: BLE001
+            logger.exception("PDF generation failed")
+            if strict:
+                raise
             logger.error(f"PDF generation failed ({exc}); falling back to HTML")
             return self._html_fallback(data, output_path)
 
@@ -147,9 +165,14 @@ class PDFReportGenerator:
             html_path = (output_path[:-4] + ".html") if output_path.endswith(".pdf") \
                 else output_path + ".html"
             findings = self._findings(data)
+            meta: dict[str, str] = {}
+            if str(data.get("tester") or "").strip():
+                meta["assessor"] = str(data["tester"]).strip()
+            if str(data.get("client") or "").strip():
+                meta["client"] = str(data["client"]).strip()
             html = ComplianceReportGenerator().generate_html_report(
                 findings, engagement_name=self._engagement(data),
-                assets=data.get("assets"))
+                assets=data.get("assets"), meta=meta or None)
             Path(html_path).write_text(html, encoding="utf-8")
             logger.info(f"HTML report written to {html_path} (install reportlab for PDF)")
             return True
@@ -313,6 +336,7 @@ class PDFReportGenerator:
                                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
         story.append(badge)
         story.append(Spacer(1, 14 * mm))
+        tester = str(data.get("tester") or "").strip()
         meta = [
             ["Findings", f"{len(findings)}  ({counts['critical']} critical, {counts['high']} high, "
                          f"{counts['medium']} medium, {counts['low']} low)"],
@@ -323,8 +347,10 @@ class PDFReportGenerator:
             ["Report date", gen_date],
             ["Version", version],
             ["Classification", "CONFIDENTIAL"],
-            ["Prepared by", "HEAVEN Autonomous Penetration-Testing Platform"],
         ]
+        if tester:
+            meta.append(["Tester", tester])
+        meta.append(["Prepared by", "HEAVEN Autonomous Penetration-Testing Platform"])
         mt = Table([[Paragraph(k, styles["cellb"]), Paragraph(_esc(v), styles["cell"])]
                     for k, v in meta], colWidths=[45 * mm, cw - 45 * mm])
         mt.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -408,7 +434,7 @@ class PDFReportGenerator:
         story.append(Paragraph(
             f"Of these, <b>{confirmed_total}</b> finding(s) are <b>Confirmed</b> (proven by direct "
             f"observation or active validation) and <b>{potential_total}</b> are <b>Potential</b> "
-            "(inferred from a service version banner and not confirmed from the outside — vendors "
+            "(inferred from a service version banner and not confirmed from the outside; vendors "
             "routinely backport fixes without bumping the banner). The Overall Risk rating counts "
             "confirmed findings only.", styles["small"]))
         # Key findings
@@ -463,7 +489,7 @@ class PDFReportGenerator:
                 f"<b>{inv_totals['open_ports']}</b> open port(s) across "
                 f"<b>{inv_totals['distinct_services']}</b> distinct service(s). Ports, service "
                 "versions and operating systems are reported exactly as observed by the scanner. "
-                "An OS marked <i>(heuristic — unconfirmed)</i> was inferred from a TTL value, not a "
+                "An OS marked <i>(heuristic, unconfirmed)</i> was inferred from a TTL value, not a "
                 "full stack fingerprint, and should be treated as indicative only. Where observed, "
                 "a host's device name, device type and MAC address are shown; a MAC address appears "
                 "only for a host on the same local segment scanned with sufficient privileges.",
@@ -477,10 +503,16 @@ class PDFReportGenerator:
             from heaven.devsecops.inventory import (
                 mac_label as _m_label,
             )
+            from heaven.devsecops.inventory import (
+                looks_like_ip as _looks_ip,
+            )
             for h in inventory:
                 os_txt = h.get("os_label") or "OS not determined"
-                story.append(Paragraph(f'{_esc(h.get("host"))} — {_esc(os_txt)}', styles["h3"]))
+                story.append(Paragraph(f'{_esc(h.get("host"))} · {_esc(os_txt)}', styles["h3"]))
                 meta_bits = []
+                _ip = h.get("ip") or ""
+                if _ip and _looks_ip(_ip) and _ip != h.get("host"):
+                    meta_bits.append(f"IP: {_ip}")
                 if _dn_label(h):
                     meta_bits.append(f"Device: {_dn_label(h)}")
                 if _dt_label(h):
@@ -507,6 +539,35 @@ class PDFReportGenerator:
                                    [16 * mm, 14 * mm, 26 * mm, cw - 116 * mm, 60 * mm]))
             story.append(PageBreak())
 
+        # ── Content Discovery (interesting paths from directory brute-forcing) ──
+        _dir_hits = [f for f in findings
+                     if (f.get("vuln_type") or f.get("type") or "") in
+                     ("directory_listing", "sensitive_file")]
+        if _dir_hits:
+            _dir_hits = sorted(_dir_hits, key=lambda f: (
+                _SEV_ORDER.get(_sev_of(f), 4),
+                -int((f.get("evidence") or {}).get("status_code") or 0)))
+            story.append(heading("", "Content Discovery"))
+            story.append(Paragraph(
+                f"Directory and file brute-forcing discovered <b>{len(_dir_hits)}</b> "
+                "interesting path(s): admin panels, exposed files, backups, API docs "
+                "and other resources returning a live status code (200 / 3xx / 401 / "
+                "403 …). Each is detailed, with remediation, in the Findings section.",
+                styles["body"]))
+            crows = [[Paragraph(c, styles["th"]) for c in
+                      ("Path", "Status", "Severity", "URL")]]
+            for f in _dir_hits:
+                ev = f.get("evidence") or {}
+                crows.append([
+                    Paragraph(_esc(ev.get("path") or f.get("target") or "—"), styles["cell"]),
+                    Paragraph(_esc(ev.get("status_code") or "—"), styles["cell"]),
+                    Paragraph(_esc(SEVERITY_META[_sev_of(f)]["label"]), styles["cell"]),
+                    Paragraph(_esc(f.get("target") or "—"), styles["cell"]),
+                ])
+            story.append(table(crows,
+                               [cw - 116 * mm, 18 * mm, 24 * mm, 74 * mm]))
+            story.append(PageBreak())
+
         # ── DNS Enumeration (only when a DNS recon ran) ──
         if dns_inv:
             story.append(heading("", "DNS Enumeration"))
@@ -520,7 +581,7 @@ class PDFReportGenerator:
                 dnssec = "enabled" if (n.get("dnssec") or {}).get("enabled") else "not detected"
                 wild = " · Wildcard DNS present" if n.get("wildcard") else ""
                 story.append(Paragraph(
-                    f'{_esc(n.get("domain"))} — DNSSEC: {dnssec}{_esc(wild)}', styles["h3"]))
+                    f'{_esc(n.get("domain"))} · DNSSEC: {dnssec}{_esc(wild)}', styles["h3"]))
                 recs = n.get("records") or {}
                 rrows = [[Paragraph(c, styles["th"]) for c in ("Type", "Record")]]
                 for rt in ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"):
@@ -561,8 +622,10 @@ class PDFReportGenerator:
         # ── 8. Findings summary ──
         story.append(heading("4.", "Findings Summary"))
         if findings:
+            # "CVSS"/"Ctx" columns are widened (was 12mm — too narrow, so the
+            # "CVSS" header wrapped to "CVS/S") and given clearer headers.
             fs = [[Paragraph(h, styles["th"]) for h in
-                   ("#", "Finding", "Severity", "Confirmation", "CVSS", "Ctx", "Target")]]
+                   ("#", "Finding", "Severity", "Confirm", "CVSS", "Ctx", "Target")]]
             for i, f in enumerate(findings, 1):
                 cvss = _OWASP._finding_cvss(f)
                 ctx = _OWASP._finding_contextual_cvss(f)
@@ -573,7 +636,8 @@ class PDFReportGenerator:
                            Paragraph(_esc(cvss), styles["small"]),
                            Paragraph(_esc(ctx), styles["small"]),
                            Paragraph(_esc(f.get("target") or "—"), styles["small"])])
-            story.append(table(fs, [9 * mm, cw - 137 * mm, 24 * mm, 24 * mm, 12 * mm, 12 * mm, 56 * mm]))
+            story.append(table(fs, [8 * mm, cw - 141 * mm, 24 * mm, 22 * mm,
+                                    16 * mm, 15 * mm, 56 * mm]))
         else:
             story.append(Paragraph("No findings recorded.", styles["small"]))
         story.append(PageBreak())
@@ -583,7 +647,13 @@ class PDFReportGenerator:
         if not findings:
             story.append(Paragraph("No findings recorded.", styles["small"]))
         for i, f in enumerate(findings, 1):
-            story.extend(self._finding_block(i, f, cw, styles, pill))
+            try:
+                story.extend(self._finding_block(i, f, cw, styles, pill))
+            except Exception:  # noqa: BLE001
+                # One malformed finding must never abort the whole report — render
+                # a minimal safe block for it and carry on. (Logged for triage.)
+                logger.exception("finding block %s failed to render; using fallback", i)
+                story.extend(self._finding_block_fallback(i, f, cw, styles))
         story.append(PageBreak())
 
         # ── 10. OWASP coverage ──
@@ -598,7 +668,7 @@ class PDFReportGenerator:
             story.append(heading("", "OWASP API Security Top 10 (2023) Coverage"))
             story.append(Paragraph(
                 "API findings (REST / GraphQL / gRPC) mapped to the OWASP API Security "
-                "Top 10 (2023) — the API-specific companion to the web risks.", styles["body"]))
+                "Top 10 (2023), the API-specific companion to the web risks.", styles["body"]))
             story.append(self._framework_table(
                 findings, _OWASP.OWASP_API_2023, _OWASP._api_category_id, cw, styles, table))
             story.append(PageBreak())
@@ -611,7 +681,7 @@ class PDFReportGenerator:
             story.append(heading("", "OWASP IoT Top 10 (2018) Coverage"))
             story.append(Paragraph(
                 "Consumer / building-automation device findings mapped to the OWASP IoT "
-                "Top 10 (2018) — the IoT-specific companion to the web risks.", styles["body"]))
+                "Top 10 (2018), the IoT-specific companion to the web risks.", styles["body"]))
             story.append(self._framework_table(
                 findings, _fw.OWASP_IOT_2018, _fw.iot_category_id, cw, styles, table))
             story.append(PageBreak())
@@ -625,6 +695,21 @@ class PDFReportGenerator:
                 findings, _fw.IEC_62443_FR, _fw.ot_category_id, cw, styles, table))
             story.append(PageBreak())
 
+        # ── 10c. Compliance-framework coverage (HIPAA / GDPR / PCI / …) ──
+        # Only when the operator requested a specific framework. An honest
+        # control-coverage view — never an attestation of compliance.
+        from heaven.devsecops import compliance_frameworks as _cf
+        _fw_obj = _cf.get_framework(data.get("compliance_framework") or "")
+        if _fw_obj is not None:
+            story.append(heading("", f"{_fw_obj.title} Compliance Mapping"))
+            story.append(Paragraph(
+                f"Identified findings mapped to {_esc(_fw_obj.title)} ({_esc(_fw_obj.subtitle)}). "
+                "This is a control-coverage view to guide remediation and audit preparation, "
+                "<b>not an attestation of compliance</b>, which requires a full audit of policy, "
+                "process and physical safeguards beyond an automated assessment.", styles["body"]))
+            story.append(self._compliance_table(findings, _fw_obj, cw, styles, table))
+            story.append(PageBreak())
+
         # ── 11. Roadmap ──
         story.append(heading("7.", "Remediation Roadmap"))
         story.append(Paragraph("Recommended remediation order, prioritised by severity. Address "
@@ -635,10 +720,10 @@ class PDFReportGenerator:
                    ("#", "Severity", "Finding", "Recommended action", "SLA")]]
             for i, f in enumerate(actionable[:25], 1):
                 ev = f.get("evidence") or {}
-                action = str(ev.get("remediation") or f.get("remediation")
-                             or "Review and remediate per finding detail.")
-                if len(action) > 160:
-                    action = action[:160] + "…"
+                # Summarise at a word boundary (a hard slice cut mid-word, e.g.
+                # "Rotate any s…"); full remediation is in the detailed finding.
+                action = _short(ev.get("remediation") or f.get("remediation")
+                                or "Review and remediate per finding detail.", 200)
                 rr.append([Paragraph(str(i), styles["cell"]), pill(_sev_of(f)),
                            Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
                            Paragraph(_esc(action), styles["small"]),
@@ -654,16 +739,16 @@ class PDFReportGenerator:
             "orchestrates reconnaissance, vulnerability scanning, NVD/EPSS/KEV enrichment, and "
             "ML-assisted risk scoring.", styles["body"]))
         story.append(Paragraph("Glossary", styles["h3"]))
-        gloss = [["CVSS", "Common Vulnerability Scoring System — a 0–10 severity score."],
-                 ["CVSS base", "The base score — a property of the weakness class, so two findings "
+        gloss = [["CVSS", "Common Vulnerability Scoring System, a 0-10 severity score."],
+                 ["CVSS base", "The base score, a property of the weakness class, so two findings "
                                "of the same class share it."],
                  ["Contextual CVSS", "The CVSS Temporal + Environmental score: the base adjusted for "
                                      "THIS finding's exploit maturity (EPSS / exploit / KEV), detection "
-                                     "confidence and the asset's criticality & exposure. Per-finding, so "
+                                     "confidence and the asset's criticality and exposure. Per-finding, so "
                                      "it varies even within one weakness class."],
-                 ["EPSS", "Exploit Prediction Scoring System — probability a vuln will be exploited."],
+                 ["EPSS", "Exploit Prediction Scoring System, the probability a vuln will be exploited."],
                  ["CISA KEV", "Catalog of vulnerabilities known to be actively exploited."],
-                 ["CWE", "Common Weakness Enumeration — category of the underlying weakness."],
+                 ["CWE", "Common Weakness Enumeration, the category of the underlying weakness."],
                  ["OWASP Top 10", "The ten most critical web application security risks."]]
         gt = [[Paragraph(t, styles["cellb"]), Paragraph(d, styles["cell"])] for t, d in gloss]
         story.append(table(gt, [32 * mm, cw - 32 * mm], header=False))
@@ -674,7 +759,7 @@ class PDFReportGenerator:
             "recommended after remediation and following significant environment changes.", styles["small"]))
 
         # ── Build (two-pass for the ToC) with footer canvas ──
-        title_str = f"CONFIDENTIAL — HEAVEN Penetration Test Report — {eng}"
+        title_str = f"CONFIDENTIAL · HEAVEN Penetration Test Report · {eng}"
 
         class _NumberedCanvas(canvas.Canvas):
             def __init__(self, *a, **k):
@@ -705,7 +790,7 @@ class PDFReportGenerator:
                     self.notify("TOCEntry", (0, toc_text, self.page))
 
         doc = _Doc(output_path, pagesize=A4, topMargin=16 * mm, bottomMargin=18 * mm,
-                   leftMargin=14 * mm, rightMargin=14 * mm, title=f"Penetration Test Report — {eng}",
+                   leftMargin=14 * mm, rightMargin=14 * mm, title=f"Penetration Test Report · {eng}",
                    author="HEAVEN")
         doc.multiBuild(story, canvasmaker=_NumberedCanvas)
 
@@ -743,8 +828,8 @@ class PDFReportGenerator:
             tail = ("No confirmed high-impact vulnerabilities were identified; the environment "
                     "demonstrated a strong security posture.")
         if potential_total:
-            tail += (f" A further <b>{potential_total}</b> potential finding(s) — inferred from "
-                     "service version banners and not confirmed from the outside — are listed "
+            tail += (f" A further <b>{potential_total}</b> potential finding(s), inferred from "
+                     "service version banners and not confirmed from the outside, are listed "
                      "separately; verify the running versions before treating them as present.")
         return (f"This report presents the results of a penetration test of <b>{_esc(eng)}</b>, "
                 f"covering <b>{scope_n}</b> in-scope target(s). A total of <b>{total}</b> finding(s) "
@@ -802,7 +887,7 @@ class PDFReportGenerator:
             ("Target", f.get("target") or "—"), ("Severity", m["label"]),
             ("Confirmation", _conf_of(f)),
             ("CVSS base (class)", cvss),
-            ("Contextual CVSS (temporal+environmental)", contextual),
+            ("Contextual CVSS", contextual),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
             ("CWE", f.get("cwe") or "—"), ("OWASP", owasp),
@@ -831,26 +916,62 @@ class PDFReportGenerator:
         section("DESCRIPTION", ev.get("description") or f.get("description"))
         section("IMPACT", ev.get("impact"))
 
-        for key, label in (("payload", "PAYLOAD"), ("request", "HTTP REQUEST"),
-                           ("response", "HTTP RESPONSE"), ("curl", "REPRODUCTION (CURL)"),
-                           ("proof", "PROOF"), ("poc", "PROOF OF CONCEPT")):
-            val = ev.get(key)
-            if not val:
-                continue
-            snippet = str(val)
+        # Proof / evidence — EVERY finding gets at least one block (explicit
+        # artefacts verbatim when present, else synthesised honest evidence), via
+        # the one shared resolver so HTML and PDF are identical.
+        for label, is_code, text in _OWASP._proof_blocks(f):
+            snippet = str(text)
             if len(snippet) > 2500:
                 snippet = snippet[:2500] + "\n… (truncated)"
-            # Paragraph with wordWrap=CJK (set on the 'pre' style) wraps long
-            # unbroken tokens safely; <br/> preserves line breaks.
-            pre = Paragraph(_esc(snippet).replace("\n", "<br/>"), styles["pre"])
-            box = Table([[pre]], colWidths=[cw])
-            box.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0d1117")),
-                                     ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                                     ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                                     ("TOPPADDING", (0, 0), (-1, -1), 6),
-                                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
-            out.append(Paragraph(label, styles["label"]))
-            out.append(box)
+            out.append(Paragraph(_esc(label).upper(), styles["label"]))
+            if is_code:
+                # Paragraph with wordWrap=CJK (set on the 'pre' style) wraps long
+                # unbroken tokens safely; <br/> preserves line breaks.
+                pre = Paragraph(_esc(snippet).replace("\n", "<br/>"), styles["pre"])
+                box = Table([[pre]], colWidths=[cw])
+                box.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0d1117")),
+                                         ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                                         ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                                         ("TOPPADDING", (0, 0), (-1, -1), 6),
+                                         ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+                out.append(box)
+            else:
+                out.append(Paragraph(_esc(snippet).replace("\n", "<br/>"), styles["body"]))
+
+        # Candidate-CVE awareness table (version-undetermined "potential" finding):
+        # names every CVE known for the product with its published score and the
+        # affected-version range it REQUIRES — full awareness, none asserted present.
+        cand = ev.get("candidate_details") or []
+        if cand:
+            head = ["CVE", "CVSS", "Sev", "Affected versions", "Exploit", "Description"]
+            crows = [[Paragraph(f'<b>{_esc(h)}</b>', styles["small"]) for h in head]]
+            for d in cand:
+                crows.append([
+                    Paragraph(_esc(str(d.get("cve", ""))), styles["small"]),
+                    Paragraph(_esc(_fmt_cvss(d.get("cvss"))), styles["small"]),
+                    Paragraph(_esc(str(d.get("severity", "")).title()), styles["small"]),
+                    Paragraph(_esc(str(d.get("affected_versions", "") or "—")), styles["small"]),
+                    Paragraph("public" if d.get("exploit_available") else "—", styles["small"]),
+                    Paragraph(_esc(str(d.get("title", ""))), styles["small"]),
+                ])
+            cwd = [0.15 * cw, 0.07 * cw, 0.10 * cw, 0.23 * cw, 0.09 * cw]
+            cwd.append(cw - sum(cwd))
+            ct = Table(crows, colWidths=cwd, repeatRows=1)
+            ct.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, line),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef1f6")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
+            out.append(Paragraph("CANDIDATE CVEs (UNVERIFIED, VERSION NOT CONFIRMED)",
+                                 styles["label"]))
+            out.append(ct)
+            hint = ev.get("how_to_confirm")
+            if hint:
+                out.append(Paragraph("HOW TO CONFIRM THE VERSION", styles["label"]))
+                out.append(Paragraph(_esc(hint), styles["body"]))
 
         # Remediation renders each numbered step on its own line, not one run-on
         # paragraph — reportlab wants <br/>, so translate the shared <br> markup.
@@ -868,6 +989,35 @@ class PDFReportGenerator:
         section("ASSESSOR NOTES", f.get("operator_notes"))
         out.append(Spacer(1, 12))
         return out
+
+    def _finding_block_fallback(self, idx, f, cw, styles) -> list:
+        """Minimal, can't-fail rendering of one finding, used only when the full
+        block raises. Guarantees the finding still appears (title, severity,
+        target, description) rather than taking the whole PDF down with it."""
+        from reportlab.lib import colors
+        from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+        sev = _sev_of(f)
+        m = SEVERITY_META[sev]
+        title = f.get("title") or f.get("vuln_type") or "Finding"
+        hdr = Table([[Paragraph(f'<font color="white" size="10"><b>{m["label"]} &nbsp; '
+                                f'#{idx} &nbsp; {_esc(title)}</b></font>', styles["cell"])]],
+                    colWidths=[cw])
+        hdr.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(m["color"])),
+                                 ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                                 ("TOPPADDING", (0, 0), (-1, -1), 5),
+                                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+        ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+        desc = _esc(ev.get("description") or f.get("description") or "")
+        return [
+            hdr, Spacer(1, 3),
+            Paragraph(f"Target: {_esc(f.get('target') or '—')} · Severity: "
+                      f"{m['label']} · Status: {_esc((f.get('status') or 'open').title())}",
+                      styles["small"]),
+            Paragraph(desc, styles["body"]) if desc else Spacer(1, 1),
+            Paragraph("<i>Some details of this finding could not be rendered and were "
+                      "omitted; see the JSON export for the full record.</i>", styles["small"]),
+            Spacer(1, 12),
+        ]
 
     def _owasp_table(self, findings, cw, styles, table):
         from reportlab.lib.units import mm
@@ -914,6 +1064,22 @@ class PDFReportGenerator:
                          Paragraph(f'<font color="{color}"><b>{status}</b></font>', styles["cell"]),
                          Paragraph(str(n), styles["cell"])])
         return table(rows, [28 * mm, cw - 86 * mm, 38 * mm, 20 * mm])
+
+    def _compliance_table(self, findings, fw, cw, styles, table):
+        """Compliance-framework control-coverage table (multi-control mapping)."""
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph
+        from heaven.devsecops import compliance_frameworks as _cf
+        buckets = _cf.covered_controls(fw, findings)
+        rows = [[Paragraph(h, styles["th"]) for h in ("Control", "Requirement", "Status", "Findings")]]
+        for cid, cn in fw.controls:
+            n = len(buckets[cid])
+            status = "Findings present" if n else "Not observed"
+            color = "#b00020" if n else "#1a7f37"
+            rows.append([Paragraph(_esc(cid), styles["cell"]), Paragraph(_esc(cn), styles["cell"]),
+                         Paragraph(f'<font color="{color}"><b>{status}</b></font>', styles["cell"]),
+                         Paragraph(str(n), styles["cell"])])
+        return table(rows, [34 * mm, cw - 92 * mm, 38 * mm, 20 * mm])
 
 
 def generate_report(data: dict[str, Any], output_path: str,

@@ -182,6 +182,95 @@ def test_stream_falls_back_to_single_chunk_on_native_error():
     assert chunks == ["FULL ANSWER"]
 
 
+# ── structured JSON parsing: local models wrap JSON in prose ────────────────
+try:
+    from pydantic import BaseModel
+
+    class _V(BaseModel):
+        keep: bool
+        note: str = ""
+    _HAS_PYD = True
+except Exception:  # pragma: no cover
+    _HAS_PYD = False
+
+
+class _CapClient:
+    """Captures each posted payload; returns a fixed content. An optional
+    status sequence lets a call raise an HTTP error before succeeding."""
+
+    def __init__(self, content, status_sequence=None):
+        self.content = content
+        self.payloads = []
+        self._status = list(status_sequence or [])
+
+    def post(self, url, json=None):
+        # snapshot the payload — _call_local mutates it in place on retry
+        self.payloads.append(dict(json) if json is not None else json)
+        if self._status:
+            code = self._status.pop(0)
+            if code != 200:
+                import httpx
+                req = httpx.Request("POST", url)
+                raise httpx.HTTPStatusError(
+                    "boom", request=req, response=httpx.Response(code, request=req)
+                )
+        return _Resp({
+            "choices": [{"message": {"content": self.content}, "finish_reason": "stop"}],
+            "usage": {},
+        })
+
+
+@pytest.mark.skipif(not _HAS_PYD, reason="pydantic not installed")
+@pytest.mark.parametrize("raw", [
+    '{"keep": true, "note": "clean"}',
+    '```json\n{"keep": true, "note": "fenced"}\n```',
+    'Sure, here is the verdict: {"keep": true, "note": "prose"}. Hope it helps.',
+    '{"keep": true, "note": "a } brace inside a string"}',
+    'reasoning first...\n{"keep": true}\ntrailing commentary',
+])
+def test_parse_structured_recovers_wrapped_json(raw):
+    v = LLMGateway._parse_structured(raw, _V)
+    assert v.keep is True
+
+
+def test_extract_json_object_none_when_absent():
+    assert LLMGateway._extract_json_object("no object here at all") is None
+
+
+@pytest.mark.skipif(not _HAS_PYD, reason="pydantic not installed")
+def test_parse_structured_raises_when_no_json():
+    with pytest.raises(LLMProviderError):
+        LLMGateway._parse_structured("totally not json", _V)
+
+
+@pytest.mark.skipif(not _HAS_PYD, reason="pydantic not installed")
+def test_call_local_sends_json_mode_when_schema_set():
+    gw = _bare()
+    cap = _CapClient('{"keep": true}')
+    gw._client = cap
+    gw._call_local("hi", "sys", LLMRequest(prompt="hi", response_schema=_V))
+    assert cap.payloads[-1].get("response_format") == {"type": "json_object"}
+
+
+def test_call_local_no_json_mode_without_schema():
+    gw = _bare()
+    cap = _CapClient("plain text")
+    gw._client = cap
+    gw._call_local("hi", "sys", LLMRequest(prompt="hi"))
+    assert "response_format" not in cap.payloads[-1]
+
+
+@pytest.mark.skipif(not _HAS_PYD, reason="pydantic not installed")
+def test_call_local_retries_without_json_mode_on_400():
+    gw = _bare()
+    cap = _CapClient('{"keep": true}', status_sequence=[400, 200])
+    gw._client = cap
+    r = gw._call_local("hi", "sys", LLMRequest(prompt="hi", response_schema=_V))
+    assert r.error is None
+    assert "response_format" in cap.payloads[0]        # first try asked for JSON mode
+    assert "response_format" not in cap.payloads[1]    # retry dropped it
+
+
 def test_stream_local_parses_sse_deltas():
     class _StreamResp:
         def __init__(self, lines):

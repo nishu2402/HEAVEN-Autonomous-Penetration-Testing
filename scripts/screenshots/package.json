@@ -4,6 +4,9 @@
   "description": "Dev-only tooling to regenerate docs/screenshots. Not part of the app or the web UI build.",
   "type": "module",
   "dependencies": {
-    "puppeteer-core": "^24.0.0"
+    "puppeteer-core": "^25.0.0"
+  },
+  "overrides": {
+    "@puppeteer/browsers": ">=3.0.2"
   }
 }

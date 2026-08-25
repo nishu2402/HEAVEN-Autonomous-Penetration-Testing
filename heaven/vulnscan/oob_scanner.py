@@ -15,6 +15,7 @@ to a routable address you're authorized to receive callbacks on.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -238,7 +239,7 @@ async def scan_oob(urls: list[str], oast: OASTListener | None = None,
         conn = aiohttp.TCPConnector(ssl=False, limit=15)
         ct = aiohttp.ClientTimeout(total=timeout)
         headers = {"User-Agent": "Mozilla/5.0 (compatible; HEAVEN-OOB/1.0)"}
-        async with aiohttp.ClientSession(connector=conn, timeout=ct,
+        async with _egress_cs(connector=conn, timeout=ct,
                                          headers=headers) as session:
             sem = asyncio.Semaphore(6)
 

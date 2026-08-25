@@ -166,7 +166,7 @@ if HAS_CLICK:
         audit, autonomous, benchmark as benchmark_module, chat as chat_module, cloud, completion,
         config_cmd, coverage, cve as cve_module,
         db, demo as demo_module,
-        diff, dns as dns_module, engage, exploitdb, findings, info, init as init_module,
+        diff, dns as dns_module, egress as egress_module, engage, exploitdb, findings, info, init as init_module,
         install_tools as install_tools_module, knowledge,
         lateral, methodology, mitre, postex as postex_module,
         quickstart as quickstart_module, replay,
@@ -189,6 +189,7 @@ if HAS_CLICK:
     db.register(cli)
     diff.register(cli)
     dns_module.register(cli)
+    egress_module.register(cli)
     engage.register(cli)
     exploitdb.register(cli)
     findings.register(cli)

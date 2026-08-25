@@ -442,10 +442,7 @@ async def _update_nvd_delta() -> tuple[bool, str, int]:
         return False, f"nvd_pipeline not importable: {e}", 0
     try:
         pipeline = NVDPipeline()
-        delta = getattr(pipeline, "download_recent", None)
-        if delta is None:
-            return False, "NVDPipeline.download_recent not implemented yet", 0
-        n = await delta(days=7)
+        n = await pipeline.download_recent(days=7)
         return True, "OK", int(n or 0)
     except Exception as e:
         return False, f"{type(e).__name__}: {e}", 0

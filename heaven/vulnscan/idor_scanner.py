@@ -17,6 +17,7 @@ Techniques used
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 import hashlib
@@ -571,7 +572,7 @@ class IDORScanner:
         logger.info(f"IDORScanner: testing {len(unique)} URLs")
 
         connector = aiohttp.TCPConnector(ssl=False, limit=40)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with _egress_cs(connector=connector) as session:
             tasks = []
             for url in unique:
                 forms = (forms_by_url or {}).get(url, [])

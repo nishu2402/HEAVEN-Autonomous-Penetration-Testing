@@ -9,8 +9,10 @@
 // (`heaven methodology coverage`) and the Findings data.
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Methodology as M } from "../api";
+import { Link } from "react-router";
+import { Methodology as M, downloadMethodology } from "../api";
 import { SkeletonCard } from "../components/Skeleton.jsx";
+import { useToast } from "../components/Toast.jsx";
 import Markdown from "../components/Markdown.jsx";
 
 const STATUS_META = {
@@ -18,6 +20,83 @@ const STATUS_META = {
   partial:   { label: "PARTIAL", color: "var(--amber)", bg: "color-mix(in srgb, var(--amber) 16%, transparent)" },
   manual:    { label: "MANUAL", color: "var(--text-2)", bg: "rgba(255,255,255,0.04)" },
 };
+
+// Severity palette for the aligned-findings chips (matches the app's finding views).
+const SEV_COLORS = {
+  critical: "var(--crit)",
+  high: "#ff8a3d",
+  medium: "#ffd24d",
+  low: "var(--cyan)",
+  info: "var(--text-2)",
+  informational: "var(--text-2)",
+};
+
+function SevChip({ sev }) {
+  const s = (sev || "info").toLowerCase();
+  const c = SEV_COLORS[s] || "var(--text-2)";
+  return (
+    <span style={{
+      display: "inline-block", padding: "0 6px", borderRadius: 4, fontSize: 9.5,
+      fontWeight: 800, letterSpacing: "0.04em", color: c,
+      border: `1px solid ${c}`, whiteSpace: "nowrap", textTransform: "uppercase",
+    }}>{s}</span>
+  );
+}
+
+// The aligned findings that exercised one methodology test — each links straight
+// to its finding detail (BrowserRouter — never hash-nav).
+function AlignedFindings({ row }) {
+  const refs = row.findings || [];
+  const more = (row.exercised_count || 0) - refs.length;
+  return (
+    <div style={{
+      padding: "10px 12px", background: "color-mix(in srgb, var(--brand) 5%, transparent)",
+      borderTop: "1px solid var(--border)",
+    }}>
+      <div style={{ fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase",
+                    color: "var(--text-2)", fontWeight: 600, marginBottom: 6 }}>
+        Findings that exercised this test
+      </div>
+      {refs.length === 0 ? (
+        <div className="dim" style={{ fontSize: 12 }}>No linkable findings.</div>
+      ) : (
+        <div style={{ display: "grid", gap: 6 }}>
+          {refs.map((f, i) => {
+            const inner = (
+              <>
+                <SevChip sev={f.severity} />
+                <span style={{ color: "var(--text-0)", fontSize: 12.5, fontWeight: 500 }}>
+                  {f.title || f.vuln_type || "Finding"}
+                </span>
+                {f.target && (
+                  <code style={{ fontSize: 11, color: "var(--text-2)" }}>{f.target}</code>
+                )}
+              </>
+            );
+            const rowStyle = {
+              display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+              textDecoration: "none",
+            };
+            return f.id ? (
+              <Link key={f.id + i} to={`/findings/${encodeURIComponent(f.id)}`}
+                    style={rowStyle} title="Open finding detail">
+                {inner}
+                <span style={{ marginLeft: "auto", color: "var(--brand)", fontSize: 11 }}>open →</span>
+              </Link>
+            ) : (
+              <div key={i} style={rowStyle}>{inner}</div>
+            );
+          })}
+          {more > 0 && (
+            <div className="dim" style={{ fontSize: 11.5 }}>
+              +{more} more finding{more === 1 ? "" : "s"}, see the Findings page.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function StatusChip({ status }) {
   const m = STATUS_META[status] || STATUS_META.manual;
@@ -86,7 +165,7 @@ export default function Methodology() {
       <div className="card">
         <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>§ Methodology Coverage</h2>
         <p className="dim" style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 0 }}>
-          How HEAVEN's scanners map to each industry standard's test IDs — with a{" "}
+          How HEAVEN's scanners map to each industry standard's test IDs, with a{" "}
           <strong style={{ color: "var(--brand)" }}>live overlay</strong> of what your
           current engagement actually exercised. A test is marked{" "}
           <span style={{ color: "var(--brand)", fontWeight: 600 }}>✓ exercised</span> when
@@ -146,10 +225,43 @@ export default function Methodology() {
 function StandardView({ std, engName, findingsTotal }) {
   const su = std.summary || {};
   const covPct = su.total ? Math.round((100 * su.covered) / su.total) : 0;
+  const [busy, setBusy] = useState("");
+  const [expandAll, setExpandAll] = useState(false);
+  const toast = useToast();
+
+  async function dl(fmt) {
+    setBusy(fmt);
+    try {
+      const name = await downloadMethodology(std.name, fmt);
+      toast.success(`Downloaded ${name}`);
+    } catch (e) {
+      toast.error(e.message || "Coverage export failed");
+    } finally {
+      setBusy("");
+    }
+  }
 
   return (
     <div>
-      <h3 style={{ margin: "0 0 6px", color: "var(--text-0)" }}>{std.title}</h3>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap",
+                    justifyContent: "space-between" }}>
+        <h3 style={{ margin: "0 0 6px", color: "var(--text-0)" }}>{std.title}</h3>
+        {/* Download this standard's live coverage matrix as a deliverable. */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[["html", "⬇ HTML"], ["pdf", "⬇ PDF"], ["markdown", "⬇ Markdown"], ["json", "⬇ JSON"]].map(([f, lbl]) => (
+            <button key={f} type="button" onClick={() => dl(f)} disabled={!!busy}
+              style={{
+                padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: busy ? "wait" : "pointer",
+                background: "rgba(255,255,255,0.03)", color: "var(--text-0)",
+                border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
+                fontFamily: "var(--font-ui)",
+              }}
+              title={`Download the ${std.meta_title || std.title} coverage report`}>
+              {busy === f ? "…" : lbl}
+            </button>
+          ))}
+        </div>
+      </div>
       {std.intro && (
         <div className="dim" style={{ fontSize: 12, lineHeight: 1.6, marginTop: 0 }}>
           <Markdown>{std.intro}</Markdown>
@@ -174,7 +286,7 @@ function StandardView({ std, engName, findingsTotal }) {
         ) : (
           <>
             <span style={{ color: "var(--text-2)", fontWeight: 700 }}>○ Idle</span>{" "}
-            No findings in <code>{engName}</code> yet — run a scan to light up the tests
+            No findings in <code>{engName}</code> yet, run a scan to light up the tests
             your engagement exercises.
           </>
         )}
@@ -190,16 +302,43 @@ function StandardView({ std, engName, findingsTotal }) {
         <Tile label="Exercised here" value={su.exercised || 0} sub="detector fired" alert />
       </div>
 
+      {/* Expand-all toggle for the aligned findings */}
+      {(su.exercised || 0) > 0 && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+          <button type="button" onClick={() => setExpandAll((v) => !v)}
+            style={{
+              padding: "5px 10px", fontSize: 11.5, cursor: "pointer",
+              background: "none", color: "var(--brand)", border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)", fontFamily: "var(--font-ui)",
+            }}>
+            {expandAll ? "▾ Collapse all findings" : "▸ Expand all exercised findings"}
+          </button>
+        </div>
+      )}
+
       {/* Per-category tables */}
       {std.categories.map((cat) => (
-        <CategoryTable key={cat.title} cat={cat} />
+        <CategoryTable key={cat.title} cat={cat} expandAll={expandAll} />
       ))}
     </div>
   );
 }
 
-function CategoryTable({ cat }) {
+function CategoryTable({ cat, expandAll }) {
   const rows = cat.rows || [];
+  // Which exercised rows are expanded to show their aligned findings.
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (key) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+
+  const cellBase = {
+    padding: "6px 10px", borderBottom: "1px solid var(--border)", verticalAlign: "top",
+  };
+
   return (
     <div style={{ marginBottom: 18 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "0 0 8px" }}>
@@ -228,38 +367,63 @@ function CategoryTable({ cat }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.id + i} style={{
-                  background: r.exercised
-                    ? "color-mix(in srgb, var(--brand) 7%, transparent)"
-                    : (i % 2 ? "rgba(255,255,255,0.015)" : "transparent"),
-                }}>
-                  <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)",
-                               verticalAlign: "top", whiteSpace: "nowrap", fontFamily: "var(--font-mono)",
-                               color: "var(--text-0)", fontSize: 11.5 }}>
-                    {r.exercised && <span title="Exercised in this engagement"
-                      style={{ color: "var(--brand)", marginRight: 5 }}>✓</span>}
-                    {r.id}
-                  </td>
-                  <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)",
-                               verticalAlign: "top", color: "var(--text-1)" }}>
-                    {inlineCode(r.description || r.item)}
-                  </td>
-                  <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)",
-                               verticalAlign: "top", color: "var(--text-2)", fontSize: 11.5 }}>
-                    {inlineCode(r.coverage)}
-                    {r.exercised_count > 0 && (
-                      <span style={{ marginLeft: 6, color: "var(--brand)", fontWeight: 600, fontSize: 11 }}>
-                        · {r.exercised_count} finding{r.exercised_count === 1 ? "" : "s"}
-                      </span>
+              {rows.map((r, i) => {
+                const key = r.id + i;
+                const isOpen = expandAll || open.has(key);
+                const clickable = !!r.exercised;
+                return (
+                  <React.Fragment key={key}>
+                    <tr
+                      onClick={clickable ? () => toggle(key) : undefined}
+                      onKeyDown={clickable ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(key); }
+                      } : undefined}
+                      tabIndex={clickable ? 0 : undefined}
+                      role={clickable ? "button" : undefined}
+                      aria-expanded={clickable ? isOpen : undefined}
+                      title={clickable ? "Show the findings that exercised this test" : undefined}
+                      style={{
+                        cursor: clickable ? "pointer" : "default",
+                        background: r.exercised
+                          ? "color-mix(in srgb, var(--brand) 7%, transparent)"
+                          : (i % 2 ? "rgba(255,255,255,0.015)" : "transparent"),
+                      }}
+                    >
+                      <td style={{ ...cellBase, whiteSpace: "nowrap", fontFamily: "var(--font-mono)",
+                                   color: "var(--text-0)", fontSize: 11.5 }}>
+                        {clickable && (
+                          <span aria-hidden="true" style={{ color: "var(--brand)", marginRight: 4,
+                            display: "inline-block", width: 10 }}>{isOpen ? "▾" : "▸"}</span>
+                        )}
+                        {r.exercised && <span title="Exercised in this engagement"
+                          style={{ color: "var(--brand)", marginRight: 5 }}>✓</span>}
+                        {r.id}
+                      </td>
+                      <td style={{ ...cellBase, color: "var(--text-1)" }}>
+                        {inlineCode(r.description || r.item)}
+                      </td>
+                      <td style={{ ...cellBase, color: "var(--text-2)", fontSize: 11.5 }}>
+                        {inlineCode(r.coverage)}
+                        {r.exercised_count > 0 && (
+                          <span style={{ marginLeft: 6, color: "var(--brand)", fontWeight: 600, fontSize: 11 }}>
+                            · {r.exercised_count} finding{r.exercised_count === 1 ? "" : "s"}
+                          </span>
+                        )}
+                      </td>
+                      <td style={cellBase}>
+                        <StatusChip status={r.status} />
+                      </td>
+                    </tr>
+                    {clickable && isOpen && (
+                      <tr>
+                        <td colSpan={4} style={{ padding: 0, borderBottom: "1px solid var(--border)" }}>
+                          <AlignedFindings row={r} />
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)",
-                               verticalAlign: "top" }}>
-                    <StatusChip status={r.status} />
-                  </td>
-                </tr>
-              ))}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

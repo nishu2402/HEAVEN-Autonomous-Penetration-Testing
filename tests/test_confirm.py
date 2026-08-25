@@ -38,10 +38,25 @@ def _no_live_sessions(monkeypatch):
     monkeypatch.setattr(confirm, "_new_session", lambda: _FakeSession())
 
 
-def _patch_get(monkeypatch, status=200, headers=None, body=""):
+def _patch_get(monkeypatch, status=200, headers=None, body="", final_url=None):
+    hdrs = {k.lower(): v for k, v in (headers or {}).items()}
+
+    def _is_junk(url: str) -> bool:
+        # The endpoint confirmer probes a random sibling for soft-404 calibration.
+        return "heaven-" in url or url.endswith(".nope")
+
     async def _fake(_session, _url, **_kw):
-        return status, {k.lower(): v for k, v in (headers or {}).items()}, body
+        if _is_junk(_url):
+            return 404, {}, "not found"
+        return status, hdrs, body
+
+    async def _fake_final(_session, _url, **_kw):
+        if _is_junk(_url):
+            return 404, {}, "not found", _url
+        return status, hdrs, body, (final_url or _url)
+
     monkeypatch.setattr(confirm, "_http_get", _fake)
+    monkeypatch.setattr(confirm, "_http_get_final", _fake_final)
 
 
 # ── Classification ───────────────────────────────────────────────────────────

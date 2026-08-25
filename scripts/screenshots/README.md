@@ -2,7 +2,7 @@
 
 Everything in [`docs/screenshots/`](../../docs/screenshots) is generated from the
 **live application**, so the images stay truthful across releases (the version
-string, module list, and UI are whatever the code currently produces — nothing is
+string, module list, and UI are whatever the code currently produces, nothing is
 mocked up in an image editor).
 
 There are two kinds of image and one command that produces all of them.
@@ -20,7 +20,7 @@ There are two kinds of image and one command that produces all of them.
 ```
 
 This runs entirely against an **isolated, throwaway data dir and a random admin
-password** — it never touches your real `./data` or `./.env`. It builds the web
+password**, it never touches your real `./data` or `./.env`. It builds the web
 UI, seeds demo data, starts a local backend, captures all seven images straight
 into `docs/screenshots/`, and tears the backend down on exit.
 

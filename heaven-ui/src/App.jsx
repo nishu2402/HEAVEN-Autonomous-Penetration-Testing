@@ -15,6 +15,7 @@ import Tour from "./components/Tour.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import ForcedPasswordChange from "./components/ForcedPasswordChange.jsx";
 import ChatWidget from "./components/ChatWidget.jsx";
+import UpdateBanner from "./components/UpdateBanner.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import NotFound from "./pages/NotFound.jsx";
 
@@ -30,6 +31,7 @@ const AIPlans        = lazy(() => import("./pages/AIPlans.jsx"));
 const ChatPage       = lazy(() => import("./pages/Chat.jsx"));
 const Benchmark      = lazy(() => import("./pages/Benchmark.jsx"));
 const Methodology    = lazy(() => import("./pages/Methodology.jsx"));
+const Compliance     = lazy(() => import("./pages/Compliance.jsx"));
 const AutonomousPage = lazy(() => import("./pages/Autonomous.jsx"));
 const CoveragePage   = lazy(() => import("./pages/Coverage.jsx"));
 const PostexPage     = lazy(() => import("./pages/Postex.jsx"));
@@ -83,7 +85,7 @@ export default function App() {
     <ToastProvider>
       {/* JobsProvider sits above the router so long-running operations (post-ex,
           lateral, SAST, …) keep running and keep their result when you navigate
-          between pages — the page can unmount without losing the job. */}
+          between pages, so the page can unmount without losing the job. */}
       <JobsProvider>
         <SessionExpiryWatcher />
         <Routes>
@@ -124,6 +126,9 @@ function Shell() {
       <div className="main-pane">
         <Header onMenu={() => setNavOpen((o) => !o)} />
         <div className="content">
+          {/* Global "update available" banner — detection is gated on the
+              operator's auto-check preference; applying is admin-only. */}
+          {!mustChange && <UpdateBanner />}
           {/* Keyed by path so navigating to another route clears a crashed page. */}
           <ErrorBoundary key={location.pathname}>
             <Suspense fallback={<RouteFallback />}>
@@ -145,6 +150,7 @@ function Shell() {
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/benchmark" element={<Benchmark />} />
               <Route path="/methodology" element={<Methodology />} />
+              <Route path="/compliance" element={<Compliance />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/health" element={<HealthPage />} />

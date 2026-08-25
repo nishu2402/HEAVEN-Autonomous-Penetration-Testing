@@ -126,7 +126,7 @@ export default function EngagementPage() {
         <EmptyState
           icon="◈"
           headline="No active engagement yet"
-          body="HEAVEN organizes findings per engagement. The quickest way to start one is to launch a scan with an engagement name — or use the CLI steps below."
+          body="HEAVEN organizes findings per engagement. The quickest way to start one is to launch a scan with an engagement name: or use the CLI steps below."
           cta="Launch a scan →"
           ctaTo="/scans"
         />
@@ -151,7 +151,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
           <div className="card-title">Why per-engagement SQLite?</div>
           <div style={{ color: 'var(--text-1)', lineHeight: 1.8, fontSize: 13 }}>
             <p>Each engagement gets an isolated database file. No cross-contamination of findings,
-            no shared state between clients. The file lives next to your notes — hand it to a
+            no shared state between clients. The file lives next to your notes, hand it to a
             colleague or archive it after the engagement ends.</p>
           </div>
         </div>
@@ -168,6 +168,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
             <tr><td>Name</td><td style={{ color: 'var(--text-0)', fontWeight: 700 }}>{engagement.name}</td></tr>
             <EditableRow label="Client" field="client" value={engagement.client} />
             <EditableRow label="Statement of work" field="statement_of_work" value={engagement.statement_of_work} />
+            <EditableRow label="Tester" field="tester" value={engagement.tester} />
             <tr><td>Created</td><td className="dim">{engagement.created_at || "—"}</td></tr>
             <tr><td>Targets in scope</td><td>{stats.scope_targets}</td></tr>
             <tr><td>Scans run</td><td>{stats.scans_run}</td></tr>

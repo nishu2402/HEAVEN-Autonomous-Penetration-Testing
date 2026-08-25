@@ -33,6 +33,7 @@ read-only GETs; the module never mutates target state.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 import re
@@ -201,7 +202,7 @@ async def scan_access_control(
             "headers": {**headers, **(sess_kwargs or {}).get("headers", {})}}
         if sess_kwargs and sess_kwargs.get("cookies"):
             merged["cookies"] = sess_kwargs["cookies"]
-        async with aiohttp.ClientSession(
+        async with _egress_cs(
             connector=aiohttp.TCPConnector(ssl=False, limit=connector_limit),
             **merged,
         ) as s:

@@ -10,7 +10,7 @@
 // of what will be in the report so it's clear the output reflects current data.
 
 import React, { useEffect, useState } from "react";
-import { Engagement, Engagements, downloadReport, previewReport, downloadSbom } from "../api";
+import { Engagement, Engagements, Compliance, downloadReport, previewReport, downloadSbom } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
 
@@ -41,7 +41,10 @@ export default function Reports() {
   // Engagement picker: when more than one engagement exists the operator must
   // be able to choose WHICH one to export, not just the active one.
   const [engList, setEngList] = useState([]);      // [{name, display_name, findings, scans, active}]
-  const [selected, setSelected] = useState("");    // DB-stem name — the export selector
+  const [selected, setSelected] = useState("");    // DB-stem name, the export selector
+  // Compliance-framework mapped reports (HIPAA / GDPR / PCI / …).
+  const [frameworks, setFrameworks] = useState([]);
+  const [fw, setFw] = useState("hipaa");
   const toast = useToast();
 
   useEffect(() => {
@@ -55,6 +58,13 @@ export default function Reports() {
         if (active) setSelected(active.name);
       })
       .catch(() => { /* picker is optional; active export still works */ });
+    Compliance.frameworks()
+      .then((r) => {
+        const list = r?.frameworks || [];
+        setFrameworks(list);
+        if (list.length) setFw((cur) => (list.some((f) => f.id === cur) ? cur : list[0].id));
+      })
+      .catch(() => { /* compliance card is optional */ });
   }, []);
 
   // Export the SELECTED engagement. We pass the engagement's DB-stem `name`
@@ -83,7 +93,7 @@ export default function Reports() {
     setBusy("preview");
     try {
       await previewReport(engOpts());
-      toast.info("Report opened in a new tab — use Print → Save as PDF for a PDF copy");
+      toast.info("Report opened in a new tab: use Print → Save as PDF for a PDF copy");
     } catch (e) {
       toast.error(e.message || "Preview failed");
     } finally {
@@ -98,6 +108,20 @@ export default function Reports() {
       toast.success(`Downloaded ${name}`);
     } catch (e) {
       toast.error(e.message || "SBOM export failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  // Download the selected engagement mapped to the chosen compliance framework.
+  async function pickCompliance(fmt) {
+    const tag = `compliance-${fmt}`;
+    setBusy(tag);
+    try {
+      const name = await downloadReport(fmt, { ...engOpts(), framework: fw });
+      toast.success(`Downloaded ${name}`);
+    } catch (e) {
+      toast.error(e.message || "Compliance export failed");
     } finally {
       setBusy("");
     }
@@ -171,7 +195,7 @@ export default function Reports() {
             >
               {engList.map((e) => (
                 <option key={e.name} value={e.name}>
-                  {(e.display_name || e.name)}{e.active ? "  (active)" : ""} — {e.findings} finding{e.findings === 1 ? "" : "s"}
+                  {(e.display_name || e.name)}{e.active ? "  (active)" : ""}, {e.findings} finding{e.findings === 1 ? "" : "s"}
                 </option>
               ))}
             </select>
@@ -203,7 +227,7 @@ export default function Reports() {
         </div>
         {!isActiveSelected && (
           <div className="dim" style={{ fontSize: 11 }}>
-            Exporting <strong style={{ color: "var(--text-0)" }}>{selName}</strong> — switch it to
+            Exporting <strong style={{ color: "var(--text-0)" }}>{selName}</strong>, switch it to
             active on the dashboard to see its full severity breakdown here.
           </div>
         )}
@@ -222,7 +246,7 @@ export default function Reports() {
             <p className="dim" style={{ fontSize: 12, margin: "6px 0 0", lineHeight: 1.6 }}>
               A complete, client-ready deliverable: cover page, executive summary, scope &amp;
               methodology, risk ratings, detailed findings with evidence &amp; remediation, OWASP
-              mapping and a prioritised roadmap. Print-ready — open it and use
+              mapping and a prioritised roadmap. Print-ready, open it and use
               <strong style={{ color: "var(--text-0)" }}> Print → Save as PDF</strong>.
             </p>
           </div>
@@ -268,6 +292,65 @@ export default function Reports() {
         </div>
       </div>
 
+      {/* Compliance-mapped reports — HIPAA / UK+EU GDPR / PCI DSS / ISO 27001 /
+          SOC 2 / NIST CSF. Each maps the engagement's findings onto that
+          framework's controls (an honest coverage view, not an attestation). */}
+      {frameworks.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
+            🛡 Compliance-mapped report
+          </div>
+          <p className="dim" style={{ fontSize: 12, margin: "6px 0 10px", lineHeight: 1.6 }}>
+            Map this engagement's findings onto a compliance framework's controls, a
+            control-by-control coverage view to guide remediation and audit prep. It's a
+            coverage mapping, <strong style={{ color: "var(--text-0)" }}>not an attestation of
+            compliance</strong>.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                        marginBottom: 12 }}>
+            <label htmlFor="compliance-fw" className="form-label" style={{ margin: 0 }}>
+              Framework
+            </label>
+            <select id="compliance-fw" className="form-select" value={fw}
+                    onChange={(e) => setFw(e.target.value)} style={{ minWidth: 0, maxWidth: 360 }}>
+              {frameworks.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.title}, {f.controls_total} controls
+                </option>
+              ))}
+            </select>
+          </div>
+          {(() => {
+            const cur = frameworks.find((f) => f.id === fw);
+            return cur ? (
+              <div className="dim" style={{ fontSize: 11.5, marginBottom: 12 }}>
+                {cur.subtitle}
+                {cur.reference ? (
+                  <> · <a href={cur.reference} target="_blank" rel="noopener noreferrer"
+                          style={{ color: "var(--brand)" }}>reference →</a></>
+                ) : null}
+              </div>
+            ) : null;
+          })()}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {[["html", "⬇ HTML report"], ["pdf", "⬇ PDF"], ["markdown", "⬇ Markdown"]].map(([f, lbl]) => (
+              <button key={f} onClick={() => pickCompliance(f)} disabled={!!busy}
+                style={{
+                  flex: "1 1 160px", padding: "11px 16px", fontSize: 13.5, fontWeight: 600,
+                  background: f === "html" ? "var(--brand)" : "rgba(255,255,255,0.04)",
+                  color: f === "html" ? "#fff" : "var(--text-0)",
+                  border: f === "html" ? "none" : "1px solid var(--border)",
+                  borderRadius: "var(--radius-md)", cursor: busy ? "wait" : "pointer",
+                  fontFamily: "var(--font-ui)",
+                }}
+                title={f === "pdf" ? "Direct PDF export (requires reportlab on the server)" : undefined}>
+                {busy === `compliance-${f}` ? "Preparing…" : lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase",
                       color: "var(--text-2)", fontWeight: 600, marginBottom: 10 }}>
@@ -311,7 +394,7 @@ export default function Reports() {
             }}
             onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
             onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
-            title="CycloneDX SBOM — discovered services + CVE findings"
+            title="CycloneDX SBOM: discovered services + CVE findings"
           >
             <span>
               <div style={{ fontSize: 13.5, fontWeight: 600 }}>SBOM (CycloneDX)</div>

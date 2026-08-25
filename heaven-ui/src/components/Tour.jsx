@@ -16,17 +16,17 @@ const SEEN_KEY = "heaven.tour.v1";
 
 const STEPS = [
   { icon: "☠", title: "Welcome to HEAVEN",
-    body: "An autonomous pen-testing platform: recon → vulnerability detection → verified exploitation → risk-scored reporting. You can explore everything with sample data — no setup required." },
+    body: "An autonomous pen-testing platform: recon → vulnerability detection → verified exploitation → risk-scored reporting. You can explore everything with sample data, no setup required." },
   { icon: "▣", title: "Dashboard", to: "/",
-    body: "Your severity overview and MITRE heat-map, plus a “Fix this first” list that ranks findings by risk and shows a one-line remediation for each." },
+    body: "Your severity overview and MITRE heat-map, plus a 'Fix this first' list that ranks findings by risk and shows a one-line remediation for each." },
   { icon: "⚡", title: "Scans", to: "/scans",
-    body: "Launch real scans — targets are validated live and gated behind an authorization confirmation — or click “Run demo scan” to watch the full loop with no target." },
+    body: "Launch real scans: targets are validated live and gated behind an authorization confirmation, or click 'Run demo scan' to watch the full loop with no target." },
   { icon: "⚠", title: "Findings & Reports", to: "/findings",
     body: "Triage findings with full evidence and a copy-paste curl repro, then export a deliverable in 8 formats (PDF, HTML, SARIF, Burp XML …)." },
   { icon: "⚙", title: "Settings", to: "/settings",
-    body: "Add API keys (Gemini / Anthropic / OpenAI, Shodan, NVD, Jira …) anytime — saved to .env and live across the CLI, API and web UI. All optional." },
+    body: "Add API keys (Gemini / Anthropic / OpenAI, Shodan, NVD, Jira …) anytime, saved to .env and live across the CLI, API and web UI. All optional." },
   { icon: "🩺", title: "System Health", to: "/health",
-    body: "See which external tools and keys are active — the browser equivalent of “heaven doctor”. A missing tool just disables one capability; it never breaks the app." },
+    body: "See which external tools and keys are active: the browser equivalent of 'heaven doctor'. A missing tool just disables one capability; it never breaks the app." },
 ];
 
 export default function Tour() {
@@ -52,7 +52,7 @@ export default function Tour() {
     setBusy(true);
     try {
       const r = await Demo.seed();
-      toast.success(`Loaded ${r.findings} sample findings — explore away`);
+      toast.success(`Loaded ${r.findings} sample findings, explore away`);
       finish();
       navigate("/");
     } catch (e) {

@@ -57,6 +57,42 @@ def test_findings_carry_evidence_for_detail_view(store):
     assert ev.get("remediation") and ev.get("description")
 
 
+def test_seed_persists_host_inventory_with_web_ip(store, monkeypatch):
+    """The demo scan must carry a host/service inventory so the Assets page and
+    the report populate — and the web-app target must show its hostname AND the
+    distinct IP it resolved to (regression: the demo used to have no assets, so
+    the IP feature could not be seen in the demo UI)."""
+    monkeypatch.setenv("HEAVEN_NO_DNS_RESOLVE", "1")  # deterministic, no network
+    from heaven.demo import DEMO_SCAN_ID, seed_demo
+    from heaven.devsecops.inventory import normalize_assets
+    import json
+    seed_demo(store)
+    summ = json.loads(store.get_scan(DEMO_SCAN_ID)["summary_json"])
+    raw = summ.get("assets") or []
+    assert len(raw) >= 3, "demo scan summary must carry host assets"
+    inv = normalize_assets(raw)
+    web = next((h for h in inv if h["host"] == "demo.heaven.local"), None)
+    assert web is not None, "web app host missing from demo inventory"
+    # hostname label preserved, distinct resolved IP recorded, and open ports.
+    assert web["ip"] == "10.10.10.20" and web["ip"] != web["host"]
+    assert web["port_count"] >= 3
+    # device identity also demonstrated somewhere in the inventory.
+    assert any(h.get("mac_label") for h in inv)
+    assert any(h.get("device_type_label") for h in inv)
+
+
+def test_api_assets_shows_demo_web_ip(client):
+    """End-to-end: after seeding, /api/assets returns the web host with its
+    resolved IP distinct from the hostname (the IP-address feature)."""
+    client.post("/api/demo/seed")
+    r = client.get("/api/assets")
+    assert r.status_code == 200, r.text
+    assets = r.json()["assets"]
+    web = next((h for h in assets if h.get("host") == "demo.heaven.local"), None)
+    assert web is not None, "web app host missing from /api/assets"
+    assert web.get("ip") == "10.10.10.20" and web["ip"] != web["host"]
+
+
 # ── API endpoint ──
 
 @pytest.fixture

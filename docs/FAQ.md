@@ -1,8 +1,8 @@
-# HEAVEN — FAQ & Troubleshooting
+# HEAVEN: FAQ & Troubleshooting
 
 Short answers to the questions that come up most. If something here doesn't fix
-it, run `heaven doctor` (or open **System Health** in the web UI) — it shows
-exactly what's configured vs. missing — and then open an issue.
+it, run `heaven doctor` (or open **System Health** in the web UI), it shows
+exactly what's configured vs. missing, and then open an issue.
 
 ---
 
@@ -11,7 +11,7 @@ exactly what's configured vs. missing — and then open an issue.
 ### What's the fastest way to see HEAVEN working?
 
 ```bash
-heaven demo      # loads a realistic sample engagement — nothing is scanned
+heaven demo      # loads a realistic sample engagement, nothing is scanned
 heaven serve     # opens http://localhost:8443 in your browser, dashboard is now full
 ```
 
@@ -32,7 +32,7 @@ A password you change in the web UI is saved to `.env`, so it survives restarts.
 
 ### Where are my API keys / settings stored?
 
-In `.env` in the working directory. Set them three ways — they all write the
+In `.env` in the working directory. Set them three ways, they all write the
 same file: the web UI **Settings** page, `heaven config set <KEY>`, or
 `heaven init`. `.env` is auto-loaded on every command and is git-ignored.
 
@@ -78,7 +78,7 @@ heaven --quiet findings --format json | jq '.[] | select(.severity=="critical")'
 
 No. Every AI feature (autonomous loop, AI attack plans, LLM false-positive
 review) falls back to a deterministic heuristic, or pass `--no-llm`. Add a key
-only to enable the LLM path — Gemini has a free tier
+only to enable the LLM path, Gemini has a free tier
 (<https://aistudio.google.com/apikey>).
 
 ### I set a key but the LLM still isn't used.
@@ -95,7 +95,7 @@ editing `.env`).
 
 ### `./scripts/install.sh` reported some optional packs were skipped.
 
-That's fine — the core install is complete and those features degrade
+That's fine, the core install is complete and those features degrade
 gracefully. Install a pack later with `pip install -e ".[recon]"` (or
 `[reports]` / `[lateral]` / `[deploy]` / `[scheduling]`). For the
 leanest footprint, run the installer with `HEAVEN_CORE_ONLY=1`.
@@ -104,7 +104,7 @@ leanest footprint, run the installer with `HEAVEN_CORE_ONLY=1`.
 
 PDF rendering needs `reportlab` (pure Python, no system libraries):
 `pip install reportlab` or `pip install -e ".[reports]"`. Tip: the **HTML report
-needs no extra packages** — open it and use your browser's *Print → Save as PDF*
+needs no extra packages**, open it and use your browser's *Print → Save as PDF*
 for the same professional layout. All other formats (HTML, Markdown, CSV, JSON,
 SARIF, Burp XML, proxy-JSONL) work without any extra dependency.
 
@@ -121,7 +121,7 @@ run it via the venv: `./venv/bin/heaven`. With pipx: `pipx ensurepath`.
 
 There's no data yet. Run a scan, or click **Load sample data** / `heaven demo`.
 If you ran a scan via the CLI and the UI is still empty, confirm both point at
-the same engagement store — by default the dashboard reads
+the same engagement store, by default the dashboard reads
 `<data_dir>/engagements/default.db` (`data_dir` defaults to `./data`).
 
 ### `heaven serve` shows a placeholder page, not the app.
@@ -133,7 +133,7 @@ The web UI wasn't built. Re-run `./scripts/install.sh`, or build it manually:
 
 ## Security & safety
 
-- HEAVEN is for **authorized** testing only — every destructive action is gated
+- HEAVEN is for **authorized** testing only, every destructive action is gated
   behind `--i-have-authorization`, and all activity is written to an
   HMAC-signed audit log.
 - Secrets live in `.env` (git-ignored) and the AES-256-GCM vault; the web UI

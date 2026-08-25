@@ -9,6 +9,14 @@ import { Link } from "react-router";
 import { Assets } from "../api";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
 
+// True when a value is an IPv4/IPv6 literal (used to show a resolved IP next to
+// a hostname target without repeating an IP that is already the host label).
+function looksLikeIp(v) {
+  const s = (v || "").trim();
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(s)) return true;
+  return s.includes(":") && /^[0-9a-fA-F:]+$/.test(s.replace(/^\[|\]$/g, ""));
+}
+
 // Ascending sort key for a host row. IPv4 addresses sort numerically (so .2
 // comes before .10, not lexicographically after it); anything else (hostnames,
 // IPv6) falls back to a case-insensitive string compare. Returned as a tuple so
@@ -36,7 +44,7 @@ function compareHosts(a, b) {
 function hostMatches(h, q) {
   if (!q) return true;
   const hay = [
-    h.host, h.os_label,
+    h.host, h.ip, h.os_label,
     h.device_name, h.device_name_label, h.device_type, h.device_type_label,
     h.mac_address, h.mac_vendor,
     ...(h.ports || []).flatMap((p) => [String(p.port), p.service, p.service_version, p.cpe]),
@@ -53,12 +61,15 @@ function osStyle(host) {
   return { color: "var(--text-dim)", border: "var(--border)" };
 }
 
-// Same trust-colouring for the device-type chip: an nmap -O classification is
-// confident (accent), a MAC-vendor-derived category is a maker hint (warn).
+// Same trust-colouring for the device-type chip: an operator-set value is
+// authoritative (accent), an nmap -O classification is confident (accent-2), a
+// MAC-vendor category or a service inference is a hint (warn/muted).
 function deviceTypeStyle(host) {
   const src = host.device_type_source;
+  if (src === "manual") return { color: "var(--accent, #6366f1)", border: "var(--accent, #6366f1)" };
   if (src === "nmap") return { color: "var(--accent-2, #6D7CFF)", border: "var(--accent-2, #6D7CFF)" };
   if (src === "mac-vendor") return { color: "var(--warn, #d29922)", border: "var(--warn, #d29922)" };
+  if (src === "service-heuristic") return { color: "var(--text-2)", border: "var(--border)" };
   return { color: "var(--text-dim)", border: "var(--border)" };
 }
 
@@ -86,6 +97,13 @@ export default function AssetsPage() {
   const [scans, setScans] = useState([]);
   const [scanId, setScanId] = useState(null);
   const [query, setQuery] = useState("");
+  // Inline device-label editor: which host is being edited, the draft values, and
+  // a saving flag. Lets an operator set a device name/type the scan couldn't
+  // observe — persisted per engagement and synced into the report.
+  const [editHost, setEditHost] = useState(null);
+  const [editVals, setEditVals] = useState({ device_name: "", device_type: "" });
+  const [savingLabel, setSavingLabel] = useState(false);
+  const [labelError, setLabelError] = useState(null);
 
   // Pass scanId=null to let the backend pick the most recent scan. The
   // inventory is scoped to ONE scan so two separate scans never blend into a
@@ -114,6 +132,39 @@ export default function AssetsPage() {
     window.addEventListener("heaven:engagement-changed", onChange);
     return () => window.removeEventListener("heaven:engagement-changed", onChange);
   }, []);
+
+  // ── Manual device-label editing ────────────────────────────────────────────
+  function startEdit(h) {
+    setLabelError(null);
+    setEditHost(h.host);
+    // Seed with the operator's own values only — an inferred/observed name/type
+    // is shown as a placeholder, so saving a blank never overwrites a real
+    // scan-observed fact with the guess.
+    setEditVals({
+      device_name: h.device_name_source === "manual" ? (h.device_name || "") : "",
+      device_type: h.device_type_source === "manual" ? (h.device_type || "") : "",
+    });
+  }
+  function cancelEdit() {
+    setEditHost(null);
+    setLabelError(null);
+  }
+  async function saveEdit(host) {
+    setSavingLabel(true);
+    setLabelError(null);
+    try {
+      await Assets.setLabel(host, {
+        device_name: editVals.device_name.trim(),
+        device_type: editVals.device_type.trim(),
+      });
+      setEditHost(null);
+      load(scanId);   // reflect the new label everywhere (chip + report)
+    } catch (e) {
+      setLabelError(e.message || String(e));
+    } finally {
+      setSavingLabel(false);
+    }
+  }
 
   const stat = [
     ["Hosts", totals?.hosts],
@@ -144,17 +195,17 @@ export default function AssetsPage() {
         <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🖧 Host &amp; Service Inventory</h2>
         <p className="page-lead">
           Every open port, service version and operating system the network scan
-          discovered — reported exactly as observed by nmap, nothing fabricated.
-          An OS shown as <em>heuristic — unconfirmed</em> was inferred from a TTL
+          discovered, reported exactly as observed by nmap, nothing fabricated.
+          An OS shown as <em>heuristic, unconfirmed</em> was inferred from a TTL
           value, not a full stack fingerprint, and should be treated as
           indicative only. Where the scan observed them, each host also shows its
           <strong> device name</strong>, <strong>device type</strong> and
-          {" "}<strong>MAC address</strong> — a MAC only appears for a host on the
+          {" "}<strong>MAC address</strong>, a MAC only appears for a host on the
           same local network segment scanned with sufficient privileges (it is an
           ARP fact, so remote/routed hosts have none), and a device type tagged
           {" "}<em>per MAC vendor</em> is a maker hint, not a fingerprint. The
           inventory is scoped to a single scan (most recent by default) so two
-          scans never blend into one host table — use the picker to switch. Run a
+          scans never blend into one host table, use the picker to switch. Run a
           network scan (<code>heaven scan -m network</code>{" "}or the{" "}
           <Link to="/scans">Scans</Link> launcher) to populate this.
         </p>
@@ -183,13 +234,13 @@ export default function AssetsPage() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter by IP, hostname, service, version or port — e.g. 10.0.0., mysql, 443"
+              placeholder="Filter by IP, hostname, service, version or port, e.g. 10.0.0., mysql, 443"
             />
           </label>
         )}
 
         {totals && (
-          <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+          <div className="mini-stat-grid" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))", marginTop: 18 }}>
             {stat.map(([label, val]) => (
               <div key={label} className="mini-stat">
                 <div className="mini-stat-label" style={{ textTransform: "uppercase" }}>{label}</div>
@@ -211,7 +262,7 @@ export default function AssetsPage() {
           <EmptyState
             icon="🖧"
             headline="No host inventory yet"
-            body="Run a network or DNS scan for this engagement — discovered hosts, ports, service versions, OS and DNS records appear here."
+            body="Run a network or DNS scan for this engagement: discovered hosts, ports, service versions, OS and DNS records appear here."
             cta="Launch a scan"
             ctaTo="/scans"
           />
@@ -222,7 +273,7 @@ export default function AssetsPage() {
         (inventory.length > 0 || dns.length > 0) && (
         <div className="card" style={{ marginTop: 12 }}>
           <div className="dim" style={{ padding: 8 }}>
-            No host or domain matches “{query.trim()}”. Clear the search to see all targets.
+            No host or domain matches "{query.trim()}". Clear the search to see all targets.
           </div>
         </div>
       )}
@@ -234,6 +285,11 @@ export default function AssetsPage() {
           <div key={h.host} className="card" style={{ marginTop: 12 }}>
             <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span className="mono">{h.host}</span>
+              {h.ip && looksLikeIp(h.ip) && h.ip !== h.host && (
+                <span className="mono dim" style={{ fontSize: 11.5 }} title="Resolved IP address">
+                  {h.ip}
+                </span>
+              )}
               {h.device_name_label && (
                 <span className="dim" style={{ fontSize: 12.5, fontWeight: 500 }}>
                   {h.device_name_label}
@@ -256,10 +312,53 @@ export default function AssetsPage() {
               <span className="dim" style={{ fontSize: 12, fontWeight: 400 }}>
                 {h.port_count} open port{h.port_count === 1 ? "" : "s"}
               </span>
+              <button
+                className="btn-small"
+                style={{ marginLeft: "auto", fontSize: 11 }}
+                onClick={() => (editHost === h.host ? cancelEdit() : startEdit(h))}
+                title="Set this host's device name and type manually"
+              >
+                {editHost === h.host ? "Cancel" : "✎ Edit"}
+              </button>
             </div>
             {h.mac_label && (
               <div className="dim mono" style={{ fontSize: 11.5, marginTop: 2 }}>
                 MAC {h.mac_label}
+              </div>
+            )}
+            {editHost === h.host && (
+              <div style={{
+                marginTop: 8, padding: 10, border: "1px solid var(--border)",
+                borderRadius: 8, background: "var(--bg-elev, rgba(255,255,255,.03))",
+                display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end",
+              }}>
+                <label className="form-group" style={{ margin: 0, flex: "1 1 180px" }}>
+                  <span className="form-label" style={{ fontSize: 11 }}>Device name</span>
+                  <input
+                    className="form-input"
+                    value={editVals.device_name}
+                    placeholder={h.device_name || "e.g. Reception PC"}
+                    onChange={(e) => setEditVals((v) => ({ ...v, device_name: e.target.value }))}
+                  />
+                </label>
+                <label className="form-group" style={{ margin: 0, flex: "1 1 180px" }}>
+                  <span className="form-label" style={{ fontSize: 11 }}>Device type</span>
+                  <input
+                    className="form-input"
+                    value={editVals.device_type}
+                    placeholder={h.device_type || "e.g. Windows workstation"}
+                    onChange={(e) => setEditVals((v) => ({ ...v, device_type: e.target.value }))}
+                  />
+                </label>
+                <button className="btn btn-primary btn-small" disabled={savingLabel}
+                  onClick={() => saveEdit(h.host)}>
+                  {savingLabel ? "Saving…" : "Save"}
+                </button>
+                <span className="dim" style={{ fontSize: 10.5, flexBasis: "100%" }}>
+                  Operator-set values override the scan's guess and appear in the report.
+                  Leave a field blank to keep the scan-observed value.
+                </span>
+                {labelError && <div className="error" style={{ flexBasis: "100%" }}>{labelError}</div>}
               </div>
             )}
             {(!h.ports || h.ports.length === 0) ? (
@@ -299,7 +398,7 @@ export default function AssetsPage() {
         <div className="card" style={{ marginTop: 18 }}>
           <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🌐 DNS Enumeration</h2>
           <p className="page-lead" style={{ marginBottom: 8 }}>
-            DNS records and resolvable subdomains discovered for this engagement —
+            DNS records and resolvable subdomains discovered for this engagement, 
             reported exactly as authoritative DNS returned them. A subdomain is
             listed only because it actually resolved; nothing is fabricated.
           </p>

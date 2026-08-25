@@ -37,7 +37,7 @@ const SOURCE_NOTE = {
   "native-controlled":
     "Controlled functional benchmark: HEAVEN's real detectors run against a " +
     "faithful, in-process reproduction of DVWA's vulnerable endpoints. Docker-free " +
-    "and regenerated on every test run — not a claim against any live third-party app.",
+    "and regenerated on every test run, not a claim against any live third-party app.",
   "live-dvwa":
     "Live benchmark: HEAVEN scanned a real Docker DVWA instance, scored against " +
     "the DVWA ground-truth set and aggregated over multiple runs.",
@@ -113,7 +113,7 @@ export default function Benchmark() {
 
         {running && (
           <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-2)" }}>
-            Running the native benchmark on the server (Docker-free) — this
+            Running the native benchmark on the server (Docker-free), this
             usually takes a few seconds…
           </div>
         )}
@@ -143,7 +143,7 @@ export default function Benchmark() {
         )}
 
         <p className="dim" style={{ fontSize: 12, marginTop: 14, marginBottom: 6 }}>
-          To (re)generate the built-in benchmark — Docker-free, ~1&nbsp;s:
+          To (re)generate the built-in benchmark, Docker-free, ~1&nbsp;s:
         </p>
         <pre className="cli-block" style={{ marginBottom: 8 }}>{`heaven benchmark`}</pre>
         <p className="dim" style={{ fontSize: 12, marginTop: 0, marginBottom: 6 }}>

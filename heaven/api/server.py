@@ -152,6 +152,10 @@ class FindingStatusUpdate(BaseModel):
     notes: str = ""
 
 
+class FindingNotesUpdate(BaseModel):
+    notes: str = ""
+
+
 class ManualFindingRequest(BaseModel):
     target: str
     vuln_type: str
@@ -213,6 +217,9 @@ log_ws_connections: list = []
 # Strong references to background scan tasks. Kept OUT of active_scans because
 # that dict is JSON-serialised by the API — an asyncio.Task is not serialisable.
 _background_scan_tasks: set = set()
+# scan_id → its running asyncio.Task, so "Cancel" can actually stop the work
+# (previously it only relabelled the in-memory dict while the scan ran on).
+_scan_tasks_by_id: dict[str, "asyncio.Task"] = {}
 
 # ── Autonomous-loop jobs ──
 # The autonomous loop can run for minutes. Running it inline in the request
@@ -247,6 +254,32 @@ def _autonomous_broadcast(job_id: str, message: dict) -> None:
 watch_jobs: dict[str, dict] = {}
 _watch_tasks: dict[str, Any] = {}                 # job_id -> asyncio.Task (for Stop)
 _watch_subscribers: dict[str, set] = {}           # job_id -> set[asyncio.Queue]
+
+# ── Self-update (web app "Update now") ──────────────────────────────────────
+# A single code-update runs at a time; this holds its live state so the UI can
+# poll a progress log. Only ever mutated by the one background apply task.
+_update_apply_state: dict[str, Any] = {
+    "running": False, "done": False, "ok": False,
+    "log": [], "result": None, "job_id": None, "started_at": None,
+}
+
+
+def _web_update_apply_enabled() -> bool:
+    """Is applying a code update *from the browser* permitted on this server?
+
+    Detection (checking whether a newer HEAVEN exists) is always available, but
+    *applying* it means a git fast-forward + reinstall/rebuild — i.e. running new
+    code — triggered over HTTP. That's a powerful action to expose in a shared or
+    hosted deployment, so it's gated by a deploy-time kill switch:
+    ``HEAVEN_DISABLE_WEB_UPDATE=1`` turns web-apply OFF (the CLI ``heaven update``
+    still works). It is read from the process environment at request time and is
+    deliberately NOT a web-editable setting, so a browser session can't grant
+    itself the capability — the operator must set it before launching, exactly
+    like the ``HEAVEN_ALLOW_LOCALHOST`` hosted-lockdown vars. Default: enabled
+    (single-operator local install — the common case the user asked for).
+    """
+    v = (os.environ.get("HEAVEN_DISABLE_WEB_UPDATE") or "").strip().lower()
+    return v not in ("1", "true", "yes", "on")
 
 
 def _watch_broadcast(job_id: str, message: dict) -> None:
@@ -567,6 +600,32 @@ def create_app() -> FastAPI:
                     logger.info("Removed empty auto-created 'default' engagement")
         except Exception as e:  # noqa: BLE001
             logger.debug("Empty-default prune skipped: %s", e)
+        # Reconcile orphaned scans: a scan persists status='running' at start and
+        # only flips to a terminal state from inside its (in-process) task, so a
+        # process that was killed or closed mid-scan leaves the row 'running'
+        # forever — the UI then shows a perpetual, ticking "running" scan that
+        # nothing is driving (the reported symptom). At startup no scan can still
+        # be live, so flip every stranded row to 'interrupted' (checkpoints kept,
+        # so it stays resumable) across every engagement DB.
+        try:
+            from heaven.config import get_config
+            from heaven.engagement import DEMO_DB_NAME, EngagementStore
+            eng_dir = get_config().data_dir / "engagements"
+            if eng_dir.exists():
+                _reconciled = 0
+                for db in eng_dir.glob("*.db"):
+                    if db.stem == DEMO_DB_NAME:
+                        continue
+                    try:
+                        _reconciled += EngagementStore(
+                            db, create=False).mark_orphaned_scans_interrupted()
+                    except Exception:  # noqa: BLE001 — skip locked/unreadable DBs
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
+                if _reconciled:
+                    logger.info("Reconciled %d orphaned scan(s) → interrupted "
+                                "(resumable) at startup", _reconciled)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Orphaned-scan reconciliation skipped: %s", e)
         # Self-heal the active pointer: if nothing is actively selected but the
         # operator has real work on disk, adopt the most-populated engagement so
         # the app opens on their data instead of a blank 'default' (which is what
@@ -711,6 +770,21 @@ def create_app() -> FastAPI:
                     v for v in items
                     if not (isinstance(v, dict) and is_attack_plan_artifact(v))
                 ]
+        # Fold in the active engagement's current metadata (client / statement of
+        # work / tester) so a report always shows the latest edited values on its
+        # cover, even when those were changed after the scan JSON was written.
+        try:
+            eng = _read_store().get_engagement()
+            if eng is not None:
+                if getattr(eng, "client", ""):
+                    data["client"] = eng.client
+                    data.setdefault("client_name", eng.client)
+                if getattr(eng, "statement_of_work", ""):
+                    data["statement_of_work"] = eng.statement_of_work
+                if getattr(eng, "tester", ""):
+                    data["tester"] = eng.tester
+        except Exception:
+            logger.debug("engagement metadata enrich skipped", exc_info=True)
         return data
 
     def _get_latest_report_data(scan_id: Optional[str] = None) -> dict:
@@ -794,6 +868,18 @@ def create_app() -> FastAPI:
                 except Exception:
                     logger.debug("suppressed non-fatal exception in report-asset fallback",
                                  exc_info=True)
+        # Overlay operator-set device names/types (Assets manual override) so both
+        # the Assets view and the report reflect them — this is the single point
+        # both read raw host assets.
+        try:
+            store = _read_store(engagement)
+            labels = store.get_host_labels() if store else {}
+            if labels:
+                from heaven.devsecops.inventory import merge_host_labels
+                merge_host_labels(raw, labels)
+        except Exception:
+            logger.debug("suppressed non-fatal exception overlaying host labels",
+                         exc_info=True)
         return raw
 
     def _collect_raw_dns(engagement: Optional[str] = None,
@@ -1234,9 +1320,11 @@ def create_app() -> FastAPI:
         # JSON-serialised by the API and a Task object is not serialisable.
         task = asyncio.create_task(_run_scan_background(scan_id, req))
         _background_scan_tasks.add(task)
+        _scan_tasks_by_id[scan_id] = task
 
         def _scan_done(t: asyncio.Task):
             _background_scan_tasks.discard(t)
+            _scan_tasks_by_id.pop(scan_id, None)
             try:
                 exc = t.exception()
             except asyncio.CancelledError:
@@ -1354,9 +1442,36 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid scan id")
 
         mem = active_scans.get(scan_id)
+        # 1. A scan running in THIS process — genuinely cancel it. The old code
+        #    only relabelled the in-memory dict, so the scan kept running; now we
+        #    cancel the real task and persist 'cancelled' (findings kept).
         if mem and mem.get("status") in ("running", "pending"):
             mem["status"] = "cancelled"
+            _task = _scan_tasks_by_id.get(scan_id)
+            if _task and not _task.done():
+                _task.cancel()
+            try:
+                _engagement_store_factory(mem.get("engagement")).record_scan_complete(
+                    scan_id, summary={"cancelled": True}, status="cancelled")
+            except Exception:  # noqa: BLE001
+                logger.debug("suppressed non-fatal exception", exc_info=True)
             return {"status": "cancelled", "scan_id": scan_id}
+
+        # 2. A persisted scan still marked running/pending but with no live task
+        #    (a zombie left by a killed process that startup reconciliation hasn't
+        #    reached, or a same-session edge). Do NOT hard-delete — that would
+        #    destroy its checkpoints and make resume impossible. Mark it
+        #    interrupted so the operator can resume or explicitly remove it.
+        try:
+            _row = _read_store().get_scan(scan_id) if _read_store() else None
+        except Exception:  # noqa: BLE001
+            _row = None
+        if _row and _row.get("status") in ("running", "pending"):
+            try:
+                _engagement_store_factory().record_scan_interrupted(scan_id)
+            except Exception:  # noqa: BLE001
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+            return {"status": "interrupted", "scan_id": scan_id}
 
         removed = False
         # 1. Report JSON file (powers the dashboard's report-file fallback)
@@ -1381,6 +1496,84 @@ def create_app() -> FastAPI:
         if not removed:
             raise HTTPException(404, "Scan not found")
         return {"status": "deleted", "scan_id": scan_id}
+
+    @app.post("/api/scans/{scan_id}/resume")
+    async def resume_scan_endpoint(
+        scan_id: str,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Resume an interrupted / paused scan from its last checkpoints.
+
+        Backs the web "Resume" action for a scan the dashboard shows as
+        interrupted (e.g. after the app was closed mid-scan). The stored,
+        replayable config is used to rebuild the same task graph; the orchestrator
+        skips tasks that already completed (their checkpoints) and continues.
+        Mirrors the CLI ``heaven resume``.
+        """
+        if not _is_safe_scan_id(scan_id):
+            raise HTTPException(400, "Invalid scan id")
+        # Already running in this process? Don't double-launch.
+        if scan_id in active_scans and active_scans[scan_id].get("status") in (
+                "running", "pending"):
+            return ScanResponse(scan_id=scan_id, status="running",
+                                message="Scan already running")
+        store = _read_store()
+        row = store.get_scan(scan_id) if store else None
+        if not row:
+            raise HTTPException(404, "Scan not found")
+        if row.get("status") not in ("running", "pending", "paused", "interrupted"):
+            raise HTTPException(409, f"Scan is {row.get('status')} — not resumable")
+
+        try:
+            cfg = json.loads(row.get("config_json") or "{}")
+        except (ValueError, TypeError):
+            cfg = {}
+        tgt = cfg.get("targets") or {}
+        ips = list(tgt.get("ips") or [])
+        urls = list(tgt.get("urls") or [])
+        if not ips and not urls:
+            raise HTTPException(422, "Resumed scan has no targets in its stored config")
+
+        _name2int = {v: k for k, v in _STEALTH_INT_TO_NAME.items()}
+        req = ScanRequest(
+            name=row.get("name") or "HEAVEN Scan",
+            targets=ips,
+            urls=urls,
+            repositories=list(tgt.get("repositories") or []),
+            cloud_providers=list(tgt.get("cloud_providers") or []),
+            ports=str(tgt.get("ports") or "1-65535"),
+            mode=row.get("mode") or cfg.get("mode") or "full",
+            stealth_level=_name2int.get(str(tgt.get("stealth_level") or "normal"), 3),
+            evade=bool(tgt.get("evade")),
+            engagement=_resolve_engagement_name(),
+            i_have_authorization=True,
+        )
+        active_scans[scan_id] = {
+            "status": "pending", "mode": req.mode, "config": req.model_dump(),
+            "created": row.get("started_at") or datetime.now(timezone.utc).isoformat(),
+            "created_by": user.username, "engagement": req.engagement,
+            "scan_id": scan_id, "resumed": True,
+        }
+        task = asyncio.create_task(_run_scan_background(scan_id, req, resume=True))
+        _background_scan_tasks.add(task)
+        _scan_tasks_by_id[scan_id] = task
+
+        def _resume_done(t: asyncio.Task):
+            _background_scan_tasks.discard(t)
+            _scan_tasks_by_id.pop(scan_id, None)
+            try:
+                exc = t.exception()
+            except asyncio.CancelledError:
+                exc = None
+            if exc is not None:
+                logger.error(f"Resumed scan {scan_id} crashed: {exc}")
+                if scan_id in active_scans:
+                    active_scans[scan_id]["status"] = "failed"
+                    active_scans[scan_id]["error"] = str(exc)
+
+        task.add_done_callback(_resume_done)
+        logger.info("Resuming scan %s by %s", scan_id, user.username)
+        return ScanResponse(scan_id=scan_id, status="running", message="Scan resumed")
 
     # ── Vulnerabilities ──
     @app.get("/api/vulnerabilities")
@@ -1471,6 +1664,45 @@ def create_app() -> FastAPI:
             "scans": scans,
             "scan_id": selected,
         }
+
+    @app.patch("/api/assets/label")
+    async def set_asset_label(
+        body: dict,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Set an operator device name / type for a host (Assets manual override).
+
+        Backs the inline "✎ Edit" on each Assets host card — the "add it manually
+        when the scan couldn't observe it" path. Send ``host`` plus any of
+        ``device_name`` / ``device_type`` (empty string clears a field). The label
+        is stored per engagement and ranks above any scan-inferred value, so it
+        shows in the Assets view and the report. Nothing is fabricated — this is
+        explicit human input.
+        """
+        if not isinstance(body, dict):
+            raise HTTPException(422, "expected a JSON object")
+        from heaven.devsecops.inventory import host_key
+        host = host_key(str(body.get("host") or ""))
+        if not host:
+            raise HTTPException(422, "a valid host/IP is required")
+        if "device_name" not in body and "device_type" not in body:
+            raise HTTPException(422, "provide device_name and/or device_type")
+
+        def _clean(v: Any) -> str:
+            return " ".join(str(v or "").split())[:120]
+
+        name = _clean(body.get("device_name")) if "device_name" in body else None
+        dtype = _clean(body.get("device_type")) if "device_type" in body else None
+        store = _engagement_store_factory()
+        try:
+            store.set_host_label(host, device_name=name, device_type=dtype)
+        except Exception as e:  # noqa: BLE001 — surface to the UI
+            logger.warning("Host label update failed for %s: %s", host, e)
+            raise HTTPException(500, "Could not save the device label")
+        logger.info("Host label set by %s for %s (name=%s, type=%s)",
+                    user.username, host, name, dtype)
+        return {"ok": True, "host": host,
+                "device_name": name, "device_type": dtype}
 
     # ── Attack Tree ──
     @app.get("/api/attack-tree/{scan_id}")
@@ -1604,10 +1836,10 @@ def create_app() -> FastAPI:
         body: dict,
         user: User = Depends(require_permission("scan.create")),
     ):
-        """Edit the active engagement's Client and/or Statement-of-work.
+        """Edit the active engagement's Client, Statement-of-work and/or Tester.
 
-        Backs the inline edit on the Engagement page. Send either or both of
-        ``client`` / ``statement_of_work``; omitted fields are left unchanged.
+        Backs the inline edit on the Engagement page. Send any of ``client`` /
+        ``statement_of_work`` / ``tester``; omitted fields are left unchanged.
         Values are trimmed and length-capped so the dashboard label and the
         report cover page stay tidy. Returns the refreshed engagement.
         """
@@ -1616,8 +1848,9 @@ def create_app() -> FastAPI:
 
         has_client = "client" in body
         has_sow = "statement_of_work" in body
-        if not (has_client or has_sow):
-            raise HTTPException(422, "provide client and/or statement_of_work")
+        has_tester = "tester" in body
+        if not (has_client or has_sow or has_tester):
+            raise HTTPException(422, "provide client, statement_of_work and/or tester")
 
         def _clean(v: Any) -> str:
             # Collapse to a tidy single-line string; cap length to keep the DB
@@ -1626,20 +1859,21 @@ def create_app() -> FastAPI:
 
         client = _clean(body.get("client")) if has_client else None
         sow = _clean(body.get("statement_of_work")) if has_sow else None
+        tester = _clean(body.get("tester")) if has_tester else None
 
         # A write store (create=True) so the row materialises even on a
         # switched-to-but-never-scanned engagement.
         store = _engagement_store_factory()
         try:
             eng = store.update_engagement_details(
-                client=client, statement_of_work=sow
+                client=client, statement_of_work=sow, tester=tester
             )
         except Exception as e:  # noqa: BLE001 — surface the failure to the UI
             logger.warning("Engagement details update failed: %s", e)
             raise HTTPException(500, "Could not update engagement details")
         logger.info(
-            "Engagement details updated by %s (client=%s, sow=%s)",
-            user.username, has_client, has_sow,
+            "Engagement details updated by %s (client=%s, sow=%s, tester=%s)",
+            user.username, has_client, has_sow, has_tester,
         )
         return {"ok": True, "engagement": eng.__dict__ if eng else None}
 
@@ -1884,6 +2118,24 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Finding not found")
         return {"status": "updated", "finding_id": finding_id, "new_status": payload.status}
 
+    @app.put("/api/engagement/findings/{finding_id}/notes")
+    async def save_finding_notes_endpoint(
+        finding_id: str, payload: FindingNotesUpdate,
+        user: User = Depends(require_permission("vuln.update")),
+    ):
+        """Save operator notes for a finding WITHOUT changing its status.
+
+        Backs the explicit "Save note" action so a note typed while leaving the
+        status unchanged is persisted (it used to be lost unless the operator
+        also flipped the status)."""
+        store = _engagement_store_factory()
+        if not store:
+            raise HTTPException(404, "No active engagement.")
+        ok = store.set_finding_notes(finding_id, payload.notes)
+        if not ok:
+            raise HTTPException(404, "Finding not found")
+        return {"status": "saved", "finding_id": finding_id}
+
     @app.get("/api/engagement/findings/{finding_id}/evidence")
     async def get_finding_evidence(
         finding_id: str,
@@ -1978,9 +2230,26 @@ def create_app() -> FastAPI:
         # downloaded report isn't named "heaven-report-foo.db.json".
         if eng_name.endswith(".db"):
             eng_name = eng_name[:-3]
+        # Engagement metadata for the report cover: the tester lands in the
+        # "Assessor" slot, the client in "Client". Empty fields are dropped so
+        # the report derives sensible defaults.
+        report_meta: dict[str, str] = {}
+        report_tester = getattr(eng, "tester", "") if eng else ""
+        if report_tester:
+            report_meta["assessor"] = report_tester
+        if eng and getattr(eng, "client", ""):
+            report_meta["client"] = eng.client
         rows = store.list_findings(limit=10000)
         if not rows:
             raise HTTPException(404, "No findings to report for this engagement")
+        # A finding triaged as a false positive is NOT part of the client
+        # deliverable — drop it from every export format so it never appears in
+        # the report after the operator flags it.
+        rows = [r for r in rows if (r.status or "").lower() != "false_positive"]
+        if not rows:
+            raise HTTPException(
+                404, "No reportable findings — every finding is marked "
+                "false-positive (or none exist) for this engagement.")
         findings = []
         for f in rows:
             d = {
@@ -2031,6 +2300,13 @@ def create_app() -> FastAPI:
         }
         ext = {"markdown": "md", "proxy-jsonl": "jsonl", "junit": "xml"}
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", eng_name)[:60] or "engagement"
+        # A recognised compliance framework id (hipaa, uk_gdpr, …) adds a mapped
+        # control-coverage section to the html/pdf/markdown deliverables; anything
+        # else (the OWASP_TOP10 default) leaves the standard report unchanged.
+        from heaven.devsecops import compliance_frameworks as _cf
+        compliance_fw = framework if _cf.is_compliance_framework(framework) else None
+        if compliance_fw:
+            safe = f"{safe}-{compliance_fw}"
         try:
             if fmt == "pdf":
                 import importlib.util
@@ -2044,16 +2320,29 @@ def create_app() -> FastAPI:
                 from heaven.devsecops.pdf_report import PDFReportGenerator
                 tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
                 tmp.close()
-                ok = PDFReportGenerator().generate(
-                    {"engagement": eng_name, "vulnerabilities": findings,
-                     "findings": findings, "assets": raw_assets,
-                     "dns_records": raw_dns}, tmp.name)
-                if not ok or not os.path.getsize(tmp.name):
+                # strict=True → a real build error is raised (with its message)
+                # instead of silently falling back to an empty .pdf and the old,
+                # misleading "reportlab installed?" — reportlab is confirmed above.
+                try:
+                    PDFReportGenerator().generate(
+                        {"engagement": eng_name, "vulnerabilities": findings,
+                         "findings": findings, "assets": raw_assets,
+                         "dns_records": raw_dns, "tester": report_tester,
+                         "client": report_meta.get("client", ""),
+                         "compliance_framework": compliance_fw}, tmp.name, strict=True)
+                except Exception as exc:  # noqa: BLE001
                     try:
                         os.unlink(tmp.name)
                     except OSError:
                         pass
-                    raise HTTPException(500, "PDF generation failed (reportlab installed?)")
+                    logger.exception("PDF report generation failed")
+                    raise HTTPException(500, f"PDF generation failed: {exc}") from exc
+                if not os.path.getsize(tmp.name):
+                    try:
+                        os.unlink(tmp.name)
+                    except OSError:
+                        pass
+                    raise HTTPException(500, "PDF generation produced an empty file")
                 # Delete the temp file once the response has been streamed.
                 return FileResponse(tmp.name, media_type="application/pdf",
                                     filename=f"heaven-report-{safe}.pdf",
@@ -2062,11 +2351,13 @@ def create_app() -> FastAPI:
                 from heaven.devsecops.compliance_report import ComplianceReportGenerator
                 body = ComplianceReportGenerator().generate_html_report(
                     findings, engagement_name=eng_name, assets=raw_assets,
-                    dns_records=raw_dns)
+                    dns_records=raw_dns, compliance_framework=compliance_fw,
+                    meta=report_meta or None)
             elif fmt == "markdown":
                 from heaven.devsecops.evidence import export_findings_markdown
                 body = export_findings_markdown(findings, engagement_name=eng_name,
-                                                assets=raw_assets, dns_records=raw_dns)
+                                                assets=raw_assets, dns_records=raw_dns,
+                                                compliance_framework=compliance_fw)
             elif fmt == "csv":
                 from heaven.devsecops.evidence import export_findings_csv
                 body = export_findings_csv(findings)
@@ -2230,6 +2521,186 @@ def create_app() -> FastAPI:
             return {"ok": False, "has_key": False, "status_code": None,
                     "sample_results": None, "reason": f"error: {e}"}
 
+    # ══════════════════════════════════════════════════════════════════
+    # Self-update — check for + apply a newer HEAVEN from the web app
+    # ══════════════════════════════════════════════════════════════════
+    # Reuses the exact, unit-tested core behind `heaven update` (git-checkout
+    # aware, fast-forward only, never overwrites uncommitted work). Detection is
+    # available to any signed-in user; applying is admin-only (config.modify).
+
+    @app.get("/api/update/status")
+    async def update_status(
+        fetch: bool = True,
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Is a newer HEAVEN available? ``fetch=false`` skips the network hop.
+
+        Adds ``current_version``, the auto-check preference, and ``can_apply``
+        (a git checkout, not dirty, and no apply already running) so the UI knows
+        whether to offer 'Update now'. Never raises — a non-git install or an
+        offline remote returns an honest, non-error payload.
+        """
+        from heaven.cli import update as _upd
+        auto_check = (os.environ.get("HEAVEN_UPDATE_AUTO_CHECK") or "").strip().lower() == "on"
+        web_apply = _web_update_apply_enabled()
+        root = _upd.find_repo_root()
+        if root is None:
+            return {
+                "is_git": False, "available": False, "can_apply": False,
+                "web_apply_enabled": web_apply,
+                "reason": "not an editable git checkout, so it can't self-update in place",
+                "current_version": __version__, "auto_check": auto_check,
+                "apply_running": _update_apply_state["running"],
+            }
+        try:
+            check = await asyncio.to_thread(_upd.check_for_update, root, fetch=fetch)
+        except Exception as e:  # noqa: BLE001 — status must never 500
+            return {"is_git": True, "available": False, "can_apply": False,
+                    "web_apply_enabled": web_apply,
+                    "error": f"update check failed: {e}",
+                    "current_version": __version__, "auto_check": auto_check,
+                    "apply_running": _update_apply_state["running"]}
+        d = check.to_dict()
+        d["current_version"] = d.get("current_version") or __version__
+        d["auto_check"] = auto_check
+        d["apply_running"] = _update_apply_state["running"]
+        d["web_apply_enabled"] = web_apply
+        d["can_apply"] = bool(
+            web_apply
+            and check.is_git and check.available and check.remote_reachable
+            and not check.dirty and not _update_apply_state["running"])
+        return d
+
+    @app.post("/api/update/apply")
+    async def update_apply(
+        body: Optional[dict] = None,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """Apply the code update in the background (admin only).
+
+        Fast-forwards the checkout to the fetched remote and reinstalls / rebuilds
+        only what changed — never a merge/rebase/reset, never overwriting
+        uncommitted work (``force`` auto-stashes non-destructively). Returns a
+        ``job_id``; poll ``/api/update/apply/status`` for the live log. The server
+        keeps running the old code until it's restarted — the response says so.
+        """
+        from heaven.cli import update as _upd
+        body = body or {}
+        force = bool(body.get("force"))
+        skip_ui = bool(body.get("skip_ui"))
+        # Deploy-time kill switch (see _web_update_apply_enabled). Enforced here
+        # too — not only hidden in the UI — so bypassing the button can't apply.
+        if not _web_update_apply_enabled():
+            raise HTTPException(
+                403, "Applying updates from the web app is disabled on this server "
+                "(HEAVEN_DISABLE_WEB_UPDATE). Run `heaven update` from the shell, or "
+                "unset that variable and restart to allow web-based updates.")
+        if _update_apply_state["running"]:
+            raise HTTPException(409, "an update is already in progress")
+        root = _upd.find_repo_root()
+        if root is None:
+            raise HTTPException(
+                400, "This HEAVEN isn't an editable git checkout, so it can't "
+                "self-update in place. Update via git pull / Docker / release.")
+        check = await asyncio.to_thread(_upd.check_for_update, root)
+        if not check.is_git:
+            raise HTTPException(400, check.reason or "not an updatable git checkout")
+        if not check.remote_reachable:
+            raise HTTPException(503, f"couldn't reach the remote: {check.error or 'offline?'}")
+        if not check.available:
+            raise HTTPException(409, f"already up to date (v{check.current_version or '?'})")
+        if check.dirty and not force:
+            raise HTTPException(
+                409, f"{len(check.dirty_files)} uncommitted change(s) on the server — "
+                "refusing to overwrite them. Commit/stash them, or retry with force.")
+
+        job_id = uuid.uuid4().hex[:12]
+        _update_apply_state.update({
+            "running": True, "done": False, "ok": False, "log": [],
+            "result": None, "job_id": job_id, "started_at": time.time(),
+        })
+
+        def _log(msg: str) -> None:
+            _update_apply_state["log"].append(msg)
+            logger.info("update.apply: %s", msg)
+
+        async def _run() -> None:
+            try:
+                _log(f"Updating v{check.current_version or '?'} → "
+                     f"v{check.latest_version or '?'} ({check.behind} commit(s))…")
+                res = await asyncio.to_thread(
+                    _upd.apply_code_update, root, check, force=force, skip_ui=skip_ui)
+                for n in res.notes:
+                    _log(n)
+                _update_apply_state["result"] = res.to_dict()
+                _update_apply_state["ok"] = bool(res.applied and not res.error)
+                if res.applied:
+                    _log(f"✓ Updated to v{res.to_version or '?'}. Restart `heaven serve` "
+                         "to run the new code.")
+                else:
+                    _log(f"⚠ {res.error or 'update did not apply'}")
+            except Exception as e:  # noqa: BLE001 — surface, never crash the worker
+                _log(f"error: {e}")
+                _update_apply_state["ok"] = False
+            finally:
+                _update_apply_state["running"] = False
+                _update_apply_state["done"] = True
+
+        asyncio.create_task(_run())
+        logger.info("Code update launched by %s (job %s)", user.username, job_id)
+        return {"job_id": job_id, "running": True,
+                "from_version": check.current_version, "to_version": check.latest_version}
+
+    @app.get("/api/update/apply/status")
+    async def update_apply_status(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Live state of the in-flight (or last) code update: running / done / ok
+        / log lines / the CodeUpdateResult."""
+        s = _update_apply_state
+        return {"running": s["running"], "done": s["done"], "ok": s["ok"],
+                "log": list(s["log"]), "result": s["result"], "job_id": s["job_id"]}
+
+    # ── Egress / anonymity (TOR / VPN / WireGuard) ──────────────────────────
+    # The dashboard stays local; these control how *scanning* traffic leaves the
+    # host. Config lives in the shared settings catalog (persisted to .env);
+    # these endpoints add the live actions: confirm the exit IP (leak check) and
+    # raise/drop the WireGuard tunnel.
+
+    @app.get("/api/egress")
+    async def egress_status(user: User = Depends(require_permission("config.modify"))):
+        """Current egress mode, kill-switch, tool availability and (for
+        WireGuard) tunnel status — a synchronous snapshot, no network calls."""
+        from heaven.net import egress as _egress
+        return _egress.status()
+
+    @app.post("/api/egress/confirm")
+    async def egress_confirm(user: User = Depends(require_permission("config.modify"))):
+        """Fetch the apparent public IP *through* the active egress and compare
+        it to the direct baseline — the leak check. Reaches out to a public
+        IP-echo service, so it takes a few seconds."""
+        from heaven.net import egress as _egress
+        try:
+            return await _egress.confirm_egress(timeout=12.0)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "detail": f"error: {e}", "mode": None}
+
+    @app.post("/api/egress/tunnel")
+    async def egress_tunnel(
+        body: dict, user: User = Depends(require_permission("config.modify")),
+    ):
+        """Raise or drop the WireGuard tunnel. Body: ``{"action": "up"|"down"}``.
+        Needs a configured ``HEAVEN_WG_CONFIG`` and root for ``wg-quick`` (via the
+        passwordless-sudo policy). Runs in a worker thread — wg-quick is blocking."""
+        from heaven.net import egress as _egress
+        action = str((body or {}).get("action", "")).strip().lower()
+        if action not in ("up", "down"):
+            raise HTTPException(422, "action must be 'up' or 'down'")
+        fn = _egress.tunnel_up if action == "up" else _egress.tunnel_down
+        result = await asyncio.to_thread(fn)
+        logger.info("Egress tunnel %s by %s: %s", action, user.username, result)
+        return result
+
     @app.get("/api/ai/local/status")
     async def ai_local_status(user: User = Depends(require_permission("config.modify"))):
         """Local-LLM runtime status for the Settings 'Local AI' card + Health:
@@ -2246,6 +2717,44 @@ def create_app() -> FastAPI:
                     "reachable": False, "host": "", "models": [],
                     "default_model": local_llm.DEFAULT_OLLAMA_MODEL, "recommended": [],
                     "error": str(e)}
+
+    @app.get("/api/ai/models")
+    async def ai_models(user: User = Depends(require_permission("config.modify"))):
+        """The model catalog for the Settings model picker.
+
+        Per provider: a curated list of known model ids (label + note), the
+        provider's default (used when the override is blank), and whether it's
+        keyless. Ollama's list is merged with the operator's actually-pulled
+        models so those appear as ready-to-use, first. Also returns the currently
+        active provider + model override so the UI can preselect them. The picker
+        always allows a custom id, so this never blocks a model.
+        """
+        from heaven.ai import llm_gateway as _gw
+        from heaven.ai import local_llm
+        provider = (os.environ.get("HEAVEN_LLM_PROVIDER") or "").lower()
+        model = (os.environ.get("HEAVEN_LLM_MODEL") or "").strip()
+        providers: dict[str, Any] = {}
+        for p in ("anthropic", "openai", "gemini", "ollama", "local"):
+            models = _gw.known_models(p)
+            if p == "ollama":
+                try:
+                    pulled = await asyncio.to_thread(local_llm.list_models)
+                except Exception:  # noqa: BLE001 — a dead Ollama just means no live models
+                    pulled = []
+                existing = {m["id"] for m in models}
+                extra = [{"id": name, "label": name, "note": "installed"}
+                         for name in pulled if name not in existing]
+                for m in models:
+                    if m["id"] in set(pulled):
+                        m["note"] = (m.get("note", "") + " · installed").strip(" ·")
+                models = extra + models
+            providers[p] = {
+                "models": models,
+                "default": _gw.PROVIDER_DEFAULT_MODELS.get(p, ""),
+                "keyless": p in _gw.LOCAL_PROVIDERS,
+            }
+        return {"provider": provider, "model": model, "providers": providers,
+                "provider_default": _gw.PROVIDER_DEFAULT_MODELS.get(provider, "")}
 
     @app.post("/api/ai/local/configure")
     async def ai_local_configure(
@@ -2934,11 +3443,35 @@ def create_app() -> FastAPI:
                 from heaven.ai import FPReviewer
                 reviewer = FPReviewer()
                 if not reviewer.available:
-                    return {"skipped": "LLM gateway unavailable"}
-                verdict = await reviewer.review(body.get("finding", {}))
+                    # The only reason a manual review can't run: no AI provider is
+                    # configured (or pydantic is missing). ``reason`` lets the UI
+                    # show an honest message instead of always blaming a missing key.
+                    from heaven.ai.llm_gateway import get_gateway
+                    gw_ok = False
+                    try:
+                        gw_ok = get_gateway().available
+                    except Exception:
+                        gw_ok = False
+                    reason = ("no_llm" if not gw_ok else "unavailable")
+                    return {"skipped": True, "reason": reason,
+                            "message": ("No AI provider is configured — add a provider "
+                                        "key in Settings to enable a second-opinion "
+                                        "verdict." if reason == "no_llm" else
+                                        "The LLM review layer is unavailable on this "
+                                        "server.")}
+                # An operator asked for a verdict on THIS finding — force the review
+                # regardless of the borderline band (which only governs the
+                # automatic bulk pass), so a high/low-confidence finding still gets
+                # a second opinion instead of a misleading "unavailable".
+                verdict = await reviewer.review(body.get("finding", {}), force=True)
                 if verdict is None:
-                    return {"skipped": "finding outside review band"}
-                return verdict.model_dump() if hasattr(verdict, "model_dump") else verdict.__dict__
+                    return {"skipped": True, "reason": "no_verdict",
+                            "message": ("The LLM did not return a usable verdict — "
+                                        "try again, or check the AI provider status "
+                                        "in Settings.")}
+                out = verdict.model_dump() if hasattr(verdict, "model_dump") else verdict.__dict__
+                out["skipped"] = False
+                return out
             if kind == "hypothesize":
                 # Propose-only: the LLM ranks vuln classes worth probing. Active
                 # verification runs in the authorised scan path, never here.
@@ -3144,7 +3677,9 @@ def create_app() -> FastAPI:
             eng = store.get_engagement()
             engagement_name = getattr(eng, "name", "") or ""
             findings = [
-                {"vuln_type": f.vuln_type, "owasp": getattr(f, "owasp", "")}
+                {"id": f.id, "vuln_type": f.vuln_type, "title": f.title,
+                 "severity": f.severity, "target": f.target,
+                 "owasp": getattr(f, "owasp", "")}
                 for f in store.list_findings(limit=10000)
             ]
         except Exception:
@@ -3165,6 +3700,189 @@ def create_app() -> FastAPI:
                     logger.debug("suppressed non-fatal exception", exc_info=True)
         built["docs"] = docs
         return built
+
+    @app.get("/api/methodology/export")
+    async def export_methodology(
+        standard: str,
+        format: str = "html",
+        engagement: Optional[str] = None,
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Download ONE standard's live coverage matrix as a report.
+
+        Renders the same overlaid coverage the Methodology page shows — every
+        test row, its status, and the concrete findings that exercised it — for a
+        single standard (a doc stem, e.g. ``owasp_testing_guide`` / ``iso_27001``)
+        in html / markdown / json. Reuses ``heaven.methodology`` so CLI, page and
+        this download never diverge.
+        """
+        from fastapi import Response
+        from heaven import methodology as _methodology
+
+        docs_dir = Path(__file__).parent.parent.parent / "docs" / "methodology"
+        findings: list[dict[str, Any]] = []
+        engagement_name = ""
+        try:
+            store = _read_store(engagement)
+            eng = store.get_engagement()
+            engagement_name = getattr(eng, "name", "") or ""
+            findings = [
+                {"id": f.id, "vuln_type": f.vuln_type, "title": f.title,
+                 "severity": f.severity, "target": f.target,
+                 "owasp": getattr(f, "owasp", "")}
+                for f in store.list_findings(limit=10000)
+            ]
+        except Exception:
+            findings = []
+
+        built = await asyncio.to_thread(_methodology.build, findings, docs_dir)
+        std = _methodology.find_standard(built, standard)
+        if std is None:
+            available = ", ".join(s["name"] for s in built.get("standards", []))
+            raise HTTPException(404, f"unknown standard '{standard}'. Available: {available}")
+
+        fmt = (format or "html").lower()
+        safe_std = re.sub(r"[^A-Za-z0-9_.-]+", "_", standard)[:60] or "standard"
+        if fmt == "html":
+            body = _methodology.render_coverage_html(std, engagement_name)
+            media, ext = "text/html", "html"
+        elif fmt in ("markdown", "md"):
+            body = _methodology.render_coverage_markdown(std, engagement_name)
+            media, ext = "text/markdown", "md"
+        elif fmt == "json":
+            body = json.dumps({"engagement": engagement_name, "standard": std},
+                              indent=2, default=str)
+            media, ext = "application/json", "json"
+        elif fmt == "pdf":
+            import importlib.util
+            if importlib.util.find_spec("reportlab") is None:
+                raise HTTPException(
+                    503, "PDF export needs reportlab — `pip install reportlab`. "
+                    "Use HTML/Markdown export, which need no extra dependency.")
+            try:
+                pdf_bytes = await asyncio.to_thread(
+                    _methodology.render_coverage_pdf, std, engagement_name)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("methodology PDF generation failed")
+                raise HTTPException(500, f"PDF generation failed: {exc}") from exc
+            filename = f"heaven-methodology-{safe_std}.pdf"
+            return Response(content=pdf_bytes, media_type="application/pdf",
+                            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+        else:
+            raise HTTPException(400, f"unsupported format: {fmt} (use html/markdown/json/pdf)")
+        filename = f"heaven-methodology-{safe_std}.{ext}"
+        return Response(content=body, media_type=media,
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    @app.get("/api/compliance/frameworks")
+    async def list_compliance_frameworks(
+        user: User = Depends(require_permission("report.view")),
+    ):
+        """The finding-mapped compliance frameworks available for a report.
+
+        Each entry (id/title/subtitle/reference/controls_total) can be downloaded
+        as a mapped report via ``/api/report/export?format=…&framework=<id>``.
+        """
+        from heaven.devsecops import compliance_frameworks as _cf
+        return {"frameworks": _cf.list_frameworks()}
+
+    def _compliance_findings(engagement: Optional[str] = None) -> tuple[str, list[dict]]:
+        """(engagement_name, enriched findings) for the compliance overlay.
+
+        Findings are enriched (CWE / OWASP) so the control mapping has the same
+        grounding the report export uses, and false-positives are excluded — a
+        control-coverage view must reflect the real, reportable findings.
+        """
+        from heaven.devsecops.vuln_kb import enrich_finding
+        name = ""
+        out: list[dict] = []
+        try:
+            store = _read_store(engagement)
+            eng = store.get_engagement()
+            name = getattr(eng, "name", "") or ""
+            for f in store.list_findings(limit=10000):
+                if (getattr(f, "status", "") or "").lower() == "false_positive":
+                    continue
+                d = {
+                    "id": f.id, "target": f.target, "vuln_type": f.vuln_type,
+                    "title": f.title, "severity": f.severity, "cve_id": f.cve_id,
+                    "cwe": getattr(f, "cwe", "") or "",
+                    "owasp": getattr(f, "owasp", "") or "",
+                    "status": f.status,
+                    "evidence": f.evidence if isinstance(f.evidence, dict) else {},
+                }
+                out.append(enrich_finding(d))
+        except Exception:
+            logger.debug("suppressed non-fatal exception collecting compliance findings",
+                         exc_info=True)
+        return name, out
+
+    @app.get("/api/compliance/coverage")
+    async def compliance_coverage(
+        framework: str,
+        engagement: Optional[str] = None,
+        user: User = Depends(require_permission("report.view")),
+    ):
+        """Live control-coverage overlay for ONE framework — the data behind the
+        interactive Compliance page (the control analogue of ``/api/methodology``).
+
+        Every control lists the distinct engagement findings that provide evidence
+        of a gap against it. Honest coverage view, not an attestation.
+        """
+        from heaven.devsecops import compliance_frameworks as _cf
+        if not _cf.is_compliance_framework(framework):
+            available = ", ".join(f["id"] for f in _cf.list_frameworks())
+            raise HTTPException(404, f"unknown framework '{framework}'. Available: {available}")
+        name, findings = _compliance_findings(engagement)
+        cov = await asyncio.to_thread(_cf.coverage_for, framework, findings, name)
+        return cov
+
+    @app.get("/api/compliance/export")
+    async def export_compliance(
+        framework: str,
+        format: str = "html",
+        engagement: Optional[str] = None,
+        user: User = Depends(require_permission("report.view")),
+    ):
+        """Download ONE framework's live control-coverage matrix as a deliverable
+        (html / markdown / json / pdf) — mirrors ``/api/methodology/export``."""
+        from fastapi import Response
+        from heaven.devsecops import compliance_frameworks as _cf
+        if not _cf.is_compliance_framework(framework):
+            available = ", ".join(f["id"] for f in _cf.list_frameworks())
+            raise HTTPException(404, f"unknown framework '{framework}'. Available: {available}")
+        name, findings = _compliance_findings(engagement)
+        cov = await asyncio.to_thread(_cf.coverage_for, framework, findings, name)
+        fmt = (format or "html").lower()
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", framework)[:60] or "framework"
+        if fmt == "html":
+            body = _cf.render_coverage_html(cov)
+            media, ext = "text/html", "html"
+        elif fmt in ("markdown", "md"):
+            body = _cf.render_coverage_markdown(cov)
+            media, ext = "text/markdown", "md"
+        elif fmt == "json":
+            body = json.dumps(cov, indent=2, default=str)
+            media, ext = "application/json", "json"
+        elif fmt == "pdf":
+            import importlib.util
+            if importlib.util.find_spec("reportlab") is None:
+                raise HTTPException(
+                    503, "PDF export needs reportlab — `pip install reportlab`. "
+                    "Use HTML/Markdown export, which need no extra dependency.")
+            try:
+                pdf_bytes = await asyncio.to_thread(_cf.render_coverage_pdf, cov)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("compliance PDF generation failed")
+                raise HTTPException(500, f"PDF generation failed: {exc}") from exc
+            filename = f"heaven-compliance-{safe}.pdf"
+            return Response(content=pdf_bytes, media_type="application/pdf",
+                            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+        else:
+            raise HTTPException(400, f"unsupported format: {fmt} (use html/markdown/json/pdf)")
+        filename = f"heaven-compliance-{safe}.{ext}"
+        return Response(content=body, media_type=media,
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     # ── Gap 1: Latest benchmark results ──
 
@@ -3505,7 +4223,7 @@ def create_app() -> FastAPI:
 
         engagement = str(body.get("engagement") or "").strip()
         if not engagement:
-            raise HTTPException(422, "engagement is required — a watch loop "
+            raise HTTPException(422, "engagement is required: a watch loop "
                                      "persists every run into an engagement")
         db_path = _engagement_db_path(engagement)
         if not db_path.exists():
@@ -4410,8 +5128,14 @@ def _clear_scan_auth() -> None:
     set_low_priv_session(None)
 
 
-async def _run_scan_background(scan_id: str, req: ScanRequest):
-    """Run a scan in the background, persist findings to engagement store and report file."""
+async def _run_scan_background(scan_id: str, req: ScanRequest, *, resume: bool = False):
+    """Run a scan in the background, persist findings to engagement store and report file.
+
+    When ``resume`` is True the scan already exists in the store: its checkpoints
+    are replayed (``build_full_scan(resume_scan_id=...)`` skips completed tasks)
+    and the existing row is kept — so an interrupted scan continues instead of
+    starting over.
+    """
     active_scans[scan_id]["status"] = "running"
     active_scans[scan_id]["progress_pct"] = 0
 
@@ -4452,10 +5176,15 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
         # reproduce this scan faithfully — previously web scans stored no config
         # at all, so they were unreplayable and their stealth choice was lost.
         from heaven.utils.seeding import current_seed
-        store.record_scan_start(
-            scan_id, name=_scan_name, mode=_scan_mode,
-            config={"targets": scan_targets, "seed": current_seed(), "mode": _scan_mode},
-        )
+        if resume:
+            # The row + its replayable config already exist; just re-arm it to
+            # 'running' (keeps checkpoints/config) instead of INSERT-OR-REPLACEing.
+            store.record_scan_resumed(scan_id)
+        else:
+            store.record_scan_start(
+                scan_id, name=_scan_name, mode=_scan_mode,
+                config={"targets": scan_targets, "seed": current_seed(), "mode": _scan_mode},
+            )
         # Record what we're actually assessing as engagement scope, so the
         # dashboard/report reflect the real targets instead of "0 targets".
         for _tgt in list(req.urls or []) + list(req.targets or []):
@@ -4509,6 +5238,7 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             cfg,
             checkpoint_store=store,
             scan_mode=_mode,
+            resume_scan_id=scan_id if resume else None,
         )
 
         # Remembers the size of the raw finding union at the last live reconcile,
@@ -4664,6 +5394,21 @@ async def _run_scan_background(scan_id: str, req: ScanRequest):
             actor=active_scans[scan_id].get("created_by", "system"),
             severity=AuditSeverity.INFO,
         )
+
+    except asyncio.CancelledError:
+        # The operator cancelled this scan (delete_scan called task.cancel()).
+        # CancelledError is a BaseException, so it bypasses the `except Exception`
+        # below — persist 'cancelled' here (not left stranded 'running') and
+        # re-raise so the task is properly torn down. Checkpoints are kept, so a
+        # cancelled scan is still resumable.
+        active_scans[scan_id]["status"] = "cancelled"
+        if store:
+            try:
+                store.record_scan_complete(scan_id, summary={"cancelled": True},
+                                           status="cancelled")
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+        raise
 
     except Exception as e:
         active_scans[scan_id]["status"] = "failed"

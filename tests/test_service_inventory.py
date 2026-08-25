@@ -187,7 +187,9 @@ def test_service_ostype_used_as_heuristic_os(monkeypatch):
 
 def test_os_level_cpe_used_as_heuristic_os(monkeypatch):
     res = _run_scan_with_xml(monkeypatch, _NMAP_XML_OS_CPE_ONLY, "10.0.0.8")
-    assert res.os_guess == "Windows"
+    # The Windows OS CPE keeps its release (windows_server_2019 → "Windows Server
+    # 2019") rather than collapsing to a version-less "Windows".
+    assert res.os_guess == "Windows Server 2019"
     assert res.os_source == "heuristic"
     # the OS CPE must NOT be mistaken for the port's (application) CPE
     p445 = next(p for p in res.open_ports if p.port == 445)
@@ -243,7 +245,11 @@ def test_udp_scan_uses_raw_flags_only_when_privileged(monkeypatch):
 
 
 @pytest.mark.parametrize("cpe,expected", [
-    ("cpe:/o:microsoft:windows_server_2019", "Windows"),
+    # Windows CPEs keep their release so the EOL scanner can recognise an
+    # end-of-life OS instead of a version-less, unmatchable "Windows".
+    ("cpe:/o:microsoft:windows_server_2019", "Windows Server 2019"),
+    ("cpe:/o:microsoft:windows_10::-", "Windows 10"),
+    ("cpe:/o:microsoft:windows_7", "Windows 7"),
     ("cpe:/o:linux:linux_kernel:5.4", "Linux"),
     ("cpe:/o:apple:mac_os_x:12.0", "macOS"),
     ("cpe:/o:freebsd:freebsd:13", "FreeBSD"),
@@ -258,7 +264,7 @@ def test_os_name_from_cpe(cpe, expected):
 def test_os_from_service_evidence_prefers_majority():
     from heaven.recon.network_scanner import _os_from_service_evidence
     assert _os_from_service_evidence(["Linux", "Linux", "Windows"], []) == "Linux"
-    assert _os_from_service_evidence([], ["cpe:/o:microsoft:windows_10"]) == "Windows"
+    assert _os_from_service_evidence([], ["cpe:/o:microsoft:windows_10"]) == "Windows 10"
     assert _os_from_service_evidence([], []) == ""  # no evidence → no guess
 
 
@@ -538,3 +544,60 @@ def test_api_assets_scopes_to_one_scan_not_merged(api_client):
     b3 = api_client.get("/api/assets?engagement=mergetest&all=1").json()
     assert b3["total"] == 2
     assert {h["host"] for h in b3["assets"]} == {"10.0.0.5", "192.168.1.10"}
+
+
+# ── hostname target → resolved IP shown in the inventory ────────────────────
+# When the scan target is a website/webapp (a hostname), the inventory should
+# also record and render the IP address it resolved to — not just the domain.
+
+def test_looks_like_ip():
+    from heaven.devsecops.inventory import looks_like_ip
+    assert looks_like_ip("10.0.0.5")
+    assert looks_like_ip("::1")
+    assert not looks_like_ip("example.com")
+    assert not looks_like_ip("")
+
+
+def test_resolve_host_ip_ip_literal_passthrough_and_disabled(monkeypatch):
+    from heaven.devsecops import inventory as inv
+    inv._IP_CACHE.clear()
+    # An IP literal resolves to itself with no lookup.
+    assert inv.resolve_host_ip("192.168.1.9") == "192.168.1.9"
+    # Disabled → never resolves (offline / air-gapped hosts).
+    inv._IP_CACHE.clear()
+    monkeypatch.setenv("HEAVEN_NO_DNS_RESOLVE", "1")
+    assert inv.resolve_host_ip("example.com") == ""
+
+
+def test_resolve_host_ip_and_inventory_ip(monkeypatch):
+    import socket
+
+    from heaven.devsecops import inventory as inv
+    monkeypatch.delenv("HEAVEN_NO_DNS_RESOLVE", raising=False)
+    monkeypatch.setattr(socket, "gethostbyname", lambda h: "93.184.216.34")
+    inv._IP_CACHE.clear()
+    assert inv.resolve_host_ip("example.com") == "93.184.216.34"
+
+    inv._IP_CACHE.clear()
+    hosts = inv.normalize_assets([
+        {"host": "example.com", "open_ports": [{"port": 443, "service": "https"}]},
+    ])
+    assert hosts[0]["host"] == "example.com"
+    assert hosts[0]["ip"] == "93.184.216.34"
+
+    inv._IP_CACHE.clear()
+    md = inv.render_markdown([
+        {"host": "example.com", "open_ports": [{"port": 443, "service": "https"}]},
+    ])
+    assert "**IP:** 93.184.216.34" in md
+
+
+def test_inventory_carries_supplied_ip_for_hostname():
+    # A scan that already resolved the address supplies `ip`; keep host+ip distinct
+    # and never re-resolve (no network needed).
+    hosts = normalize_assets([
+        {"host": "shop.example.com", "ip": "203.0.113.10",
+         "open_ports": [{"port": 80, "service": "http"}]},
+    ])
+    assert hosts[0]["host"] == "shop.example.com"
+    assert hosts[0]["ip"] == "203.0.113.10"

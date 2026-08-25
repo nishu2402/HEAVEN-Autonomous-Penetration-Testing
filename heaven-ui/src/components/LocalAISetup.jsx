@@ -49,7 +49,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
     try {
       navigator.clipboard?.writeText(text);
       toast?.success?.("Copied to clipboard");
-    } catch { toast?.error?.("Could not copy — select and copy manually"); }
+    } catch { toast?.error?.("Could not copy: select and copy manually"); }
   }
 
   function startPull(model) {
@@ -89,7 +89,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
     try {
       const r = await SettingsApi.aiLocalConfigure({ provider: "ollama", model: m });
       setResult({ ...r.test, model: m });
-      if (r.test?.available) toast?.success?.(`Local AI is live — ${m}`);
+      if (r.test?.available) toast?.success?.(`Local AI is live: ${m}`);
       else toast?.error?.(r.test?.reason || "Saved, but the test call failed");
       await onChanged?.();
     } catch (e) {
@@ -109,7 +109,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
     try {
       const r = await SettingsApi.aiLocalConfigure({ provider: "local", base_url: url, model: m });
       setResult({ ...r.test, model: m });
-      if (r.test?.available) toast?.success?.(`Connected — ${m}`);
+      if (r.test?.available) toast?.success?.(`Connected: ${m}`);
       else toast?.error?.(r.test?.reason || "Saved, but the test call failed");
       await onChanged?.();
     } catch (e) {
@@ -128,7 +128,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
   return (
     <div style={card}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>🖥️ Local AI — no key, no rate limits</div>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>🖥️ Local AI, no key, no rate limits</div>
         <span style={{ flex: 1 }} />
         <div style={tabRow}>
           <button type="button" onClick={() => setTab("ollama")}
@@ -139,7 +139,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
       </div>
 
       <p style={hint}>
-        Run HEAVEN's AI privately on your own machine — findings never leave the box,
+        Run HEAVEN's AI privately on your own machine, findings never leave the box,
         and there are no API keys or rate limits. Set it up right here.
       </p>
 
@@ -183,7 +183,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
           {installed && reachable ? (
             <Step n={installed ? 3 : 2} title="Pick a model">
               <p style={hint}>
-                Pull a model once (a few hundred MB–GB). {defaultModel} is the balanced default.
+                Pull a model once (a few hundred MB, GB). {defaultModel} is the balanced default.
               </p>
               <div style={{ display: "grid", gap: 8 }}>
                 {recommended.map((rec) => {
@@ -221,7 +221,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
               {pull ? (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ fontSize: 12, color: "var(--text-1)", marginBottom: 4 }}>
-                    Pulling <b>{pull.model}</b> — {pull.status}
+                    Pulling <b>{pull.model}</b>, {pull.status}
                     {pull.percent != null ? ` · ${pull.percent}%` : ""}
                   </div>
                   <div style={barTrack}>
@@ -255,9 +255,9 @@ export default function LocalAISetup({ status, onChanged, toast }) {
           </p>
           <div style={{ display: "grid", gap: 8 }}>
             <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
-                   placeholder="Base URL — e.g. http://localhost:1234/v1" style={input} />
+                   placeholder="Base URL: e.g. http://localhost:1234/v1" style={input} />
             <input value={localModel} onChange={(e) => setLocalModel(e.target.value)}
-                   placeholder="Served model id — e.g. your-model" style={input} />
+                   placeholder="Served model id: e.g. your-model" style={input} />
             <div>
               <button type="button" style={primaryBtn} disabled={configuring === "__local__"}
                       onClick={connectLocalEndpoint}>
@@ -323,7 +323,7 @@ function ResultBanner({ result }) {
       background: ok ? "rgba(52,229,163,0.08)" : "rgba(255,107,107,0.08)",
       color: ok ? "var(--brand)" : "var(--crit)",
     }}>
-      {ok ? "✓ Local AI is live" : "✗ Not ready"} — {result.model ? <b>{result.model}</b> : null}{" "}
+      {ok ? "✓ Local AI is live" : "✗ Not ready"}, {result.model ? <b>{result.model}</b> : null}{" "}
       {result.reason ? <span style={{ color: "var(--text-1)" }}>· {result.reason}</span> : null}
     </div>
   );

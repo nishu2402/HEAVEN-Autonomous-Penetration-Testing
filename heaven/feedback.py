@@ -57,21 +57,36 @@ class ScopeGuard:
 
     A candidate passes when it is:
       * an exact match of an in-scope host/domain/IP; or
-      * a subdomain of an in-scope registrable domain; or
-      * an IP address inside an in-scope CIDR (or equal to an in-scope IP).
+      * an IP address inside an in-scope CIDR (or equal to an in-scope IP); or
+      * a subdomain of an in-scope **domain**.
+
+    Crucially, subdomain-wide scope is granted *only* when the operator named a
+    domain deliberately — a target in the ``domains`` bucket, or a wildcard/dotted
+    target such as ``*.example.com`` / ``.example.com``. A single host or URL
+    target (``https://example.com`` / a bare ``example.com`` in the ``ips`` /
+    ``urls`` buckets) authorises **exactly that host**, never its whole subdomain
+    tree. This stops a one-host engagement from silently expanding into an active
+    scan of every discovered subdomain — many of which resolve to third-party
+    infrastructure (a mail provider, a CDN, a SaaS) the operator never authorised.
     """
 
     def __init__(self, targets: dict[str, Any]):
-        self._domains: set[str] = set()
+        self._domains: set[str] = set()   # subdomain-wildcard scope (deliberate)
         self._nets: list[ipaddress._BaseNetwork] = []
-        self._exact: set[str] = set()
+        self._exact: set[str] = set()     # exact host / IP scope
 
-        def _add_host(raw: str) -> None:
+        def _add_host(raw: str, *, wildcard: bool) -> None:
             raw = (raw or "").strip().lower()
             if not raw:
                 return
             if "://" in raw:
                 raw = urlparse(raw).hostname or ""
+            # An explicit wildcard/dotted target always requests subdomain-wide
+            # scope, whatever bucket it arrived in.
+            if raw.startswith("*."):
+                raw, wildcard = raw[2:], True
+            elif raw.startswith("."):
+                raw, wildcard = raw[1:], True
             raw = raw.split(":", 1)[0].strip("[]")  # drop :port and IPv6 brackets
             if not raw:
                 return
@@ -79,14 +94,41 @@ class ScopeGuard:
             try:
                 self._nets.append(ipaddress.ip_network(raw, strict=False))
             except ValueError:
-                self._domains.add(raw)  # a hostname, not an IP/CIDR
+                # A hostname, not an IP/CIDR. It widens scope to its whole
+                # subdomain tree ONLY when the operator named it as a domain
+                # (the ``domains`` bucket) or with explicit wildcard syntax —
+                # never merely because a single URL/host target was entered.
+                if wildcard:
+                    self._domains.add(raw)
 
         for ip in targets.get("ips", []) or []:
-            _add_host(str(ip))
+            _add_host(str(ip), wildcard=False)
         for url in targets.get("urls", []) or []:
-            _add_host(str(url))
+            _add_host(str(url), wildcard=False)
         for dom in targets.get("domains", []) or []:
-            _add_host(str(dom))
+            _add_host(str(dom), wildcard=True)
+
+    def allows_subdomains(self, domain: str) -> bool:
+        """True when *arbitrary* subdomains of ``domain`` are in authorised scope.
+
+        This is granted only when the operator deliberately requested
+        subdomain-wide scope — a target in the ``domains`` bucket, or an explicit
+        ``*.example.com`` / ``.example.com`` — so a bare host / URL target
+        (exact-host scope) returns ``False``. Subdomain *discovery* (CT-log +
+        DNS brute-force) is gated on this so a one-host engagement never
+        enumerates, counts, logs or feeds back its whole subdomain tree — most of
+        which is out-of-scope third-party infrastructure the operator never named.
+        """
+        domain = (domain or "").strip().lower()
+        if "://" in domain:
+            domain = urlparse(domain).hostname or ""
+        domain = domain.split(":", 1)[0].strip("[]")
+        if not domain:
+            return False
+        for dom in self._domains:
+            if domain == dom or domain.endswith("." + dom):
+                return True
+        return False
 
     def allows(self, host: str) -> bool:
         host = (host or "").strip().lower()

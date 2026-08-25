@@ -6,6 +6,7 @@ import FirstRunGuide from '../components/FirstRunGuide'
 import { Engagement, Dashboard as DashApi, Demo, Engagements, Scans } from '../api'
 import { useToast } from '../components/Toast.jsx'
 import HelpTip from '../components/HelpTip.jsx'
+import Marquee from '../components/Marquee.jsx'
 import { SCAN_MODES, ANALYSIS_TOOLS } from '../scanModes.js'
 
 // three.js + r3f + drei are heavy (~600 KB). Load them only when the dashboard
@@ -119,7 +120,7 @@ export default function Dashboard() {
     try {
       await Engagements.setActive(name)
       await refresh()
-      toast.success(`Now viewing “${name}”`)
+      toast.success(`Now viewing "${name}"`)
     } catch (e) {
       toast.error(e.message || 'Could not switch engagement')
     } finally {
@@ -136,14 +137,14 @@ export default function Dashboard() {
       ? `${target.findings} finding${target.findings !== 1 ? 's' : ''}`
       : 'no findings'
     if (!window.confirm(
-      `Delete engagement “${name}” (${detail})? This permanently removes its ` +
+      `Delete engagement "${name}" (${detail})? This permanently removes its ` +
       `scans and findings and cannot be undone.`
     )) return
     setBusyEng(name)
     try {
       await Engagements.remove(name)
       await refresh()
-      toast.success(`Deleted “${name}”`)
+      toast.success(`Deleted "${name}"`)
     } catch (e) {
       toast.error(e.message || 'Could not delete engagement')
     } finally {
@@ -156,7 +157,7 @@ export default function Dashboard() {
   // DB and repoints the active pointer if you rename the one you're viewing.
   const renameEngagement = async (name) => {
     if (busyEng) return
-    const proposed = window.prompt(`Rename engagement “${name}” to:`, name)
+    const proposed = window.prompt(`Rename engagement "${name}" to:`, name)
     if (proposed === null) return                       // cancelled
     const next = proposed.trim()
     if (!next || next === name) return                  // empty or unchanged
@@ -164,7 +165,7 @@ export default function Dashboard() {
     try {
       await Engagements.rename(name, next)
       await refresh()
-      toast.success(`Renamed “${name}” → “${next}”`)
+      toast.success(`Renamed "${name}" → "${next}"`)
     } catch (e) {
       toast.error(e.message || 'Could not rename engagement')
     } finally {
@@ -214,7 +215,7 @@ export default function Dashboard() {
     setSeeding(true)
     try {
       const r = await Demo.seed()
-      toast.success(`Loaded ${r.findings} sample findings — explore away`)
+      toast.success(`Loaded ${r.findings} sample findings, explore away`)
       refresh()
     } catch (e) {
       toast.error(e.message || 'Could not load sample data')
@@ -251,7 +252,7 @@ export default function Dashboard() {
                   No active engagement
                 </div>
                 <div style={{ color: 'var(--text-2)', fontSize: 12.5, marginBottom: 14 }}>
-                  Launch a scan to map your target surface — no terminal required.
+                  Launch a scan to map your target surface, no terminal required.
                 </div>
                 <button className="btn btn-primary" style={{ pointerEvents: 'auto' }}
                         onClick={() => navigate('/scans')}>
@@ -334,7 +335,7 @@ export default function Dashboard() {
                         className="eng-switch-pick"
                         disabled={!!busyEng}
                         onClick={() => switchEngagement(e.name)}
-                        title={e.active ? 'Currently viewing' : `Switch to “${e.name}”`}
+                        title={e.active ? 'Currently viewing' : `Switch to "${e.name}"`}
                       >
                         <span className="eng-switch-dot" />
                         <span className="eng-switch-name">{e.display_name}</span>
@@ -352,7 +353,7 @@ export default function Dashboard() {
                         onClick={() => renameEngagement(e.name)}
                         title={e.name === 'demo'
                           ? 'The sample engagement cannot be renamed'
-                          : `Rename “${e.name}”`}
+                          : `Rename "${e.name}"`}
                         aria-label={`Rename engagement ${e.name}`}
                       >
                         {busy ? '…' : '✎'}
@@ -362,7 +363,7 @@ export default function Dashboard() {
                         className="eng-switch-del"
                         disabled={!!busyEng}
                         onClick={() => deleteEngagement(e.name)}
-                        title={`Delete “${e.name}” permanently`}
+                        title={`Delete "${e.name}" permanently`}
                         aria-label={`Delete engagement ${e.name}`}
                       >
                         {busy ? '…' : '🗑'}
@@ -387,7 +388,7 @@ export default function Dashboard() {
             <div>
               <div className="card-title" style={{ marginBottom: 10 }}>Quick start</div>
               <div style={{ color: 'var(--text-1)', fontSize: 12.5, lineHeight: 1.6, marginBottom: 12 }}>
-                Launch your first scan to populate the dashboard — findings, severity
+                Launch your first scan to populate the dashboard, findings, severity
                 breakdown and topology fill in automatically.
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -400,7 +401,7 @@ export default function Dashboard() {
               </div>
               <div className="dim" style={{ fontSize: 11, marginTop: 12 }}>
                 Just exploring? <b>Load sample data</b> fills every page with a realistic
-                example engagement — nothing is scanned.
+                example engagement, nothing is scanned.
               </div>
               <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>
                 Prefer the terminal? <code>heaven demo</code> (sample) ·
@@ -410,9 +411,11 @@ export default function Dashboard() {
           ) : (
             <div>
               <div className="stat-label" style={{ marginBottom: 6 }}>Engagement</div>
-              <div style={{ color: 'var(--text-0)', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>
-                {eng.engagement?.name}
-              </div>
+              <Marquee
+                text={eng.engagement?.name || ""}
+                title={eng.engagement?.name}
+                style={{ color: 'var(--text-0)', fontWeight: 700, fontSize: 16, marginBottom: 4 }}
+              />
               <div style={{ color: 'var(--text-1)', fontSize: 12.5 }}>
                 {totalFindings} finding{totalFindings !== 1 ? 's' : ''} ·{' '}
                 {stats.scope_targets ?? 0} target{(stats.scope_targets ?? 0) !== 1 ? 's' : ''} in scope
@@ -479,7 +482,7 @@ export default function Dashboard() {
                                    whiteSpace: 'nowrap' }}>{f.title}</span>
                     {f.confirmation === 'Potential' && (
                       <span className="conf-badge conf-potential" style={{ flexShrink: 0, fontSize: 10 }}
-                            title="Inferred from a service version banner — verify before treating as present.">
+                            title="Inferred from a service version banner: verify before treating as present.">
                         Potential
                       </span>
                     )}

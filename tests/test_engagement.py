@@ -60,6 +60,36 @@ class TestEngagementMetadata:
         assert eng.name == "fresh"                # canonical DB-stem name
         assert eng.client == "NewCo"
 
+    def test_create_and_update_tester(self, store):
+        store.create_engagement("acme", client="ACME", tester="Alice")
+        assert store.get_engagement().tester == "Alice"
+        eng = store.update_engagement_details(tester="Bob")
+        assert eng.tester == "Bob"
+        assert eng.client == "ACME"               # untouched field preserved
+
+    def test_tester_column_migrated_onto_old_db(self, tmp_path):
+        """An engagement DB created before the tester column still works: the
+        column is added idempotently on open, so writing tester never errors."""
+        import sqlite3
+        from heaven.engagement import EngagementStore
+        old = tmp_path / "old.db"
+        con = sqlite3.connect(old)
+        con.executescript(
+            "CREATE TABLE engagement (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name TEXT NOT NULL UNIQUE, client TEXT, statement_of_work TEXT, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, notes TEXT); "
+            "INSERT INTO engagement (name, client, statement_of_work, created_at, "
+            "updated_at) VALUES ('old','OldCo','',datetime('now'),datetime('now'));"
+        )
+        con.commit()
+        con.close()
+        st = EngagementStore(old)                 # _init_schema runs the migration
+        cols = {r[1] for r in sqlite3.connect(old).execute("PRAGMA table_info(engagement)")}
+        assert "tester" in cols
+        eng = st.update_engagement_details(tester="Carol")
+        assert eng.tester == "Carol"
+        assert eng.client == "OldCo"              # existing data preserved
+
 
 # ── Scope management ───────────────────────────────────────────────────
 

@@ -37,7 +37,7 @@ export default function SastPage() {
       // The scan just persisted into (and activated) an engagement — tell the
       // header chip and dashboard so they reflect the run without a reload.
       try { window.dispatchEvent(new Event("heaven:engagement-changed")); }
-      catch { /* non-browser — no-op */ }
+      catch { /* non-browser, no-op */ }
     }
   }, [result?.engagement_scan_id]);
 
@@ -120,7 +120,7 @@ export default function SastPage() {
         )}
         {loading && (
           <div className="dim" style={{ marginTop: 10, fontSize: 12 }}>
-            Running on the server — you can switch pages; the scan keeps going.
+            Running on the server, you can switch pages; the scan keeps going.
           </div>
         )}
       </div>
@@ -147,7 +147,7 @@ export default function SastPage() {
         <>
           <div className="card" style={{ marginTop: 12 }}>
             <div className="card-title">
-              SAST results — {result.files_scanned} file(s) scanned in {result.duration_s}s
+              SAST results, {result.files_scanned} file(s) scanned in {result.duration_s}s
               {result.engagement_scan_id && (
                 <span className="dim" style={{ marginLeft: 8 }}>
                   · persisted as <code>{result.engagement_scan_id}</code>
@@ -210,7 +210,7 @@ export default function SastPage() {
           emptyState={{
             icon: "🔬",
             title: "No SAST runs recorded",
-            hint: "Run a SAST scan with an engagement set — persisted runs appear here.",
+            hint: "Run a SAST scan with an engagement set: persisted runs appear here.",
           }}
         />
       </div>

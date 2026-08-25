@@ -34,7 +34,7 @@ function useThemeIsLight() {
 // floods the view with dozens of low-signal spheres.
 const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4, unknown: 5 }
 const MAX_NODES = 24              // cap; larger scans show "+N more"
-const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))  // ~137.5° — even, no clumping
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))  // ~137.5°, even, no clumping
 
 function hostSeverity(h) {
   return h.severity || h.max_severity || 'unknown'
@@ -253,7 +253,7 @@ export default function NetworkTopology3D({ hosts = [] }) {
         position: 'absolute', top: 12, right: 14, zIndex: 10, textAlign: 'right',
         fontSize: 11, color: 'var(--text-2)', letterSpacing: '0.06em',
       }}>
-        {!hasHosts && <span style={{ textTransform: 'uppercase' }}>○ no hosts — run a scan</span>}
+        {!hasHosts && <span style={{ textTransform: 'uppercase' }}>○ no hosts, run a scan</span>}
         {hasHosts && !capped && (
           <><span style={{ color: 'var(--brand)' }}>●</span> {total} host{total !== 1 ? 's' : ''} mapped</>
         )}

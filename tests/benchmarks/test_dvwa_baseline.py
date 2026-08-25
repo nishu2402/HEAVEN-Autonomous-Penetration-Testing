@@ -121,6 +121,16 @@ def _run_heaven_scan(
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         env = {**os.environ, "HEAVEN_DATA_DIR": str(tmp_path)}
+        # The target is the official multi-arch DVWA image, which runs NATIVE on
+        # the host CPU (no QEMU), so its baselines are sub-second and timing-based
+        # blind SQLi is stable. On a small (2-CPU) VM a modest per-host concurrency
+        # keeps request timing clean for that oracle without saturating the single
+        # MariaDB backend; the throttle's AIMD still adapts from here. These are
+        # only defaults (operator `HEAVEN_THROTTLE_*` env wins), and on a larger
+        # host you can raise them freely.
+        for _k, _v in {"HEAVEN_THROTTLE_START": "8", "HEAVEN_THROTTLE_MAX": "16",
+                       "HEAVEN_THROTTLE_MIN": "2"}.items():
+            env.setdefault(_k, _v)
         # Pre-create the engagement DB shell
         init_cmd = [heaven, "engage", "init", engagement_name, "--client", "benchmark"]
         subprocess.run(init_cmd, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
@@ -166,8 +176,29 @@ def _run_heaven_scan(
         return engagement_db, duration
 
 
-def _findings_from_db(db_path: Path) -> list[Finding]:
-    """Read all findings rows out of a HEAVEN engagement SQLite DB."""
+def _scope_to_target(findings: list[Finding], base_url: str) -> list[Finding]:
+    """Keep only findings on the benchmark's own host:port.
+
+    A URL-targeted web scan does a quick host recon first, which on a shared
+    loopback can legitimately surface the operator's *other* local services (a
+    colima/lima SSH forward on an ephemeral port, for instance). Those are real
+    findings, but they belong to a different host:port than the DVWA web app
+    under test, so they are out of scope for this benchmark's precision. Reuse
+    HEAVEN's own host-key logic so the notion of "same host:port" matches the
+    product's dedup (default web ports normalised, a real non-default port kept).
+    """
+    from heaven.engagement import _host_key
+    target_key = _host_key(base_url)
+    target_host = target_key.split(":", 1)[0]
+    return [f for f in findings
+            if _host_key(f.url or "") in (target_key, target_host)]
+
+
+def _findings_from_db(db_path: Path, base_url: str = "") -> list[Finding]:
+    """Read all findings rows out of a HEAVEN engagement SQLite DB.
+
+    When ``base_url`` is given, findings are scoped to that host:port (see
+    :func:`_scope_to_target`)."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     rows: list[dict] = []
@@ -195,6 +226,8 @@ def _findings_from_db(db_path: Path) -> list[Finding]:
             except json.JSONDecodeError:
                 r["evidence"] = {}
         findings.append(Finding.from_heaven(r))
+    if base_url:
+        findings = _scope_to_target(findings, base_url)
     return findings
 
 
@@ -216,7 +249,7 @@ def test_heaven_vs_dvwa_baseline(dvwa_target: GroundTruth) -> None:
         if db.exists():
             db.unlink()
         _, duration = _run_heaven_scan(dvwa_target.base_url, db, cookie_file=cookie_file)
-        findings = _findings_from_db(db)
+        findings = _findings_from_db(db, base_url=dvwa_target.base_url)
         result = evaluate(findings, dvwa_target, duration_seconds=duration)
         run_results.append(result)
 
@@ -255,15 +288,16 @@ def test_heaven_vs_dvwa_baseline(dvwa_target: GroundTruth) -> None:
     # ── Floors ────────────────────────────────────────────────────────────
     # Smoke floor: every run loaded ground truth and produced findings.
     assert all(r.total_gt > 0 for r in run_results), "ground truth empty?"
-    # Detection floor: the authenticated scan must find the bulk of DVWA's core
-    # injection vulnerabilities. Eight of the ten detection-required entries —
-    # SQLi (id) ×2, reflected XSS (name) ×2, command injection (ip) ×2, LFI
-    # (page) ×2 — detect deterministically; blind-SQLi (timing) and CSRF (a
-    # non-injection class) are the swing cases. The 0.5 floor catches a real
-    # regression — most importantly an authenticated-crawl session collapse,
-    # which drops recall to ~0 (see the module docstring on /logout) — while
-    # leaving headroom so timing jitter on a loaded CI runner never flakes it.
-    assert agg.mean_recall >= 0.5, (
-        f"DVWA authenticated recall {agg.mean_recall:.0%} is below the 0.5 floor — "
-        "core injection detection regressed (check the authenticated crawl / session)."
+    # Detection floor: the authenticated scan must find essentially all of DVWA's
+    # detection-required vulnerabilities. Against the native multi-arch image all
+    # ten required entries detect — SQLi (id) ×2, reflected XSS (name) ×2, command
+    # injection (ip) ×2, LFI (page) ×2, blind-timing SQLi, and the GET-based CSRF
+    # (measured 10/10, 100% recall). The 0.9 floor locks that in while allowing a
+    # single transient miss (e.g. one timing sample lost on a loaded CI runner)
+    # rather than flaking. A drop well below this is a real regression — most
+    # often an authenticated-crawl session collapse, which craters recall (see the
+    # module docstring on /logout).
+    assert agg.mean_recall >= 0.9, (
+        f"DVWA authenticated recall {agg.mean_recall:.0%} is below the 0.9 floor — "
+        "core detection regressed (check the authenticated crawl / session)."
     )

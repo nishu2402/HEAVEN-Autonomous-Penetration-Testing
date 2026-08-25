@@ -215,8 +215,11 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   "high", 7.7, ["<=8.0.32"], cwe="CWE-400"),
         CVERecord("CVE-2022-21417", "MySQL Server InnoDB info disclosure",
                   "medium", 4.9, ["<=8.0.28", "<=5.7.37"], cwe="CWE-200"),
-        CVERecord("CVE-2021-2471", "MySQL Connector/J SSRF via HOST parameter",
-                  "medium", 5.0, ["<=8.0.26"], cwe="CWE-918"),
+        # NOTE: CVE-2021-2471 (MySQL Connector/J SSRF) was intentionally removed —
+        # it is a JDBC *client driver* CVE, not a MySQL Server flaw. HEAVEN only
+        # ever fingerprints the server (port 3306 banner), never the connector, so
+        # attaching it to a server produced a guaranteed false positive on every
+        # MySQL <= 8.0.26 in the wild. Connector/J is out of scope for a network scan.
         CVERecord("CVE-2016-6662", "MySQL remote code execution via config file injection",
                   "critical", 9.8, ["<=5.7.14", "<=5.6.32", "<=5.5.51"],
                   exploit_available=True, cwe="CWE-264"),
@@ -441,6 +444,8 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   "critical", 9.8, ["4.87-4.91"], exploit_available=True, cwe="CWE-78"),
     ],
     "samba": [
+        CVERecord("CVE-2007-2447", "Samba username map script command execution (RCE)",
+                  "medium", 6.0, ["3.0.0-3.0.25"], exploit_available=True, cwe="CWE-78"),
         CVERecord("CVE-2017-7494", "SambaCry: Samba writable share arbitrary code execution",
                   "critical", 9.8, [">=3.5.0", "<4.6.4"], exploit_available=True, cwe="CWE-749"),
         CVERecord("CVE-2021-44142", "Samba vfs_fruit out-of-bounds heap RW",
@@ -448,8 +453,14 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   exploit_available=True, cwe="CWE-787"),
         CVERecord("CVE-2022-32744", "Samba forged Kerberos tickets leading to password change",
                   "critical", 8.8, ["<4.16.4", "<4.15.9", "<4.14.14"], cwe="CWE-290"),
+        # Zerologon only affects Samba acting as an Active Directory DC, which
+        # exists from 4.0; 4.8 flipped the default to a secure schannel, so
+        # 4.0–4.7 are the versions vulnerable by default. Bounding it here stops
+        # the marker from tagging EVERY Samba (an ancient 3.0.x file server or a
+        # patched 4.15 build) with a critical it cannot have — the old
+        # "all_with_netlogon" catch-all matched every version.
         CVERecord("CVE-2020-1472", "Zerologon: Netlogon privilege escalation",
-                  "critical", 10.0, ["all_with_netlogon"], exploit_available=True, cwe="CWE-330"),
+                  "critical", 10.0, [">=4.0", "<4.8"], exploit_available=True, cwe="CWE-330"),
     ],
     "dovecot": [
         CVERecord("CVE-2022-30550", "Dovecot auth privilege escalation via SASL",
@@ -571,6 +582,12 @@ _BANNER_FINGERPRINTS: list[tuple[str, str]] = [
     (r"exim\s+([\d.]+)",                    "exim"),
     (r"postfix",                             "postfix"),
     (r"dovecot",                             "dovecot"),
+    # nmap reports Samba as "Samba smbd 3.0.20-Debian" / "Samba smbd 4.15.13" —
+    # capture the concrete X.Y.Z so old builds (3.0.x) map to their era CVEs and
+    # the version-aware matcher excludes the modern ones. Without this the very
+    # common Samba banner never resolved to a product at all.
+    (r"samba(?:\s+smbd)?\s+(\d+\.\d+(?:\.\w+)?)", "samba"),
+    (r"\bsamba\b",                          "samba"),
     (r"mysql",                               "mysql"),
     (r"mariadb",                             "mariadb_server"),
     (r"postgresql\s+([\d.]+)",              "postgresql"),
@@ -802,6 +819,72 @@ _PRODUCT_LABELS: dict[str, str] = {
 }
 
 
+# Per-product, one-line "how to confirm the running version" guidance for the
+# version-undetermined "potential" finding. The whole reason that finding exists
+# is that the banner hid the version, so the honest next step is a *version*
+# check — not a claim. ``{host}``/``{port}`` are filled per finding. Any product
+# without an entry falls back to a generic service-version re-observation.
+_VERSION_CONFIRM_HINTS: dict[str, str] = {
+    "apache_http_server":
+        "Confirm the exact build: `nmap -sV -p {port} {host}` (many hardened "
+        "servers, e.g. Bluehost, strip the version — then use authenticated "
+        "`httpd -v` / `apachectl -v`, or the hosting control panel / vendor "
+        "advisory). Each CVE below applies ONLY to the affected-version range shown.",
+    "nginx":
+        "Confirm the exact build: `nmap -sV -p {port} {host}`, or authenticated "
+        "`nginx -v`. Each CVE below applies only to the affected-version range shown.",
+    "openssh":
+        "Re-read the SSH banner: `nc {host} {port}` or `nmap -sV -p {port} {host}`; "
+        "distros backport fixes without bumping the banner, so verify the *package* "
+        "build (`ssh -V` / `dpkg -l openssh-server`) before treating any CVE as present.",
+    "microsoft_iis":
+        "Confirm the exact build: `nmap -sV -p {port} {host}` or the `Server:` "
+        "header; IIS versions map to Windows releases — verify the OS patch level.",
+    "postgresql":
+        "Confirm the exact build: `nmap -sV -p {port} {host}` or authenticated "
+        "`SELECT version();`. Each CVE below applies only to the range shown.",
+    "mysql": "Confirm the exact build: `nmap -sV -p {port} {host}` or `SELECT VERSION();`.",
+    "mariadb_server": "Confirm the exact build: `nmap -sV -p {port} {host}` or `SELECT VERSION();`.",
+    "dovecot": "Confirm the exact build: `nmap -sV -p {port} {host}` or `dovecot --version`.",
+}
+
+
+def _version_confirm_hint(product_key: str, host: str, port: int) -> str:
+    """One honest, product-appropriate line on how to establish the real version
+    so the candidate CVEs below can be confirmed or dismissed."""
+    tmpl = _VERSION_CONFIRM_HINTS.get(
+        product_key,
+        "Confirm the exact running version: `nmap -sV -p {port} {host}` to "
+        "re-observe the service banner, then match it against each affected-"
+        "version range below.")
+    p = str(port) if port else ""
+    return tmpl.replace("{host}", host or "<host>").replace("{port}", p or "<port>")
+
+
+def _candidate_details(records: list[CVERecord]) -> list[dict]:
+    """Structured, report-ready rows for the version-undetermined finding: one
+    per known CVE for the product, richest (highest CVSS) first. Each row names
+    the CVE, its published score/severity, the affected-version range it needs,
+    CWE, whether a public exploit exists, and an authoritative reference — so the
+    reader gets full awareness of the candidate CVEs and *exactly which version
+    each requires*, without any of them being asserted as confirmed."""
+    rows: list[dict] = []
+    for r in sorted(records, key=lambda c: (c.cvss, c.cve_id), reverse=True):
+        ref = r.references[0] if r.references else \
+            f"https://nvd.nist.gov/vuln/detail/{r.cve_id}"
+        rows.append({
+            "cve":               r.cve_id,
+            "cvss":              round(float(r.cvss), 1),
+            "severity":          r.severity,
+            "title":             r.title,
+            "cwe":               r.cwe or "",
+            "affected_versions": ", ".join(r.affected_versions),
+            "exploit_available": bool(r.exploit_available),
+            "reference":         ref,
+        })
+    return rows
+
+
 _CVE_INDEX: dict[str, CVERecord] = {}
 
 
@@ -947,16 +1030,25 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
 
             inline_cves = lookup_inline_cves(product_key, version_str)
 
-            # 3a. Dynamic fallback — only when the inline DB knows nothing about
-            #     this product (that is exactly the "not in my DB" situation) AND
-            #     the product_key names a concrete PRODUCT rather than a bare
-            #     protocol. A generic label ("http", "https", "www", "ssl", …)
-            #     must NOT trigger a live NVD sweep: searching the feed for the
-            #     word "http" pulls every Apache/nginx CVE onto any HTTP server,
-            #     so a plain Python http.server was landing ~25 false "Apache"
-            #     CVEs. A specific service name (e.g. "gizmoserver", "vsftpd") is
-            #     a valid product to search even without a banner fingerprint.
-            if (live_feed is not None and not INLINE_CVE_DB.get(product_key)
+            # 3a. Dynamic fallback — fire when the inline DB produced NO
+            #     version-matched CVE for this service. That covers two cases:
+            #       (a) the product is entirely unknown to the inline DB, and
+            #       (b) the product IS known but the observed version falls
+            #           outside every inline CVE's affected range — e.g. an
+            #           ancient Samba 3.0.20 against a DB that only carries the
+            #           modern SambaCry/Zerologon entries. Gating on the product
+            #           key alone silently dropped case (b): a decade-old service
+            #           got neither an inline hit nor a live lookup, so its
+            #           era-appropriate CVE (CVE-2007-2447 for Samba 3.0.20,
+            #           CVE-2010-2075 for UnrealIRCd 3.2.8.1, …) was never found.
+            #     Still requires a concrete PRODUCT, not a bare protocol: a
+            #     generic label ("http", "https", "www", "ssl", …) must NOT drive
+            #     a live NVD sweep — searching the feed for the word "http" pulls
+            #     every Apache/nginx CVE onto any HTTP server (a plain Python
+            #     http.server was landing ~25 false "Apache" CVEs). When the
+            #     product IS in the inline DB and DID match, inline stays
+            #     authoritative and the feed is skipped (no double-reporting).
+            if (live_feed is not None and not inline_cves
                     and live_used < max_live_lookups
                     and product_key not in _GENERIC_SERVICE_KEYS
                     and (service or banner)):
@@ -1128,7 +1220,15 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                         "version": "undetermined",
                         "candidate_cve_count": len(candidates),
                         "candidate_cves": candidates,
+                        # Full per-CVE awareness (id, published score/severity, the
+                        # affected-version range each REQUIRES, CWE, exploit flag,
+                        # reference) so the reader sees exactly what this service
+                        # *might* be vulnerable to — without any CVE being asserted
+                        # as confirmed. Rendered as a table in report + UI.
+                        "candidate_details": _candidate_details(inline_cves),
                         "highest_candidate_cvss": worst,
+                        "how_to_confirm": _version_confirm_hint(
+                            product_key, host_name, port_info.get("port", 0)),
                         "verification": (
                             "Confirm the exact version (authenticated access or "
                             "vendor advisory); unauthenticated banner matching "

@@ -1104,6 +1104,8 @@ a:hover { color: var(--accent-2); }
 .scan-badge-completed { color: var(--brand); border-color: rgba(52,229,163,0.30); background: rgba(52,229,163,0.07); }
 .scan-badge-failed    { color: var(--crit);  border-color: rgba(255,77,106,0.40); background: rgba(255,77,106,0.10); }
 .scan-badge-paused    { color: var(--med);   border-color: rgba(255,197,61,0.40); background: rgba(255,197,61,0.10); }
+.scan-badge-interrupted { color: var(--med);  border-color: rgba(255,197,61,0.40); background: rgba(255,197,61,0.10); }
+.scan-badge-cancelled { color: var(--text-2); border-color: var(--border);        background: rgba(127,127,127,0.08); }
 .scan-badge-unknown   { color: var(--text-2); }
 
 .scan-mode-tag {
@@ -1152,6 +1154,10 @@ a:hover { color: var(--accent-2); }
 .scan-remove:hover {
   border-color: rgba(255,77,106,0.5) !important; color: var(--crit) !important;
   background: rgba(255,77,106,0.10) !important;
+}
+.scan-resume:hover {
+  border-color: rgba(52,229,163,0.5) !important; color: var(--brand) !important;
+  background: rgba(52,229,163,0.10) !important;
 }
 
 .scan-body { border-top: 1px solid var(--border); background: var(--bg-0); }
@@ -1660,4 +1666,32 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }
 @media (max-width: 560px) {
   .chat-widget { right: 14px; bottom: 14px; }
   .chat-widget-panel { width: calc(100vw - 28px); }
+}
+
+/* ── Marquee: scrolls a single line only when it would clip (see Marquee.jsx) ── */
+.marquee { overflow: hidden; white-space: nowrap; max-width: 100%; }
+.marquee-track { display: inline-flex; align-items: center; will-change: transform; }
+.marquee-item { flex: 0 0 auto; }
+/* Static state: the duplicate copy + spacers are hidden, so short names render
+   once with no trailing gap. */
+.marquee:not(.marquee-animate) .marquee-dup { display: none; }
+/* Animating state: the duplicate rides behind the first copy so the loop is
+   seamless, and the whole track slides left by exactly one copy + gap. */
+.marquee-animate .marquee-track {
+  animation-name: marquee-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-delay: 1s;                 /* let the reader see the start first */
+}
+.marquee-animate:hover .marquee-track { animation-play-state: paused; }
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--marquee-shift, -100%)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* No motion: fall back to a clean clip; the title tooltip still shows the
+     full text on hover. */
+  .marquee-animate .marquee-track { animation: none; }
+  .marquee-animate .marquee-dup { display: none; }
+  .marquee-animate { text-overflow: ellipsis; }
 }

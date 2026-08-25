@@ -259,6 +259,46 @@ def _nmap_sudo_prefix() -> tuple[str, ...]:
         return ()
 
 
+def _egress_nmap() -> tuple[list[str], bool]:
+    """Egress adjustment for an nmap invocation: ``(proxychains_prefix,
+    force_connect)``. Under a proxy/Tor egress nmap must run a TCP *connect*
+    scan (raw SYN/UDP/OS can't traverse a proxy) wrapped in proxychains so its
+    TCP exits via the egress. Returns ``([], False)`` for off / WireGuard tunnel
+    modes — a tunnel carries raw nmap transparently, so nothing changes."""
+    try:
+        from heaven.net import egress as _egress
+        if _egress.nmap_forces_connect_scan():
+            return _egress.proxychains_prefix(), True
+    except Exception:  # noqa: BLE001 — egress must never break the scan
+        logger.debug("egress nmap adjustment skipped", exc_info=True)
+    return [], False
+
+
+_egress_block_warned = False
+
+
+def _egress_port_scan_blocked() -> bool:
+    """Fail-closed: under a proxy/Tor egress with the kill-switch on and no
+    proxychains, a port scan would leak the real IP — so skip it (nuclei + HTTP
+    checks still route via the proxy; use WireGuard for full coverage). Warns
+    once so the operator understands why the port scan is empty."""
+    global _egress_block_warned
+    try:
+        from heaven.net import egress as _egress
+        if _egress.port_scan_blocked():
+            if not _egress_block_warned:
+                _egress_block_warned = True
+                logger.warning(
+                    "Egress kill-switch: proxy/Tor mode without proxychains — "
+                    "SKIPPING the network port scan so it can't leak your real "
+                    "IP. Install proxychains-ng, or use WireGuard tunnel mode, "
+                    "or disable the kill-switch to allow a direct port scan.")
+            return True
+    except Exception:  # noqa: BLE001 — egress must never break the scan
+        logger.debug("egress port-scan guard skipped", exc_info=True)
+    return False
+
+
 @functools.lru_cache(maxsize=1)
 def scan_capability() -> dict:
     """Report whether nmap can run *privileged* scans on this host, and — when it
@@ -323,16 +363,45 @@ def _log_privilege_hint_once() -> None:
     )
 
 
+def _friendly_windows_from_cpe(c: str) -> str:
+    """Friendly, VERSION-PRESERVING Windows name from a lowercased OS CPE.
+
+    The Microsoft product token encodes the exact release
+    (``windows_10`` / ``windows_server_2008`` / ``windows_xp`` …). Collapsing it
+    to a bare "Windows" was what stopped the EOL scanner recognising an
+    end-of-life release, so map the token back to its human name and keep the
+    version. Falls back to bare "Windows" only when the token is unversioned.
+    """
+    import re as _re
+    m = _re.search(r"microsoft:(windows[a-z0-9_.]*)", c)
+    token = (m.group(1) if m else "windows").replace(".", "_")
+    server = "_server_" in token or token.startswith("windows_server")
+    ver = _re.search(r"(\d{4}|\d+(?:\.\d+)?)", token)
+    if server:
+        return f"Windows Server {ver.group(1)}" if ver else "Windows Server"
+    named = {"xp": "Windows XP", "vista": "Windows Vista"}
+    for key, label in named.items():
+        if key in token:
+            return label
+    if ver:
+        return f"Windows {ver.group(1)}"
+    return "Windows"
+
+
 def _os_name_from_cpe(cpe: str) -> str:
     """Map an OS-level CPE (``cpe:/o:…`` / ``cpe:2.3:o:…``) to a friendly OS
     name. Returns '' for application CPEs or anything we can't confidently map —
-    we never guess an OS we didn't actually see evidence for."""
+    we never guess an OS we didn't actually see evidence for.
+
+    Windows CPEs keep their release (``windows_10`` → "Windows 10") so an
+    end-of-life OS is recognised by the EOL scanner instead of being flattened to
+    a generic, unmatchable "Windows"."""
     c = cpe.lower()
     # OS part marker differs by CPE form: URI is `cpe:/o:…`, 2.3 is `cpe:2.3:o:…`
     if "/o:" not in c and ":o:" not in c:
         return ""
     if "microsoft:windows" in c or "microsoft" in c or "windows" in c:
-        return "Windows"
+        return _friendly_windows_from_cpe(c)
     if "linux" in c:
         return "Linux"
     if "apple:mac" in c or "mac_os" in c or "macos" in c or "apple:iphone" in c:
@@ -426,6 +495,63 @@ def _device_type_from_mac_vendor(vendor: str) -> str:
     return ""
 
 
+# Conservative open-port → device-role map. A device's ROLE is strongly implied by
+# the services it exposes — a box answering 3389/445 is a Windows host, one on
+# 9100/515/631 is a printer, 502/102/44818 is an industrial controller. This is a
+# real observed signal (the ports actually answered), but it infers a role rather
+# than fingerprinting the stack, so callers label anything derived here
+# "(inferred from services)" and never as an nmap fingerprint. Ordered
+# most-specific first; the first rule whose ports are all present (for an "all"
+# rule) or any port is present (for an "any" rule) wins.
+#   (label, {ports}, mode)  where mode is "any" (one port suffices) or
+#   "all" (every listed port must be open — a stronger, less ambiguous signal).
+_SERVICE_DEVICE_TYPES: list[tuple[str, set[int], str]] = [
+    ("industrial control system", {502}, "any"),       # Modbus
+    ("industrial control system", {102}, "any"),        # Siemens S7
+    ("industrial control system", {44818, 2222}, "any"),  # EtherNet/IP
+    ("industrial control system", {20000}, "any"),      # DNP3
+    ("industrial control system", {47808}, "any"),      # BACnet
+    ("printer", {9100}, "any"),                          # JetDirect raw print
+    ("printer", {515}, "any"),                           # LPD
+    ("printer", {631}, "any"),                           # IPP
+    ("IP camera", {554}, "any"),                          # RTSP
+    ("IoT device", {1883}, "any"),                        # MQTT
+    ("IoT device", {5683}, "any"),                        # CoAP
+    ("hypervisor", {902}, "any"),                         # VMware ESXi
+    ("database server", {3306}, "any"),                   # MySQL
+    ("database server", {5432}, "any"),                   # PostgreSQL
+    ("database server", {1433}, "any"),                   # MSSQL
+    ("database server", {27017}, "any"),                  # MongoDB
+    ("mail server", {25, 143}, "any"),                    # SMTP/IMAP
+    ("DNS server", {53}, "any"),
+    ("Windows host", {3389}, "any"),                      # RDP
+    ("Windows host", {445}, "any"),                       # SMB
+    ("Windows host", {135}, "any"),                       # MSRPC
+    ("network equipment", {161, 23}, "all"),              # SNMP + telnet mgmt
+]
+
+
+def _device_type_from_services(ports: list[int]) -> str:
+    """Infer a device ROLE from the set of open ports; '' when nothing is
+    conclusive.
+
+    A real, observed signal (these ports actually answered) but an inference
+    about the device's role, not a stack fingerprint — the caller labels it
+    "(inferred from services)" so it is never read as an nmap classification. A
+    port set that matches nothing high-signal returns '' (we never guess a role we
+    can't back with a service)."""
+    open_set = {int(p) for p in ports if isinstance(p, int) or str(p).isdigit()}
+    if not open_set:
+        return ""
+    for label, need, mode in _SERVICE_DEVICE_TYPES:
+        if mode == "all":
+            if need <= open_set:
+                return label
+        elif need & open_set:
+            return label
+    return ""
+
+
 def _netbios_name_from_script(script_id: str, output: str) -> str:
     """Pull a device / computer name out of an nmap host-script's output; '' when
     none is present.
@@ -450,6 +576,37 @@ def _netbios_name_from_script(script_id: str, output: str) -> str:
             m = re.search(pat, text, re.IGNORECASE)
             if m:
                 return m.group(1).strip().rstrip(".")
+    return ""
+
+
+def _os_from_smb_script(script_id: str, output: str) -> str:
+    """Pull a precise OS string out of an nmap ``smb-os-discovery`` host script.
+
+    This NSE script runs under ``-sC`` **without root** and reports the host's
+    OWN, SMB-advertised operating system — e.g. ``OS: Windows 10 Pro 19041
+    (Windows 10 Pro 6.3)``. That is far more specific than the generic "Windows"
+    a TTL bucket or a version-less OS CPE yields, and it is exactly what the EOL
+    scanner needs to recognise an end-of-life release (Windows 10, Server 2012,
+    …). We read the ``OS:`` line first, then fall back to the ``OS CPE:`` line.
+    Anything we can't confidently parse yields '' — the OS is never invented.
+    """
+    import re
+    sid = (script_id or "").lower()
+    text = output or ""
+    if sid != "smb-os-discovery":
+        return ""
+    m = re.search(r"^\s*OS:\s*([^\n\x00]+)", text, re.IGNORECASE | re.MULTILINE)
+    if m:
+        os_str = m.group(1).strip()
+        # Drop a trailing "(Windows … 6.3)" build-number parenthetical and an
+        # "Unknown"/"-" placeholder some hosts return.
+        os_str = re.sub(r"\s*\([^)]*\)\s*$", "", os_str).strip()
+        if os_str and os_str.lower() not in ("unknown", "-"):
+            return os_str
+    m = re.search(r"^\s*OS CPE:\s*(cpe:[^\n\x00]+)", text,
+                  re.IGNORECASE | re.MULTILINE)
+    if m:
+        return _os_name_from_cpe(m.group(1).strip())
     return ""
 
 
@@ -733,17 +890,23 @@ async def _nmap_service_scan(
     """
     if not ports:
         return {}
+    if _egress_port_scan_blocked():  # fail-closed under an un-wrappable proxy egress
+        return {}
     scan_ports = sorted(set(ports) | set(context_ports or []))
     port_str = _build_nmap_port_spec(scan_ports)
     if not port_str:
         return {}
     timing = _nmap_timing_args(stealth_level)
     sudo_prefix = list(_nmap_sudo_prefix())
+    # Egress: proxychains-wrap + force connect scan under a proxy/Tor mode.
+    proxy_prefix, force_connect = _egress_nmap()
+    if force_connect:
+        sudo_prefix = []
     evasion = (
         _nmap_evasion_args(_have_admin_privileges() or bool(sudo_prefix))
         if evade else []
     )
-    scan_type = ["-sT"] if connect_scan else []
+    scan_type = ["-sT"] if (connect_scan or force_connect) else []
     # -sV ONLY (deliberately no -sC). Service/version/CPE — everything the
     # inventory columns and CVE mapping need — comes from -sV; the default-script
     # engine (-sC / NSE) is the slow, occasionally-crashing half and adds nothing
@@ -752,7 +915,7 @@ async def _nmap_service_scan(
     # even on a loaded machine. The primary full-range scan already carries NSE
     # output for anything it reached.
     cmd = [
-        *sudo_prefix, "nmap", *scan_type, "-sV", "-Pn", "-p", port_str,
+        *proxy_prefix, *sudo_prefix, "nmap", *scan_type, "-sV", "-Pn", "-p", port_str,
         "-oX", "-", "--host-timeout", host_timeout, *timing, *evasion, host,
     ]
     parsed: Optional[dict] = None
@@ -827,13 +990,20 @@ def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
     device_name = ""
     device_name_source = ""
     # NetBIOS / SMB computer name — the machine's own advertised name, the
-    # strongest device-name signal. nmap surfaces it under <hostscript>.
+    # strongest device-name signal. nmap surfaces it under <hostscript>. The same
+    # smb-os-discovery script also carries the host's own precise OS string, which
+    # we mine here (unprivileged, machine-advertised) for the OS-detection tiers
+    # below — without it a Windows 10/Server box reads as a generic "Windows".
+    smb_os = ""
     for script in xml_root.findall(".//hostscript/script"):
-        name = _netbios_name_from_script(script.get("id", ""), script.get("output", ""))
-        if name:
-            device_name = name
-            device_name_source = "netbios"
-            break
+        _sid, _out = script.get("id", ""), script.get("output", "")
+        if not device_name:
+            name = _netbios_name_from_script(_sid, _out)
+            if name:
+                device_name = name
+                device_name_source = "netbios"
+        if not smb_os:
+            smb_os = _os_from_smb_script(_sid, _out)
     # Reverse-DNS PTR (works remotely, weaker than a self-advertised name). Only a
     # type="PTR" name is a discovered fact; type="user" is just the target we were
     # given echoed back, so it is ignored.
@@ -943,6 +1113,12 @@ def _parse_nmap_xml(stdout: bytes, host: str) -> Optional[dict]:
             os_accuracy = int(os_match.get("accuracy") or 0)
         except (ValueError, TypeError):
             os_accuracy = 0
+    # 1.5 smb-os-discovery — the host's OWN SMB-advertised OS (precise, needs no
+    #     root). Used when nmap's -O fingerprint is absent; more specific than the
+    #     service/TTL tiers below, so a Windows 10/Server release is recognised.
+    if not os_guess and smb_os:
+        os_guess = smb_os
+        os_source = "heuristic"
     if not os_guess:
         svc_os = _os_from_service_evidence(os_evidence_types, os_evidence_cpes)
         if svc_os:
@@ -1132,6 +1308,11 @@ async def scan_host(
     host_result = HostResult(host=host)
     start = time.time()
 
+    # Fail-closed: skip the port scan entirely if a proxy egress can't carry it
+    # (no proxychains + kill-switch on) rather than leak the real IP.
+    if _egress_port_scan_blocked():
+        return host_result
+
     port_str = _build_nmap_port_spec(ports)
     timing = _nmap_timing_args(stealth_level)
 
@@ -1142,7 +1323,14 @@ async def scan_host(
     # heuristics instead of killing the scan.
     sudo_prefix = list(_nmap_sudo_prefix())
     raw_capable = _have_admin_privileges() or bool(sudo_prefix)
-    if not raw_capable:
+    # Network egress (proxy/Tor): force a proxychains-wrapped TCP connect scan;
+    # raw SYN/UDP/OS scans can't traverse a proxy, and a connect scan needs no
+    # root (so drop sudo — mixing sudo with proxychains loses the LD_PRELOAD).
+    proxy_prefix, force_connect = _egress_nmap()
+    if force_connect:
+        raw_capable = False
+        sudo_prefix = []
+    if not raw_capable and not force_connect:
         _log_privilege_hint_once()
 
     # ── nmap command ──────────────────────────────────────────────────────────
@@ -1162,6 +1350,9 @@ async def scan_host(
     # -oX  : XML output → stdout for parsing
     # --host-timeout : abort per-host after this long (prevents hangs on firewalled hosts)
     os_flag = ["-O"] if raw_capable else []
+    # Explicit -sT under proxy egress; otherwise nmap picks connect automatically
+    # when it lacks raw privileges.
+    connect_flag = ["-sT"] if force_connect else []
 
     if include_udp and udp_ports and raw_capable:
         udp_str = _build_nmap_port_spec(udp_ports[:100])
@@ -1180,7 +1371,8 @@ async def scan_host(
     evasion = _nmap_evasion_args(raw_capable) if evade else []
 
     cmd = [
-        *sudo_prefix, "nmap", "-sV", "-sC", "-Pn", *os_flag, *scan_flags, *port_args,
+        *proxy_prefix, *sudo_prefix, "nmap", "-sV", "-sC", "-Pn",
+        *os_flag, *connect_flag, *scan_flags, *port_args,
         "-oX", "-", "--host-timeout", host_timeout, *timing, *evasion, host,
     ]
 
@@ -1514,6 +1706,7 @@ _ENRICH_SETTLE_SECONDS = 12.0
 
 async def _nmap_ping_sweep(
     raw_targets: list[str], expanded: list[str],
+    mac_out: Optional[dict[str, tuple[str, str]]] = None,
 ) -> Optional[list[str]]:
     """Discover live hosts with a single ``nmap -sn`` sweep (no port scan).
 
@@ -1522,6 +1715,11 @@ async def _nmap_ping_sweep(
     miss; unprivileged it TCP-connects to 80/443. Returns the list of responding
     addresses, or ``None`` when nmap is unavailable / the sweep failed so the
     caller can fall back to the pure-Python probe.
+
+    When ``mac_out`` is supplied it is filled with ``{ip: (mac, vendor)}`` for
+    every host whose ARP reply carried a MAC — the on-LAN layer-2 fact the later
+    ``-Pn`` service scan can't observe, so it isn't lost. Nothing is fabricated:
+    only a MAC nmap actually reported is recorded.
     """
     if not shutil.which("nmap"):
         return None
@@ -1554,12 +1752,19 @@ async def _nmap_ping_sweep(
         if st is None or st.get("state") != "up":
             continue
         addr = ""
+        mac = ""
+        mac_vendor = ""
         for a in host_el.findall("address"):
-            if a.get("addrtype") in ("ipv4", "ipv6"):
+            atype = a.get("addrtype")
+            if atype in ("ipv4", "ipv6") and not addr:
                 addr = a.get("addr", "")
-                break
+            elif atype == "mac":
+                mac = (a.get("addr") or "").strip().upper()
+                mac_vendor = (a.get("vendor") or "").strip()
         if addr:
             live.append(addr)
+            if mac and mac_out is not None:
+                mac_out[addr] = (mac, mac_vendor)
     return live
 
 
@@ -1596,11 +1801,20 @@ async def _tcp_ping_sweep(hosts: list[str], timeout: float = 2.0) -> list[str]:
 
 async def _discover_live_hosts(
     raw_targets: list[str], expanded: list[str], timeout: float = 2.0,
+    mac_out: Optional[dict[str, tuple[str, str]]] = None,
 ) -> list[str]:
     """Return the subset of *expanded* that responds to a fast liveness sweep.
     Prefers nmap ``-sn`` (catches ICMP/ARP-only hosts); falls back to a
-    concurrent TCP-connect probe when nmap is absent."""
-    live = await _nmap_ping_sweep(raw_targets, expanded)
+    concurrent TCP-connect probe when nmap is absent.
+
+    When ``mac_out`` is supplied the nmap path fills it with ``{ip: (mac,
+    vendor)}`` from the ARP replies, so a LAN scan keeps the MAC the later
+    ``-Pn`` service scan can't see."""
+    # Fail-closed: liveness probes (ICMP/ARP/raw SYN, and the TCP fallback) can't
+    # be forced through a proxy — skip discovery rather than leak the real IP.
+    if _egress_port_scan_blocked():
+        return []
+    live = await _nmap_ping_sweep(raw_targets, expanded, mac_out=mac_out)
     if live is None:
         live = await _tcp_ping_sweep(expanded, timeout=timeout)
     # nmap may report addresses in a slightly different form; keep any host we
@@ -1738,9 +1952,14 @@ async def scan_network(
     # only deep-scan the ones that answer. A single host / small explicit list
     # skips discovery — the operator named it, so we trust -Pn to reach it.
     discovery: Optional[dict[str, Any]] = None
+    # {ip: (mac, vendor)} captured from the discovery ARP sweep — the on-LAN MAC
+    # the later -Pn service scan can't observe. Threaded into the host results
+    # below so the Assets view / report show it.
+    discovered_macs: dict[str, tuple[str, str]] = {}
     if len(expanded_targets) > _DISCOVERY_THRESHOLD:
         _range_size = len(expanded_targets)
-        live = await _discover_live_hosts(targets, expanded_targets, timeout=timeout)
+        live = await _discover_live_hosts(targets, expanded_targets, timeout=timeout,
+                                          mac_out=discovered_macs)
         discovery = {"range_size": _range_size, "hosts_up": len(live)}
         logger.info(
             f"Host discovery: {len(live)}/{_range_size} address(es) responded — "
@@ -1925,6 +2144,10 @@ async def scan_network(
             if verdict.detected:
                 perimeter_hosts[h.host] = h.perimeter
 
+    # Device-identity enrichment (MAC + device type) — after all scanning, so the
+    # ARP cache is fully populated by our own traffic and every port is known.
+    _enrich_device_identity(host_results, discovered_macs)
+
     total_open = sum(len(h.open_ports) for h in host_results)
 
     logger.info(
@@ -2108,6 +2331,65 @@ def _service_version(product: str, version: str, extrainfo: str) -> str:
     if core and extra:
         return f"{core} ({extra})"
     return core or (f"({extra})" if extra else "")
+
+
+def _enrich_device_identity(
+    host_results: list[HostResult],
+    discovered_macs: Optional[dict[str, tuple[str, str]]] = None,
+) -> None:
+    """Fill MAC + device type from real observed signals the port scan missed.
+
+    Runs once after scanning, IN PLACE, and never overwrites a value nmap already
+    proved. Three honest sources, best-first:
+
+    1. **MAC from the discovery ARP sweep** (``discovered_macs``) — nmap's own ARP
+       reply + OUI vendor, dropped by the ``-Pn`` service scan; re-attached here.
+    2. **MAC from the OS ARP cache** — for any on-LAN host still blank, the
+       neighbour entry our scan traffic populated (real, same-segment fact).
+    3. **Device type from services** — when neither an nmap ``-O`` osclass nor a
+       MAC-vendor category set one, infer the role from the open ports (labelled
+       ``service-heuristic`` → "(inferred from services)").
+
+    A newly-learned MAC also backfills a MAC-vendor device type when the role is
+    still unknown. Nothing is fabricated: a routed host with no MAC stays blank.
+    """
+    discovered_macs = discovered_macs or {}
+    # Read the OS ARP cache once (cheap) only if some host still lacks a MAC and
+    # might be on-link — avoids a subprocess when discovery already covered them.
+    _arp_cache: Optional[dict[str, str]] = None
+
+    for h in host_results:
+        # 1 + 2 — MAC (only when nmap didn't already report one for this host).
+        if not h.mac_address:
+            dm = discovered_macs.get(h.host)
+            if dm:
+                h.mac_address, vend = dm[0], dm[1]
+                if vend and not h.mac_vendor:
+                    h.mac_vendor = vend
+            else:
+                if _arp_cache is None:
+                    from heaven.recon import arp_cache as _ac
+                    _arp_cache = _ac.read_arp_cache()
+                mac = _arp_cache.get(h.host, "")
+                if mac:
+                    h.mac_address = mac.upper()
+                    if not h.mac_vendor:
+                        from heaven.recon import arp_cache as _ac
+                        h.mac_vendor = _ac.vendor_for_mac(mac)
+
+        # A MAC-vendor device type, now that a MAC may have just arrived.
+        if not h.device_type and h.mac_vendor:
+            cat = _device_type_from_mac_vendor(h.mac_vendor)
+            if cat:
+                h.device_type = cat
+                h.device_type_source = "mac-vendor"
+
+        # 3 — Service/port-derived role, the last-resort honest inference.
+        if not h.device_type:
+            role = _device_type_from_services([p.port for p in h.open_ports])
+            if role:
+                h.device_type = role
+                h.device_type_source = "service-heuristic"
 
 
 def _host_to_dict(host: HostResult) -> dict:

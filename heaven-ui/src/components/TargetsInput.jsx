@@ -119,7 +119,7 @@ export default function TargetsInput({ value, onChange, placeholder = "Add a tar
         const kind = classifyTarget(t);
         return (
           <span key={`${t}-${i}`} className={"tag" + (kind ? "" : " is-invalid")}
-                title={kind ? `${kind}: ${t} — click to edit` : `Unrecognised target: ${t} — click to edit`}>
+                title={kind ? `${kind}: ${t}, click to edit` : `Unrecognised target: ${t}, click to edit`}>
             <span className="tag-kind" aria-hidden="true">{kind || "?"}</span>
             <button
               type="button" className="tag-text"

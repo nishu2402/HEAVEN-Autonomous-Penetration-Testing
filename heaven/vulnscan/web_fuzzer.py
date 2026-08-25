@@ -5,6 +5,7 @@ HTTP request smuggling, clickjacking, parameter pollution, hidden field discover
 content-type confusion, and method override attacks.
 """
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 import base64
@@ -110,16 +111,17 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
                                     evidence={"method": "TRACE", "status": r.status,
                                               "canary_echoed": True, "echo": body[:400]},
                                 ))
-                        elif method in ("PUT", "DELETE") and r.status in (200, 201, 204, 207):
-                            # Only a genuine SUCCESS proves the method is honoured.
-                            # A 404/403/401/400 (all < 405) means the request was
-                            # routed but denied / had no target — benign, and the
-                            # old ``r.status < 405`` gate flagged those as
-                            # "dangerous method accepted" (a 404 to DELETE fired).
+                        elif method in ("PUT", "DELETE") and r.status in (201, 204):
+                            # Only an UNAMBIGUOUS WebDAV success proves the method
+                            # is honoured destructively: 201 Created (PUT wrote a
+                            # file) or 204 No Content (DELETE removed one). A plain
+                            # 200 that returns the page HTML is the app ignoring the
+                            # method (Apache serves any verb PHP doesn't handle), so
+                            # DELETE/PUT → 200 is NOT a dangerous-method finding.
                             findings.append(_finding(
                                 url, "dangerous_http_method", "high",
                                 f"Dangerous HTTP Method Accepted: {method}",
-                                f"Server returns HTTP {r.status} (success) for {method} at "
+                                f"Server returns HTTP {r.status} (WebDAV success) for {method} at "
                                 f"{url}. This may allow unauthorized file modification or "
                                 f"deletion (WebDAV, REST API misconfiguration).",
                                 confidence=0.80,
@@ -174,20 +176,29 @@ async def _fuzz_host_header(session: "aiohttp.ClientSession",
                                    timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 body = await resp.text()
                 location = resp.headers.get("Location", "")
-                # Check if our host leaked into the response (absolute URL reflection)
-                if _ATTACKER_HOST in body or _ATTACKER_HOST in location:
+                # The host must be reflected in a SECURITY-SENSITIVE position, not
+                # merely echoed. A redirect Location built from the header, or an
+                # absolute URL / link attribute in the body, is exploitable
+                # (reset-link hijack, cache poisoning). The host simply DISPLAYED
+                # in a page (phpinfo's HTTP_HOST, a debug dump) is not — matching a
+                # bare occurrence in the body flagged every such page as "high".
+                in_location = _ATTACKER_HOST in location
+                in_url_context = (f"//{_ATTACKER_HOST}" in body
+                                  or f'="{_ATTACKER_HOST}' in body
+                                  or f"='{_ATTACKER_HOST}" in body)
+                if in_location or in_url_context:
                     injected_hdr = next(iter(hdrs))
                     findings.append(_finding(
                         url, "host_header_injection", "high",
                         f"Host Header Injection via {injected_hdr}",
-                        f"Server reflected attacker-controlled host ({_ATTACKER_HOST}) "
-                        f"in response body or Location header. Enables password-reset link "
-                        f"hijacking, cache poisoning, and SSRF attacks.",
+                        f"Server used attacker-controlled host ({_ATTACKER_HOST}) to build "
+                        f"a redirect or link. Enables password-reset link hijacking, cache "
+                        f"poisoning, and SSRF attacks.",
                         confidence=0.90,
                         evidence={
                             "injected_header": injected_hdr,
                             "injected_value": hdrs[injected_hdr],
-                            "reflected_in": "body" if _ATTACKER_HOST in body else "location",
+                            "reflected_in": "location" if in_location else "body_url",
                         },
                     ))
                     break
@@ -848,8 +859,14 @@ async def _fuzz_content_type(session: "aiohttp.ClientSession",
                         "xmlexception", "org.xml.sax", "premature end of file",
                         "expected '>'", "<?xml",
                     )
+                    # Only a genuine XML/SOAP RESPONSE type counts. A bare "xml"
+                    # substring matched every "+xml" suffix (application/xhtml+xml,
+                    # image/svg+xml, application/vnd.apple.installer+xml) — ordinary
+                    # pages and assets, not proof the server parsed our XML body.
+                    xml_response = resp_ctype.startswith(
+                        ("application/xml", "text/xml", "application/soap+xml"))
                     processes_xml = (
-                        "xml" in resp_ctype or "soap" in resp_ctype
+                        xml_response
                         or any(sig in body.lower() for sig in xml_error_sigs)
                     )
                     if processes_xml:
@@ -885,11 +902,11 @@ async def _fuzz_method_override(session: "aiohttp.ClientSession",
         "_method",
     ]
 
-    # Baseline plain POST — method override only matters if it changes the response
+    # Baseline plain POST — method override only matters if it changes the status.
     try:
         async with session.post(url, timeout=aiohttp.ClientTimeout(total=8)) as base_r:
             base_status = base_r.status
-            base_body_len = len(await base_r.text())
+            await base_r.read()  # drain the body so the connection can be reused
     except Exception:
         return findings
 
@@ -899,11 +916,16 @@ async def _fuzz_method_override(session: "aiohttp.ClientSession",
                 hdrs = {override: method}
                 async with session.post(url, headers=hdrs,
                                         timeout=aiohttp.ClientTimeout(total=8)) as r:
-                    body = await r.text()
-                    # Only report if: not a "not allowed" status AND response differs from baseline
+                    await r.read()  # drain body so the connection can be reused
+                    # Fire ONLY on a genuine status CHANGE. A mere body-length
+                    # difference is not evidence of method override: two POSTs to a
+                    # dynamic page routinely differ by >200 bytes (CSRF tokens,
+                    # timestamps, nonces, ads), so the old body-length OR-clause
+                    # flagged method-override on every dynamic app — a medium FP on
+                    # normal pages. A real override changes what the server DOES,
+                    # which shows up as a different (non-error) status.
                     if (r.status not in (404, 405, 501)
-                            and (r.status != base_status
-                                 or abs(len(body) - base_body_len) > 200)):
+                            and r.status != base_status):
                         findings.append(_finding(
                             url, "method_override_accepted", "medium",
                             f"HTTP Method Override Accepted ({override}: {method})",
@@ -945,7 +967,7 @@ async def fuzz_url(url: str, aggressive: bool = False) -> dict:
     }
     connector = aiohttp.TCPConnector(ssl=False, limit=15)
 
-    async with aiohttp.ClientSession(headers=headers,
+    async with _egress_cs(headers=headers,
                                      connector=connector) as session:
         tasks = [
             _fuzz_verb_tampering(session, url),

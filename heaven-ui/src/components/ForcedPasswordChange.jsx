@@ -47,7 +47,7 @@ export default function ForcedPasswordChange({ onDone }) {
         <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Set a new password</div>
         <div style={{ color: "var(--text-2)", fontSize: 13, marginBottom: 24, lineHeight: 1.6 }}>
           This account is still using its <span className="mono">first-run password</span>.
-          Choose a strong password of your own to continue — HEAVEN won't let you in until you do.
+          Choose a strong password of your own to continue, HEAVEN won't let you in until you do.
         </div>
 
         <div className="login-field">

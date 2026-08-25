@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { Engagement } from "../api";
 import ReportMenu from "../components/ReportMenu.jsx";
 import { EmptyState, SkeletonTable } from "../components/Skeleton.jsx";
+import usePersistentState from "../hooks/usePersistentState.js";
 
 const SEVERITIES = ["", "critical", "high", "medium", "low", "info"];
 const STATUSES   = ["", "open", "verified", "false_positive", "accepted_risk", "fixed"];
@@ -34,14 +35,16 @@ function sevSummary(rows) {
 }
 
 export default function Findings() {
-  const [filters, setFilters] = useState({
+  // Filters persist across navigation (detail → back) and reloads within the
+  // tab, so the operator's chosen view isn't reset to defaults every time.
+  const [filters, setFilters] = usePersistentState("heaven.findings.filters", {
     severity: "", status: "open", target: "", min_confidence: "", limit: 500,
   });
   const [data, setData]     = useState(null);
   const [error, setError]   = useState(null);
   const [loading, setLoading] = useState(false);
-  const [sort, setSort]     = useState({ col: "severity", dir: 1 });
-  const [groupByHost, setGroupByHost] = useState(true);
+  const [sort, setSort]     = usePersistentState("heaven.findings.sort", { col: "severity", dir: 1 });
+  const [groupByHost, setGroupByHost] = usePersistentState("heaven.findings.groupByHost", true);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -126,7 +129,7 @@ export default function Findings() {
       <td>
         <span className={`conf-badge conf-${conf.toLowerCase()}`}
           title={conf === "Potential"
-            ? "Inferred from a service version banner — not confirmed from the outside. Verify the running version before treating as present."
+            ? "Inferred from a service version banner: not confirmed from the outside. Verify the running version before treating as present."
             : "Proven by direct observation or active validation."}>
           {conf}
         </span>
@@ -216,7 +219,7 @@ export default function Findings() {
         <EmptyState
           icon="🛰"
           headline="No active engagement yet"
-          body="Findings show up here after your first scan. Launch one from the Scans page — no terminal required."
+          body="Findings show up here after your first scan. Launch one from the Scans page: no terminal required."
           cta="Launch a scan →"
           ctaTo="/scans"
         />

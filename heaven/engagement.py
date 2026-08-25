@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS engagement (
     name            TEXT NOT NULL UNIQUE,
     client          TEXT,
     statement_of_work TEXT,
+    tester          TEXT,               -- who ran the assessment (shown on reports)
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     notes           TEXT
@@ -284,6 +285,18 @@ CREATE INDEX IF NOT EXISTS idx_findings_target ON findings(target);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status);
 CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
+
+-- Operator-set device labels, keyed by bare host/IP. Lets an operator name a
+-- host and set its device type when the scan couldn't observe them (no NetBIOS/
+-- PTR name, no -O/MAC-vendor type). These are authoritative human input and win
+-- over any inferred value in the inventory; they are never fabricated by a scan.
+CREATE TABLE IF NOT EXISTS host_labels (
+    host            TEXT PRIMARY KEY,          -- bare host/IP (inventory.host_key)
+    device_name     TEXT,
+    device_type     TEXT,
+    notes           TEXT,
+    updated_at      TEXT NOT NULL
+);
 """
 
 
@@ -299,6 +312,13 @@ HOST_LEVEL_VULN_TYPES = frozenset({
     "hsts_missing", "missing_hsts", "x_content_type_missing", "missing_security_headers",
     "referrer_policy_missing", "permissions_policy_missing", "cors_misconfig",
     "cookie_security", "insecure_cookie",
+    # session-cookie flags (the Set-Cookie is the same site-wide, so a missing
+    # Secure/SameSite/HttpOnly flag is one host finding, not one per crawled URL)
+    "cookie_no_secure", "cookie_no_samesite", "cookie_no_httponly",
+    # server technology / version disclosure (a response header sent site-wide).
+    # NOTE: not the broad "info_disclosure" category — a stack trace or a data
+    # leak on ONE endpoint is genuinely per-URL and must not collapse here.
+    "technology_disclosure", "server_version_disclosure",
     # TLS / certificate (property of host:port)
     "weak_cipher", "ssl_weak", "weak_tls", "tls_version", "ssl_expired",
     "ssl_self_signed", "sslv3_enabled", "heartbleed", "ssl_misconfiguration",
@@ -420,6 +440,26 @@ def _strip_query(url: str) -> str:
     return url.split("?", 1)[0].split("#", 1)[0]
 
 
+def _param_of(f: dict) -> str:
+    """The distinguishing parameter of a finding, from the top level OR its
+    evidence.
+
+    Scanners often carry the parameter only in ``evidence['param']`` (the
+    injection scanner does this for every XSS / SQLi / cmdi finding). Without
+    this fallback, two findings that differ ONLY by parameter — reflected XSS on
+    a form's ``txtName`` vs its ``mtxMessage``, or two injectable query params on
+    one endpoint — hash to the same id and all but the first silently collapse,
+    so a genuinely multi-parameter vulnerability is under-reported.
+    """
+    p = f.get("param", "")
+    if p:
+        return p
+    ev = f.get("evidence")
+    if isinstance(ev, dict):
+        return ev.get("param", "") or ev.get("parameter", "") or ""
+    return ""
+
+
 def _finding_hash(target: str, vuln_type: str, param: str = "",
                   endpoint: str = "", cve: str = "", port: str = "") -> str:
     """
@@ -474,7 +514,7 @@ def _finding_identity(f: dict) -> tuple[str, str, str, str, str, str]:
     ``cve_id``)."""
     target = f.get("target", "") or f.get("target_url", "") or f.get("host", "")
     vuln_type = f.get("vuln_type", "") or f.get("type", "") or "unknown"
-    param = f.get("param", "") or ""
+    param = _param_of(f)
     endpoint = f.get("endpoint", "") or f.get("url", "") or ""
     cve = _cve_id_of(f)
     port = str(f.get("port", "") or "")
@@ -689,6 +729,7 @@ class Engagement:
     name: str
     client: str = ""
     statement_of_work: str = ""
+    tester: str = ""
     created_at: str = ""
     updated_at: str = ""
     notes: str = ""
@@ -790,23 +831,31 @@ class EngagementStore:
     def _init_schema(self) -> None:
         with self._conn() as c:
             c.executescript(SCHEMA)
+            # Additive migrations for DBs created by an earlier schema. SQLite's
+            # CREATE TABLE IF NOT EXISTS never adds a column to an existing table,
+            # so a store from before `tester` existed would break the moment the
+            # column is written. Add it idempotently.
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(engagement)")}
+            if "tester" not in cols:
+                c.execute("ALTER TABLE engagement ADD COLUMN tester TEXT")
 
     # ── Engagement metadata ────────────────────────────────────────────
     def create_engagement(self, name: str, client: str = "",
-                          statement_of_work: str = "") -> Engagement:
+                          statement_of_work: str = "", tester: str = "") -> Engagement:
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as c:
             cur = c.execute(
-                "INSERT OR IGNORE INTO engagement (name, client, statement_of_work, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (name, client, statement_of_work, now, now),
+                "INSERT OR IGNORE INTO engagement "
+                "(name, client, statement_of_work, tester, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (name, client, statement_of_work, tester, now, now),
             )
             if cur.rowcount == 0:
                 # Already exists — return it
                 row = c.execute("SELECT * FROM engagement WHERE name = ?", (name,)).fetchone()
                 return Engagement(**dict(row))
         return Engagement(name=name, client=client, statement_of_work=statement_of_work,
-                          created_at=now, updated_at=now)
+                          tester=tester, created_at=now, updated_at=now)
 
     def get_engagement(self) -> Optional[Engagement]:
         """Return this store's engagement, deterministically.
@@ -873,8 +922,9 @@ class EngagementStore:
         *,
         client: Optional[str] = None,
         statement_of_work: Optional[str] = None,
+        tester: Optional[str] = None,
     ) -> Optional["Engagement"]:
-        """Update the Client and/or Statement-of-work on this engagement.
+        """Update the Client, Statement-of-work and/or Tester on this engagement.
 
         Only the fields explicitly passed (non-``None``) are written; the others
         are preserved, so the caller can PATCH one field at a time. Targets the
@@ -897,8 +947,9 @@ class EngagementStore:
             if row is None:
                 c.execute(
                     "INSERT INTO engagement (name, client, statement_of_work, "
-                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                    (stem, client or "", statement_of_work or "", now, now),
+                    "tester, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (stem, client or "", statement_of_work or "", tester or "",
+                     now, now),
                 )
             else:
                 new_client = row["client"] if client is None else client
@@ -907,10 +958,11 @@ class EngagementStore:
                     if statement_of_work is None
                     else statement_of_work
                 )
+                new_tester = row["tester"] if tester is None else tester
                 c.execute(
                     "UPDATE engagement SET client = ?, statement_of_work = ?, "
-                    "updated_at = ? WHERE id = ?",
-                    (new_client, new_sow, now, row["id"]),
+                    "tester = ?, updated_at = ? WHERE id = ?",
+                    (new_client, new_sow, new_tester, now, row["id"]),
                 )
         return self.get_engagement()
 
@@ -1253,13 +1305,116 @@ class EngagementStore:
                  "findings": r[5]} for r in rows]
 
     def find_resumable_scans(self) -> list[dict]:
-        """Find scans that didn't finish (for resume command)."""
+        """Find scans that didn't finish (for resume command / web resume).
+
+        Includes ``paused`` and ``interrupted`` as well as ``running``/``pending``
+        so a scan that was paused, or orphaned by a killed process (see
+        :meth:`mark_orphaned_scans_interrupted`), can be continued from its
+        checkpoints — previously those two states were silently unresumable.
+        """
         with self._conn() as c:
             rows = c.execute(
-                "SELECT * FROM scans WHERE status IN ('running', 'pending') "
+                "SELECT * FROM scans "
+                "WHERE status IN ('running', 'pending', 'paused', 'interrupted') "
                 "ORDER BY started_at DESC"
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def record_scan_resumed(self, scan_id: str) -> bool:
+        """Mark a scan ``running`` again for a resume, keeping its config + row.
+
+        Unlike :meth:`record_scan_start` (INSERT OR REPLACE, which would reset the
+        row and wipe the stored config/summary), this only flips status back to
+        ``running`` and clears ``completed_at`` — the checkpoints and replayable
+        config the resume needs are preserved.
+        """
+        try:
+            with self._conn() as c:
+                c.execute(
+                    "UPDATE scans SET status='running', completed_at=NULL WHERE id=?",
+                    (scan_id,),
+                )
+            return True
+        except sqlite3.Error:
+            return False
+
+    def record_scan_interrupted(self, scan_id: str) -> bool:
+        """Mark one scan ``interrupted`` (keeps checkpoints so it can resume)."""
+        try:
+            with self._conn() as c:
+                c.execute(
+                    "UPDATE scans SET status='interrupted' WHERE id=? "
+                    "AND status IN ('running','pending')",
+                    (scan_id,),
+                )
+            return True
+        except sqlite3.Error:
+            return False
+
+    def mark_orphaned_scans_interrupted(self) -> int:
+        """Reconcile scans left ``running``/``pending`` by a killed process.
+
+        A scan persists ``running`` at start and only flips to a terminal state
+        from inside the live process; if that process is killed (crash, ``Ctrl-C``,
+        the app closed) the row is stranded ``running`` forever and the UI shows a
+        perpetual, ticking "running" scan that nothing is driving. Called once at
+        server startup, this flips every such row to ``interrupted`` — checkpoints
+        are preserved, so the scan becomes resumable. Returns the number reconciled.
+        """
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE scans SET status='interrupted' "
+                "WHERE status IN ('running','pending')"
+            )
+            return cur.rowcount or 0
+
+    # ── Operator-set device labels (Assets manual override) ─────────────
+    def set_host_label(self, host: str, *, device_name: Optional[str] = None,
+                       device_type: Optional[str] = None,
+                       notes: Optional[str] = None) -> None:
+        """Upsert an operator-set device name/type for a host (bare host/IP key).
+
+        Only the provided fields are changed; passing an empty string clears a
+        field, ``None`` leaves it untouched. Authoritative human input — the
+        inventory ranks these above any scan-inferred value.
+        """
+        host = (host or "").strip().lower()
+        if not host:
+            raise ValueError("host is required")
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT device_name, device_type, notes FROM host_labels WHERE host=?",
+                (host,),
+            ).fetchone()
+            cur_name = row["device_name"] if row else None
+            cur_type = row["device_type"] if row else None
+            cur_notes = row["notes"] if row else None
+            new_name = cur_name if device_name is None else device_name.strip()
+            new_type = cur_type if device_type is None else device_type.strip()
+            new_notes = cur_notes if notes is None else notes.strip()
+            c.execute(
+                "INSERT INTO host_labels (host, device_name, device_type, notes, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(host) DO UPDATE SET device_name=excluded.device_name, "
+                "device_type=excluded.device_type, notes=excluded.notes, "
+                "updated_at=excluded.updated_at",
+                (host, new_name or None, new_type or None, new_notes or None, now),
+            )
+
+    def get_host_labels(self) -> dict[str, dict]:
+        """Return ``{host: {device_name, device_type, notes}}`` for all labels."""
+        out: dict[str, dict] = {}
+        with self._conn() as c:
+            for r in c.execute(
+                "SELECT host, device_name, device_type, notes FROM host_labels"
+            ).fetchall():
+                out[r["host"]] = {
+                    "device_name": r["device_name"] or "",
+                    "device_type": r["device_type"] or "",
+                    "notes": r["notes"] or "",
+                }
+        return out
 
     # ── Findings ───────────────────────────────────────────────────────
     def upsert_finding(self, scan_id: str, finding: dict) -> str:
@@ -1272,7 +1427,7 @@ class EngagementStore:
         """
         target = finding.get("target", "") or finding.get("target_url", "") or finding.get("host", "")
         vuln_type = finding.get("vuln_type", "") or finding.get("type", "") or "unknown"
-        param = finding.get("param", "")
+        param = _param_of(finding)
         endpoint = finding.get("endpoint", "") or finding.get("url", "") or ""
         cve = _cve_id_of(finding)
         port = str(finding.get("port", "") or "")
@@ -1464,6 +1619,23 @@ class EngagementStore:
                 "UPDATE findings SET status = ?, operator_notes = COALESCE(?, operator_notes) "
                 "WHERE id = ?",
                 (status, notes if notes else None, finding_id),
+            )
+            return cur.rowcount > 0
+
+    def set_finding_notes(self, finding_id: str, notes: str) -> bool:
+        """Persist operator notes WITHOUT changing the finding's status.
+
+        The triage UI used to save notes only as a side effect of a status
+        change, so a note typed while leaving the status unchanged was silently
+        lost. This is the dedicated save path. An empty string is written as-is
+        (so a note can also be cleared), unlike the COALESCE in
+        :meth:`update_finding_status` which preserves the old note on a bare
+        status change.
+        """
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE findings SET operator_notes = ? WHERE id = ?",
+                (notes or "", finding_id),
             )
             return cur.rowcount > 0
 

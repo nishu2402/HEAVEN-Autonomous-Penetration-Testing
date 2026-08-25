@@ -61,7 +61,7 @@ def retest_posture(report: DiffReport) -> dict[str, Any]:
 def _verdict(posture: dict[str, Any]) -> tuple[str, str]:
     """(label, colour) summarising the retest outcome."""
     if posture["reintroduced"]:
-        return "Action required — previously-fixed findings returned", "#dc2626"
+        return "Action required: previously-fixed findings returned", "#dc2626"
     rate = posture["remediation_rate"]
     if rate is None:
         return "No baseline findings to retest", "#64748b"
@@ -110,7 +110,7 @@ def render_retest_html(report: DiffReport, *, engagement_name: str = "",
     if posture["reintroduced"]:
         reintro_banner = (
             f'<div class="banner">⚠ {posture["reintroduced"]} previously-fixed '
-            f'finding(s) were observed again — '
+            f'finding(s) were observed again, '
             f'{posture["regressed_critical_or_high"]} critical/high.</div>'
         )
 

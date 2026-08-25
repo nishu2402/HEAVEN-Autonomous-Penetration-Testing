@@ -4,11 +4,11 @@ Mapping of HEAVEN scanners against the [OWASP Web Security Testing Guide
 v4.2](https://owasp.org/www-project-web-security-testing-guide/v42/).
 
 Test ID format: `WSTG-XXX-NN` (e.g., WSTG-INPV-05 = Input Validation,
-test 05). HEAVEN automates the full **technical** WSTG surface — every test
+test 05). HEAVEN automates the full **technical** WSTG surface, every test
 below is exercised by a real, confirmation-based detector that emits a finding
 only on observed, attacker-favourable behaviour (never on the mere absence of a
 "good" value). The single exception is **Business Logic (BUSL)**: those tests
-require application-specific domain knowledge and remain analyst-led — HEAVEN
+require application-specific domain knowledge and remain analyst-led, HEAVEN
 does not fabricate a verdict it cannot evidence.
 
 ## Coverage summary
@@ -102,7 +102,7 @@ does not fabricate a verdict it cannot evidence.
 | WSTG-SESS-08 | Session puzzling | `heaven.vulnscan.auth_scanner` (predictable session-id) |
 | WSTG-SESS-09 | Session hijacking | `heaven.vulnscan.ssl_scanner` (transport security) |
 
-### Input Validation (INPV) — HEAVEN's strongest area
+### Input Validation (INPV): HEAVEN's strongest area
 | Test ID | Description | HEAVEN coverage |
 |---|---|---|
 | WSTG-INPV-01 | Reflected XSS | `heaven.vulnscan.injection_scanner` |
@@ -168,5 +168,5 @@ function-use limits, workflow circumvention, defenses against application
 misuse, upload of malicious/unexpected file types) require domain knowledge of
 the specific application. HEAVEN surfaces the raw signals an analyst needs
 (entry points, parameters, roles, upload endpoints) but does not assert a
-business-logic verdict it cannot evidence — automating a checkbox here would be
+business-logic verdict it cannot evidence, automating a checkbox here would be
 fabrication, which HEAVEN never does.

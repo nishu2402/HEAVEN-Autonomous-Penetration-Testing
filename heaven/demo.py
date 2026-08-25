@@ -5,7 +5,10 @@ tool even works. ``heaven demo`` (CLI) and ``POST /api/demo/seed`` (web "Load
 sample data" button) both call :func:`seed_demo` to drop a realistic example
 engagement — a spread of critical→info findings with evidence — into the same
 engagement store the dashboard reads, so every page (Dashboard, Findings,
-Finding Detail, Kill Chain, Coverage, Reports) lights up instantly.
+Finding Detail, Assets, Kill Chain, Coverage, Reports) lights up instantly. The
+scan summary also carries a small sample host/service inventory so the Assets
+view and the report's Host & Service Inventory — including the web app's resolved
+IP address — populate exactly as they would after a real scan.
 
 The data is clearly labelled as a sample (engagement "demo (sample data)",
 targets under the reserved ``demo.heaven.local`` / TEST-NET ``10.10.10.0/24``
@@ -20,7 +23,9 @@ from typing import Any, Optional
 
 DEMO_ENGAGEMENT = "demo (sample data)"
 DEMO_SCAN_ID = "demo-scan-0001"  # stable id → re-seeding dedups, never duplicates
-WEB = "https://demo.heaven.local"   # RFC-reserved .local — never resolves/scanned
+WEB_HOST = "demo.heaven.local"       # RFC-reserved .local — never resolves/scanned
+WEB_IP = "10.10.10.20"               # address the web app "resolved to" in the lab
+WEB = f"https://{WEB_HOST}"          # web-app target used by the sample findings
 HOST = "10.10.10.10"                 # RFC5737 TEST-NET-style placeholder host
 
 
@@ -133,6 +138,74 @@ _FINDINGS: list[dict] = [
 ]
 
 
+# ── The sample host & service inventory ──────────────────────────────────────
+# A realistic little lab topology inside the demo's 10.10.10.0/24 scope, so the
+# Assets page and the report's Host & Service Inventory light up the same way a
+# real network scan would — and, crucially, so the web-app target shows both its
+# hostname AND the address it resolved to (the IP column). Every value here is
+# clearly part of the labelled sample engagement; nothing was scanned.
+_ASSETS: list[dict] = [
+    {
+        # Web application — a HOSTNAME target that resolved to a distinct IP, so
+        # the inventory shows "demo.heaven.local" with an "IP: 10.10.10.20" line.
+        "host": WEB_HOST, "ip": WEB_IP, "is_alive": True,
+        "os": "Linux 4.15 - 5.8 (Ubuntu)", "os_source": "nmap", "os_accuracy": 96,
+        "device_type": "web server", "device_type_source": "service-heuristic",
+        "open_ports": [
+            {"port": 22, "protocol": "tcp", "service": "ssh", "product": "OpenSSH",
+             "version": "7.6p1 Ubuntu 4ubuntu0.7",
+             "cpe": "cpe:/a:openbsd:openssh:7.6p1",
+             "banner": "SSH-2.0-OpenSSH_7.6p1 Ubuntu-4ubuntu0.7"},
+            {"port": 80, "protocol": "tcp", "service": "http", "product": "Apache httpd",
+             "version": "2.4.29 ((Ubuntu))",
+             "cpe": "cpe:/a:apache:http_server:2.4.29", "banner": "Apache/2.4.29 (Ubuntu)"},
+            {"port": 443, "protocol": "tcp", "service": "ssl/http", "product": "Apache httpd",
+             "version": "2.4.29 ((Ubuntu))",
+             "cpe": "cpe:/a:apache:http_server:2.4.29", "banner": "Apache/2.4.29 (Ubuntu)"},
+            {"port": 3306, "protocol": "tcp", "service": "mysql", "product": "MySQL",
+             "version": "5.7.33", "cpe": "cpe:/a:mysql:mysql:5.7.33",
+             "banner": "5.7.33-0ubuntu0.18.04.1"},
+        ],
+        "web_components": [
+            {"service": "apache", "version": "2.4.29"},
+            {"service": "php", "version": "7.2.24"},
+            {"service": "openssl", "version": "1.1.1"},
+        ],
+    },
+    {
+        # Crown-jewel host — the exposed Docker/SSH box the sample findings hit.
+        "host": HOST, "ip": HOST, "is_alive": True,
+        "os": "Linux 3.13 - 4.9 (Debian)", "os_source": "nmap", "os_accuracy": 92,
+        "mac_address": "00:0c:29:4b:1a:7e", "mac_vendor": "VMware, Inc.",
+        "device_type": "server", "device_type_source": "service-heuristic",
+        "open_ports": [
+            {"port": 22, "protocol": "tcp", "service": "ssh", "product": "OpenSSH",
+             "version": "6.6.1p1 Debian 4~bpo70+1",
+             "cpe": "cpe:/a:openbsd:openssh:6.6.1p1",
+             "banner": "SSH-2.0-OpenSSH_6.6.1p1 Debian-4~bpo70+1"},
+            {"port": 2375, "protocol": "tcp", "service": "docker", "product": "Docker",
+             "version": "18.06.1-ce", "cpe": "cpe:/a:docker:docker:18.06.1",
+             "banner": "HTTP/1.1 200 OK — Docker Engine API"},
+        ],
+    },
+    {
+        # Edge gateway — demonstrates MAC + device-name/type identity columns.
+        "host": "10.10.10.1", "ip": "10.10.10.1", "is_alive": True,
+        "mac_address": "f0:9f:c2:11:22:33", "mac_vendor": "Ubiquiti Inc.",
+        "device_name": "gw-edge-01", "device_name_source": "ptr",
+        "device_type": "router", "device_type_source": "mac-vendor",
+        "open_ports": [
+            {"port": 53, "protocol": "tcp", "service": "domain", "product": "dnsmasq",
+             "version": "2.79", "cpe": "cpe:/a:thekelleys:dnsmasq:2.79"},
+            {"port": 80, "protocol": "tcp", "service": "http", "product": "lighttpd",
+             "version": "1.4.45", "banner": "lighttpd/1.4.45"},
+            {"port": 443, "protocol": "tcp", "service": "ssl/http", "product": "lighttpd",
+             "version": "1.4.45"},
+        ],
+    },
+]
+
+
 def resolve_demo_store(name: Optional[str] = None):
     """Resolve the engagement store that holds the sample data.
 
@@ -183,6 +256,9 @@ def insert_findings(store: Any, scan_id: str) -> dict:
     summary = {
         "findings": len(_FINDINGS), "by_severity": by_sev,
         "targets": 3, "duration_seconds": 47, "demo": True,
+        # Host & service inventory so the Assets page + report inventory populate
+        # (and the web app shows its hostname alongside the resolved IP).
+        "assets": [dict(a) for a in _ASSETS],
     }
     return {
         "engagement": DEMO_ENGAGEMENT, "scan_id": scan_id,

@@ -19,7 +19,7 @@ export default function EngagementPicker({
   onChange,
   id = "eng-picker",
   label = "Save findings to engagement",
-  help = "The engagement this run's findings are saved into. Defaults to the one you're viewing — change it so a run never lands in the wrong engagement. Pick “＋ New engagement…” to start a fresh one.",
+  help = "The engagement this run's findings are saved into. Defaults to the one you're viewing, change it so a run never lands in the wrong engagement. Pick '＋ New engagement…' to start a fresh one.",
 }) {
   const [engList, setEngList] = useState([]);
   const [choice, setChoice] = useState("");   // name | "__new__" | ""
@@ -53,7 +53,7 @@ export default function EngagementPicker({
 
   const options = useMemo(() => engList.map((e) => (
     <option key={e.name} value={e.name}>
-      {(e.display_name || e.name)}{e.active ? " — current" : ""}
+      {(e.display_name || e.name)}{e.active ? ", current" : ""}
       {` (${e.findings} finding${e.findings === 1 ? "" : "s"})`}
     </option>
   )), [engList]);
@@ -87,7 +87,7 @@ export default function EngagementPicker({
       )}
       {dest && (
         <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
-          Findings will be saved to “{dest}”.
+          Findings will be saved to "{dest}".
         </span>
       )}
     </label>

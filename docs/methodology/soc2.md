@@ -1,15 +1,15 @@
 # HEAVEN ↔ SOC 2 (Trust Services Criteria)
 
 Mapping of HEAVEN's detectors against the AICPA [SOC 2 Trust Services Criteria
-(TSC)](https://www.aicpa-cima.com/) — the **2017 criteria (with revised points
-of focus, 2022)**, specifically the Common Criteria (CC1–CC9) that underpin the
+(TSC)](https://www.aicpa-cima.com/), the **2017 criteria (with revised points
+of focus, 2022)**, specifically the Common Criteria (CC1, CC9) that underpin the
 *Security* category.
 
 SOC 2 is an **attestation** performed by an independent CPA over a period of
 time; it is not a scan and HEAVEN does not issue a SOC 2 report. What HEAVEN
-provides is *technical evidence for the Security criteria* — chiefly **CC6
+provides is *technical evidence for the Security criteria*, chiefly **CC6
 Logical & Physical Access Controls**, **CC7 System Operations** and the
-risk/monitoring points of CC3–CC4 and CC8 — each named to a real detector, that
+risk/monitoring points of CC3, CC4 and CC8, each named to a real detector, that
 an organisation and its auditor can use as supporting control evidence.
 Governance, control-design and risk-programme criteria are attested through
 records and are listed as **out-of-band (analyst-attested)**.
@@ -21,22 +21,22 @@ HEAVEN detector it names actually produced a finding in the active engagement.
 
 | Common Criteria | HEAVEN evidence |
 |---|---|
-| CC1–CC2 Control Environment & Communication | governance — analyst-attested |
-| CC3–CC4 Risk Assessment & Monitoring | vulnerability identification + continuous re-scan |
-| CC5 Control Activities | governance — analyst-attested |
-| CC6 Logical & Physical Access Controls | extensive — access, boundary, transport crypto |
-| CC7 System Operations | extensive — vulnerability detection & monitoring |
+| CC1, CC2 Control Environment & Communication | governance, analyst-attested |
+| CC3, CC4 Risk Assessment & Monitoring | vulnerability identification + continuous re-scan |
+| CC5 Control Activities | governance, analyst-attested |
+| CC6 Logical & Physical Access Controls | extensive, access, boundary, transport crypto |
+| CC7 System Operations | extensive, vulnerability detection & monitoring |
 | CC8 Change Management | secure-development evidence (SAST + SCA) |
-| CC9 Risk Mitigation | governance — analyst-attested |
+| CC9 Risk Mitigation | governance, analyst-attested |
 
 ## Detailed mapping
 
-### CC1–CC2 Control Environment & Communication
+### CC1, CC2 Control Environment & Communication
 **Out-of-band (analyst-attested):** CC1 (control environment, integrity,
 oversight) and CC2 (communication and information) are governance criteria
 attested through records, not scannable properties.
 
-### CC3–CC5 Risk Assessment, Monitoring & Control Activities
+### CC3, CC5 Risk Assessment, Monitoring & Control Activities
 | Control | Description | HEAVEN coverage |
 |---|---|---|
 | CC3.2 | Identify and assess risks (vulnerabilities as risk inputs) | `heaven.vulnscan.cve_mapper`, `heaven.orchestrator` (full suite + scoring) |
@@ -68,7 +68,7 @@ malicious software) is an endpoint control.
 **Out-of-band (analyst-attested):** CC7.4 (respond to identified security
 incidents) is an IR-process criterion.
 
-### CC8–CC9 Change Management & Risk Mitigation
+### CC8, CC9 Change Management & Risk Mitigation
 | Control | Description | HEAVEN coverage |
 |---|---|---|
 | CC8.1 | Changes are developed and tested securely | `heaven.vulnscan.sast_runner`, `heaven.vulnscan.sca_scanner` |

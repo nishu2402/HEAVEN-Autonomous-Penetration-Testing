@@ -483,37 +483,57 @@ def build_injection_targets(
 
 
 async def _get(session, url: str, headers: Optional[dict] = None, timeout: float = 8.0) -> tuple[int, str]:
-    """Single GET, returns (status, body). Never raises."""
-    try:
-        async with session.get(
-            url,
-            headers=headers or {},
-            timeout=aiohttp.ClientTimeout(total=timeout),
-            allow_redirects=True,
-            ssl=False,
-        ) as resp:
-            body = await resp.text(errors="replace")
-            return resp.status, body
-    except Exception:
-        return 0, ""
+    """Single GET, returns (status, body). Never raises.
+
+    Retries ONCE on timeout with a longer budget. A timeout returns (0, "") which
+    the detectors read as an empty baseline/response, so a single slow reply would
+    otherwise silently suppress every finding on that URL — a real false negative
+    on slow, throttled, or overloaded targets (and on emulated benchmark VMs). The
+    retry only fires on timeout, so a genuinely dead host still fails fast.
+    """
+    for attempt in range(2):
+        try:
+            async with session.get(
+                url,
+                headers=headers or {},
+                timeout=aiohttp.ClientTimeout(total=timeout * (1 + attempt)),
+                allow_redirects=True,
+                ssl=False,
+            ) as resp:
+                body = await resp.text(errors="replace")
+                return resp.status, body
+        except (asyncio.TimeoutError, TimeoutError):
+            if attempt == 0:
+                continue
+            return 0, ""
+        except Exception:
+            return 0, ""
+    return 0, ""
 
 
 async def _post(session, url: str, data: dict, headers: Optional[dict] = None,
                 timeout: float = 8.0) -> tuple[int, str]:
-    """Single POST, returns (status, body). Never raises."""
-    try:
-        async with session.post(
-            url,
-            data=data,
-            headers=headers or {},
-            timeout=aiohttp.ClientTimeout(total=timeout),
-            allow_redirects=True,
-            ssl=False,
-        ) as resp:
-            body = await resp.text(errors="replace")
-            return resp.status, body
-    except Exception:
-        return 0, ""
+    """Single POST, returns (status, body). Never raises. Retries once on timeout
+    (see :func:`_get` for why an unretried timeout is a silent false negative)."""
+    for attempt in range(2):
+        try:
+            async with session.post(
+                url,
+                data=data,
+                headers=headers or {},
+                timeout=aiohttp.ClientTimeout(total=timeout * (1 + attempt)),
+                allow_redirects=True,
+                ssl=False,
+            ) as resp:
+                body = await resp.text(errors="replace")
+                return resp.status, body
+        except (asyncio.TimeoutError, TimeoutError):
+            if attempt == 0:
+                continue
+            return 0, ""
+        except Exception:
+            return 0, ""
+    return 0, ""
 
 
 # ─────────────────────────────────────────────────────────────────

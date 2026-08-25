@@ -4,19 +4,19 @@ Mapping of HEAVEN's detectors against the UK NCSC [Cyber
 Essentials](https://www.ncsc.gov.uk/cyberessentials/overview) scheme's five
 technical control themes, aligned with the current [*Cyber Essentials
 Requirements for IT Infrastructure* v3.3](https://www.ncsc.gov.uk/files/cyber-essentials-requirements-for-it-infrastructure-v3-3.pdf)
-— the "Danzell" question set, effective April 2026.
+, the "Danzell" question set, effective April 2026.
 
 Cyber Essentials is a **self-assessed** certification: an organisation attests
 that the five controls are in place. HEAVEN cannot issue that attestation, but it
 provides *external, evidence-based verification* for every control with an
-observable network footprint — what is exposed at the boundary, whether default
+observable network footprint, what is exposed at the boundary, whether default
 credentials remain, whether services run supported and patched software, and
 whether transport is encrypted. Each such control below is automated by a real,
 named detector. The residual controls that are purely endpoint-, IdP- or
 policy-based (anti-malware on laptops, application allow-listing, automatic-update
 configuration, MFA/least-privilege on internal accounts) have **no external
 footprint**; they are listed per theme as **out-of-band (analyst-attested)** and
-are not scored — an authenticated Cyber Essentials **Plus** audit (see
+are not scored, an authenticated Cyber Essentials **Plus** audit (see
 `cyber_essentials_plus`) covers them. HEAVEN never fabricates evidence.
 
 A control row is marked **✓ exercised** on the live Methodology page only when
@@ -36,7 +36,7 @@ engagement.
 ## Detailed mapping
 
 ### 1. Firewalls & Internet Gateways
-HEAVEN enumerates exactly what the boundary actually exposes — the ground-truth
+HEAVEN enumerates exactly what the boundary actually exposes, the ground-truth
 firewall rules cannot be read remotely, but their *effect* is measurable.
 
 | Control | Description | HEAVEN coverage |
@@ -47,7 +47,7 @@ firewall rules cannot be read remotely, but their *effect* is measurable.
 | CE-FW-4 | Administrative interfaces not published to the internet | `heaven.vulnscan.dir_fuzzer` (admin panels), `heaven.recon.web_crawler` |
 
 **Out-of-band (analyst-attested):** CE-FW-5 (documented business case for each
-open port) is a firewall-ruleset paperwork check — HEAVEN supplies the
+open port) is a firewall-ruleset paperwork check, HEAVEN supplies the
 authoritative open-port inventory the operator maps business justifications onto,
 but does not assert the justification itself.
 
@@ -64,7 +64,7 @@ but does not assert the justification itself.
 config) is a host-level control with no network-observable footprint.
 
 ### 3. Security Update Management
-The core of Cyber Essentials — HEAVEN detects software that is missing security
+The core of Cyber Essentials, HEAVEN detects software that is missing security
 patches or is out of vendor support.
 
 | Control | Description | HEAVEN coverage |
@@ -96,9 +96,9 @@ automated.
 
 | Control | Description | HEAVEN coverage |
 |---|---|---|
-| CE-MW-3 | Email and web content filtering hardened | `heaven.recon.dns_recon` (SPF/DMARC/DKIM/MTA-STS — inbound email spoofing surface) |
+| CE-MW-3 | Email and web content filtering hardened | `heaven.recon.dns_recon` (SPF/DMARC/DKIM/MTA-STS, inbound email spoofing surface) |
 
 **Out-of-band (analyst-attested):** CE-MW-1 (anti-malware installed on all
 devices) and CE-MW-2 (application allow-listing) are endpoint controls verified
-by the CE Plus functional test — a remote external scanner cannot see them
+by the CE Plus functional test, a remote external scanner cannot see them
 without fabricating evidence.

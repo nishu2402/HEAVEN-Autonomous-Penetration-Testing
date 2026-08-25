@@ -248,6 +248,39 @@ WILDCARD_SAMPLE_LONG = ("h3av3n_wildcard_probe_9z8x7_"
                         "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8_notexist")
 
 
+def _norm_target(base_url: str, location: str) -> tuple[str, str]:
+    """Resolve ``location`` against ``base_url`` → ``(host, path)`` normalised:
+    lowercase host, path with any trailing slash stripped (``/`` kept for root),
+    query/fragment dropped. ``("", "")`` when there's nothing to resolve. Lets the
+    soft-404 filter compare *where* a redirect lands regardless of scheme, an
+    absolute-vs-relative Location, or a cosmetic trailing slash."""
+    if not location:
+        return ("", "")
+    try:
+        p = urlparse(urljoin(base_url, location))
+    except ValueError:
+        return ("", "")
+    host = (p.hostname or "").lower()
+    path = (p.path or "/").rstrip("/") or "/"
+    return (host, path)
+
+
+def _is_root(host_path: tuple[str, str]) -> bool:
+    """True when a normalised ``(host, path)`` is a site root / homepage."""
+    return host_path[1] in ("", "/")
+
+
+def _session_destroying(url: str) -> bool:
+    """True if fetching ``url`` would likely end the current auth session (logout
+    / signout / session-kill). Reuses the crawler's single source of truth; lazy
+    import keeps dir_fuzzer free of a static import cycle. Fails safe to False."""
+    try:
+        from heaven.recon.web_crawler import _is_session_destroying
+        return _is_session_destroying(url)
+    except Exception:
+        return False
+
+
 # ─────────────────────────────────────────────────────────────────
 # Scanner
 # ─────────────────────────────────────────────────────────────────
@@ -281,53 +314,116 @@ class DirectoryFuzzer:
         self._sem = asyncio.Semaphore(concurrency)
         self._findings: list[dict] = []
         self._seen_paths: set[str] = set()
+        # Set True when the fuzz session carries an auth cookie jar. While
+        # authenticated, the fuzzer must never GET a session-destroying path
+        # (/logout, /signout, …): the app tears the shared session down
+        # server-side, and every OTHER scanner reusing it then probes
+        # UNAUTHENTICATED and finds nothing (this silently collapsed DVWA
+        # authenticated recall — SQLi/XSS/cmdi → 0 — because "logout" is in the
+        # wordlist). The crawler already guards this; the fuzzer now does too.
+        self._authed = False
 
     # ── Wildcard detection ────────────────────────────────────────
 
-    async def _detect_wildcard(self, session, base_url: str) -> Optional[tuple[int, int, int]]:
-        """Detect a soft-404 / catch-all responder.
+    async def _detect_wildcard(self, session, base_url: str) -> Optional[dict]:
+        """Detect a soft-404 / catch-all responder — including redirect-based ones.
 
-        Probes TWO non-existent paths of different lengths. If both return the
-        same hit-status, the server has a catch-all: we return
-        ``(status, lo_size, hi_size)`` describing a size band (widened to cover
-        path-length-dependent "<path> not found" pages) so ``_probe`` can drop any
-        response landing in it. Returns ``None`` when the server 404s honestly (or
-        the two probes disagree, meaning there is no stable catch-all to filter).
+        Probes several non-existent paths (two no-slash of different lengths, one
+        with a trailing slash). For each it records both the *immediate* response
+        (no redirects — how :meth:`_probe` requests) and, for a 3xx, where it
+        *finally* lands after following redirects. From that it builds a catch-all
+        model :meth:`_probe` uses to drop noise:
+
+        * ``status`` / ``lo`` / ``hi`` — an immediate body-size band (only when the
+          random paths share one status; ``None`` otherwise);
+        * ``finals`` — the set of URLs a nonexistent path ultimately resolves to
+          (e.g. ``{(host, "/")}`` for a "unknown path → homepage" catch-all);
+        * ``final_lo`` / ``final_hi`` — the *followed* body-size band (the homepage
+          size), so a path that redirects to — or directly serves — the homepage is
+          recognised whatever status it used.
+
+        Returns ``None`` when the server 404s honestly (nothing to filter). Earlier
+        this calibrated *with* redirects while ``_probe`` requested *without* them,
+        so a server that 301/302-redirects every unknown path to its homepage was
+        never recognised and leaked every probed path as a "hit".
         """
-        async def _one(sample: str) -> Optional[tuple[int, int]]:
-            probe = urljoin(base_url.rstrip("/") + "/", sample)
+        async def _one(sample: str) -> Optional[tuple]:
+            url = urljoin(base_url.rstrip("/") + "/", sample)
             try:
                 async with session.get(
-                    probe,
-                    headers={"User-Agent": self._ua},
+                    url, headers={"User-Agent": self._ua},
                     timeout=aiohttp.ClientTimeout(total=8),
-                    allow_redirects=True,
-                    ssl=False,
+                    allow_redirects=False, ssl=False,
                 ) as resp:
-                    body = await resp.text(errors="replace")
-                    return resp.status, len(body)
+                    istatus = resp.status
+                    isize = len(await resp.text(errors="replace"))
+                    iloc = ((resp.headers.get("Location") or "").strip()
+                            if 300 <= istatus < 400 else "")
             except Exception:
                 return None
+            final, fsize = ("", ""), isize
+            if 300 <= istatus < 400:
+                try:
+                    async with session.get(
+                        url, headers={"User-Agent": self._ua},
+                        timeout=aiohttp.ClientTimeout(total=8),
+                        allow_redirects=True, ssl=False,
+                    ) as fr:
+                        fsize = len(await fr.text(errors="replace"))
+                        final = ((fr.url.host or "").lower(),
+                                 (fr.url.path or "/").rstrip("/") or "/")
+                except Exception:
+                    logger.debug("wildcard follow failed for %s", url, exc_info=True)
+            return (istatus, isize, iloc, final, fsize)
 
-        r1 = await _one(WILDCARD_SAMPLE)
-        r2 = await _one(WILDCARD_SAMPLE_LONG)
-        if r1 is None or r2 is None:
+        samples = [WILDCARD_SAMPLE, WILDCARD_SAMPLE_LONG, WILDCARD_SAMPLE + "/"]
+        probes = [p for p in await asyncio.gather(*[_one(s) for s in samples]) if p]
+        if len(probes) < 2:
             return None
-        (s1, z1), (s2, z2) = r1, r2
-        # Different statuses, or an honest 404 → no catch-all worth filtering.
-        if s1 != s2 or s1 in MISS_CODES:
+        # An honest 404 for a random path means there is no catch-all to filter.
+        if any(p[0] in MISS_CODES for p in probes):
             return None
-        lo, hi = min(z1, z2), max(z1, z2)
-        span = hi - lo  # how much the soft-404 grows with path length
-        return (s1, lo - span - 64, hi + span + 64)
+
+        imm_sizes = [p[1] for p in probes]
+        final_sizes = [p[4] for p in probes]
+        locations = {_norm_target(base_url, p[2]) for p in probes if p[2]}
+        finals = {p[3] for p in probes if p[3][0]}
+        statuses = {p[0] for p in probes}
+        span = max(imm_sizes) - min(imm_sizes)
+        fspan = max(final_sizes) - min(final_sizes)
+        return {
+            # Immediate-size band only when the random paths share one status.
+            "status": next(iter(statuses)) if len(statuses) == 1 else None,
+            "lo": min(imm_sizes) - span - 64,
+            "hi": max(imm_sizes) + span + 64,
+            "locations": locations,
+            "finals": finals,
+            "final_lo": min(final_sizes) - fspan - 64,
+            "final_hi": max(final_sizes) + fspan + 64,
+        }
+
+    async def _follow_final(self, session, url: str) -> Optional[tuple[str, str, int]]:
+        """Follow ``url``'s redirects → ``(final_host, final_path, size)`` or None."""
+        try:
+            async with session.get(
+                url, headers={"User-Agent": self._ua},
+                timeout=aiohttp.ClientTimeout(total=8),
+                allow_redirects=True, ssl=False,
+            ) as fr:
+                size = len(await fr.text(errors="replace"))
+                return ((fr.url.host or "").lower(),
+                        (fr.url.path or "/").rstrip("/") or "/", size)
+        except Exception:
+            return None
 
     # ── Single path probe ─────────────────────────────────────────
 
-    async def _probe(self, session, url: str, wildcard: Optional[tuple]) -> Optional[dict]:
+    async def _probe(self, session, url: str, wildcard: Optional[dict]) -> Optional[dict]:
         """Probe a single URL; return finding dict or None."""
         async with self._sem:
             if self._delay:
                 await asyncio.sleep(self._delay)
+            location = ""
             try:
                 async with session.get(
                     url,
@@ -337,6 +433,10 @@ class DirectoryFuzzer:
                     ssl=False,
                 ) as resp:
                     status = resp.status
+                    # Where a 3xx points — useful triage (an open redirect, or a
+                    # login/redirect that reveals a real resource exists).
+                    if 300 <= status < 400:
+                        location = (resp.headers.get("Location") or "").strip()
                     body = await resp.text(errors="replace")
                     size = len(body)
             except Exception:
@@ -347,33 +447,48 @@ class DirectoryFuzzer:
         if status not in HIT_CODES:
             return None
 
-        # Soft-404 filter: a catch-all responder returns this same status for any
-        # path, so a hit whose size lands inside the observed catch-all band is
-        # noise, not a discovered resource.
-        if wildcard and wildcard[0] == status:
-            _, lo, hi = wildcard
-            if lo <= size <= hi:
+        # ── Soft-404 / catch-all filter ──────────────────────────────────────
+        # A catch-all responder answers *every* path — a probed path is only a
+        # real discovery when it behaves differently from a known-nonexistent one.
+        req = _norm_target(url, url)
+        if 300 <= status < 400:
+            loc = _norm_target(url, location)
+            # A redirect to the site root / homepage never *exposes* the probed
+            # resource — it's the universal "unknown path → home" catch-all.
+            if _is_root(loc):
+                return None
+            if wildcard:
+                # Redirects to the same place a nonexistent path goes → catch-all.
+                if loc in wildcard["finals"] or loc in wildcard["locations"]:
+                    return None
+                # A pure trailing-slash normalisation to the same path: follow it
+                # once and drop the hit if it, too, lands on the catch-all target.
+                if loc[0] == req[0] and loc[1] == req[1]:
+                    final = await self._follow_final(session, url)
+                    if final and (
+                        (final[0], final[1]) in wildcard["finals"]
+                        or _is_root((final[0], final[1]))
+                        or wildcard["final_lo"] <= final[2] <= wildcard["final_hi"]
+                    ):
+                        return None
+        elif wildcard:
+            # Same status + size inside the observed catch-all band → noise.
+            if wildcard["status"] == status and wildcard["lo"] <= size <= wildcard["hi"]:
+                return None
+            # Or the catch-all's homepage served directly (any status) at its size.
+            if status == 200 and wildcard["final_lo"] <= size <= wildcard["final_hi"]:
                 return None
 
-        # Severity heuristics
+        # Severity is status-aware (see _severity_for): the path-name ratings only
+        # apply when the resource is actually served — a 401/403 or a surviving
+        # 3xx is honest discovery, never an "Exposed .env (critical)".
         path = urlparse(url).path.lower()
-        severity = "info"
-        if any(x in path for x in [".git", ".env", "config", "backup", "credentials",
-                                     "secret", "private", "password", "db_backup",
-                                     ".sql", "dump", "phpinfo", "shell", "cmd.php",
-                                     "adminer", "phpmyadmin"]):
-            severity = "critical"
-        elif any(x in path for x in ["admin", "administrator", "login", "wp-admin",
-                                       "jenkins", "grafana", "kibana", "console",
-                                       "debug", "actuator", "trace"]):
-            severity = "high"
-        elif any(x in path for x in ["api", "swagger", "openapi", "graphql",
-                                       "install", "setup", "readme", "changelog"]):
-            severity = "medium"
-        elif status in (401, 403):
-            severity = "low"
-
-        title = _path_title(path, status)
+        # The expected front door and standard public files are not findings.
+        if _is_benign_public_path(path):
+            return None
+        served = _served(status)
+        severity = _severity_for(path, status)
+        title = _path_title(path, status, served=served)
 
         return {
             "target": url,
@@ -385,6 +500,7 @@ class DirectoryFuzzer:
                 "status_code": status,
                 "response_size": size,
                 "path": path,
+                **({"location": location} if location else {}),
                 "snippet": body[:300].strip() if severity in ("critical", "high") else "",
             },
             "remediation": _remediation(path, status),
@@ -411,13 +527,18 @@ class DirectoryFuzzer:
                     extra.append(candidate)
         paths.extend(extra)
 
+        candidate_urls = [f"{base}/{p.lstrip('/')}" for p in paths]
+        # While authenticated, drop logout/session-kill candidates BEFORE fetching
+        # them — one GET to /logout with the shared session ends it for the whole
+        # scan (see __init__).
+        if self._authed:
+            candidate_urls = [u for u in candidate_urls if not _session_destroying(u)]
         tasks = [
-            self._probe(session, f"{base}/{p.lstrip('/')}", wildcard)
-            for p in paths
-            if f"{base}/{p.lstrip('/')}" not in self._seen_paths
+            self._probe(session, url, wildcard)
+            for url in candidate_urls
+            if url not in self._seen_paths
         ]
-        for p in paths:
-            self._seen_paths.add(f"{base}/{p.lstrip('/')}")
+        self._seen_paths.update(candidate_urls)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         findings: list[dict] = []
@@ -507,11 +628,14 @@ class DirectoryFuzzer:
                 url = result.get("url", "")
                 status = result.get("status", 0)
                 path = urlparse(url).path
+                # The expected front door and standard public files are not findings.
+                if _is_benign_public_path(path):
+                    continue
                 findings.append({
                     "target": url,
                     "vuln_type": "sensitive_file",
-                    "title": _path_title(path, status),
-                    "severity": _severity_from_path(path),
+                    "title": _path_title(path, status, served=_served(status)),
+                    "severity": _severity_for(path, status),
                     "confidence": 0.90,
                     "evidence": {
                         "status_code": status,
@@ -575,6 +699,7 @@ class DirectoryFuzzer:
         connector = aiohttp.TCPConnector(ssl=False, limit=80)
         from heaven.recon.auth_session import aiohttp_session_kwargs
         _auth_kw = aiohttp_session_kwargs()
+        self._authed = bool(_auth_kw.get("cookies"))
         async with aiohttp.ClientSession(connector=connector, **_auth_kw) as session:
             tasks = [self._scan_target(session, url) for url in native_targets]
             raw: list[Any] = list(await asyncio.gather(*tasks, return_exceptions=True))
@@ -606,25 +731,89 @@ class DirectoryFuzzer:
 # Helpers
 # ─────────────────────────────────────────────────────────────────
 
-def _severity_from_path(path: str) -> str:
+def _served(status: int) -> bool:
+    """True when a status means the resource was actually served (a body returned),
+    as opposed to access-controlled (401/403) or redirected (3xx)."""
+    return status in (200, 201, 204, 405, 500)
+
+
+def _is_git_vcs_path(p: str) -> bool:
+    """True only for the .git VCS *directory* (/.git, /.git/, /.git/config …),
+    NOT for a plain .gitignore / .gitattributes / .github file that merely shares
+    the ".git" prefix. Matching the bare ".git" substring rated a harmless
+    .gitignore as a critical "exposed .git directory" false positive."""
+    p = p.lower()
+    return p == "/.git" or p.endswith("/.git") or "/.git/" in p
+
+
+# The normal front door and standard public artifacts. Discovering a login
+# page, a home page, or robots.txt is not a security finding — every site has
+# them, and reporting them as "sensitive" only inflates noise (and precision on
+# any benchmark). Entry pages match on the full path so a genuinely sensitive
+# subdir isn't skipped by its index.php; the public files match by name because
+# robots.txt / security.txt are benign wherever they live. Genuinely sensitive
+# paths (.git, .env, backups, admin panels, phpinfo) are unaffected.
+_BENIGN_ENTRY_PATHS = frozenset({
+    "/", "/index.php", "/index.html", "/index.htm", "/index.asp", "/index.aspx",
+    "/login.php", "/login.html", "/login", "/home", "/home.php",
+})
+_BENIGN_PUBLIC_FILES = frozenset({
+    "robots.txt", "security.txt", "sitemap.xml", "favicon.ico", "humans.txt",
+})
+
+
+def _is_benign_public_path(path: str) -> bool:
+    """True for the expected front door / standard public files, which are never
+    a 'sensitive' discovery no matter their status."""
+    p = (path or "").lower()
+    if p in _BENIGN_ENTRY_PATHS:
+        return True
+    return p.rsplit("/", 1)[-1] in _BENIGN_PUBLIC_FILES
+
+
+def _severity_for(path: str, status: int) -> str:
+    """Status-aware severity. The path-name ratings (exposed .env → critical, an
+    admin panel → high, …) apply ONLY when the resource is actually served. A
+    401/403 (access-controlled — the secure state) or a surviving 3xx (a path that
+    exists but redirects) is honest low/info discovery, never an "exposure"."""
     p = path.lower()
-    if any(x in p for x in [".git", ".env", "config", "backup", "credentials",
-                               "secret", "private", "password", ".sql", "dump",
-                               "phpinfo", "shell", "cmd.php", "adminer", "phpmyadmin"]):
+    if not _served(status):
+        return "low" if status in (401, 403) else "info"
+    # The VCS directory itself is source-code disclosure — critical. A .gitignore
+    # / .gitattributes / .github file is not (see _is_git_vcs_path).
+    if _is_git_vcs_path(p):
         return "critical"
-    if any(x in p for x in ["admin", "administrator", "login", "wp-admin",
+    if any(x in p for x in [".env", "config", "backup", "credentials",
+                               "secret", "private", "password", "db_backup",
+                               ".sql", "dump", "phpinfo", "shell", "cmd.php",
+                               "adminer", "phpmyadmin"]):
+        return "critical"
+    # "login" is intentionally NOT here: every app has a login page, so rating a
+    # discovered /login.php as high inflated risk on a normal, expected surface.
+    # Real admin panels are still caught by admin/administrator/wp-admin below.
+    if any(x in p for x in ["admin", "administrator", "wp-admin",
                                "jenkins", "grafana", "kibana", "console",
                                "debug", "actuator", "trace"]):
         return "high"
     if any(x in p for x in ["api", "swagger", "openapi", "graphql",
-                               "install", "setup"]):
+                               "install", "setup", "readme", "changelog"]):
         return "medium"
-    return "low"
+    return "info"
 
 
-def _path_title(path: str, status: int) -> str:
+def _path_title(path: str, status: int, served: bool = True) -> str:
     p = path.lower()
-    if ".git" in p:
+    # Access-controlled / redirecting paths exist but are NOT exposed — never
+    # title them "Exposed …". Report them honestly as discovery instead.
+    if not served:
+        if status == 403:
+            return f"Access-controlled resource (403) — {path}"
+        if status == 401:
+            return f"Authentication-required resource (401) — {path}"
+        if 300 <= status < 400:
+            return f"Path exists (redirects, {status}) — {path}"
+        return f"Path discovered — {path} ({status})"
+    if _is_git_vcs_path(p):
         return f"Exposed .git directory ({status})"
     if ".env" in p:
         return f"Exposed .env file ({status})"
@@ -644,10 +833,6 @@ def _path_title(path: str, status: int) -> str:
         return f"Backup/dump file exposed ({status})"
     if "phpinfo" in p:
         return f"phpinfo() page exposed ({status})"
-    if status == 403:
-        return f"Forbidden resource discovered — {path}"
-    if status == 401:
-        return f"Authentication-required resource — {path}"
     return f"Sensitive path discovered — {path} ({status})"
 
 

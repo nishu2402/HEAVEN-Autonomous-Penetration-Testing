@@ -33,6 +33,9 @@ CANONICAL_CATEGORIES = {
     # expansion (misconfig_scanner + oob_scanner). Kept as distinct categories
     # so the per-category benchmark table credits each one individually.
     "cors", "jwt", "insecure_cookie",
+    # Client-side DOM XSS (a source→sink flow in the page's own JavaScript),
+    # tracked apart from reflected/stored server-side XSS.
+    "dom_xss",
 }
 
 _TYPE_TO_CATEGORY: dict[str, str] = {
@@ -95,7 +98,8 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     # Authentication weaknesses
     "weak_auth": "weak_auth", "weak_credentials": "weak_auth",
     "default_credentials": "weak_auth", "no_rate_limit": "weak_auth",
-    "brute_force": "weak_auth",
+    "brute_force": "weak_auth", "no_account_lockout": "weak_auth",
+    "account_lockout_missing": "weak_auth", "missing_rate_limit": "weak_auth",
     # File upload
     "file_upload": "file_upload", "unrestricted_file_upload": "file_upload",
     # IDOR
@@ -112,6 +116,23 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     "deserialization": "deserialization", "insecure_deserialization": "deserialization",
     "broken_access_control": "broken_access_control",
     "security_misconfig": "security_misconfig",
+    # More missing/weak HTTP security headers → Security Misconfiguration (A05),
+    # complementing the header keys above. All real, server-wide gaps; credited
+    # against a labelled security_misconfig entry rather than scored as FPs.
+    "csp_missing": "security_misconfig", "missing_csp": "security_misconfig",
+    "x_frame_options_missing": "security_misconfig",
+    "no_x_content_type": "security_misconfig", "x_content_type_missing": "security_misconfig",
+    "no_referrer_policy": "security_misconfig", "referrer_policy_missing": "security_misconfig",
+    "no_permissions_policy": "security_misconfig",
+    "permissions_policy_missing": "security_misconfig",
+    # More session-cookie flags → insecure cookie (HttpOnly is mapped above).
+    "cookie_no_secure": "insecure_cookie", "cookie_no_samesite": "insecure_cookie",
+    "cookie_security": "insecure_cookie",
+    # An exposed file / path discloses information (A05 Security Misconfiguration
+    # / information disclosure).
+    "sensitive_file": "info_disclosure", "directory_listing": "info_disclosure",
+    # Client-side DOM XSS sink flows.
+    "dom_xss_sink": "dom_xss", "dom_xss": "dom_xss", "dom_based_xss": "dom_xss",
 }
 
 

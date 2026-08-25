@@ -34,7 +34,7 @@ export default class ErrorBoundary extends React.Component {
           <div className="error-boundary-icon">⚠</div>
           <h1 className="error-boundary-title">Something went wrong</h1>
           <p className="error-boundary-text">
-            This page hit an unexpected error. Your session is still active —
+            This page hit an unexpected error. Your session is still active, 
             try reloading, or head back to the dashboard.
           </p>
           <pre className="error-boundary-detail">{message}</pre>

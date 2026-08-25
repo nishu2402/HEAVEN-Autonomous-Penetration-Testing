@@ -44,7 +44,7 @@ export default function LateralPage() {
       }
       const uniq = [...new Set(pairs)];
       if (uniq.length === 0) {
-        setFormError("No SSH/SMB/RDP hosts in the active engagement's inventory yet — run a network scan first.");
+        setFormError("No SSH/SMB/RDP hosts in the active engagement's inventory yet, run a network scan first.");
       } else {
         setTargetsText(uniq.join("\n"));
       }
@@ -161,7 +161,7 @@ export default function LateralPage() {
         )}
         {loading && (
           <div className="dim" style={{ marginTop: 10, fontSize: 12 }}>
-            Running on the server — you can leave this page and come back; it won't stop.
+            Running on the server, you can leave this page and come back; it won't stop.
           </div>
         )}
       </div>
@@ -173,7 +173,7 @@ export default function LateralPage() {
       {result && (
         <div className="card" style={{ marginTop: 12 }}>
           <div className="card-title">
-            Summary — {result.successful} success(es) / {result.attempted} attempt(s)
+            Summary, {result.successful} success(es) / {result.attempted} attempt(s)
           </div>
           {result.method_breakdown && Object.keys(result.method_breakdown).length > 0 && (
             <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>

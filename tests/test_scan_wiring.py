@@ -29,7 +29,11 @@ def test_aiohttp_session_kwargs_uses_cookies_not_jar():
         assert kw.get("headers") == {"X-Auth": "1"}
     finally:
         clear_active_session()
-    assert aiohttp_session_kwargs() == {}
+    # Auth material is gone once the session is cleared; only the global
+    # per-target throttle's trace_config may ride along.
+    cleared = aiohttp_session_kwargs()
+    assert "cookies" not in cleared
+    assert "headers" not in cleared
 
 
 @pytest.mark.asyncio

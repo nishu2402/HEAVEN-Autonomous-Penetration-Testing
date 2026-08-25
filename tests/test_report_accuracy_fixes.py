@@ -152,17 +152,32 @@ async def test_dangerous_method_404_not_flagged():
 
 
 @pytest.mark.asyncio
-async def test_dangerous_method_success_is_flagged():
+async def test_dangerous_method_webdav_success_is_flagged():
     from heaven.vulnscan.web_fuzzer import _fuzz_verb_tampering
 
     def handler(method, url, **kw):
         if method in ("PUT", "DELETE"):
-            return _Resp(status=200, text="ok")   # genuine success
+            return _Resp(status=201, text="")   # genuine WebDAV success (Created)
         return _Resp(status=404, text="")
 
     findings = await _fuzz_verb_tampering(_FnSession(handler), "https://t/")
     assert [f for f in findings if f["vuln_type"] == "dangerous_http_method"], \
-        "a 200 success to DELETE/PUT SHOULD be reported"
+        "a 201/204 WebDAV success to DELETE/PUT SHOULD be reported"
+
+
+@pytest.mark.asyncio
+async def test_dangerous_method_200_page_served_is_not_flagged():
+    # A plain 200 that returns the page is the app IGNORING the method (Apache
+    # serves any verb PHP doesn't handle) — not a dangerous-method finding.
+    # This was a real FP on DVWA, where DELETE /login.php returns 200 HTML.
+    from heaven.vulnscan.web_fuzzer import _fuzz_verb_tampering
+
+    def handler(method, url, **kw):
+        return _Resp(status=200, text="<html>the page</html>")
+
+    findings = await _fuzz_verb_tampering(_FnSession(handler), "https://t/")
+    assert not [f for f in findings if f["vuln_type"] == "dangerous_http_method"], \
+        "a 200 (page served) to DELETE/PUT must NOT be flagged"
 
 
 # ── 4. http_smuggling_indicator ───────────────────────────────────────────────
@@ -234,17 +249,41 @@ async def test_race_divergent_successes_is_a_low_lead():
     from heaven.vulnscan.advanced_attacks import RaceConditionDetector
 
     calls = {"n": 0}
+    concurrent = 20
 
     def handler(method, url, **kw):
         calls["n"] += 1
-        # identical concurrent POSTs, all 200, but DIFFERENT success bodies →
-        # the genuine (weak) race signal.
-        return _Resp(status=200, text=f"balance-{calls['n']}")
+        # The genuine (weak) race signal: the CONCURRENT burst diverges (the
+        # state raced), but once serialised the endpoint is deterministic. The
+        # detector confirms that stability with two sequential probes AFTER the
+        # burst, so a merely-dynamic page (which diverges every time, even
+        # serially) is rejected — see test_race_dynamic_page_not_flagged.
+        if calls["n"] <= concurrent:
+            return _Resp(status=200, text=f"balance-{calls['n']}")
+        return _Resp(status=200, text="balance-final")   # stable when serialised
 
     r = await RaceConditionDetector.test_race(_FnSession(handler), "https://t/redeem",
-                                              method="POST", concurrent_requests=20)
+                                              method="POST", concurrent_requests=concurrent)
     assert r is not None
     assert r.severity == "low" and r.vuln_type == "race_condition"
+
+
+@pytest.mark.asyncio
+async def test_race_dynamic_page_not_flagged():
+    """A page whose body varies on EVERY request (phpinfo, CSRF tokens,
+    timestamps) is dynamic, not racing — its divergence appears under a serial
+    probe too, so it must never be flagged."""
+    from heaven.vulnscan.advanced_attacks import RaceConditionDetector
+
+    calls = {"n": 0}
+
+    def handler(method, url, **kw):
+        calls["n"] += 1
+        return _Resp(status=200, text=f"nonce-{calls['n']}")   # differs every call
+
+    r = await RaceConditionDetector.test_race(_FnSession(handler), "https://t/phpinfo.php",
+                                              method="POST", concurrent_requests=20)
+    assert r is None
 
 
 # ── 6. Exposed databases (coverage vs Shodan) ─────────────────────────────────

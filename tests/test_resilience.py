@@ -24,6 +24,18 @@ from heaven.vulnscan.oob_scanner import scan_oob  # noqa: E402
 from heaven.vulnscan.web_fuzzer import fuzz_url  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_throttle(monkeypatch):
+    """Measure the scanner's own hostile-response resilience at full request
+    parallelism. The global per-target throttle deliberately *paces* a distressed
+    host (a slow server reads as distress and gets serialised toward the floor),
+    which is correct behaviour but would push these deliberately-slow scans past
+    their wall-clock safety bound. The throttle's pacing is validated on its own
+    in tests/test_request_throttle.py; here it is off so it can't mask a real
+    hang behind legitimate back-off."""
+    monkeypatch.setenv("HEAVEN_NO_THROTTLE", "1")
+
+
 class HostileServer:
     """A local server that misbehaves in one chosen ``mode``."""
 

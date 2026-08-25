@@ -21,6 +21,7 @@ to a PLC, changes a register, or issues a control command.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 import socket
@@ -579,7 +580,7 @@ class IoTScanner:
         server = ""
         auth_required = False
         try:
-            async with aiohttp.ClientSession() as session:
+            async with _egress_cs() as session:
                 async with session.get(
                         base, ssl=False, allow_redirects=False,
                         timeout=aiohttp.ClientTimeout(total=self._timeout)) as resp:
@@ -648,7 +649,7 @@ class IoTScanner:
         import base64
         token = base64.b64encode(f"{user}:{pwd}".encode()).decode()
         try:
-            async with aiohttp.ClientSession() as session:
+            async with _egress_cs() as session:
                 async with session.get(
                         base, ssl=False, allow_redirects=False,
                         headers={"Authorization": f"Basic {token}"},

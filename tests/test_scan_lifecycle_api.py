@@ -44,6 +44,10 @@ def _seed(engagement: str, scans: dict[str, list[dict]]):
         store.record_scan_start(scan_id, name=scan_id, mode="web")
         for f in findings:
             store.upsert_finding(scan_id, f)
+        # Mark finished — these fixtures stand in for completed scans. A scan left
+        # 'running' is now treated as an interruptible zombie (delete → interrupted
+        # to preserve resume), so a "remove a finished scan" test needs them done.
+        store.record_scan_complete(scan_id, summary={})
     return store
 
 

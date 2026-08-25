@@ -30,16 +30,20 @@ def engage() -> None:
 @click.argument("name")
 @click.option("--client", default="", help="Client name")
 @click.option("--sow", default="", help="Statement of work / contract reference")
-def engage_init(name: str, client: str, sow: str) -> None:
+@click.option("--tester", default="", help="Tester name (who ran the assessment; shown on reports)")
+def engage_init(name: str, client: str, sow: str, tester: str) -> None:
     """Initialize a new engagement (creates <data_dir>/engagements/<name>.db)."""
     from heaven.engagement import EngagementStore
     path = _engagement_db_path(name)
     store = EngagementStore(path)
-    eng = store.create_engagement(name, client=client, statement_of_work=sow)
+    eng = store.create_engagement(name, client=client, statement_of_work=sow,
+                                  tester=tester)
     _print(f"[green]Engagement initialised:[/green] {path}")
     _print(f"  Name: {eng.name}")
     if eng.client:
         _print(f"  Client: {eng.client}")
+    if eng.tester:
+        _print(f"  Tester: {eng.tester}")
     _print(f"\nSet [cyan]HEAVEN_ENGAGEMENT={path}[/cyan] in your shell to use it by default.")
 
 
@@ -58,6 +62,8 @@ def engage_status(engagement: Optional[str]) -> None:
     _print(f"[cyan]Engagement:[/cyan] {eng.name if eng else '(no metadata)'}")
     if eng and eng.client:
         _print(f"[cyan]Client:[/cyan] {eng.client}")
+    if eng and eng.tester:
+        _print(f"[cyan]Tester:[/cyan] {eng.tester}")
     _print(f"[cyan]Targets in scope:[/cyan] {stats['scope_targets']}")
     _print(f"[cyan]Scans run:[/cyan] {stats['scans_run']}")
     _print(f"[cyan]Total findings:[/cyan] {stats['total_findings']}")

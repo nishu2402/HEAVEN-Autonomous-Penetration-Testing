@@ -25,6 +25,7 @@ is honestly labelled, never asserted as confirmed exploitation.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import re
 from urllib.parse import urljoin, urlparse
@@ -282,7 +283,11 @@ async def audit_url(session: "aiohttp.ClientSession", url: str) -> list[dict]:
     for js_url in srcs[:_MAX_SCRIPTS_PER_PAGE]:
         js, jct = await _fetch(session, js_url)
         if js and len(js) <= _MAX_JS_BYTES:
-            findings.extend(_analyse_js(url, js, f"linked:{urlparse(js_url).path}"))
+            # Attribute a linked-script sink to the JS FILE, not the including
+            # page. A shared bundle (a framework's page.js) is pulled in by many
+            # pages; keying the finding on the file collapses it to one per file
+            # instead of one per page that happens to include it.
+            findings.extend(_analyse_js(js_url, js, f"linked:{urlparse(js_url).path}"))
     return findings
 
 
@@ -320,7 +325,7 @@ async def scan_client_audit(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
     conn = aiohttp.TCPConnector(ssl=False, limit=15)
     ct = aiohttp.ClientTimeout(total=timeout)
     headers = {"User-Agent": "Mozilla/5.0 (compatible; HEAVEN-ClientAudit/1.0)"}
-    async with aiohttp.ClientSession(connector=conn, timeout=ct, headers=headers) as session:
+    async with _egress_cs(connector=conn, timeout=ct, headers=headers) as session:
         sem = asyncio.Semaphore(8)
 
         async def _one(u: str) -> None:

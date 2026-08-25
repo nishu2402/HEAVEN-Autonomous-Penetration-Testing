@@ -37,8 +37,10 @@ jobs:
           docker --version
           docker compose version
 
-      - name: Pull DVWA image (so the scan timer doesn't include image pull)
-        run: docker pull vulnerables/web-dvwa:latest
+      - name: Pull DVWA benchmark images (so the scan timer doesn't include image pulls)
+        run: |
+          docker pull ghcr.io/digininja/dvwa:latest
+          docker pull mariadb:11
 
       - name: Run benchmark
         env:

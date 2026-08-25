@@ -97,12 +97,18 @@ class FPReviewer:
         lo, hi = self.review_band
         return lo <= confidence < hi
 
-    async def review(self, finding: dict) -> Optional[FPReviewVerdict]:
-        """Return a verdict, or None if the finding is out of band / LLM unavailable."""
+    async def review(self, finding: dict, *, force: bool = False) -> Optional[FPReviewVerdict]:
+        """Return a verdict, or None if the finding is out of band / LLM unavailable.
+
+        ``force=True`` bypasses the borderline-band gate: the automatic bulk pass
+        only reviews findings inside :data:`DEFAULT_REVIEW_BAND` to bound cost, but
+        when an operator explicitly asks for a second opinion on ONE finding they
+        want a verdict regardless of where its confidence sits.
+        """
         if not self.available:
             return None
         conf = float(finding.get("confidence", 0))
-        if not self.in_band(conf):
+        if not force and not self.in_band(conf):
             return None
 
         prompt = self._build_prompt(finding)

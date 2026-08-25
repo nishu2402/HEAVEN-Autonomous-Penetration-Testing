@@ -4,6 +4,7 @@ Maps endpoints, extracts JS files, identifies input vectors, and fingerprints te
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import asyncio
 import re
@@ -129,7 +130,7 @@ async def crawl_url(
         if auth_config.get("bearer_token"):
             _extra_headers["Authorization"] = f"Bearer {auth_config['bearer_token']}"
 
-    async with aiohttp.ClientSession(
+    async with _egress_cs(
         headers={**(evasion_headers or {}), **_extra_headers},
         cookies=_cookies,
         timeout=aiohttp.ClientTimeout(total=timeout),
@@ -244,7 +245,7 @@ async def extract_js_endpoints(js_urls: list[str], timeout: float = 10.0) -> lis
     from heaven.feedback import resolve_js_endpoint
 
     discovered: set[str] = set()
-    async with aiohttp.ClientSession(
+    async with _egress_cs(
         timeout=aiohttp.ClientTimeout(total=timeout),
         connector=aiohttp.TCPConnector(ssl=False),
     ) as session:
@@ -274,7 +275,7 @@ async def discover_apis(base_url: str, timeout: float = 10.0, evasion_headers: O
     api_paths = ["/swagger.json", "/openapi.json", "/v3/api-docs", "/api/v1/swagger.json", "/api/swagger.json", "/docs-json"]
     endpoints = []
     
-    async with aiohttp.ClientSession(
+    async with _egress_cs(
         headers=evasion_headers or {},
         timeout=aiohttp.ClientTimeout(total=timeout),
         connector=aiohttp.TCPConnector(ssl=False)
@@ -348,6 +349,20 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
     total_vectors = sum(len(ep.input_vectors) for ep in all_endpoints)
     logger.info(f"Web crawl: {len(all_endpoints)} pages, {total_vectors} input vectors, {len(js_endpoints)} JS endpoints")
 
+    # Preserve the actual form structures per URL so downstream scanners that
+    # reason over whole forms (auth_scanner's CSRF / session-fixation audits,
+    # idor_scanner) can consume them. The endpoint summary keeps only a form
+    # COUNT, which is why those audits used to receive nothing. Normalise the
+    # crawler's `inputs` list to the `fields` key every consumer reads.
+    url_forms: dict[str, list[dict]] = {}
+    for ep in all_endpoints:
+        for f in ep.forms:
+            url_forms.setdefault(ep.url, []).append({
+                "action": f.get("action") or ep.url,
+                "method": (f.get("method") or "GET"),
+                "fields": f.get("inputs") or f.get("fields") or [],
+            })
+
     return {
         "endpoints": [
             {"url": ep.url, "status": ep.status_code, "server": ep.server,
@@ -357,6 +372,7 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
         ],
         "js_endpoints": js_endpoints,
         "input_vectors": total_vectors,
+        "url_forms": url_forms,
     }
 
 

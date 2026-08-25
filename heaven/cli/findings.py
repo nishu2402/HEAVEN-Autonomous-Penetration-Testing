@@ -200,6 +200,11 @@ def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
         status=status, min_confidence=min_confidence, limit=10000,
     )
     all_findings = [f for f in all_findings if f.severity in keep_sev]
+    # Unless the caller explicitly asked for a status (e.g. --status false_positive
+    # to audit them), false-positives are excluded from the exported deliverable.
+    if not status:
+        all_findings = [f for f in all_findings
+                        if (f.status or "").lower() != "false_positive"]
 
     finding_dicts = []
     for f in all_findings:
@@ -406,7 +411,9 @@ def report(engagement: Optional[str], output: str, framework: str) -> None:
     from heaven.engagement import EngagementStore
     from heaven.devsecops.compliance_report import ComplianceReportGenerator
     store = EngagementStore(_engagement_db_path(engagement))
-    findings_list = store.list_findings(limit=10000)
+    # False-positives are triaged out of the client deliverable.
+    findings_list = [f for f in store.list_findings(limit=10000)
+                     if (f.status or "").lower() != "false_positive"]
     finding_dicts = [{"id": f.id, "target": f.target, "vuln_type": f.vuln_type,
                       "title": f.title, "severity": f.severity,
                       "confidence": f.confidence,

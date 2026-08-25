@@ -139,7 +139,7 @@ export default function CoveragePage() {
           </div>
 
           <div className="card" style={{ marginTop: 12 }}>
-            <div className="card-title">OWASP Top 10 (2025) — per-category coverage</div>
+            <div className="card-title">OWASP Top 10 (2025): per-category coverage</div>
             <table className="data-table">
               <tbody>
                 {(report.owasp_top10 || []).map((c) => (
@@ -159,15 +159,15 @@ export default function CoveragePage() {
           {/* Domain-specific frameworks — scored against the right standard, shown
               only when the engagement produced findings of that kind. */}
           {(report.owasp_api_top10 || []).some((c) => c.findings > 0) && (
-            <FrameworkCard title="OWASP API Security Top 10 (2023) — API findings"
+            <FrameworkCard title="OWASP API Security Top 10 (2023): API findings"
                            rows={report.owasp_api_top10} />
           )}
           {(report.owasp_iot || []).length > 0 && (
-            <FrameworkCard title="OWASP IoT Top 10 (2018) — device findings"
+            <FrameworkCard title="OWASP IoT Top 10 (2018): device findings"
                            rows={report.owasp_iot} />
           )}
           {(report.ot_ics || []).length > 0 && (
-            <FrameworkCard title="OT / ICS Security (IEC 62443) — industrial findings"
+            <FrameworkCard title="OT / ICS Security (IEC 62443): industrial findings"
                            rows={report.ot_ics} />
           )}
 

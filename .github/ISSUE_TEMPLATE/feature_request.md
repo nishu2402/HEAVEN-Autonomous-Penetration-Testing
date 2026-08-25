@@ -12,7 +12,7 @@ What part of a pen-test does HEAVEN make harder than it should be?
 
 ## Your proposed solution
 
-What should HEAVEN do? Be specific — UI mockup, CLI flag spec, or
+What should HEAVEN do? Be specific, UI mockup, CLI flag spec, or
 API schema preferred over hand-wavy descriptions.
 
 ## Alternatives considered

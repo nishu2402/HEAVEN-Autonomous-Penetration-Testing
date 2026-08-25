@@ -533,6 +533,35 @@ def _finding_vuln_type(f: Any) -> str:
     return str(getattr(f, "vuln_type", "") or getattr(f, "type", "") or "")
 
 
+def _finding_field(f: Any, *names: str) -> str:
+    """First non-empty of ``names`` from a finding (dict or object), as str."""
+    for n in names:
+        v = f.get(n) if isinstance(f, dict) else getattr(f, n, None)
+        if v not in (None, ""):
+            return str(v)
+    return ""
+
+
+# Severity rank for ordering the aligned-findings list (worst first).
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "informational": 4}
+
+
+def _finding_ref(f: Any) -> dict[str, str]:
+    """Compact, serialisable identity for one finding, for the row overlay.
+
+    Carries just enough for the Methodology page to show which findings a test
+    exercised and to link straight to the finding detail — id, title, severity,
+    target, vuln_type. Everything degrades to '' when absent (never fabricated).
+    """
+    return {
+        "id": _finding_field(f, "id"),
+        "title": _finding_field(f, "title") or _finding_vuln_type(f) or "Finding",
+        "severity": (_finding_field(f, "severity") or "info").lower(),
+        "target": _finding_field(f, "target", "host", "url"),
+        "vuln_type": _finding_vuln_type(f),
+    }
+
+
 def _finding_owasp(f: Any) -> str:
     from heaven.devsecops import frameworks as _fw
     if isinstance(f, dict):
@@ -561,6 +590,22 @@ def module_counts(findings: Iterable[Any]) -> dict[str, int]:
     return counts
 
 
+def module_findings(findings: Iterable[Any]) -> dict[str, list[dict[str, str]]]:
+    """Detector token → the list of finding refs it produced.
+
+    The per-token companion to :func:`module_counts` — it powers the row-level
+    "which findings exercised this test?" overlay. A finding maps to every token
+    of its ``vuln_type`` (a finding can name more than one detector), so the same
+    ref may appear under several tokens; the row overlay dedups by id.
+    """
+    out: dict[str, list[dict[str, str]]] = {}
+    for f in findings:
+        ref = _finding_ref(f)
+        for tok in modules_for_vuln(_finding_vuln_type(f)):
+            out.setdefault(tok, []).append(ref)
+    return out
+
+
 def overlay_findings(standards: list[dict[str, Any]], findings: list[Any]) -> dict[str, Any]:
     """Annotate parsed standards in-place with per-row engagement coverage.
 
@@ -568,7 +613,15 @@ def overlay_findings(standards: list[dict[str, Any]], findings: list[Any]) -> di
     detector token it names produced at least one finding in this engagement.
     """
     counts = module_counts(findings)
+    per_token = module_findings(findings)
     active_tokens = set(counts)
+    # Generous per-row cap: high enough that a real engagement's whole aligned
+    # set is shown on the page (the operator asked to see them all here), but
+    # still bounded so a pathological run can't bloat the payload. ``findings``
+    # and ``exercised_count`` are kept in lock-step — the count is the number of
+    # DISTINCT findings that lit the row, never a token-hit sum — so the UI never
+    # advertises "+N more" for findings it is actually already showing.
+    _MAX_ROW_REFS = 500
 
     for std in standards:
         rows_exercised = 0
@@ -577,14 +630,36 @@ def overlay_findings(standards: list[dict[str, Any]], findings: list[Any]) -> di
             cat_ex = 0
             for row in cat["rows"]:
                 cov = row["coverage"]
-                hit = sum(counts[t] for t in active_tokens if t in cov)
+                # Attach the concrete findings that lit this row — every ref from
+                # a detector token named in the coverage cell, DEDUPED BY IDENTITY
+                # and ordered worst-severity first. A finding can name more than
+                # one detector token that appears in the same coverage cell, so
+                # deduping is what makes the count honest: ``exercised_count`` is
+                # the number of distinct findings, not the number of token hits.
+                seen: set[str] = set()
+                refs: list[dict[str, str]] = []
+                for tok in active_tokens:
+                    if tok not in cov:
+                        continue
+                    for ref in per_token.get(tok, ()):
+                        key = ref.get("id") or f"{ref['vuln_type']}|{ref['target']}|{ref['title']}"
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        refs.append(ref)
+                refs.sort(key=lambda r: (_SEV_RANK.get(r.get("severity", "info"), 4),
+                                         r.get("title", "")))
+                hit = len(refs)
                 row["exercised"] = hit > 0
                 row["exercised_count"] = hit
                 if hit > 0:
+                    row["findings"] = refs[:_MAX_ROW_REFS]
                     rows_exercised += 1
                     cat_ex += 1
                     if row["status"] in ("automated", "partial"):
                         covered_exercised += 1
+                else:
+                    row["findings"] = []
             cat["exercised"] = cat_ex
         std["summary"]["exercised"] = rows_exercised
         std["summary"]["exercised_covered"] = covered_exercised
@@ -606,3 +681,240 @@ def build(findings: Optional[list[Any]] = None,
     standards = load_standards(docs_dir)
     engagement = overlay_findings(standards, findings or [])
     return {"standards": standards, "engagement": engagement}
+
+
+# ── Downloadable coverage report for ONE standard ────────────────────────────
+# The same live matrix the web page shows — coverage rows + which findings each
+# test exercised — rendered as a standalone, printable deliverable so an operator
+# can hand a client (or auditor) the methodology / compliance coverage for a
+# specific standard. HTML (print-to-PDF), Markdown and JSON.
+
+from html import escape as _esc  # noqa: E402
+
+
+_STATUS_LABEL = {"automated": "Automated", "partial": "Partial", "manual": "Manual"}
+
+
+def find_standard(built: dict[str, Any], name: str) -> Optional[dict[str, Any]]:
+    """The parsed+overlaid standard dict for a doc stem, or ``None``."""
+    for s in built.get("standards", []):
+        if s.get("name") == name:
+            return s
+    return None
+
+
+def _coverage_intro(std: dict[str, Any], eng_name: str) -> str:
+    su = std.get("summary", {})
+    return (f"{su.get('covered', 0)} of {su.get('total', 0)} tests are automated by "
+            f"HEAVEN; {su.get('exercised', 0)} were exercised in "
+            f"{eng_name or 'this engagement'}.")
+
+
+def render_coverage_html(std: dict[str, Any], eng_name: str = "") -> str:
+    """One standard's live coverage matrix as a self-contained printable HTML."""
+    su = std.get("summary", {})
+    title = std.get("meta_title") or std.get("title") or std.get("name", "")
+    sub = std.get("subtitle", "")
+    generated = _now_utc()
+
+    def _refs_html(row: dict[str, Any]) -> str:
+        refs = row.get("findings") or []
+        if not refs:
+            return ""
+        lis = "".join(
+            f"<li><span class='sev sev-{_esc(r.get('severity', 'info'))}'>"
+            f"{_esc((r.get('severity') or 'info').upper())}</span> "
+            f"{_esc(r.get('title') or r.get('vuln_type') or 'Finding')}"
+            f"{' — <code>' + _esc(r['target']) + '</code>' if r.get('target') else ''}</li>"
+            for r in refs)
+        extra = ""
+        if row.get("exercised_count", 0) > len(refs):
+            extra = f"<li class='muted'>+{row['exercised_count'] - len(refs)} more…</li>"
+        return f"<ul class='refs'>{lis}{extra}</ul>"
+
+    cats_html = ""
+    for cat in std.get("categories", []):
+        rows = cat.get("rows") or []
+        if not rows:
+            note = _esc(cat.get("note") or "No automated tests in this category.")
+            cats_html += (f"<h3>{_esc(cat.get('title', ''))}</h3>"
+                          f"<p class='muted'>{note}</p>")
+            continue
+        body = ""
+        for r in rows:
+            ex = "✓" if r.get("exercised") else ""
+            status = _STATUS_LABEL.get(r.get("status", "manual"), "Manual")
+            body += (
+                f"<tr class='{'hit' if r.get('exercised') else ''}'>"
+                f"<td class='mono'>{ex} {_esc(r.get('id', ''))}</td>"
+                f"<td>{_esc(r.get('description') or r.get('item') or '')}</td>"
+                f"<td class='mono small'>{_esc(r.get('coverage', ''))}</td>"
+                f"<td>{status}</td>"
+                f"<td>{_refs_html(r)}</td></tr>")
+        cats_html += (
+            f"<h3>{_esc(cat.get('title', ''))}</h3>"
+            "<table><tr><th>Test</th><th>Description</th><th>HEAVEN detector</th>"
+            "<th>Status</th><th>Exercised findings</th></tr>"
+            f"{body}</table>")
+
+    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_esc(title)} — Coverage · {_esc(eng_name)}</title>
+<style>
+ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+   color:#1a1f29;background:#f4f6f9;margin:0;line-height:1.55;font-size:14px;}}
+ .page{{background:#fff;max-width:900px;margin:24px auto;padding:40px 48px;box-shadow:0 1px 4px rgba(0,0,0,.08);}}
+ h1{{font-size:26px;margin:0 0 4px;}} h2{{font-size:18px;border-bottom:2px solid #4f46e5;padding-bottom:6px;}}
+ h3{{font-size:15px;margin:22px 0 6px;color:#33405a;}}
+ table{{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0 4px;}}
+ th{{background:#f0f3f8;text-align:left;padding:7px 9px;border:1px solid #e3e7ee;color:#33405a;}}
+ td{{padding:7px 9px;border:1px solid #e3e7ee;vertical-align:top;overflow-wrap:anywhere;}}
+ tr.hit{{background:#eef4ff;}}
+ .mono{{font-family:ui-monospace,Menlo,Consolas,monospace;}} .small{{font-size:11.5px;}} .muted{{color:#5b6472;}}
+ .kpis{{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0;}}
+ .kpi{{flex:1;min-width:110px;border:1px solid #e3e7ee;border-radius:10px;padding:12px;text-align:center;background:#fcfdff;}}
+ .kpi .n{{font-size:26px;font-weight:800;}} .kpi .l{{font-size:11px;color:#5b6472;text-transform:uppercase;letter-spacing:.05em;margin-top:4px;}}
+ .refs{{margin:2px 0 0 0;padding-left:16px;}} .refs li{{margin:2px 0;}}
+ .sev{{display:inline-block;padding:0 6px;border-radius:4px;font-size:10px;font-weight:700;color:#fff;}}
+ .sev-critical{{background:#b00020;}} .sev-high{{background:#e2571e;}} .sev-medium{{background:#b8860b;}}
+ .sev-low{{background:#2b6cb0;}} .sev-info,.sev-informational{{background:#5b6472;}}
+ .toolbar{{position:fixed;top:16px;right:16px;}} .btn{{background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:9px 15px;font-weight:600;cursor:pointer;}}
+ @media print{{body{{background:#fff;}} .page{{box-shadow:none;margin:0;max-width:none;padding:0;}} .no-print{{display:none;}} tr{{page-break-inside:avoid;}}}}
+</style></head><body>
+ <div class="toolbar no-print"><button class="btn" onclick="window.print()">🖨 Print / Save as PDF</button></div>
+ <div class="page">
+  <h1>{_esc(title)} — Coverage</h1>
+  <p class="muted">{_esc(sub)} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng_name or '—')}</strong>
+     &nbsp;·&nbsp; Generated {_esc(generated)}</p>
+  <p>{_esc(_coverage_intro(std, eng_name))}</p>
+  <div class="kpis">
+   <div class="kpi"><div class="n">{su.get('total', 0)}</div><div class="l">Tests mapped</div></div>
+   <div class="kpi"><div class="n">{su.get('covered', 0)}</div><div class="l">Automated</div></div>
+   <div class="kpi"><div class="n">{su.get('manual', 0)}</div><div class="l">Manual / OOS</div></div>
+   <div class="kpi"><div class="n">{su.get('exercised', 0)}</div><div class="l">Exercised here</div></div>
+  </div>
+  {cats_html}
+  <p class="muted small" style="margin-top:26px">Generated by HEAVEN Autonomous Penetration-Testing Platform.
+   A test is marked ✓ exercised when the detector it names produced a finding in this engagement.</p>
+ </div>
+</body></html>"""
+
+
+def render_coverage_markdown(std: dict[str, Any], eng_name: str = "") -> str:
+    su = std.get("summary", {})
+    title = std.get("meta_title") or std.get("title") or std.get("name", "")
+    lines = [
+        f"# {title} — Coverage",
+        "",
+        f"*{std.get('subtitle', '')}* · Engagement: **{eng_name or '—'}** · Generated {_now_utc()}",
+        "",
+        _coverage_intro(std, eng_name),
+        "",
+        f"- Tests mapped: **{su.get('total', 0)}**",
+        f"- Automated by HEAVEN: **{su.get('covered', 0)}** "
+        f"(auto {su.get('automated', 0)} · partial {su.get('partial', 0)})",
+        f"- Manual / out-of-scope: **{su.get('manual', 0)}**",
+        f"- Exercised in this engagement: **{su.get('exercised', 0)}**",
+        "",
+    ]
+    for cat in std.get("categories", []):
+        lines.append(f"## {cat.get('title', '')}")
+        rows = cat.get("rows") or []
+        if not rows:
+            lines.append(f"_{cat.get('note') or 'No automated tests in this category.'}_")
+            lines.append("")
+            continue
+        lines.append("| Test | Description | HEAVEN detector | Status | Exercised |")
+        lines.append("|---|---|---|---|---|")
+        for r in rows:
+            ex = "✓" if r.get("exercised") else ""
+            refs = r.get("findings") or []
+            ref_txt = "; ".join(
+                f"{(rf.get('severity') or 'info').upper()} {rf.get('title') or rf.get('vuln_type')}"
+                f"{' (' + rf['target'] + ')' if rf.get('target') else ''}"
+                for rf in refs)
+            if r.get("exercised_count", 0) > len(refs):
+                ref_txt += f"; +{r['exercised_count'] - len(refs)} more"
+            desc = str(r.get("description") or r.get("item") or "").replace("|", "\\|")
+            cov = str(r.get("coverage", "")).replace("|", "\\|")
+            ref_txt = ref_txt.replace("|", "\\|")
+            status = _STATUS_LABEL.get(r.get("status", "manual"), "Manual")
+            lines.append(
+                f"| {ex} {r.get('id', '')} | {desc} | {cov} | {status} | {ref_txt} |")
+        lines.append("")
+    lines.append("_Generated by HEAVEN Autonomous Penetration-Testing Platform._")
+    return "\n".join(lines)
+
+
+def render_coverage_pdf(std: dict[str, Any], eng_name: str = "") -> bytes:
+    """One standard's live coverage matrix as a PDF (reportlab).
+
+    Renders the exact same overlaid matrix as :func:`render_coverage_html` /
+    :func:`render_coverage_markdown`, so the three deliverables never diverge.
+    Raises ``RuntimeError`` when reportlab is not installed (the API turns that
+    into an actionable 503).
+    """
+    from heaven.devsecops.coverage_pdf import MatrixSection, render_matrix_pdf
+
+    su = std.get("summary", {})
+    title = std.get("meta_title") or std.get("title") or std.get("name", "")
+    sub = std.get("subtitle", "")
+
+    def _refs_text(row: dict[str, Any]) -> str:
+        refs = row.get("findings") or []
+        if not refs:
+            return "—"
+        parts = [
+            f"{(r.get('severity') or 'info').upper()} "
+            f"{r.get('title') or r.get('vuln_type') or 'Finding'}"
+            f"{' (' + r['target'] + ')' if r.get('target') else ''}"
+            for r in refs]
+        if row.get("exercised_count", 0) > len(refs):
+            parts.append(f"+{row['exercised_count'] - len(refs)} more")
+        return "; ".join(parts)
+
+    sections: list[MatrixSection] = []
+    for cat in std.get("categories", []):
+        rows = cat.get("rows") or []
+        if not rows:
+            sections.append(MatrixSection(
+                heading=cat.get("title", ""), columns=[],
+                note=cat.get("note") or "No automated tests in this category."))
+            continue
+        body_rows = []
+        highlight = []
+        for r in rows:
+            ex = "✓ " if r.get("exercised") else ""
+            body_rows.append([
+                f"{ex}{r.get('id', '')}",
+                r.get("description") or r.get("item") or "",
+                r.get("coverage", ""),
+                _STATUS_LABEL.get(r.get("status", "manual"), "Manual"),
+                _refs_text(r),
+            ])
+            highlight.append(bool(r.get("exercised")))
+        sections.append(MatrixSection(
+            heading=cat.get("title", ""),
+            columns=["Test", "Description", "HEAVEN detector", "Status",
+                     "Exercised findings"],
+            rows=body_rows, highlight=highlight,
+            col_ratios=[0.14, 0.24, 0.24, 0.10, 0.28]))
+
+    return render_matrix_pdf(
+        title=f"{title} — Coverage",
+        subtitle=sub,
+        meta_lines=[f"Engagement: {eng_name or '—'}  ·  Generated {_now_utc()}"],
+        intro=_coverage_intro(std, eng_name),
+        kpis=[(su.get("total", 0), "Tests mapped"),
+              (su.get("covered", 0), "Automated"),
+              (su.get("manual", 0), "Manual / OOS"),
+              (su.get("exercised", 0), "Exercised here")],
+        sections=sections,
+        footer="Generated by HEAVEN Autonomous Penetration-Testing Platform. A test "
+               "is marked ✓ exercised when the detector it names produced a "
+               "finding in this engagement.")
+
+
+def _now_utc() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M UTC")

@@ -106,7 +106,7 @@ export default function Header({ onMenu }) {
           </div>
         ) : (
           <span className="eng-warn">
-            ⚠ No active engagement — run <span className="mono">heaven engage init &lt;name&gt;</span>
+            ⚠ No active engagement, run <span className="mono">heaven engage init &lt;name&gt;</span>
           </span>
         )}
       </div>
@@ -116,7 +116,7 @@ export default function Header({ onMenu }) {
             type="button"
             className="scan-running-badge"
             onClick={() => navigate("/scans")}
-            title={`${running} scan${running !== 1 ? "s" : ""} in progress — view`}
+            title={`${running} scan${running !== 1 ? "s" : ""} in progress, view`}
           >
             <span className="scan-running-dot" />
             {running} scanning
@@ -127,7 +127,7 @@ export default function Header({ onMenu }) {
             type="button"
             className="scan-running-badge job-running-badge"
             onClick={() => navigate(runningJobs[0].path || "/")}
-            title={runningJobs.map((j) => j.label || j.key).join(", ") + " — running (safe to navigate away)"}
+            title={runningJobs.map((j) => j.label || j.key).join(", ") + ", running (safe to navigate away)"}
           >
             <span className="scan-running-dot" />
             {runningJobs.length === 1
@@ -141,7 +141,7 @@ export default function Header({ onMenu }) {
             title={
               siem.siem_backends_active.length
                 ? `SIEM forwarding active: ${siem.siem_backends_active.join(", ")}`
-                : "No SIEM configured — set HEAVEN_SPLUNK_HEC_* or HEAVEN_ELASTIC_* env vars"
+                : "No SIEM configured: set HEAVEN_SPLUNK_HEC_* or HEAVEN_ELASTIC_* env vars"
             }
             style={{
               borderColor: siem.siem_backends_active.length ? "var(--brand)" : "var(--border)",

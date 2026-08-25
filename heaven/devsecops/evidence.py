@@ -105,10 +105,36 @@ class EvidencePackage:
             or bool(self.response_excerpt)
         )
 
+    def _candidate_cve_markdown(self) -> list[str]:
+        """Render the candidate-CVE awareness table for a version-undetermined
+        ``potential_vulnerable_service`` finding. Names every CVE known for the
+        product with its published score, the affected-version range it *requires*,
+        and whether a public exploit exists — full awareness, nothing asserted as
+        present. Empty for any other finding."""
+        details = self.evidence_data.get("candidate_details") or []
+        if not details:
+            return []
+        out = ["**Candidate CVEs (UNVERIFIED, version not confirmed):**", ""]
+        out.append("| CVE | CVSS | Severity | Affected versions | Exploit | Description |")
+        out.append("|-----|------|----------|-------------------|---------|-------------|")
+        for d in details:
+            expl = "public" if d.get("exploit_available") else "—"
+            out.append(
+                f"| {d.get('cve','')} | {d.get('cvss','')} | "
+                f"{str(d.get('severity','')).title()} | "
+                f"{d.get('affected_versions','') or '—'} | {expl} | "
+                f"{str(d.get('title','')).replace('|', '/')} |")
+        out.append("")
+        hint = self.evidence_data.get("how_to_confirm")
+        if hint:
+            out.append(f"**How to confirm the version:** {hint}")
+            out.append("")
+        return out
+
     def to_markdown(self) -> str:
         """Render as a Markdown block suitable for a pentest report."""
         lines = [
-            f"### {self.vuln_type.upper()} — {self.target}",
+            f"### {self.vuln_type.upper()} · {self.target}",
             "",
             f"**ID:** `{self.finding_id}`  ",
             f"**Severity:** {self.severity}  ",
@@ -177,13 +203,19 @@ class EvidencePackage:
             if self.description:
                 lines.append(self.description)
                 lines.append("")
+            # The candidate-CVE table (version-undetermined "potential" finding)
+            # is rendered as its own structured block below, so keep it — and the
+            # keys it supersedes — out of the flat key/value "Observed" dump.
+            _CANDIDATE_KEYS = {"candidate_details", "candidate_cves",
+                               "how_to_confirm", "verification"}
             observed = {k: v for k, v in self.evidence_data.items()
-                        if v not in (None, "", [], {})}
+                        if v not in (None, "", [], {}) and k not in _CANDIDATE_KEYS}
             if observed:
                 lines.append("**Observed:**")
                 for k, v in observed.items():
                     lines.append(f"- **{k}:** {_evidence_value(v)}")
                 lines.append("")
+            lines.extend(self._candidate_cve_markdown())
 
         # Why
         if self.reasons:
@@ -435,9 +467,9 @@ def build_repro_command(vuln_type: str, target: str,
             return cmd.strip(), ""
 
     src = (ev.get("source") or ev.get("detection_source") or "").strip()
-    note = (f"Observed via {src}; no single-command reproduction — see the "
+    note = (f"Observed via {src}; no single-command reproduction, see the "
             "evidence above." if src else
-            "Observed by HEAVEN; no single-command reproduction — see the "
+            "Observed by HEAVEN; no single-command reproduction, see the "
             "evidence above.")
     return "", note
 
@@ -594,7 +626,8 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
 
 def export_findings_markdown(findings: list[dict], engagement_name: str = "",
                              assets: Optional[list[dict]] = None,
-                             dns_records: Optional[list[dict]] = None) -> str:
+                             dns_records: Optional[list[dict]] = None,
+                             compliance_framework: Optional[str] = None) -> str:
     """Render multiple findings as a single Markdown report.
 
     When ``assets`` (raw network-scan host records) are supplied, a
@@ -602,6 +635,9 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
     appended so the written report matches what the terminal and web UI show.
     When ``dns_records`` (raw DNS enumeration) are supplied, a "DNS Enumeration"
     section (records + resolved subdomains) is appended too.
+    When ``compliance_framework`` names a framework (``hipaa``, ``uk_gdpr``, …),
+    a control-coverage mapping section is appended (evidence view, not an
+    attestation).
     """
     from datetime import datetime, timezone
     out = []
@@ -648,7 +684,47 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
         if section:
             out.append(section)
 
+    if compliance_framework:
+        section = _render_compliance_md(findings, compliance_framework)
+        if section:
+            out.append(section)
+
     return "\n".join(out)
+
+
+def _render_compliance_md(findings: list[dict], framework_id: str) -> str:
+    """Markdown control-coverage matrix for one compliance framework, or ''."""
+    from heaven.devsecops import compliance_frameworks as _cf
+    fw = _cf.get_framework(framework_id)
+    if fw is None:
+        return ""
+    buckets = _cf.covered_controls(fw, findings)
+    total = len(fw.controls)
+    covered = sum(1 for cid, _ in fw.controls if buckets[cid])
+    lines = [
+        f"## {fw.title} Compliance Mapping",
+        "",
+        f"*{fw.subtitle}*, {covered} of {total} controls have findings providing "
+        "evidence of a gap. This is a **control-coverage view, not an attestation "
+        "of compliance**.",
+        "",
+        "| Control | Requirement | Status | Count | Example findings |",
+        "|---|---|---|---|---|",
+    ]
+    for cid, cn in fw.controls:
+        hits = buckets[cid]
+        status = "Findings present" if hits else "Not observed"
+        ex = "; ".join(
+            f"{h.get('title') or h.get('vuln_type') or 'Finding'}"
+            f" ({h.get('severity', 'info')})"
+            for h in hits[:4])
+        if len(hits) > 4:
+            ex += f"; +{len(hits) - 4} more"
+        cn_esc = str(cn).replace("|", "\\|")
+        ex = ex.replace("|", "\\|")
+        lines.append(f"| {cid} | {cn_esc} | {status} | {len(hits)} | {ex} |")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def export_findings_csv(findings: list[dict]) -> str:

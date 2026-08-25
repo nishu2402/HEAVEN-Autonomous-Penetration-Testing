@@ -50,8 +50,8 @@ export default function CvePage() {
         <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🧾 CVE Lookup · Live Feed</h2>
         <p className="page-lead">
           Dynamic CVE discovery for products <strong>not</strong> in HEAVEN's curated
-          offline DB. Queries authoritative live feeds — <strong>NVD</strong> (CPE-matched,
-          KEV-aware) and <strong>CIRCL CVE-Search</strong> (keyless fallback) — then merges,
+          offline DB. Queries authoritative live feeds, <strong>NVD</strong> (CPE-matched,
+          KEV-aware) and <strong>CIRCL CVE-Search</strong> (keyless fallback), then merges,
           de-duplicates, enriches with <strong>EPSS</strong> (exploitation probability) and{" "}
           <strong>Exploit-DB</strong> (public PoC availability), and marks which CVEs a concrete
           version is actually confirmed to be affected by. Results are disk-cached, so repeats
@@ -67,7 +67,7 @@ export default function CvePage() {
                    placeholder="openssh · nginx · log4j · apache …" />
           </label>
           <label className="form-group">
-            <span className="form-label">Version (optional — enables version-confirm)</span>
+            <span className="form-label">Version (optional: enables version-confirm)</span>
             <input className="form-input mono-input" type="text" value={version}
                    style={{ minWidth: 0 }}
                    onChange={(e) => setVersion(e.target.value)} onKeyDown={onKey}
@@ -84,7 +84,7 @@ export default function CvePage() {
                    placeholder="openbsd" />
           </label>
           <label className="form-group">
-            <span className="form-label">Exact CPE 2.3 (optional — overrides product/version)</span>
+            <span className="form-label">Exact CPE 2.3 (optional: overrides product/version)</span>
             <input className="form-input mono-input" type="text" value={cpe}
                    style={{ minWidth: 0 }}
                    onChange={(e) => setCpe(e.target.value)} onKeyDown={onKey}
@@ -134,7 +134,7 @@ export default function CvePage() {
               <div className="dim" style={{ padding: 8, lineHeight: 1.65 }}>
                 No CVEs came back for this query. Common causes:
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                  <li>The product/vendor spelling doesn't match NVD's CPE dictionary —
+                  <li>The product/vendor spelling doesn't match NVD's CPE dictionary, 
                     try the <strong>Vendor</strong> field or an exact <strong>CPE 2.3</strong>.</li>
                   <li>NVD rate-limited the request (only ~5 lookups / 30&nbsp;s without a key).
                     Add an <code>NVD_API_KEY</code> in{" "}

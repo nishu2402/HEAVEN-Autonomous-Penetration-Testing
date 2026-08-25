@@ -5,6 +5,7 @@ pod security, container escape detection, etcd exposure.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import os
 import socket
@@ -104,7 +105,7 @@ class DockerScanner:
         if HAS_AIOHTTP:
             for port in [2375, 2376]:
                 try:
-                    async with aiohttp.ClientSession() as session:
+                    async with _egress_cs() as session:
                         url = f"http://{host}:{port}/version"
                         async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                             if resp.status == 200:
@@ -174,7 +175,7 @@ class KubernetesScanner:
         if not HAS_AIOHTTP:
             return findings
 
-        async with aiohttp.ClientSession() as session:
+        async with _egress_cs() as session:
             # Check anonymous auth
             for scheme in ["https", "http"]:
                 api_url = f"{scheme}://{host}:{port}"

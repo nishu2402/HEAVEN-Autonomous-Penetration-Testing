@@ -278,13 +278,29 @@ async def refresh_active_session() -> bool:
 
 def aiohttp_session_kwargs() -> dict[str, Any]:
     """Return kwargs for `aiohttp.ClientSession(**...)` that honour the
-    active auth session. Returns an empty dict when no session is active —
-    scanner code can splat this unconditionally.
+    active auth session *and* the configured network egress (proxy/tunnel).
+    Returns an empty dict when neither applies — scanner code can splat this
+    unconditionally.
     """
+    out: dict[str, Any] = {}
+    # Egress first (adds `trust_env` under an HTTP proxy so target traffic exits
+    # via the operator's anonymity path). No-op when egress is off / tunnelled.
+    try:
+        from heaven.net.egress import aiohttp_session_kwargs as _egress_kw
+        out.update(_egress_kw())
+    except Exception:  # noqa: BLE001 — egress must never break a scan
+        logger.debug("egress session kwargs unavailable", exc_info=True)
+    # Install the global per-target throttle (adaptive per-host concurrency) so
+    # every scanner that splats these kwargs is a good citizen against a fragile
+    # target. No-op when disabled / aiohttp missing.
+    try:
+        from heaven.net.throttle import instrument_session_kwargs
+        instrument_session_kwargs(out)
+    except Exception:  # noqa: BLE001 — throttle must never break a scan
+        logger.debug("throttle install unavailable", exc_info=True)
     s = get_active_session()
     if not s:
-        return {}
-    out: dict[str, Any] = {}
+        return out
     # Pass cookies as the session-level `cookies=` dict, NOT a pre-filled
     # cookie_jar. A jar built with `update_cookies({k: v})` (no response_url)
     # leaves the cookies with an empty domain, and aiohttp then never sends

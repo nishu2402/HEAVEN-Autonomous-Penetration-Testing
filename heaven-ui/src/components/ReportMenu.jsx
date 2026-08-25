@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { downloadReport } from "../api";
+import { downloadReport, Compliance } from "../api";
 import { useToast } from "./Toast.jsx";
 
 // Every standard a pentest deliverable might be asked for.
@@ -17,6 +17,8 @@ const FORMATS = [
 export default function ReportMenu({ engagement }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState("");
+  const [frameworks, setFrameworks] = useState([]);
+  const [fw, setFw] = useState("hipaa");
   const ref = useRef(null);
   const toast = useToast();
 
@@ -26,10 +28,23 @@ export default function ReportMenu({ engagement }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  async function pick(fmt) {
-    setBusy(fmt);
+  // Load the compliance frameworks once the menu is first opened.
+  useEffect(() => {
+    if (!open || frameworks.length) return;
+    Compliance.frameworks()
+      .then((r) => {
+        const list = r?.frameworks || [];
+        setFrameworks(list);
+        if (list.length) setFw((c) => (list.some((f) => f.id === c) ? c : list[0].id));
+      })
+      .catch(() => { /* compliance picker is optional */ });
+  }, [open, frameworks.length]);
+
+  async function pick(fmt, extra = {}) {
+    const tag = extra.framework ? `compliance-${fmt}` : fmt;
+    setBusy(tag);
     try {
-      const name = await downloadReport(fmt, engagement ? { engagement } : {});
+      const name = await downloadReport(fmt, { ...(engagement ? { engagement } : {}), ...extra });
       toast.success(`Downloaded ${name}`);
       setOpen(false);
     } catch (e) {
@@ -80,6 +95,36 @@ export default function ReportMenu({ engagement }) {
               </span>
             </button>
           ))}
+
+          {/* Compliance-mapped report — pick a framework, download HTML/PDF. */}
+          {frameworks.length > 0 && (
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 6, paddingTop: 8 }}>
+              <div style={{ padding: "0 10px 6px", fontSize: 10.5, letterSpacing: "0.1em",
+                            textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600 }}>
+                Compliance mapping
+              </div>
+              <select value={fw} onChange={(e) => setFw(e.target.value)}
+                className="form-select"
+                style={{ width: "calc(100% - 20px)", margin: "0 10px 8px", fontSize: 12 }}>
+                {frameworks.map((f) => (
+                  <option key={f.id} value={f.id}>{f.title}</option>
+                ))}
+              </select>
+              <div style={{ display: "flex", gap: 6, padding: "0 10px 4px" }}>
+                {["html", "pdf"].map((f) => (
+                  <button key={f} onClick={() => pick(f, { framework: fw })} disabled={!!busy}
+                    style={{
+                      flex: 1, padding: "8px 10px", fontSize: 12, fontWeight: 600,
+                      background: "rgba(109,124,255,0.10)", color: "var(--text-0)",
+                      border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+                      cursor: busy ? "wait" : "pointer", fontFamily: "var(--font-ui)",
+                    }}>
+                    {busy === `compliance-${f}` ? "…" : `⬇ ${f.toUpperCase()}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

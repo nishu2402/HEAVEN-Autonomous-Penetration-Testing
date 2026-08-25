@@ -11,11 +11,11 @@
 
 ## CI checklist
 
-- [ ] `ruff check heaven/ tests/` — all green
-- [ ] `mypy --ignore-missing-imports --no-strict-optional heaven/` — all green
-- [ ] `pytest tests/` — all green
-- [ ] `bandit -r heaven/ -ll` — no new high-severity findings
-- [ ] `heaven self-audit` — still grade A
+- [ ] `ruff check heaven/ tests/`, all green
+- [ ] `mypy --ignore-missing-imports --no-strict-optional heaven/`, all green
+- [ ] `pytest tests/`, all green
+- [ ] `bandit -r heaven/ -ll`, no new high-severity findings
+- [ ] `heaven self-audit`, still grade A
 
 ## Test plan
 
@@ -38,7 +38,7 @@ $ heaven <command> ...
 
 <!-- Required for any new active / destructive action -->
 
-- [ ] N/A — this PR is read-only / passive
+- [ ] N/A, this PR is read-only / passive
 - [ ] New action requires `--i-have-authorization` at the CLI
 - [ ] New API endpoint requires `vuln.validate` or `config.modify` permission
 

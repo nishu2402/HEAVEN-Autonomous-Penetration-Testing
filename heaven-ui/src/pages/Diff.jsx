@@ -52,7 +52,7 @@ export default function DiffPage() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 10, alignItems: "center" }}>
           <select className="form-select" value={baseline} onChange={(e) => setBaseline(e.target.value)}>
-            <option value="">— Baseline scan —</option>
+            <option value="">, Baseline scan, </option>
             {scans.map((s) => {
               const id = s.scan_id || s.id;
               return (
@@ -63,7 +63,7 @@ export default function DiffPage() {
             })}
           </select>
           <select className="form-select" value={current} onChange={(e) => setCurrent(e.target.value)}>
-            <option value="">— Current scan —</option>
+            <option value="">, Current scan, </option>
             {scans.map((s) => {
               const id = s.scan_id || s.id;
               return (

@@ -1,7 +1,8 @@
 # HEAVEN Benchmark Ground Truth — DVWA (Damn Vulnerable Web Application)
 #
 # Source app: https://github.com/digininja/DVWA
-# Image used: vulnerables/web-dvwa (DockerHub) — the most-pulled DVWA image.
+# Image used: ghcr.io/digininja/dvwa (the official multi-arch image, native on
+# arm64 so timing-based checks are not distorted by QEMU emulation).
 # Difficulty levels covered: low + medium (high is hardened; impossible should
 # yield zero findings).
 #
@@ -11,8 +12,12 @@
 
 target_app: dvwa
 version: "1.10"
-docker_image: vulnerables/web-dvwa:latest   # pin to @sha256:... in CI
-base_url: http://localhost:8080
+docker_image: ghcr.io/digininja/dvwa:latest   # pin to @sha256:... in CI
+# Reach the target over 127.0.0.1 (not the "localhost" hostname): DVWA's newer
+# image sets its session cookie with an explicit domain, and Python's cookiejar
+# mishandles a dot-less "localhost" domain, which would silently drop the auth
+# session. An IP host sidesteps that so the authenticated crawl actually works.
+base_url: http://127.0.0.1:8080
 auth:
   method: form_login
   url: /login.php
@@ -295,3 +300,110 @@ vulnerabilities:
     # Brute-force detection requires the scanner to attempt enumeration — opt-in for most
     detection_required: false
     notes: "No login throttling — admin/password works without any backoff."
+
+  # ── Infrastructure / configuration findings ─────────────────────────────
+  # DVWA ships with none of the standard HTTP hardening, and exposes several
+  # sensitive artifacts. These are all genuinely present (verified live), so
+  # they are labeled here rather than scored as false positives when found.
+  # Opportunistic (not required for the recall floor); the endpoint is the
+  # host:port so a site-wide finding (reported once per host) matches.
+
+  - id: dvwa-missing-security-headers
+    endpoint: 127.0.0.1:8080
+    method: GET
+    parameter: null
+    category: security_misconfig
+    subtypes_ok: [csp_missing, clickjacking, x_content_type_missing,
+                  referrer_policy_missing, permissions_policy_missing]
+    owasp: A05_2025
+    cwe: CWE-16
+    severity: medium
+    difficulty: low
+    detection_required: false
+    notes: "No CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy or Permissions-Policy on any response."
+
+  - id: dvwa-insecure-session-cookie
+    endpoint: 127.0.0.1:8080
+    method: GET
+    parameter: null
+    category: insecure_cookie
+    subtypes_ok: [cookie_no_secure, cookie_no_samesite]
+    owasp: A05_2025
+    cwe: CWE-614
+    severity: medium
+    difficulty: low
+    detection_required: false
+    notes: "PHPSESSID is set without the Secure or SameSite attributes."
+
+  - id: dvwa-info-disclosure
+    endpoint: 127.0.0.1:8080
+    method: GET
+    parameter: null
+    category: info_disclosure
+    subtypes_ok: [server_version_disclosure, technology_disclosure, sensitive_file]
+    owasp: A05_2025
+    cwe: CWE-200
+    severity: low
+    difficulty: low
+    detection_required: false
+    notes: "Server/X-Powered-By version banners, plus exposed setup.php, phpinfo.php and README.md."
+
+  - id: dvwa-config-dist-readable
+    endpoint: /config/config.inc.php.dist
+    method: GET
+    parameter: null
+    category: broken_access_control
+    subtypes_ok: [broken_access_control]
+    owasp: A01_2025
+    cwe: CWE-538
+    severity: medium
+    difficulty: low
+    detection_required: false
+    notes: "The config template config.inc.php.dist is served (readable) from the web root."
+
+  - id: dvwa-rfi-low-page
+    endpoint: /vulnerabilities/fi/
+    method: GET
+    parameter: page
+    category: rfi
+    subtypes_ok: [remote_file_inclusion]
+    owasp: A05_2025
+    cwe: CWE-98
+    severity: high
+    difficulty: low
+    # allow_url_include is on, so ?page=http://... fetches a remote file. Verified
+    # live: ?page=http://example.com/ returns the remote page's content.
+    detection_required: false
+    notes: "include($_GET['page']) with allow_url_include=On, so a remote URL is fetched and included (RFI)."
+
+  - id: dvwa-csrf-tokenless-forms
+    endpoint: /vulnerabilities/
+    method: POST
+    parameter: null
+    category: csrf
+    subtypes_ok: [csrf]
+    owasp: A01_2025
+    cwe: CWE-352
+    severity: medium
+    difficulty: low
+    # Beyond the /csrf/ password-change exercise, DVWA's other state-changing
+    # forms (exec, upload, guestbook, cryptography, captcha) also carry no
+    # anti-CSRF token at low security.
+    detection_required: false
+    notes: "State-changing forms across /vulnerabilities/* omit any anti-CSRF token at low security."
+
+  - id: dvwa-dom-xss
+    endpoint: 127.0.0.1:8080
+    method: GET
+    parameter: null
+    category: dom_xss
+    subtypes_ok: [dom_xss, dom_xss_sink]
+    owasp: A05_2025
+    cwe: CWE-79
+    severity: medium
+    difficulty: low
+    # DVWA has a documented DOM-based XSS exercise (/vulnerabilities/xss_d/) and
+    # its shared page JavaScript passes URL-derived sources into HTML/JS sinks.
+    # Opportunistic (a source→sink flow warrants manual confirmation).
+    detection_required: false
+    notes: "Client-side DOM XSS: URL-derived sources reach document.write/eval/window.open sinks in DVWA's page JS."

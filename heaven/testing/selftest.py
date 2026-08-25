@@ -45,14 +45,19 @@ KNOWN_FIXTURES = {
         "notes": "OWASP Juice Shop — primary integration test target",
     },
     "dvwa": {
-        "image": "vulnerables/web-dvwa:latest",
-        "default_port": 80,
-        "url": "http://localhost",
+        "image": "ghcr.io/digininja/dvwa:latest",
+        "default_port": 8080,
+        "url": "http://127.0.0.1:8080",
         "ground_truth_file": "tests/fixtures/dvwa_truth.json",
         "categories": ["sqli", "xss", "csrf", "command_injection", "file_upload"],
         "vendor_url": "https://github.com/digininja/DVWA",
         "license": "GPL-3.0",
-        "notes": "DVWA — classic vulnerable web app",
+        "spin_up": "docker compose -f tests/benchmarks/docker-compose.yml up -d",
+        "notes": "DVWA, the classic vulnerable web app. Official multi-arch image, "
+                 "so it runs native on Apple Silicon (not emulated). It needs a "
+                 "MariaDB backend, so bring it up with the compose file above, then "
+                 "open http://127.0.0.1:8080/setup.php once and click Create / Reset "
+                 "Database.",
     },
     "vulnerable-rest-api": {
         "image": "erev0s/vampi:latest",
@@ -245,7 +250,10 @@ def list_fixtures() -> None:
             categories_str = ""
         print(f"    Categories: {categories_str}")
         print(f"    Vendor:     {info['vendor_url']}")
-        print(f"    Spin up:    docker run --rm -p {info['default_port']}:{info['default_port']} {info['image']}")
+        spin_up = info.get("spin_up") or (
+            f"docker run --rm -p {info['default_port']}:{info['default_port']} {info['image']}"
+        )
+        print(f"    Spin up:    {spin_up}")
         print()
 
 

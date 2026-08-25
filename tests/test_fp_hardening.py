@@ -518,7 +518,7 @@ async def test_dir_fuzzer_softffour_band_suppresses_catchall():
 
     session = _HSession(handler)
     wildcard = await fuzzer._detect_wildcard(session, "http://t")
-    assert wildcard is not None and wildcard[0] == 200
+    assert wildcard is not None and wildcard["status"] == 200
     # A normal probe against the catch-all is filtered, not reported as a hit.
     assert await fuzzer._probe(session, "http://t/admin", wildcard) is None
 

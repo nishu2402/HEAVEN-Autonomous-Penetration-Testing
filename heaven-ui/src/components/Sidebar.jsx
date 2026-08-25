@@ -49,6 +49,7 @@ const GROUPS = [
       { to: "/tickets",     label: "Tickets",      icon: "🎫" },
       { to: "/benchmark",   label: "Benchmark",    icon: "≡" },
       { to: "/methodology", label: "Methodology",  icon: "§" },
+      { to: "/compliance",  label: "Compliance",   icon: "🛡" },
     ],
   },
   {

@@ -83,7 +83,7 @@ class TestCidrDiscoveryAndConcurrency:
             r.is_alive = True
             return r
 
-        async def fake_discover(raw, expanded, timeout=2.0):
+        async def fake_discover(raw, expanded, timeout=2.0, mac_out=None):
             assert len(expanded) > ns._DISCOVERY_THRESHOLD
             return ["192.168.1.10", "192.168.1.20"]
 
@@ -112,7 +112,7 @@ class TestCidrDiscoveryAndConcurrency:
             r.is_alive = True
             return r
 
-        async def fake_discover(raw, expanded, timeout=2.0):
+        async def fake_discover(raw, expanded, timeout=2.0, mac_out=None):
             disco_calls["n"] += 1
             return expanded
 

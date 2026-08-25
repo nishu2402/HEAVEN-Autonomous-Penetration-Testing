@@ -16,6 +16,7 @@ content signature for its artefact type. All requests are read-only GETs.
 """
 
 from __future__ import annotations
+from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import json
 import re
@@ -289,7 +290,7 @@ async def scan_exposures(
 
     findings: list[dict[str, Any]] = []
     connector = aiohttp.TCPConnector(ssl=False, limit=max(1, min(10, profile.max_concurrent)))
-    async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+    async with _egress_cs(headers=headers, connector=connector) as session:
         for root in roots:
             await engine.apply_evasion_delay()
             findings.extend(await _scan_base(session, root, timeout))

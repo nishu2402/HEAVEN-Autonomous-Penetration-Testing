@@ -53,7 +53,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         "HEAVEN_LLM_PROVIDER", "LLM provider", "AI / LLM",
         "Which provider to use. 'ollama' = a local model (no API key, no rate "
-        "limits — run `heaven ai setup`); 'local' = any OpenAI-compatible server "
+        "limits, run `heaven ai setup`); 'local' = any OpenAI-compatible server "
         "(LM Studio / llama.cpp / vLLM). Leave blank to auto-detect.",
         secret=False, placeholder="ollama",
         choices=("", "ollama", "local", "gemini", "anthropic", "openai"),
@@ -107,6 +107,16 @@ SETTINGS: tuple[SettingSpec, ...] = (
         choices=("", "ollama", "local", "gemini", "anthropic", "openai"),
     ),
 
+    # ── Updates ──
+    SettingSpec(
+        "HEAVEN_UPDATE_AUTO_CHECK", "Auto-check for updates", "Updates",
+        "When on, the web app checks on load whether a newer HEAVEN version is "
+        "available (a quick network call to your git remote) and shows an "
+        "'update available' banner. Off by default, so no network check runs. "
+        "Applying an update is always a separate, admin-only action.",
+        secret=False, placeholder="off", choices=("", "on", "off"),
+    ),
+
     # ── Recon enrichment ──
     SettingSpec(
         "NVD_API_KEY", "NVD API key", "Recon enrichment",
@@ -115,7 +125,7 @@ SETTINGS: tuple[SettingSpec, ...] = (
     ),
     SettingSpec(
         "SHODAN_API_KEY", "Shodan API key", "Recon enrichment",
-        "Passive recon — exposed-host intelligence merged into scans.",
+        "Passive recon: exposed-host intelligence merged into scans.",
         url="https://account.shodan.io", placeholder="xxxxxxxxxxxxxxxx",
     ),
 
@@ -177,6 +187,61 @@ SETTINGS: tuple[SettingSpec, ...] = (
         "HEAVEN_LINEAR_TEAM_ID", "Linear team ID", "Ticketing",
         "UUID of the team new issues belong to.", secret=False,
         placeholder="xxxxxxxx-xxxx-…",
+    ),
+
+    # ── Egress / anonymity ──
+    # Route HEAVEN's outbound *scanning* traffic through a tunnel or proxy while
+    # the dashboard stays local. Legitimate OPSEC for an AUTHORIZED engagement.
+    # See heaven/net/egress.py. WireGuard is the complete path (covers every
+    # tool at the network layer); proxy/Tor covers nuclei + nmap + HTTP checks.
+    SettingSpec(
+        "HEAVEN_EGRESS_MODE", "Egress mode", "Egress / anonymity",
+        "How scanning traffic leaves this host. 'off' = direct (default); "
+        "'wireguard' = full network tunnel (covers every tool, needs a .conf + "
+        "root to raise); 'http'/'socks5' = a proxy you run; 'tor' = local Tor "
+        "SOCKS (127.0.0.1:9050). Proxy/Tor cover nuclei, nmap and HTTP checks; "
+        "use WireGuard for complete in-process coverage.",
+        secret=False, placeholder="off",
+        choices=("", "off", "wireguard", "http", "socks5", "tor"),
+    ),
+    SettingSpec(
+        "HEAVEN_EGRESS_PROXY", "Proxy URL", "Egress / anonymity",
+        "For mode 'http'/'socks5': the proxy to route through, e.g. "
+        "http://127.0.0.1:8080 or socks5://127.0.0.1:1080.",
+        secret=False, placeholder="http://127.0.0.1:8080",
+    ),
+    SettingSpec(
+        "HEAVEN_TOR_SOCKS", "Tor SOCKS address", "Egress / anonymity",
+        "For mode 'tor': the local Tor SOCKS endpoint. Default is "
+        "socks5://127.0.0.1:9050 (start Tor with `tor` or the Tor Browser).",
+        secret=False, placeholder="socks5://127.0.0.1:9050",
+    ),
+    SettingSpec(
+        "HEAVEN_WG_CONFIG", "WireGuard config path", "Egress / anonymity",
+        "For mode 'wireguard': path to your WireGuard .conf (e.g. from a VPS or "
+        "commercial provider). HEAVEN references it by path; the private key is "
+        "never copied into HEAVEN's settings. Raise/drop from the Egress panel.",
+        secret=False, placeholder="/etc/wireguard/wg0.conf",
+    ),
+    SettingSpec(
+        "HEAVEN_WG_INTERFACE", "WireGuard interface", "Egress / anonymity",
+        "Optional. Interface name for `wg` status; derived from the config "
+        "filename (wg0.conf → wg0) when blank.",
+        secret=False, placeholder="wg0",
+    ),
+    SettingSpec(
+        "HEAVEN_EGRESS_KILLSWITCH", "Egress kill-switch", "Egress / anonymity",
+        "When on (default), a scan ABORTS if the armed egress isn't actually "
+        "carrying traffic, so a dropped tunnel or dead proxy never leaks your "
+        "real IP. Turn off only to deliberately allow direct fallback.",
+        secret=False, placeholder="on", choices=("", "on", "off"),
+    ),
+    SettingSpec(
+        "HEAVEN_EGRESS_SUDO", "WireGuard sudo policy", "Egress / anonymity",
+        "How to gain root for `wg-quick up/down`. 'auto' (default) uses "
+        "passwordless `sudo -n` when available; 'never' assumes you're already "
+        "root; 'always' forces sudo. Never prompts for a password.",
+        secret=False, placeholder="auto", choices=("", "auto", "always", "never"),
     ),
 )
 
@@ -286,6 +351,13 @@ def apply_settings(updates: dict[str, str]) -> dict:
             from heaven.config import reload_config
             reload_config()
         except Exception:  # noqa: BLE001 — settings must persist even if config reload fails
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+        # 3. the egress resolver (mode/proxy/wg + the *_PROXY env it exports) →
+        #    so a change on the Egress panel takes effect for the next scan.
+        try:
+            from heaven.net.egress import reset_egress
+            reset_egress()
+        except Exception:  # noqa: BLE001 — settings must persist even if egress reload fails
             logger.debug("suppressed non-fatal exception", exc_info=True)
 
     return {"changed": changed, "status": catalog_status()}

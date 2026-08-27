@@ -34,6 +34,21 @@ def test_base_names_skip_reserved_labels():
     assert generate_bucket_candidates("example.com") == []
 
 
+def test_base_names_skip_ip_literals():
+    # A bare IP has no registrable domain label — deriving bucket names from its
+    # octets ("192-assets", "0-backup") can only coincidentally hit an unrelated
+    # party's bucket and mis-attribute it to the target. Same FP class as the
+    # reserved-label guard; observed live when scanning an IP target directly.
+    assert base_names_from_target("http://192.168.0.162/") == []
+    assert base_names_from_target("10.0.0.1") == []
+    assert generate_bucket_candidates("http://192.168.0.162/") == []
+    # IPv6 literal (with brackets + port) is also skipped.
+    assert base_names_from_target("http://[2001:db8::1]:8080/") == []
+    assert base_names_from_target("[::1]") == []
+    # A real hostname that merely contains digits is NOT treated as an IP.
+    assert base_names_from_target("https://api2.acmecorp.com")  # non-empty
+
+
 def test_base_names_multi_part_tld():
     # acme.co.uk → registrable label is 'acme', not 'co'.
     bases = base_names_from_target("shop.acme.co.uk")

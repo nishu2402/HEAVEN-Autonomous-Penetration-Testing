@@ -489,6 +489,15 @@ _HTTP_EVIDENCE_KEYS = frozenset({
     "cvss_vector", "cvss_base", "cvss4_vector", "cvss4_base", "cvss_version",
     "typical_cvss", "risk_score", "severity", "confidence", "confidence_bucket",
     "title", "vuln_type", "source", "owasp_api",
+    # model / risk-scoring intermediates. These are the ML predictor's own view
+    # and the header already renders the reconciled, authoritative scores; showing
+    # the raw values here made the proof panel contradict the header (e.g. a
+    # "risk_band: high" beside a reconciled Medium severity), so they are internal.
+    "predicted_cvss_score", "priority_score", "risk_band",
+    "contextual_cvss_score", "cvss4_score", "epss", "epss_score",
+    "epss_score_pct", "in_kev", "kev", "cisa_kev",
+    "criticality", "asset_criticality", "exposure",
+    "cpe_count", "ref_count", "vuln_age_days",
 })
 
 

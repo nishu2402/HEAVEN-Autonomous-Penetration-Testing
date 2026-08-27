@@ -88,6 +88,10 @@ class FPReviewer:
                  review_band: tuple[float, float] = DEFAULT_REVIEW_BAND):
         self.gateway = gateway or get_gateway()
         self.review_band = review_band
+        # Reason the most recent review() returned None (out-of-band, LLM
+        # unavailable, provider error). Lets callers surface an honest,
+        # actionable message instead of a generic "no verdict".
+        self.last_error: Optional[str] = None
 
     @property
     def available(self) -> bool:
@@ -105,10 +109,13 @@ class FPReviewer:
         when an operator explicitly asks for a second opinion on ONE finding they
         want a verdict regardless of where its confidence sits.
         """
+        self.last_error = None
         if not self.available:
+            self.last_error = "LLM provider unavailable"
             return None
         conf = float(finding.get("confidence", 0))
         if not force and not self.in_band(conf):
+            self.last_error = "confidence out of review band"
             return None
 
         prompt = self._build_prompt(finding)
@@ -122,7 +129,8 @@ class FPReviewer:
         )
         resp = await self.gateway.acomplete(req)
         if not resp.ok() or resp.structured is None:
-            logger.warning(f"fp review failed: {resp.error}")
+            self.last_error = resp.error or "provider returned no structured verdict"
+            logger.warning(f"fp review failed: {self.last_error}")
             return None
 
         verdict: FPReviewVerdict = resp.structured

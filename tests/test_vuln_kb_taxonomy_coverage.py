@@ -35,6 +35,10 @@ from heaven.devsecops import vuln_kb as kb
     ("web_cache_deception", "CWE-525"),
     ("weak_login_credentials", "CWE-1392"),
     ("weak_http_auth_credentials", "CWE-1392"),
+    # Unrestricted file upload: the scanner sets CWE-434 inline but no OWASP,
+    # and the keyword fallback has no "upload" rule — so it rendered with a
+    # blank OWASP cell until curated.
+    ("file_upload", "CWE-434"),
     ("no_account_lockout", "CWE-307"),
     ("weak_password_policy", "CWE-521"),
     ("smtp_open_relay", "CWE-269"),
@@ -123,6 +127,30 @@ def test_no_real_emitted_type_is_uncovered():
         if key not in kb._KB and key not in kb._ALIASES:
             uncovered.append(vt)
     assert not uncovered, f"still-blank detector types: {uncovered}"
+
+
+def test_kb_owasp_labels_are_canonical_2025():
+    """Every curated OWASP label must already be the canonical 2025 form.
+
+    `normalize_owasp` maps by the *id* (A06:2025 → "Insecure Design"), so a KB
+    entry that carries the right id with a stale name — e.g. the real bug where
+    `flash_crossdomain` was tagged `A06:2025 Vulnerable and Outdated Components`
+    (an id whose 2025 name is "Insecure Design") — gets silently relabelled to
+    the wrong category on read. Pin every label to its normalized form so any
+    future id/name drift fails here instead of shipping a mislabelled finding.
+    """
+    from heaven.devsecops import frameworks as fw
+
+    drift = []
+    for name, entry in kb._KB.items():
+        raw = entry.get("owasp") or ""
+        if not raw:
+            continue
+        norm = fw.normalize_owasp(raw)
+        if norm and norm != raw:
+            drift.append((name, raw, norm))
+    assert not drift, "non-canonical OWASP labels in _KB: " + "; ".join(
+        f"{n}: {raw!r} should be {norm!r}" for n, raw, norm in drift)
 
 
 def test_dangerous_methods_matches_mitre_id_regex_is_not_true():

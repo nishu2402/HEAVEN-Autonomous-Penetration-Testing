@@ -19,6 +19,7 @@ except ImportError:
     HAS_AIOHTTP = False
 
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("auth_scanner")
 
@@ -779,9 +780,10 @@ async def _audit_wstg_surrogates(session: "aiohttp.ClientSession",
 
     async def _get(path: str) -> "tuple[int, str, dict]":
         try:
-            async with session.get(origin.rstrip("/") + path,
-                                   allow_redirects=True) as r:
+            _u = origin.rstrip("/") + path
+            async with session.get(_u, allow_redirects=True) as r:
                 body = await r.text(errors="replace") if r.status < 400 else ""
+                proof_capture.record(_u, r.status, body)
                 return r.status, body, dict(r.headers)
         except Exception as e:  # noqa: BLE001
             logger.debug("surrogate GET %s failed: %s", path, e)

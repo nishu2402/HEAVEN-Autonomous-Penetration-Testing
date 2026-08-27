@@ -37,6 +37,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("recon.param_miner")
 
@@ -113,7 +114,9 @@ async def _get(session: Any, url: str, timeout: float) -> tuple[int, str]:
             url, timeout=aiohttp.ClientTimeout(total=timeout),
             allow_redirects=False, ssl=False,
         ) as resp:
-            return resp.status, await resp.text(errors="replace")
+            status, body = resp.status, await resp.text(errors="replace")
+            proof_capture.record(url, status, body)
+            return status, body
     except Exception:
         return 0, ""
 

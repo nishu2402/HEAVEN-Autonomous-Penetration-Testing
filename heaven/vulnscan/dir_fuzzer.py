@@ -30,6 +30,7 @@ except ImportError:
     aiohttp = None  # type: ignore[assignment]
 
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.dirfuzz")
 
@@ -439,6 +440,7 @@ class DirectoryFuzzer:
                         location = (resp.headers.get("Location") or "").strip()
                     body = await resp.text(errors="replace")
                     size = len(body)
+                    proof_capture.record(url, status, body)
             except Exception:
                 return None
 
@@ -683,7 +685,9 @@ class DirectoryFuzzer:
             if not native_targets:
                 logger.info(f"DirFuzzer (ffuf): {len(all_findings)} paths across "
                             f"{len(targets)} targets")
-                return {"findings": self._dedup(all_findings),
+                deduped_ffuf = self._dedup(all_findings)
+                await self._capture_responses(deduped_ffuf)
+                return {"findings": deduped_ffuf,
                         "urls_tested": len(targets), "error": None}
             logger.info("DirFuzzer: ffuf unavailable/failed for %d/%d target(s) — "
                         "native engine covers them", len(native_targets), len(targets))
@@ -711,8 +715,51 @@ class DirectoryFuzzer:
                 all_findings.extend(r)
 
         deduped = self._dedup(all_findings)
+        await self._capture_responses(deduped)
         logger.info(f"DirFuzzer: {len(deduped)} unique paths found")
         return {"findings": deduped, "urls_tested": len(targets), "error": None}
+
+    async def _capture_responses(self, findings: list[dict]) -> None:
+        """Attach the real HTTP response to each discovered path (Proof of issue).
+
+        ffuf reports only the path/status/size, so its findings carry no response
+        body; the native ``_probe`` engine already records one. A single bounded
+        GET per finding that still lacks a body fills the gap so the report shows
+        the transaction that proved the exposure instead of "HTTP 0". Best-effort:
+        a failed re-fetch simply leaves the finding as-is."""
+        if aiohttp is None:
+            return
+        need = [f for f in findings
+                if isinstance(f, dict) and f.get("target")
+                and not (f.get("evidence") or {}).get("response_body")]
+        if not need:
+            return
+        from heaven.recon.auth_session import aiohttp_session_kwargs
+        connector = aiohttp.TCPConnector(ssl=False, limit=40)
+        try:
+            async with aiohttp.ClientSession(connector=connector,
+                                             **aiohttp_session_kwargs()) as session:
+                async def _cap(f: dict) -> None:
+                    url = f["target"]
+                    try:
+                        async with self._sem:
+                            async with session.get(
+                                url, headers={"User-Agent": self._ua},
+                                timeout=aiohttp.ClientTimeout(total=8),
+                                allow_redirects=self._follow, ssl=False,
+                            ) as resp:
+                                body = await resp.text(errors="replace")
+                    except Exception:
+                        return
+                    ev = f.setdefault("evidence", {})
+                    ev.setdefault("status", resp.status)
+                    if body:
+                        ev.setdefault("response_body", body[:4000])
+                    proof_capture.record(url, resp.status, body)
+                await asyncio.gather(*[_cap(f) for f in need[:80]],
+                                     return_exceptions=True)
+        except Exception:  # noqa: BLE001 — capture is best-effort, never fatal
+            logger.debug("dir_fuzzer response capture failed", exc_info=True)
 
     @staticmethod
     def _dedup(findings: list[dict]) -> list[dict]:

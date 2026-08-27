@@ -997,6 +997,27 @@ class LLMGateway:
                 temperature=req.temperature,
                 system_instruction=system or None,
             )
+            # Native structured output: when a Pydantic schema is requested, ask
+            # Gemini to emit JSON that conforms to it (response_mime_type +
+            # response_schema) instead of relying on prose + regex recovery. This
+            # is the robust path — the SDK returns clean JSON that `.text` yields
+            # verbatim — and is what fixes the "LLM did not return a usable
+            # verdict" FP-review failure when the model wraps the object in prose.
+            # Guarded: a schema the SDK's converter can't represent degrades to
+            # the hint-only path (the schema hint is already in `system`).
+            schema = req.response_schema
+            if schema is not None and hasattr(schema, "model_json_schema"):
+                try:
+                    types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=schema, **base_kwargs,
+                    )
+                    base_kwargs["response_mime_type"] = "application/json"
+                    base_kwargs["response_schema"] = schema
+                except Exception:  # noqa: BLE001 — schema not SDK-convertible
+                    logger.debug("gemini native response_schema unsupported for "
+                                 f"{getattr(schema, '__name__', schema)!r}; "
+                                 "using JSON-hint path", exc_info=True)
             thinking_cfg = getattr(types, "ThinkingConfig", None)
             if thinking_cfg is not None:
                 config = types.GenerateContentConfig(
@@ -1011,12 +1032,17 @@ class LLMGateway:
             except Exception:
                 # A few models (e.g. gemini-2.5-pro) reject a zero thinking
                 # budget. Retry with thinking left on but a larger budget so its
-                # reasoning tokens don't starve the visible answer.
-                config = types.GenerateContentConfig(
+                # reasoning tokens don't starve the visible answer. Keep the
+                # structured-output request (schema) if one was set.
+                retry_kwargs: dict[str, Any] = dict(
                     max_output_tokens=max(req.max_tokens, 2048) + 1024,
                     temperature=req.temperature,
                     system_instruction=system or None,
                 )
+                if base_kwargs.get("response_schema") is not None:
+                    retry_kwargs["response_mime_type"] = "application/json"
+                    retry_kwargs["response_schema"] = base_kwargs["response_schema"]
+                config = types.GenerateContentConfig(**retry_kwargs)
                 result = self._client.models.generate_content(
                     model=self.model, contents=prompt, config=config,
                 )

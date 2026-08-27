@@ -35,7 +35,7 @@ from heaven.devsecops.compliance_report import (
     SEVERITY_META,
     ComplianceReportGenerator,
     _fmt_cvss,
-    _short,
+    roadmap_action_lines,
 )
 from heaven.utils.cvss import is_confirmed_finding as _is_confirmed
 from heaven.utils.logger import get_logger
@@ -712,21 +712,23 @@ class PDFReportGenerator:
 
         # ── 11. Roadmap ──
         story.append(heading("7.", "Remediation Roadmap"))
-        story.append(Paragraph("Recommended remediation order, prioritised by severity. Address "
-                               "higher-severity items first; SLAs are guidance.", styles["body"]))
-        actionable = [f for f in findings if _sev_of(f) in ("critical", "high", "medium")] or findings[:10]
-        if actionable:
+        story.append(Paragraph(
+            f"Recommended remediation order, prioritised by severity, covering all "
+            f"{len(findings)} findings. Address higher-severity items first; SLAs "
+            "are guidance.", styles["body"]))
+        if findings:
             rr = [[Paragraph(h, styles["th"]) for h in
                    ("#", "Severity", "Finding", "Recommended action", "SLA")]]
-            for i, f in enumerate(actionable[:25], 1):
+            # Every finding earns a row — no severity filter, no top-25 cap. Each
+            # numbered step renders on its own line (via <br/>), whole sentences,
+            # no mid-word ellipsis; the full remediation is in the finding detail.
+            for i, f in enumerate(findings, 1):
                 ev = f.get("evidence") or {}
-                # Summarise at a word boundary (a hard slice cut mid-word, e.g.
-                # "Rotate any s…"); full remediation is in the detailed finding.
-                action = _short(ev.get("remediation") or f.get("remediation")
-                                or "Review and remediate per finding detail.", 200)
+                lines = roadmap_action_lines(ev.get("remediation") or f.get("remediation") or "")
+                action_html = "<br/>".join(_esc(ln) for ln in lines)
                 rr.append([Paragraph(str(i), styles["cell"]), pill(_sev_of(f)),
                            Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
-                           Paragraph(_esc(action), styles["small"]),
+                           Paragraph(action_html, styles["small"]),
                            Paragraph(SEVERITY_META[_sev_of(f)]["sla"], styles["small"])])
             story.append(table(rr, [8 * mm, 24 * mm, 48 * mm, cw - 110 * mm, 30 * mm]))
         story.append(PageBreak())

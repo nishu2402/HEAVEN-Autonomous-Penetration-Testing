@@ -9,6 +9,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Read-only active checks for four high-value network services.** The Network
+  Service Exposure scan now confirms, without exploiting anything, four
+  misconfigurations a banner-only pass cannot see. NFS shares exported to the
+  world are read off the wire with an ONC-RPC MOUNT dump (the equivalent of
+  `showmount -e`), and a follow-up read-only NFSv3 ACCESS query reports whether an
+  anonymous client is actually granted write access, so the finding states
+  read-write or read-only instead of guessing from the export list (nothing is
+  created, written or deleted). Apache Tomcat Manager default credentials are
+  checked against a 401 baseline so only a credential that truly authenticated is
+  reported, and nothing is deployed. PostgreSQL default and weak superuser
+  credentials are checked by connecting and closing with no query. VNC servers are
+  flagged when they require no authentication or accept a default password. Every
+  probe reports only what a live response proved, tears the session down at once,
+  and is gated off in the stealth and paranoid profiles.
+
+### Fixed
+
+- **The GraphQL denial-of-service checks no longer fire on a server that already
+  enforces its limits.** The query-complexity check reported "No Query
+  Depth/Complexity Limit" on any HTTP 200, and the batching check reported
+  "Unlimited Query Batching" on any list of more than 50 entries. A properly
+  hardened GraphQL server answers 200 with an errors array that rejects the deep
+  query ("depth 8 exceeds maximum of 5") or rejects the batch, so both were live
+  false positives against a depth-limited, batching-disabled endpoint. A finding
+  now requires the query to have been accepted: complexity suppresses when the
+  response carries a depth/complexity/cost rejection error (and is downgraded to a
+  medium verify-me signal, since a 200 to an introspection depth query is not by
+  itself proof of a missing limit), and batching counts only entries the server
+  actually processed, not error entries. Verified against a local vulnerable API
+  (both still fire) and a depth-limited one (both now silent);
+  `tests/test_api_graphql_fp.py`.
+- **Cloud bucket hunting no longer derives candidate names from an IP address.**
+  Scanning an IP target directly (for example the Metasploitable host at
+  192.168.0.162) turned the octets into guesses like `192-assets` and `0-backup`.
+  A bare IP has no registrable domain label, so any hit could only be an unrelated
+  third party's bucket mis-attributed to the target as a critical exposure, the
+  same false-positive class the reserved-name guard already blocks. IPv4 and IPv6
+  literals now produce no candidates. Live `heaven cloud storage http://192.168.0.162/`
+  went from 60 mis-targeted probes to zero; `tests/test_cloud_scanner.py`.
+- **The finding detail no longer contradicts itself.** The "Proof of Issue" panel
+  rendered the ML predictor's raw scoring fields (predicted CVSS, priority score,
+  risk band) straight from the finding evidence, so a banner-inferred finding could
+  show "risk band: high" beside a reconciled Medium severity, along with a second,
+  different priority number. Those model intermediates are now kept out of the
+  observed-evidence block, since the header already shows the reconciled,
+  authoritative scores, and the internal risk band is pinned to the reconciled
+  severity on read, so no surface can disagree with the severity badge.
+- **Terrapin (CVE-2023-48795) is no longer reported on OpenSSH releases that
+  cannot be attacked.** The check flagged every OpenSSH below 9.6, but the attack
+  only works against a connection negotiating ChaCha20-Poly1305 or an
+  Encrypt-then-MAC mode, which OpenSSH gained in 6.5 and 6.2. Releases before 6.2
+  (for example the 4.7p1 on a classic Metasploitable host) support neither and
+  were a live false positive; the affected range now starts at 6.2.
+- **A service exposed on more than one port is reported once, not once per port.**
+  A version-matched CVE is a property of the running daemon, so the same finding on
+  Samba's 139 and 445 (or a web server on 80 and 443) now collapses into a single
+  entry that lists the extra ports, keeping the more precise version fingerprint.
+  Two genuinely different builds (different precise versions) still stay distinct.
+- **File-upload findings carry a full taxonomy, and two OWASP labels were corrected.**
+  Unrestricted file upload now resolves to CWE-434 with the A06:2025 Insecure Design
+  category and a matching CVSS vector instead of a blank OWASP cell. A legacy-Flash
+  finding that carried the retired "Vulnerable and Outdated Components" label (which
+  silently normalised to the wrong 2025 category) is now tagged A03:2025 Software
+  Supply Chain Failures, and a padding-oracle label was corrected to the canonical
+  spelling. A regression guard now pins every knowledge-base OWASP label to its
+  canonical 2025 form.
+- **Remote File Inclusion is no longer reported when the server refused the fetch.**
+  The RFI probe supplies an unroutable URL and looks for PHP echoing an
+  `include(http://<host>/...)` warning that names it. On a hardened host with
+  `allow_url_include` disabled (the PHP default), the interpreter still echoes that
+  warning but adds "URL file-access is disabled in the server configuration" and
+  never fetches, so a target that cannot be remotely included was flagged high-risk
+  RFI. The check now recognises that refusal (the disabled-wrapper notice, or "no
+  suitable wrapper could be found") and stays silent, while a genuinely includable
+  host, which fails on the network rather than on configuration, still fires.
+  Confirmed against a live DVWA/PHP 5.2 target, where the false positive was found.
+- **A slow target no longer wipes out every injection finding.** The XSS/SQLi
+  sweep ran unbounded until the orchestrator's hard per-task timeout cancelled it,
+  which discarded every finding gathered so far and reported zero injection on an
+  app full of it, then skipped the dependent IDOR scan as "failed". This surfaced
+  on a heavily loaded emulated target where the sweep could not finish in time. The
+  scanner now honours a soft wall-clock deadline (90% of the task timeout): when it
+  is reached, the sweep returns the findings it already proved instead of losing
+  them, and the IDOR scan still runs. It also scans URLs that carry an injectable
+  surface (a query string or a POST form) before bare, param-less pages, so a
+  truncated sweep spends its budget where a finding can actually surface. Confirmed
+  live against DVWA: a 20-second budget over the full 31-URL surface returned nine
+  real findings (command injection, SQLi, reflected and stored XSS, LFI) instead of
+  nothing.
+
 ## [3.1.0]: 2026-08-25
 
 ### Added

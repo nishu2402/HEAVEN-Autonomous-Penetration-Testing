@@ -36,6 +36,7 @@ except ImportError:  # pragma: no cover - exercised only in minimal installs
     HAS_AIOHTTP = False
 
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.cms")
 
@@ -84,6 +85,7 @@ async def _get(session: "aiohttp.ClientSession", url: str, *, method: str = "GET
             # Only read a body for text-ish responses, capped to keep it cheap.
             if any(t in ctype.lower() for t in ("html", "xml", "json", "text")) or not ctype:
                 body = (await resp.text(errors="replace"))[:200_000]
+            proof_capture.record(url, resp.status, body)
             return resp.status, dict(resp.headers), body
     except Exception as e:  # noqa: BLE001 - network hiccup / unreachable path
         logger.debug("CMS probe failed for %s: %s", url, e)

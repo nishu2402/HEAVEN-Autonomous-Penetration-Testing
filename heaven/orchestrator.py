@@ -21,6 +21,11 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("orchestrator")
 
+# Hard per-task timeout for the injection sweep. The scanner is given a soft
+# deadline at 90% of this so it returns partial findings before the hard cancel
+# (see _injection_scan / scan_for_injections time_budget).
+_INJECTION_TIMEOUT_S = 600
+
 
 def _registered_domain(host: str) -> Optional[str]:
     """Best-effort registered domain (eTLD+1) for a *hostname*, or ``None``.
@@ -1057,6 +1062,13 @@ class ScanOrchestrator:
         logger.info(f"╔══ HEAVEN Scan {self.scan_id[:8]} starting ══╗")
         self.progress.start_time = time.time()
 
+        # Install a scan-scoped HTTP proof store so every web detector's request/
+        # response is captured for its findings' evidence (Proof of issue). Set
+        # here — before any task is created — so each task inherits the same store
+        # via contextvars. Isolated per run(): concurrent scans never share it.
+        from heaven.vulnscan import proof_capture as _proof_capture
+        _proof_capture.begin()
+
         # ── Egress preflight (kill-switch) ──────────────────────────────────
         # Only when an anonymity egress is armed — a direct scan does no network
         # check here. Confirms the tunnel/proxy is actually carrying traffic
@@ -1175,6 +1187,17 @@ class ScanOrchestrator:
             # the summary so the Assets view and the report's DNS section render
             # the attack surface's naming layer, not just host/port inventory.
             all_dns.extend(data.get("dns_records", []))
+
+        # Fold each web detector's captured request/response into the findings
+        # that lack one, so "Proof of issue" shows the real transaction instead
+        # of a fabricated "HTTP 0 (0 bytes) — no response captured". Only fills
+        # gaps; never overwrites evidence a detector already stored. Best-effort.
+        try:
+            enriched = _proof_capture.attach_all(all_vulns)
+            if enriched:
+                logger.debug(f"proof_capture: attached responses to {enriched} findings")
+        except Exception:  # noqa: BLE001 — evidence enrichment must never break a scan
+            logger.debug("proof_capture attach failed", exc_info=True)
 
         # One vuln flows through the pipeline as candidate -> validated ->
         # scored, and a single scanner emits it under both "findings" and
@@ -2364,15 +2387,19 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
 
         if not urls and not forms_by_url:
             return {"skipped": True, "reason": "no URLs for injection scanning"}
+        # Soft-cap the sweep at 90% of the hard task timeout so a slow target
+        # yields the findings gathered so far instead of being cancelled with
+        # total loss (which would also skip the dependent IDOR scan).
         return await scan_for_injections(
             urls, forms_by_url=forms_by_url, stealth_level=stealth,
+            time_budget=_INJECTION_TIMEOUT_S * 0.9,
         )
 
     inject_id = orch.add_task(
         "Injection Discovery (XSS/SQLi)", _injection_scan,
         phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
         modes=WEBAPI_MODES,
-        concurrency_group="web", timeout=600,
+        concurrency_group="web", timeout=_INJECTION_TIMEOUT_S,
     )
 
     # ═══ Phase: FILE-UPLOAD PROBE ═══

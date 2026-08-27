@@ -34,10 +34,14 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "websockets>=12.0",
     "slowapi>=0.1.9",
-    # ML / Data — xgboost-cpu avoids the 300+MB nvidia-nccl wheel; macOS still gets full xgboost
+    # ML / Data — the CVSS risk model is a scikit-learn ExtraTreesRegressor loaded
+    # with joblib (heaven/ml/risk_model.py); numpy/pandas back feature engineering.
+    # There is deliberately no xgboost: the model was migrated to scikit-learn, and
+    # the old "xgboost-cpu on Linux / xgboost on macOS" split was a frequent
+    # cross-platform install failure (no CPU-only wheel on macOS, none on musl or
+    # some ARM targets, forcing a from-source build). Dropping it keeps the base
+    # install wheel-only on every OS.
     "scikit-learn>=1.5.0",  # floor patched: GHSA-jw8x-6495-233v (OSV)
-    "xgboost-cpu>=2.0.0; sys_platform != 'darwin'",
-    "xgboost>=2.0.0; sys_platform == 'darwin'",
     "numpy>=1.26.0",
     "pandas>=2.2.0",
     "joblib>=1.3.0",
@@ -51,7 +55,6 @@ dependencies = [
     "rich-click>=1.7.0",
     "python-dotenv>=1.2.2",  # floor patched: PYSEC-2026-2270 (OSV)
     "httpx>=0.27.0",
-    "hypothesis>=6.152.4",
     # Security + the default offline data store. These power the documented
     # out-of-the-box experience (JWT sessions, vault encryption, SQLite mode),
     # so they belong in the base install rather than an extra.
@@ -106,6 +109,10 @@ dev = [
     "pytest>=9.0.3",       # floor patched (OSV)
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    # Property-based tests (tests/test_properties.py) import hypothesis at module
+    # load, so it must be present for the suite to collect. It is a TEST tool, not
+    # a runtime dependency — hence it lives here, not in the base install.
+    "hypothesis>=6.152.4",
     "black>=26.3.1",       # floor patched (OSV)
     "ruff>=0.2.0",
     "mypy>=1.8.0",

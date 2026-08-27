@@ -1,127 +1,108 @@
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║  HEAVEN v1.0 — Requirements                                      ║
-# ║  Vulnerability Scanner & Risk Triage Platform                    ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# ==============================================================================
+#  HEAVEN - Runtime requirements
+#  Vulnerability Scanner & Risk Triage Platform
+# ==============================================================================
 #
-# Install:    pip install -r requirements.txt
-# Python:     >= 3.11
+# This file mirrors the base [project.dependencies] in pyproject.toml, which is
+# the canonical source of truth. Keep the two in sync: if you add or bump a
+# dependency, change it in BOTH places.
+#
+# Recommended install (resolves everything from pyproject, cross-OS, wheel-only):
+#     pip install -e .
+#   or the one-command installer:
+#     ./scripts/install.sh          (macOS / Linux)
+#     ./scripts/install.ps1         (Windows)
+#
+# This flat list is here for `pip install -r requirements.txt`, the Docker
+# dependency layer, and `pip-audit`. It is the full-power default install.
+#
+# NOT listed here (opt-in, install on demand):
+#   - Alternate LLM providers:  pip install -e ".[anthropic]"  /  ".[openai]"
+#     (Gemini / google-genai is the shipped default and IS below.)
+#   - Cloud IAM SDKs:  pip install -e ".[cloud-aws]" / ".[cloud-gcp]" / ".[cloud-azure]"
+#   - Dev + test tooling (pytest, ruff, mypy, hypothesis, ...):  pip install -e ".[dev]"
+#
+# Python: >= 3.11   (tested on 3.11, 3.12, 3.13)
 
-# ─── Core Async Engine ───────────────────────────────────────────────
+# ── Core async engine ─────────────────────────────────────────────────
 uvloop>=0.19.0; sys_platform != "win32"
-aiohttp>=3.14.1          # 3.14.1 fixes 11 CVEs incl. request smuggling (pip-audit)
+aiohttp>=3.14.3           # floor patched: request smuggling + 2026 advisories (OSV/pip-audit)
 aiofiles>=23.2.0
-asyncio-throttle>=1.0.2
 
-# ─── Database (PostgreSQL + SQLite offline fallback) ─────────────────
+# ── Database (PostgreSQL + SQLite offline fallback) ────────────────────
 asyncpg>=0.29.0
 sqlalchemy[asyncio]>=2.0.0
 alembic>=1.13.0
-aiosqlite>=0.19.0          # SQLite offline store (no PostgreSQL required)
+aiosqlite>=0.19.0         # SQLite offline store (no PostgreSQL required)
 
-# ─── API Server (FastAPI + WebSocket) ────────────────────────────────
+# ── API server (FastAPI + WebSocket) ───────────────────────────────────
 fastapi>=0.110.0
+starlette>=1.3.1          # security floor: fastapi allows <1.3.1 which has 6 advisories
 uvicorn[standard]>=0.27.0
 websockets>=12.0
-python-multipart>=0.0.9
-starlette>=1.3.1          # <1.3.1 has 6 advisories (DoS/multipart); fastapi allows it
 slowapi>=0.1.9
 
-# ─── Machine Learning & Risk Scoring ─────────────────────────────────
-# Pin xgboost to a CPU-only build to avoid pulling the 300+MB nvidia-nccl wheel
-# on installs that don't need GPU support. Set HEAVEN_USE_GPU_XGBOOST=1 and
-# replace this line with `xgboost>=2.0.0` if you want CUDA support.
-xgboost-cpu>=2.0.0; sys_platform != "darwin"
-xgboost>=2.0.0; sys_platform == "darwin"
-scikit-learn>=1.4.0
+# ── Machine learning & risk scoring ────────────────────────────────────
+# The CVSS risk model is a scikit-learn ExtraTreesRegressor loaded with joblib.
+# No xgboost: it was migrated to scikit-learn, and the old CPU/GPU wheel split
+# was a common cross-OS install failure.
+scikit-learn>=1.5.0       # floor patched: GHSA-jw8x-6495-233v (OSV)
 numpy>=1.26.0
 pandas>=2.2.0
 joblib>=1.3.0
-scipy>=1.12.0
 
-# ─── Security & Cryptography ─────────────────────────────────────────
-cryptography>=48.0.1      # 48.0.0 has GHSA-537c-gmf6-5ccf (pip-audit); pyopenssl caps <49
-bcrypt>=4.1.0
-PyJWT>=2.8.0
-passlib[bcrypt]>=1.7.4
-argon2-cffi>=23.1.0
+# ── Security & cryptography ─────────────────────────────────────────────
+cryptography>=50.0.0      # floor patched: incl. 2026 advisories thru 49.x (OSV)
+pyjwt>=2.13.0             # floor patched: multiple JWT advisories (OSV)
 defusedxml>=0.7.1         # XXE-safe XML parsing (untrusted pom.xml / nmap output)
+cvss>=3.0                # reference-grade CVSS v4.0 base scoring
 
-# ─── Network Reconnaissance ──────────────────────────────────────────
-# nmap / nuclei / sqlmap are SYSTEM binaries (apt/brew), not pip packages —
-# HEAVEN shells out to them, so no python-nmap wrapper is needed. Shodan recon
-# and WHOIS use plain HTTP (aiohttp), not the shodan/python-whois SDKs.
-scapy>=2.5.0
-dnspython>=2.6.0
-asyncssh>=2.14.0        # SSH credential testing (CredentialSprayer.spray_ssh)
+# ── Network reconnaissance ──────────────────────────────────────────────
+# nmap / nuclei / sqlmap are SYSTEM binaries (apt/brew), not pip packages -
+# HEAVEN shells out to them. Shodan recon and WHOIS use plain HTTP (aiohttp).
+scapy>=2.7.0              # floor patched (OSV)
+dnspython>=2.6.1         # floor patched (OSV)
+asyncssh>=2.14.2         # SSH credential testing; floor patched (OSV)
 
-# ─── Web Reconnaissance & Parsing ────────────────────────────────────
+# ── Web reconnaissance & parsing ────────────────────────────────────────
 # The crawler parses with the stdlib "html.parser" backend, so no lxml needed.
 beautifulsoup4>=4.12.0
 httpx>=0.27.0
-# selenium is optional (heavy, browser-based) — uncomment if you need JS-rendered crawling
-selenium>=4.17.0
-# playwright is optional — faster for JS-heavy SPAs; install with: pip install playwright && playwright install chromium
-playwright>=1.43.0
+# Headless-browser DAST (DOM/stored-XSS proof + JS-rendered crawl). The pip
+# wheel ships the driver; the browser bundle is fetched once with
+# `playwright install chromium` (scripts/install.sh does this automatically).
+playwright>=1.40.0
 
-# ─── Active Directory & Kerberos ─────────────────────────────────────
+# ── Active Directory & Kerberos ─────────────────────────────────────────
 impacket>=0.11.0
 ldap3>=2.9.1
-pyasn1>=0.6.0
-pycryptodome>=3.20.0
+pywinrm>=0.4.3           # WinRM credential validation
 
-# ─── MITRE ATT&CK Framework ──────────────────────────────────────────
-# ATT&CK mapping ships a bundled dataset (heaven/mitre/*) and talks TAXII over
-# plain HTTP — no mitreattack-python / stix2 / taxii2-client packages required.
-
-# ─── Container & Kubernetes ──────────────────────────────────────────
+# ── Container & Kubernetes ──────────────────────────────────────────────
 kubernetes>=29.0.0
 docker>=7.0.0
 
-# ─── Cloud SDKs ──────────────────────────────────────────────────────
+# ── Cloud (AWS recon ships by default; GCP/Azure IAM are opt-in extras) ──
 boto3>=1.34.0
-google-cloud-compute>=1.17.0
-azure-mgmt-compute>=30.0.0
 
-# ─── Reporting & Visualization ───────────────────────────────────────
-# PDF reports use reportlab (pure-Python, no system libraries). The HTML
-# report needs no extra packages at all.
-jinja2>=3.1.3
+# ── Reporting & visualization ───────────────────────────────────────────
+# PDF reports use reportlab (pure-Python, no system libraries). HTML reports
+# use jinja2. No extra system packages required.
+jinja2>=3.1.6            # floor patched: 2026 template advisories (OSV)
 reportlab>=4.0.0
+tabulate>=0.9.0
 
-# ─── Utilities ───────────────────────────────────────────────────────
+# ── Utilities ───────────────────────────────────────────────────────────
 apscheduler>=3.10.0
 pydantic>=2.6.0
-pydantic-settings>=2.14.2   # 2.14.2 fixes GHSA-4xgf-cpjx-pc3j (pip-audit)
+pydantic-settings>=2.14.2   # floor patched: GHSA-4xgf-cpjx-pc3j (pip-audit)
 rich>=13.7.0
-click>=8.1.0
+click>=8.3.3             # floor patched: PYSEC-2026-2132 (OSV)
 rich-click>=1.7.0
-python-dotenv>=1.0.0
-pyyaml>=6.0.1
-tabulate>=0.9.0
-tqdm>=4.66.0
-colorama>=0.4.6
+python-dotenv>=1.2.2     # floor patched: PYSEC-2026-2270 (OSV)
 
-# ─── Transitive dependency security floors ───────────────────────────
-# These are pulled in indirectly (idna via requests/aiohttp, msgpack via
-# cachecontrol) but shipped versions had advisories, so pin the fixed floor
-# explicitly. Flagged by `pip-audit`; re-run it after dependency bumps.
-# (pypdf is TEST-ONLY — it lives in the [dev] extra in pyproject.toml, not here.)
-idna>=3.15                  # PYSEC-2026-215
-msgpack>=1.2.1              # GHSA-6v7p-g79w-8964 (via cachecontrol)
-
-# ─── AI layers (LLM providers) ───────────────────────────────────────
-# The default provider SDK (Gemini) ships by default so the AI features
-# (recon-parse, planner, FP-review, autonomous, coverage) work as soon as a key
-# is added. HEAVEN still runs fully without a key (deterministic fallback).
-google-genai>=1.0.0          # Gemini (default AI SDK)
-anthropic>=0.39.0          # Claude
-openai>=1.40.0             # GPT
-
-# ─── Development & Testing (optional) ────────────────────────────────
-# pytest>=8.0.0
-# pytest-asyncio>=0.23.0
-# pytest-cov>=4.1.0
-# black>=24.0.0
-# ruff>=0.2.0
-# mypy>=1.8.0
-# bandit>=1.7.7
+# ── AI (default LLM provider) ───────────────────────────────────────────
+# Gemini ships by default so the AI features (recon-parse, planner, FP-review,
+# autonomous, coverage) work as soon as a key is added. HEAVEN still runs fully
+# without a key (deterministic fallback). Claude/GPT are opt-in (see header).
+google-genai>=1.0.0

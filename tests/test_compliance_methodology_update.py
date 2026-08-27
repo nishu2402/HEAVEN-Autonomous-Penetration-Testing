@@ -184,7 +184,14 @@ def api_client():
 
     from heaven.api.server import create_app
     app = create_app()
-    yield TestClient(app)
+    # Enter the TestClient as a context manager so every request in this module
+    # shares ONE persistent event loop. Without this, Starlette spins up a fresh
+    # blocking portal (a throwaway loop) per request and tears it down when the
+    # request returns — which cancels any background task the request spawned via
+    # asyncio.create_task (e.g. /api/update/apply's worker). That cancellation is
+    # a scheduling race: it happened to lose on Python 3.12 and pass on 3.11.
+    with TestClient(app) as client:
+        yield client
     os.environ.pop("HEAVEN_DISABLE_AUTH", None)
 
 

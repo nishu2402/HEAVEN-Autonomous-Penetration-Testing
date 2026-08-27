@@ -105,6 +105,32 @@ def test_gemini_receives_prepared_system_with_schema_hint() -> None:
     assert resp.structured.answer == "yes"
 
 
+def test_gemini_uses_native_structured_output() -> None:
+    """A response_schema request must reach Gemini as *native* structured output
+    (response_mime_type=application/json + response_schema) so the model emits
+    conforming JSON instead of prose the parser might reject — the fix for the
+    'LLM did not return a usable verdict' FP-review failure."""
+    try:
+        from pydantic import BaseModel
+    except ImportError:  # pragma: no cover
+        return
+
+    class Verdict(BaseModel):
+        keep: bool
+        reasoning: str = ""
+
+    gw = _gateway_with(_FakeResult('{"keep": true, "reasoning": "clear"}'))
+    resp = gw.complete(LLMRequest(
+        prompt="review", system="analyst", response_schema=Verdict, max_tokens=256,
+    ))
+    cfg = gw._client.models.captured["config"]
+    assert cfg.response_mime_type == "application/json"
+    assert cfg.response_schema is Verdict
+    # Thinking still disabled alongside the schema.
+    assert cfg.thinking_config is not None and cfg.thinking_config.thinking_budget == 0
+    assert resp.structured is not None and resp.structured.keep is True
+
+
 def test_gemini_empty_response_surfaces_reason() -> None:
     """An empty completion (MAX_TOKENS before any text) must report a reason,
     not a silent blank — so operators see *why* the AI produced nothing."""

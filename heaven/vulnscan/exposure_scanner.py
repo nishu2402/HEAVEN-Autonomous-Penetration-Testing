@@ -27,6 +27,7 @@ from urllib.parse import urljoin, urlparse
 
 from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.exposure")
 
@@ -152,6 +153,7 @@ async def _get(session: Any, url: str, timeout: float) -> _Resp:
             allow_redirects=False, ssl=False,
         ) as resp:
             body = await resp.text(errors="replace")
+            proof_capture.record(url, resp.status, body)
             return _Resp(resp.status, body, resp.headers.get("Content-Type", ""))
     except Exception:
         return _Resp(0, "", "")

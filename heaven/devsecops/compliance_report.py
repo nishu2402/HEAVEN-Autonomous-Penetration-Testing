@@ -118,6 +118,48 @@ def _short(text: Any, limit: int = 220) -> str:
     return (cut or s[:limit]) + "…"
 
 
+def _clip_sentence(text: Any, limit: int = 200) -> str:
+    """Trim to a whole word within ``limit``, ending cleanly with a period.
+
+    Unlike :func:`_short`, this never appends an ellipsis — a roadmap step reads
+    as a finished instruction, not a truncated fragment ("…apply a WAF rule
+    targeting…" looked unprofessional). The complete remediation lives in the
+    finding detail; the roadmap carries a concise, whole-sentence summary."""
+    s = " ".join(str(text or "").split())
+    if len(s) <= limit:
+        return s
+    cut = s[:limit].rsplit(" ", 1)[0].rstrip(",;:. ")
+    return (cut or s[:limit]) + "."
+
+
+def roadmap_action_lines(text: Any) -> list[str]:
+    """Break a (possibly multi-step) remediation into concise roadmap lines.
+
+    Each numbered step becomes its own line so "1. … 2. …" no longer runs
+    together on one line, the verbose Verify/Reference trailer is dropped (it's
+    in the finding detail), an exploit warning is kept, and nothing is truncated
+    mid-word with an ellipsis. Returns at least one line."""
+    if not str(text or "").strip():
+        return ["Review and remediate per the finding detail."]
+    raw = [ln.strip() for ln in str(text).replace("\r", "").split("\n") if ln.strip()]
+    if len(raw) <= 1:
+        return [_clip_sentence(raw[0] if raw else text, 240)]
+    steps: list[str] = []
+    warn = ""
+    for ln in raw:
+        low = ln.lower()
+        if low.startswith(("verify:", "reference:", "references:", "see http", "note:")):
+            continue
+        if ln.startswith("⚠"):
+            warn = _clip_sentence(ln, 200)  # kept even past the 3-step cap
+            continue
+        if len(steps) < 3:
+            steps.append(_clip_sentence(ln, 200))
+    if warn:
+        steps.append(warn)
+    return steps or [_clip_sentence(text, 240)]
+
+
 def _sev_of(f: dict) -> str:
     s = (f.get("severity") or "info").lower()
     return s if s in SEVERITY_META else "info"
@@ -1415,26 +1457,29 @@ class ComplianceReportGenerator:
         </div>"""
 
     def _roadmap(self, ordered: list[dict]) -> str:
-        actionable = [f for f in ordered if _sev_of(f) in ("critical", "high", "medium")]
-        if not actionable:
-            actionable = ordered[:10]
+        # Every finding earns a roadmap row — the list is the full remediation
+        # backlog, ordered by severity (``ordered`` is already sorted). Capping it
+        # at the top 25 critical/high/medium items silently dropped real work the
+        # client is paying to see.
         rows = ""
-        for i, f in enumerate(actionable[:25], 1):
+        for i, f in enumerate(ordered, 1):
             sev = _sev_of(f)
             m = SEVERITY_META[sev]
             ev = f.get("evidence") or {}
-            action = ev.get("remediation") or f.get("remediation") or "Review and remediate per finding detail."
-            # Summarise at a word boundary — a hard slice cut mid-word ("Rotate
-            # any s…"); the full remediation is in the detailed finding above.
-            action = _short(action, 220)
+            action = ev.get("remediation") or f.get("remediation") or ""
+            # Each numbered step on its own line; concise, whole sentences, no
+            # mid-word ellipsis. The full remediation is in the finding detail.
+            lines = roadmap_action_lines(action)
+            action_html = "<br>".join(_esc(ln) for ln in lines)
             rows += (f'<tr><td class="small">{i}</td>'
                      f'<td><span class="pill" style="background:{m["color"]}">{m["label"]}</span></td>'
                      f'<td>{_esc(f.get("title") or f.get("vuln_type") or "Finding")}</td>'
-                     f'<td class="small">{_esc(action)}</td>'
+                     f'<td class="small">{action_html}</td>'
                      f'<td class="small">{m["sla"]}</td></tr>')
         return f"""<div class="page section" id="roadmap"><h2>Remediation Roadmap</h2>
-          <p>Recommended remediation order, prioritised by severity. Address higher-severity items
-          first; SLAs are guidance and should be adapted to your risk appetite.</p>
+          <p>Recommended remediation order, prioritised by severity, covering all
+          {len(ordered)} findings. Address higher-severity items first; SLAs are
+          guidance and should be adapted to your risk appetite.</p>
           <table>
             <tr><th style="width:40px">#</th><th style="width:90px">Severity</th><th>Finding</th>
                 <th>Recommended action</th><th style="width:100px">Target SLA</th></tr>

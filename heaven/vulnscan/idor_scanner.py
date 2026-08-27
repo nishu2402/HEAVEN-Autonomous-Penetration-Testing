@@ -32,6 +32,7 @@ except ImportError:
     aiohttp = None  # type: ignore[assignment]
 
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.idor")
 
@@ -177,7 +178,9 @@ async def _get(session, url: str, headers: dict, timeout: float = 10.0) -> tuple
             timeout=aiohttp.ClientTimeout(total=timeout),
             allow_redirects=True, ssl=False,
         ) as resp:
-            return resp.status, await resp.text(errors="replace")
+            status, body = resp.status, await resp.text(errors="replace")
+            proof_capture.record(url, status, body)
+            return status, body
     except Exception:
         return 0, ""
 
@@ -189,7 +192,9 @@ async def _post(session, url: str, data: dict, headers: dict, timeout: float = 1
             timeout=aiohttp.ClientTimeout(total=timeout),
             allow_redirects=True, ssl=False,
         ) as resp:
-            return resp.status, await resp.text(errors="replace")
+            status, body = resp.status, await resp.text(errors="replace")
+            proof_capture.record(url, status, body)
+            return status, body
     except Exception:
         return 0, ""
 

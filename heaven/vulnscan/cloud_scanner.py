@@ -29,6 +29,7 @@ raises) and every parser is pure and unit-tested against canned responses.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -223,10 +224,24 @@ def base_names_from_target(target: str) -> list[str]:
     host = target.strip()
     if "://" in host:
         host = urlparse(host).netloc or host
-    host = host.split("@")[-1].split(":")[0].strip().lower()
-    host = host.rstrip(".")
+    host = host.split("@")[-1]
+    # Strip an IPv6 literal's brackets / port, else a trailing :port.
+    if host.startswith("["):
+        host = host[1:].split("]")[0]
+    else:
+        host = host.split(":")[0]
+    host = host.strip().lower().rstrip(".")
     if not host:
         return []
+    # A bare IP literal has no registrable domain label — deriving bucket names
+    # from its octets ("192-assets", "0-backup") can only ever coincidentally hit
+    # an unrelated third party's bucket and mis-attribute it to the target. Skip
+    # it, for the same reason reserved base names are skipped.
+    try:
+        ipaddress.ip_address(host)
+        return []
+    except ValueError:
+        pass
     labels = [x for x in host.split(".") if x]
     # Number of trailing labels that form the public suffix (1 normally, 2 for
     # co.uk / com.au / ... so the registrable label is picked correctly).

@@ -142,6 +142,16 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   "critical", 9.8, [">=5.4", "<=9.3p1"], exploit_available=True, cwe="CWE-78"),
         CVERecord("CVE-2023-51385", "OpenSSH shell metacharacter injection in ProxyCommand",
                   "high", 7.5, ["<=9.6"], cwe="CWE-78"),
+        # Terrapin is an SSH *transport-protocol* weakness (prefix truncation of
+        # the binary packet stream), so it belongs to the SSH server, not to
+        # unrelated services that merely speak another protocol. It only affects a
+        # connection that negotiates ChaCha20-Poly1305 or an Encrypt-then-MAC
+        # (*-etm) mode — and OpenSSH gained EtM MACs in 6.2 and
+        # chacha20-poly1305@openssh.com in 6.5. Releases before 6.2 (e.g. 4.7p1)
+        # support NEITHER, so they cannot be attacked: floor at >=6.2 to avoid
+        # flagging them, ceiling at <9.6 where it is fixed.
+        CVERecord("CVE-2023-48795", "Terrapin attack: SSH prefix truncation weakens channel integrity",
+                  "medium", 5.9, [">=6.2", "<9.6"], cwe="CWE-222"),
         CVERecord("CVE-2024-6387", "OpenSSH regreSSHion RCE (signal handler race condition)",
                   "critical", 8.1, ["<=9.7p1", ">=8.5p1"], exploit_available=True, cwe="CWE-364"),
         CVERecord("CVE-2021-41617", "OpenSSH privilege escalation via AuthorizedKeysCommand",
@@ -211,8 +221,11 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   "critical", 9.8, ["<=10.0.19041"], exploit_available=True, cwe="CWE-416"),
     ],
     "mysql": [
+        # NVD affects two explicit windows — 5.0.0–5.7.41 and 8.0.0–8.0.32 — so a
+        # bare "<=8.0.32" (which also swept 5.7.42+/6.x/7.x) is tightened to match
+        # exactly those, keeping the real 5.0.51a hit while excluding patched 8.0.33+.
         CVERecord("CVE-2023-21980", "MySQL Server DOS via Group Replication",
-                  "high", 7.7, ["<=8.0.32"], cwe="CWE-400"),
+                  "high", 7.7, ["5.0.0-5.7.41", ">=8.0.0", "<=8.0.32"], cwe="CWE-400"),
         CVERecord("CVE-2022-21417", "MySQL Server InnoDB info disclosure",
                   "medium", 4.9, ["<=8.0.28", "<=5.7.37"], cwe="CWE-200"),
         # NOTE: CVE-2021-2471 (MySQL Connector/J SSRF) was intentionally removed —
@@ -223,6 +236,9 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
         CVERecord("CVE-2016-6662", "MySQL remote code execution via config file injection",
                   "critical", 9.8, ["<=5.7.14", "<=5.6.32", "<=5.5.51"],
                   exploit_available=True, cwe="CWE-264"),
+        # NVD lists this with no lower bound (all MySQL/MariaDB up to 5.6.5); the
+        # token-comparison cast is core auth code present in the 5.0 line too, so
+        # the single "<=5.6.5" ceiling stays open-ended-down (matches 5.0.51a).
         CVERecord("CVE-2012-2122", "MySQL authentication bypass (timing)",
                   "high", 7.5, ["<=5.6.5"], exploit_available=True, cwe="CWE-287"),
     ],
@@ -526,13 +542,34 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
         CVERecord("CVE-2011-2523", "vsftpd 2.3.4 backdoor command execution",
                   "critical", 10.0, ["2.3.4"], exploit_available=True, cwe="CWE-78"),
     ],
+    "distccd": [
+        # distcc's daemon runs any command a reachable client sends — RCE by
+        # design (the whole point of CVE-2004-2687). There is no "fixed version":
+        # a distccd answering an untrusted network is exploitable regardless of
+        # release, so the spec is "all". distcc's own docs say never expose it.
+        CVERecord("CVE-2004-2687", "distccd remote command execution (unauthenticated compile jobs)",
+                  "critical", 9.8, ["all"], exploit_available=True, cwe="CWE-78"),
+    ],
+    "unrealircd": [
+        # The 3.2.8.1 tarball distributed Nov-2009 to Jun-2010 was trojaned with a
+        # DEBUG3_DOLOG_SYSTEM backdoor (msf unreal_ircd_3281_backdoor). Pin the
+        # exact backdoored build so a patched/other-version UnrealIRCd is never
+        # falsely flagged; a version-less banner still surfaces as one honest
+        # low "potential" candidate rather than a confirmed critical.
+        CVERecord("CVE-2010-2075", "UnrealIRCd 3.2.8.1 backdoor command execution",
+                  "critical", 10.0, ["3.2.8.1"], exploit_available=True, cwe="CWE-78"),
+    ],
     "proftpd": [
-        CVERecord("CVE-2023-48795", "Terrapin attack: prefix truncation in SSH/SFTP",
-                  "medium", 5.9, ["<1.3.8b"], cwe="CWE-924"),
+        # mod_copy (SITE CPFR/CPTO) first shipped in ProFTPD 1.3.3, so both
+        # mod_copy CVEs need a >=1.3.3 floor — an unbounded "<1.3.7a"/"<1.3.6b"
+        # ceiling otherwise flagged pre-mod_copy 1.3.1 (Metasploitable) as
+        # vulnerable to a module it does not even build. (Terrapin, CVE-2023-48795,
+        # was removed from here: it is an SSH-transport flaw, not an FTP one, and
+        # now lives under the "openssh" key where it actually applies.)
         CVERecord("CVE-2020-9273", "ProFTPD memory corruption via mod_copy",
-                  "high", 8.8, ["<1.3.7a"], exploit_available=True, cwe="CWE-416"),
+                  "high", 8.8, [">=1.3.3", "<1.3.7a"], exploit_available=True, cwe="CWE-416"),
         CVERecord("CVE-2019-12815", "ProFTPD arbitrary file copy via mod_copy unauthenticated",
-                  "critical", 9.8, ["<1.3.6b"], exploit_available=True, cwe="CWE-284"),
+                  "critical", 9.8, [">=1.3.3", "<1.3.6b"], exploit_available=True, cwe="CWE-284"),
     ],
     "rabbitmq": [
         CVERecord("CVE-2023-46118", "RabbitMQ HTTP API DoS via large HTTP body",
@@ -749,6 +786,29 @@ def _same_branch(version: str, upper_spec: str) -> bool:
     if depth < 1:
         return True
     return _parse_ver(version)[:depth] == _parse_ver(body)[:depth]
+
+
+def _fuzzy_version(version: str) -> bool:
+    """True when a fingerprinted version is too imprecise to pin one build —
+    an nmap softmatch range ("3.X - 4.X", "8.3.0 - 8.3.7"), a bare "X" placeholder
+    or an empty string. Such a fingerprint cannot tell two deployments apart, so
+    it must not be used to split one daemon (seen on several ports at different
+    fingerprint precision) into duplicate findings."""
+    v = (version or "").strip().lower()
+    return (not v) or ("x" in v) or (" - " in v) or ("," in v)
+
+
+def _versions_compatible(a: str, b: str) -> bool:
+    """True when two version fingerprints could name the SAME running instance:
+    equal, either unknown, or at least one only a fuzzy nmap range. Two different
+    PRECISE versions (2.2.8 vs 2.2.14) are genuinely separate deployments."""
+    a = (a or "").strip().lower()
+    b = (b or "").strip().lower()
+    if a == b:
+        return True
+    if _fuzzy_version(a) or _fuzzy_version(b):
+        return True
+    return False
 
 
 def specs_match_version(version: str, specs: list[str]) -> bool:
@@ -1343,21 +1403,56 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
         port_num = v.get("port") or 0
         v["target"] = f"{host_str}:{port_num}" if port_num else host_str
 
-    # Deduplicate. A confirmed CVE is identified per (host, port, cve) so
-    # distinct CVEs — and the same CVE on genuinely different service ports —
-    # stay distinct. The consolidated version-undetermined "potential" finding is
-    # a property of the product on the host, so it collapses per (host, product):
-    # a service whose version is hidden but is reachable on several ports (Apache
-    # on 80 AND 443) is reported once, not once per port.
-    seen: set[tuple] = set()
+    # Deduplicate. A version-matched CVE is a property of the software INSTANCE,
+    # not of a port: the very same daemon answering on several ports (Samba on
+    # 139 AND 445, Apache on 80 AND 443) is one installation with one instance of
+    # the flaw, so it collapses per (host, product, cve) and records the extra
+    # ports in evidence. Two ports count as the same instance when their versions
+    # are compatible — equal, either unknown, or one only a fuzzy nmap range
+    # ("3.X - 4.X") that cannot distinguish builds. Two DIFFERENT precise versions
+    # (Apache 2.2.8 on :80, 2.2.14 on :8080) are genuinely separate deployments
+    # and stay distinct. When the product is unknown we cannot tie ports together,
+    # so we fall back to (host, port, cve). The consolidated version-undetermined
+    # "potential" finding is likewise a property of the product on the host, so it
+    # collapses per (host, product).
+    inst: dict[tuple, list[dict]] = {}   # (host, product, cve) -> distinct builds
+    seen_flat: set[tuple] = set()        # potential / product-less fallback keys
     unique: list[dict] = []
+
+    def _merge_port(kept: dict, extra: Any) -> None:
+        if extra and extra != kept.get("port"):
+            ev = kept.setdefault("evidence", {})
+            if isinstance(ev, dict):
+                ports = ev.setdefault("also_on_ports", [])
+                if extra not in ports:
+                    ports.append(extra)
+
     for v in all_vulns:
+        product = (v.get("product") or "").strip().lower()
+        version = (v.get("version") or "").strip().lower()
         if v.get("vuln_type") == "potential_vulnerable_service":
             key = ("__potential__", v.get("host"), v.get("product"))
-        else:
+            if key not in seen_flat:
+                seen_flat.add(key)
+                unique.append(v)
+            continue
+        if not product:
             key = (v.get("host"), v.get("port"), v.get("cve"))
-        if key not in seen:
-            seen.add(key)
+            if key not in seen_flat:
+                seen_flat.add(key)
+                unique.append(v)
+            continue
+        base = (v.get("host"), product, v.get("cve"))
+        bucket = inst.setdefault(base, [])
+        for kept in bucket:
+            if _versions_compatible(version, (kept.get("version") or "").strip().lower()):
+                _merge_port(kept, v.get("port"))
+                # Keep the more precise of the two fingerprints on the survivor.
+                if _fuzzy_version(kept.get("version", "")) and not _fuzzy_version(version):
+                    kept["version"] = v.get("version")
+                break
+        else:
+            bucket.append(v)
             unique.append(v)
 
     logger.info(f"CVE mapping complete: {len(unique)} vulnerabilities across {len(host_results)} hosts")

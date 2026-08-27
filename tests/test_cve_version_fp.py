@@ -228,3 +228,44 @@ def test_samba_zerologon_scoped_to_vulnerable_ad_dc_range():
     assert "CVE-2020-1472" in {r.cve_id for r in lookup_inline_cves("samba", "4.5.0")}
     assert "CVE-2020-1472" not in {r.cve_id for r in lookup_inline_cves("samba", "4.15.13")}
     assert "CVE-2020-1472" not in {r.cve_id for r in lookup_inline_cves("samba", "3.0.20")}
+
+
+# ── 7. Terrapin only affects OpenSSH that can negotiate the vulnerable modes ──
+def test_terrapin_not_flagged_on_openssh_before_etm_macs():
+    """CVE-2023-48795 (Terrapin) exploits ChaCha20-Poly1305 (OpenSSH 6.5) or an
+    EtM MAC (OpenSSH 6.2). A 4.7p1 server supports NEITHER, so it cannot be
+    attacked — it was a live false positive on Metasploitable's OpenSSH 4.7p1."""
+    assert "CVE-2023-48795" not in {r.cve_id for r in lookup_inline_cves("openssh", "4.7p1")}
+    assert "CVE-2023-48795" not in {r.cve_id for r in lookup_inline_cves("openssh", "6.1")}
+    # In-range versions (that DO negotiate the modes) are still flagged.
+    assert "CVE-2023-48795" in {r.cve_id for r in lookup_inline_cves("openssh", "6.2")}
+    assert "CVE-2023-48795" in {r.cve_id for r in lookup_inline_cves("openssh", "8.9p1")}
+    assert "CVE-2023-48795" not in {r.cve_id for r in lookup_inline_cves("openssh", "9.6")}
+
+
+# ── 8. One software instance on several ports is one finding, not one per port ─
+def test_same_product_version_cve_collapses_across_ports():
+    """Samba answers on 139 AND 445 — the same daemon, so the same
+    version-matched RCE must be ONE finding, with the extra port recorded."""
+    hosts = [{"host": "10.0.0.9", "open_ports": [
+        {"port": 139, "service": "netbios-ssn", "banner": "Samba smbd 3.0.20-Debian",
+         "version": "3.0.20"},
+        {"port": 445, "service": "netbios-ssn", "banner": "Samba smbd 3.0.20-Debian",
+         "version": "3.0.20"},
+    ]}]
+    vulns = asyncio.run(CM.map_vulnerabilities(hosts))
+    usermap = [v for v in vulns if v.get("cve") == "CVE-2007-2447"]
+    assert len(usermap) == 1, f"Samba RCE duplicated across ports: {usermap}"
+    assert 445 in usermap[0].get("evidence", {}).get("also_on_ports", [])
+
+
+def test_same_cve_different_versions_stay_distinct_across_ports():
+    """Two genuinely different builds (different versions) sharing a CVE are two
+    instances, so they must NOT be collapsed."""
+    hosts = [{"host": "10.0.0.9", "open_ports": [
+        {"port": 80, "service": "http", "banner": "Apache/2.2.8", "version": "2.2.8"},
+        {"port": 8080, "service": "http", "banner": "Apache/2.2.14", "version": "2.2.14"},
+    ]}]
+    vulns = asyncio.run(CM.map_vulnerabilities(hosts))
+    versions = {v.get("version") for v in vulns if v.get("cve")}
+    assert {"2.2.8", "2.2.14"} <= versions

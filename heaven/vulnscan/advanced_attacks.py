@@ -30,6 +30,7 @@ except ImportError:
     aiohttp = None  # type: ignore[assignment]
 
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.advanced")
 
@@ -207,6 +208,7 @@ class RaceConditionDetector:
                 async with session.request(method, url, data=data,
                                             timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     body = await resp.text()
+                    proof_capture.record(url, resp.status, body)
                     return {"status": resp.status, "length": len(body), "body_hash": hashlib.md5(body.encode(), usedforsecurity=False).hexdigest()[:8]}
             except Exception:
                 return None

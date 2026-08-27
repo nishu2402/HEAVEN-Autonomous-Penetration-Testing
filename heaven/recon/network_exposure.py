@@ -20,10 +20,19 @@ What it flags (all grounded in the discovered attack surface, never fabricated):
   is attached as evidence. Nothing is ever written to the device.
 * **High-risk appliance management planes** — Cisco Smart Install (TCP 4786),
   IPMI/BMC (UDP 623) — which are routinely abused for remote config theft / RCE.
+* **World-exported NFS shares** — a read-only ``showmount -e`` style RPC dump.
+  A filesystem exported to ``*`` is a direct access-control failure.
+* **Default / weak service credentials, proven by an authenticated handshake** —
+  Tomcat Manager (WAR-deploy RCE), PostgreSQL (DB takeover), and VNC (no-auth or
+  default-password desktop takeover). Each tries only a tiny list of well-known
+  vendor defaults, stops at the first hit, reports only a credential that
+  actually authenticated, and tears the session down immediately.
 
 Severity discipline: an exposure detected from the port/service alone is rated
-by the protocol's inherent risk and marked as detected; the SNMP default
-community is only rated high once *proven* by a live reply.
+by the protocol's inherent risk and marked as detected; the active checks (SNMP
+default community, IPMI RAKP, anonymous FTP, RDP-NLA, NFS export dump, and the
+Tomcat / PostgreSQL / VNC default-credential probes) are only raised once
+*proven* by a live, attacker-favourable response.
 """
 
 from __future__ import annotations
@@ -31,6 +40,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
+import struct
 from typing import Optional
 
 from heaven.utils.logger import get_logger
@@ -119,6 +130,95 @@ _DATABASE_PORTS: dict[int, tuple[str, tuple[str, ...]]] = {
 # Engines that historically bind with no authentication by default → exposure is
 # especially dangerous (direct unauthenticated read/write to all data).
 _NOAUTH_DEFAULT_DB = frozenset({6379, 27017, 9200, 5984, 11211, 9042})
+
+
+# ── Backdoor shells & remote-code-execution-by-design services ───────────────
+# Unlike the database block, these fire on public AND internal hosts: a bind
+# shell is an unauthenticated backdoor, and dRuby / Java RMI invoke
+# attacker-supplied code by design wherever they are reachable. Every match is
+# driven by the service label or the banner the scanner already captured, never
+# a bare port number, so an unrelated service on the same port cannot trip them.
+_BACKDOOR_SHELL_TOKENS = ("bindshell", "backdoor", "root shell")
+# Strong, low-false-positive signals that a listener is handing out a shell with
+# no authentication: an advertised shell/backdoor, a leaked root uid, or a live
+# root shell prompt. Deliberately NOT a bare "#" or "/bin/sh" — those appear in
+# too many benign banners (paths, help text).
+_SHELL_BANNER_RE = re.compile(
+    r"(root\s*shell|bind\s*shell|back\s*door|uid=0\(root\)|"
+    r"\broot@[\w.-]+:[^\s]*[#$])",
+    re.I)
+
+
+def _dangerous_service_findings(ip: str, host: dict) -> list[dict]:
+    """Flag unauthenticated backdoor shells and RCE-by-design services from the
+    per-port banner/service the scanner captured. Backdoors are dangerous on any
+    network, so — unlike ``database_exposed`` — these are not gated on a public
+    host."""
+    out: list[dict] = []
+    for p in host.get("open_ports", []):
+        try:
+            port = int(p.get("port", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if not port:
+            continue
+        svc = (p.get("service") or "").lower()
+        product = p.get("product") or ""
+        banner = p.get("banner") or ""
+        hay = f"{svc} {product} {banner}".lower()
+
+        # 1) Unauthenticated bind / backdoor shell (e.g. Metasploitable's 1524
+        #    "root shell"). The banner or nmap label literally advertises a shell.
+        if (any(t in hay for t in _BACKDOOR_SHELL_TOKENS)
+                or _SHELL_BANNER_RE.search(f"{product} {banner}")):
+            f = _finding(
+                f"{ip}:{port}", "backdoor_shell", "critical",
+                f"Unauthenticated Backdoor Shell (port {port})",
+                "This port answers with an interactive command shell and no "
+                "authentication, giving any client on the network direct command "
+                "execution (typically as root). It is a bind shell / backdoor — "
+                "treat the host as fully compromised: remove the listener and "
+                "rebuild from a known-good image.",
+                confidence=0.9,
+                evidence={"port": port, "service": svc, "banner": banner[:200]})
+            f["typical_cvss"] = 10.0
+            out.append(f)
+            continue
+
+        # 2) Distributed Ruby (dRuby / DRb) — deserialises and invokes methods on
+        #    remote objects with no auth, so an exposed endpoint is RCE by design.
+        if svc in ("drb", "druby") or "druby" in hay or " drb " in f" {hay} ":
+            f = _finding(
+                f"{ip}:{port}", "dangerous_service_exposed", "critical",
+                f"Distributed Ruby (dRuby) Exposed (port {port})",
+                "A dRuby (DRb) endpoint is reachable. dRuby invokes methods on "
+                "remote objects with no authentication, so an exposed endpoint is "
+                "remote code execution by design (msf drb_remote_codeexec). Bind "
+                "it to localhost or require an authenticated transport.",
+                confidence=0.85,
+                evidence={"port": port, "service": svc, "banner": banner[:200]})
+            f["typical_cvss"] = 9.8
+            out.append(f)
+            continue
+
+        # 3) Java RMI registry — a well-known RCE surface: default configurations
+        #    permit remote class loading, and object endpoints are frequently
+        #    vulnerable to deserialization attacks (ysoserial, BaRMIe).
+        if (svc in ("java-rmi", "rmiregistry", "rmi")
+                or "rmiregistry" in hay or "java rmi" in hay):
+            f = _finding(
+                f"{ip}:{port}", "dangerous_service_exposed", "high",
+                f"Java RMI Registry Exposed (port {port})",
+                "A Java RMI registry is reachable. An exposed registry is a "
+                "well-known remote-code-execution surface: default configurations "
+                "allow remote class loading and object endpoints are frequently "
+                "vulnerable to deserialization (ysoserial, BaRMIe). Restrict it to "
+                "a management network and disable remote class loading.",
+                confidence=0.65,
+                evidence={"port": port, "service": svc, "banner": banner[:200]})
+            f["typical_cvss"] = 8.1
+            out.append(f)
+    return out
 
 
 def _is_public_host(host: str) -> bool:
@@ -491,6 +591,535 @@ async def _ipmi_rakp_hashdump(host: str, port: int = 623,
     return {"rmcp_plus": True, "hash": False}
 
 
+# ── Active default-/weak-credential checks (authorized, bounded) ─────────────
+# These complete an authentication handshake to *prove* a service accepts a
+# vendor-default or trivially-guessable credential — the same class of check as
+# the SNMP default-community and IPMI RAKP probes above, and the reason the
+# scanner exists (an authorized assessment). They are deliberately NOT
+# brute-force: each list is a handful of well-known defaults an unauthenticated
+# attacker would try first, every probe stops at the first hit, and only a
+# credential that actually authenticated is ever reported. On success the
+# session is torn down immediately — no command is run, no object deployed, no
+# framebuffer read. All are gated on ``active_probes`` so a stealthy profile
+# skips them.
+_TOMCAT_MANAGER_DEFAULT_CREDS: tuple[tuple[str, str], ...] = (
+    ("tomcat", "tomcat"), ("tomcat", "s3cret"), ("admin", "admin"),
+    ("admin", ""), ("role1", "role1"), ("both", "tomcat"),
+    ("manager", "manager"), ("tomcat", "manager"),
+)
+_POSTGRES_DEFAULT_CREDS: tuple[tuple[str, str], ...] = (
+    ("postgres", "postgres"), ("postgres", ""), ("postgres", "password"),
+    ("postgres", "admin"),
+)
+_VNC_DEFAULT_PASSWORDS: tuple[str, ...] = ("password", "", "root", "admin", "vnc")
+
+# NFS group tokens that mean "any host on the network" — an export shared this
+# widely is world-accessible.
+_NFS_WORLD_TOKENS = frozenset({"*", "", "(everyone)", "0.0.0.0/0", "::/0"})
+# Sensitive export roots that make a world-accessible NFS share critical rather
+# than merely high (full-filesystem / home / credential-bearing paths). "/" is
+# handled separately as an exact match so it doesn't prefix-match every path.
+_NFS_SENSITIVE_ROOTS = ("/root", "/home", "/etc", "/var", "/srv", "/export", "/usr")
+
+
+def _nfs_path_is_sensitive(path: str) -> bool:
+    """True for the whole filesystem ("/") or a credential-bearing system root,
+    matched on path boundaries so "/homework" does not match "/home"."""
+    if path == "/":
+        return True
+    return any(path == r or path.startswith(r + "/") for r in _NFS_SENSITIVE_ROOTS)
+
+
+# ── NFS export enumeration (read-only RPC MOUNT dump; `showmount -e`) ─────────
+# AUTH_NULL cred {flavor 0, length 0} = 8 bytes, plus AUTH_NULL verf = 16 total.
+_AUTH_NULL = b"\x00" * 16
+
+
+def _xdr_pack(data: bytes) -> bytes:
+    """Encode one XDR variable-length opaque (4-byte length + 4-byte-padded body)."""
+    return struct.pack(">I", len(data)) + data + b"\x00" * ((4 - len(data) % 4) % 4)
+
+
+def _auth_unix(uid: int = 0, gid: int = 0, machine: bytes = b"heaven") -> bytes:
+    """AUTH_UNIX (AUTH_SYS) credential + AUTH_NULL verifier. NFS MOUNT and ACCESS
+    reject AUTH_NULL; uid/gid 0 means a server with root_squash maps us to its
+    anonymous user, so the probe reflects the rights an unauthenticated client is
+    actually granted rather than assuming any privilege."""
+    body = (struct.pack(">I", 0)                    # stamp
+            + _xdr_pack(machine)                    # machinename
+            + struct.pack(">III", uid, gid, 0))     # uid, gid, 0 auxiliary gids
+    cred = struct.pack(">II", 1, len(body)) + body  # AUTH_UNIX (flavor 1) + opaque
+    return cred + struct.pack(">II", 0, 0)          # + AUTH_NULL verifier
+
+
+def _rpc_record(prog: int, vers: int, proc: int, args: bytes = b"",
+                cred: bytes = _AUTH_NULL) -> bytes:
+    """Build one ONC-RPC (RFC 1057) CALL, record-marked for TCP. ``cred`` is the
+    full credential+verifier blob — AUTH_NULL by default, AUTH_UNIX for the
+    MOUNT/NFS calls that demand a real identity."""
+    xid = int.from_bytes(os.urandom(4), "big")
+    body = struct.pack(">IIIIII", xid, 0, 2, prog, vers, proc) + cred + args
+    return struct.pack(">I", 0x80000000 | len(body)) + body
+
+
+def _rpc_reply_results(payload: bytes) -> Optional[bytes]:
+    """Return the results bytes of an *accepted* RPC reply, or None on any
+    reject / non-success status (so a wrong-program reply never looks like data)."""
+    if len(payload) < 12:
+        return None
+    _xid, mtype, rstat = struct.unpack(">III", payload[:12])
+    if mtype != 1 or rstat != 0:                            # REPLY / MSG_ACCEPTED
+        return None
+    off = 12
+    _vf, vl = struct.unpack(">II", payload[off:off + 8])
+    off += 8 + vl                                           # skip verifier
+    if off + 4 > len(payload):
+        return None
+    astat = struct.unpack(">I", payload[off:off + 4])[0]
+    off += 4
+    return payload[off:] if astat == 0 else None            # SUCCESS
+
+
+def _xdr_string(data: bytes, off: int) -> tuple[str, int]:
+    """Read one XDR variable-length opaque string (4-byte length + padded body)."""
+    ln = struct.unpack(">I", data[off:off + 4])[0]
+    off += 4
+    val = data[off:off + ln]
+    off += ln + ((4 - ln % 4) % 4)                          # 4-byte alignment pad
+    return val.decode("latin-1", "replace"), off
+
+
+async def _rpc_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                    prog: int, vers: int, proc: int, args: bytes,
+                    timeout: float, cred: bytes = _AUTH_NULL) -> Optional[bytes]:
+    """Send one RPC CALL over an open TCP stream and return the accepted results,
+    reassembling record fragments. None on any transport/parse failure."""
+    writer.write(_rpc_record(prog, vers, proc, args, cred))
+    await writer.drain()
+    payload = b""
+    while True:
+        hdr = await asyncio.wait_for(reader.readexactly(4), timeout)
+        frag = struct.unpack(">I", hdr)[0]
+        payload += await asyncio.wait_for(reader.readexactly(frag & 0x7FFFFFFF),
+                                          timeout)
+        if frag & 0x80000000:                               # last-fragment flag
+            break
+    return _rpc_reply_results(payload)
+
+
+async def _nfs_exports(host: str, port: int = 111,
+                       timeout: float = 5.0) -> Optional[list[tuple[str, list[str]]]]:
+    """Read-only NFS export enumeration, the wire equivalent of ``showmount -e``.
+
+    Asks the portmapper (rpcbind, TCP 111) for the mountd port, then issues a
+    single MOUNTPROC_EXPORT (procedure 5) call and parses the export list. This
+    is exactly the dump any unauthenticated client can request — nothing is
+    mounted and nothing is written. Returns a list of ``(dirpath, [allowed])``
+    tuples (``allowed`` is the host/netgroup list the path is shared with), or
+    None if the host is not a reachable NFS/mountd server."""
+    _MOUNTD = 100005
+    reader = writer = None
+    mport = 0
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout)
+        # portmap GETPORT (prog 100000, vers 2, proc 3) for mountd over TCP(6).
+        res = await _rpc_call(reader, writer, 100000, 2, 3,
+                              struct.pack(">IIII", _MOUNTD, 1, 6, 0), timeout)
+        if res and len(res) >= 4:
+            mport = struct.unpack(">I", res[:4])[0]
+    except Exception:
+        return None
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+    if not mport:
+        return None
+
+    # MOUNTPROC_EXPORT (proc 5) on a fresh connection per version — a version the
+    # daemon does not speak answers with PROG_MISMATCH and may drop the socket,
+    # so we never reuse a connection across attempts.
+    res = None
+    for vers in (1, 3, 2):                                  # v1 is the most widely supported
+        mreader = mwriter = None
+        try:
+            mreader, mwriter = await asyncio.wait_for(
+                asyncio.open_connection(host, mport), timeout)
+            res = await _rpc_call(mreader, mwriter, _MOUNTD, vers, 5, b"", timeout)
+        except Exception:
+            res = None
+        finally:
+            if mwriter is not None:
+                with contextlib.suppress(Exception):
+                    mwriter.close()
+        if res is not None:
+            break
+    if res is None:
+        return None
+    try:
+        exports: list[tuple[str, list[str]]] = []
+        off = 0
+        while off + 4 <= len(res):
+            if struct.unpack(">I", res[off:off + 4])[0] == 0:   # exportnode: no more
+                break
+            off += 4
+            dirpath, off = _xdr_string(res, off)
+            groups: list[str] = []
+            while off + 4 <= len(res):
+                if struct.unpack(">I", res[off:off + 4])[0] == 0:  # group: no more
+                    off += 4
+                    break
+                off += 4
+                gname, off = _xdr_string(res, off)
+                groups.append(gname)
+            exports.append((dirpath, groups))
+        return exports
+    except Exception:
+        return None
+
+
+# ── NFS anonymous write-access probe (read-only NFSv3 ACCESS) ────────────────
+# MOUNTPROC_EXPORT reveals that a share is world-exported but not whether it is
+# read-only or read-write — that lives in the server's /etc/exports. NFSv3's
+# ACCESS procedure closes the gap without touching data: it returns the rights
+# the server *would* grant. We mount the export for a file handle (MOUNT MNT),
+# issue one ACCESS call, then unmount (UMNT) to clear our rmtab entry. Nothing is
+# created, written or deleted. NFS `secure` exports (the default) only honour
+# requests from a privileged (<1024) source port, so we source from one; when we
+# cannot (unprivileged and the OS forbids it) the probe reports "undetermined"
+# and the finding keeps its honest read-write caveat.
+_NFS_ACCESS_MODIFY = 0x04
+_NFS_ACCESS_EXTEND = 0x08
+
+
+async def _rpc_getport(host: str, prog: int, vers: int, proto: int,
+                       timeout: float) -> int:
+    """portmap GETPORT — resolve the TCP(6)/UDP(17) port of an RPC program, or 0."""
+    reader = writer = None
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, 111), timeout)
+        res = await _rpc_call(reader, writer, 100000, 2, 3,
+                              struct.pack(">IIII", prog, vers, proto, 0), timeout)
+        if res and len(res) >= 4:
+            return struct.unpack(">I", res[:4])[0]
+    except Exception:
+        return 0
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+    return 0
+
+
+async def _open_reserved(host: str, port: int, timeout: float):
+    """Open a TCP stream from a privileged (<1024) source port, which NFS
+    `secure` exports require. Raises PermissionError when the OS forbids it (we
+    are unprivileged), so the caller can degrade to an honest "undetermined"."""
+    last: Optional[BaseException] = None
+    for src in range(1023, 600, -1):
+        try:
+            return await asyncio.wait_for(
+                asyncio.open_connection(host, port, local_addr=("0.0.0.0", src)),
+                timeout)
+        except PermissionError:
+            raise
+        except OSError as exc:                              # source port in use
+            last = exc
+            continue
+    raise last or OSError("no free reserved source port")
+
+
+async def _nfs_mnt(host: str, mount_port: int, dirpath: str,
+                   timeout: float) -> Optional[bytes]:
+    """MOUNT MNT (v3) — return the NFS file handle for an export, or None."""
+    reader = writer = None
+    try:
+        reader, writer = await _open_reserved(host, mount_port, timeout)
+        res = await _rpc_call(reader, writer, 100005, 3, 1,
+                              _xdr_pack(dirpath.encode("latin-1")), timeout,
+                              cred=_auth_unix())
+        if not res or len(res) < 8 or struct.unpack(">I", res[:4])[0] != 0:
+            return None                                     # mountstat3 != MNT3_OK
+        fhlen = struct.unpack(">I", res[4:8])[0]
+        if fhlen == 0 or 8 + fhlen > len(res):
+            return None
+        return res[8:8 + fhlen]
+    except Exception:
+        return None
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+
+async def _nfs_umnt(host: str, mount_port: int, dirpath: str,
+                    timeout: float) -> None:
+    """MOUNT UMNT (v3) — best-effort removal of our rmtab entry after MNT."""
+    reader = writer = None
+    try:
+        reader, writer = await _open_reserved(host, mount_port, timeout)
+        await _rpc_call(reader, writer, 100005, 3, 3,
+                        _xdr_pack(dirpath.encode("latin-1")), timeout,
+                        cred=_auth_unix())
+    except Exception:
+        return
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+
+async def _nfs_access_mode(host: str, nfs_port: int, fh: bytes,
+                           timeout: float) -> Optional[str]:
+    """One NFSv3 ACCESS call for a file handle. Returns "read-write" when the
+    server grants MODIFY/EXTEND, "read-only" otherwise, or None. Performs no I/O."""
+    reader = writer = None
+    try:
+        reader, writer = await _open_reserved(host, nfs_port, timeout)
+        args = _xdr_pack(fh) + struct.pack(">I", 0x3F)      # request all six bits
+        res = await _rpc_call(reader, writer, 100003, 3, 4, args, timeout,
+                              cred=_auth_unix())
+        if not res or len(res) < 8 or struct.unpack(">I", res[:4])[0] != 0:
+            return None                                     # nfsstat3 != NFS3_OK
+        off = 4
+        if struct.unpack(">I", res[off:off + 4])[0] == 1:   # post_op_attr present
+            off += 4 + 84                                   # attrs_follow + fattr3
+        else:
+            off += 4
+        if off + 4 > len(res):
+            return None
+        granted = struct.unpack(">I", res[off:off + 4])[0]
+        return ("read-write"
+                if granted & (_NFS_ACCESS_MODIFY | _NFS_ACCESS_EXTEND)
+                else "read-only")
+    except Exception:
+        return None
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+
+async def _nfs_world_write_check(host: str, dirpath: str,
+                                 timeout: float = 5.0) -> Optional[str]:
+    """Determine, read-only, whether an anonymous client is granted write access
+    to a world-exported NFS share. Resolves the mount/NFS ports, mounts the
+    export for a file handle, issues one NFSv3 ACCESS query (which reports the
+    rights the server would grant without performing any I/O), and unmounts.
+    Returns "read-write", "read-only", or None when it cannot be determined."""
+    mport = await _rpc_getport(host, 100005, 3, 6, timeout)
+    if not mport:
+        return None
+    nport = await _rpc_getport(host, 100003, 3, 6, timeout) or 2049
+    fh = await _nfs_mnt(host, mport, dirpath, timeout)
+    if fh is None:
+        return None
+    try:
+        return await _nfs_access_mode(host, nport, fh, timeout)
+    finally:
+        await _nfs_umnt(host, mport, dirpath, timeout)
+
+
+# ── Tomcat Manager default-credential check (read-only) ──────────────────────
+async def _tomcat_manager_default_creds(host: str, port: int,
+                                        timeout: float = 6.0) -> Optional[dict]:
+    """Try a small set of well-known Tomcat defaults against ``/manager/html``.
+
+    Confirms first that the endpoint exists and demands HTTP Basic auth (a 401
+    with a Basic challenge); a wrong password then also yields 401, so a 200 in
+    response to a default pair is proof the credential authenticated. Only GETs
+    ``/manager/html`` — nothing is deployed, undeployed, started or stopped.
+    Returns the working credential + evidence, or None."""
+    try:
+        import aiohttp
+    except ImportError:
+        return None
+    scheme = "https" if port in (8443, 443) else "http"
+    url = f"{scheme}://{host}:{port}/manager/html"
+    to = aiohttp.ClientTimeout(total=timeout)
+    try:
+        async with aiohttp.ClientSession(
+                timeout=to, connector=aiohttp.TCPConnector(ssl=False)) as session:
+            try:
+                async with session.get(url) as r0:
+                    challenge = (r0.headers.get("WWW-Authenticate", "") or "").lower()
+                    if r0.status != 401 or "basic" not in challenge:
+                        return None            # not a Basic-protected Manager here
+            except aiohttp.ClientError:
+                return None
+            for user, pwd in _TOMCAT_MANAGER_DEFAULT_CREDS:
+                try:
+                    async with session.get(
+                            url, auth=aiohttp.BasicAuth(user, pwd)) as r:
+                        if r.status != 200:
+                            continue
+                        body = (await r.text())[:8000]
+                except (aiohttp.ClientError, UnicodeError):
+                    continue
+                low = body.lower()
+                ui = any(m in low for m in (
+                    "tomcat web application manager", "application manager",
+                    "/manager/html", "list of applications", "war file to deploy",
+                    "server information"))
+                return {"username": user, "password_used": pwd, "url": url,
+                        "status": 200, "manager_ui_confirmed": ui}
+    except Exception:
+        return None
+    return None
+
+
+# ── PostgreSQL default-credential check (read-only) ──────────────────────────
+async def _postgres_default_creds(host: str, port: int = 5432,
+                                  timeout: float = 6.0) -> Optional[dict]:
+    """Try a small set of PostgreSQL defaults. A completed startup/auth handshake
+    proves the credential; the connection is closed immediately with no query
+    run. ``ssl=False`` is required for legacy servers that reject a modern TLS
+    ``ClientHello``. Returns the working credential + server version, or None."""
+    try:
+        import asyncpg
+    except ImportError:
+        return None
+    for user, pwd in _POSTGRES_DEFAULT_CREDS:
+        creds_valid_db_unknown = False
+        for db in ("template1", "postgres", user):
+            try:
+                conn = await asyncio.wait_for(
+                    asyncpg.connect(host=host, port=port, user=user, password=pwd,
+                                    database=db, ssl=False, timeout=timeout),
+                    timeout=timeout + 2)
+            except asyncpg.InvalidPasswordError:
+                break                          # wrong password for this user
+            except asyncpg.InvalidCatalogNameError:
+                creds_valid_db_unknown = True  # password ACCEPTED, db just absent
+                continue
+            except Exception:
+                break                          # transport/auth-method issue → give up pair
+            else:
+                try:
+                    ver = conn.get_server_version()
+                    server = f"{ver.major}.{ver.minor}.{ver.micro}"
+                finally:
+                    with contextlib.suppress(Exception):
+                        await conn.close()
+                return {"username": user, "password_used": pwd,
+                        "database": db, "server_version": server}
+        if creds_valid_db_unknown:
+            return {"username": user, "password_used": pwd,
+                    "database": "(accepted; no default database opened)",
+                    "server_version": ""}
+    return None
+
+
+# ── VNC weak-/no-authentication check (read-only RFB handshake) ──────────────
+def _vnc_des_response(password: str, challenge: bytes) -> bytes:
+    """RFB "VNC Authentication" response: DES-ECB-encrypt the 16-byte challenge
+    with the password as key, applying VNC's per-byte bit-reversal quirk. Uses a
+    24-byte triple-DES key with K1=K2=K3 (identical to single DES) to avoid the
+    deprecated single-key-DES path."""
+    from cryptography.hazmat.primitives.ciphers import Cipher, modes
+    try:
+        from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
+    except ImportError:  # older cryptography still exposes it under primitives
+        from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES
+
+    def _rev(b: int) -> int:
+        b = ((b & 0xF0) >> 4) | ((b & 0x0F) << 4)
+        b = ((b & 0xCC) >> 2) | ((b & 0x33) << 2)
+        b = ((b & 0xAA) >> 1) | ((b & 0x55) << 1)
+        return b
+
+    pw = password.encode("latin-1", "replace")[:8].ljust(8, b"\x00")
+    key = bytes(_rev(c) for c in pw)
+    # DES-ECB is mandated by the RFB protocol's VNC authentication (RFC 6143
+    # §7.2.2); it is the scheme the server itself uses, not a HEAVEN cipher
+    # choice, and this is a read-only auth probe, not data-at-rest encryption.
+    enc = Cipher(TripleDES(key * 3), modes.ECB()).encryptor()  # nosec B304 B305
+    return enc.update(challenge) + enc.finalize()
+
+
+async def _vnc_probe_once(host: str, port: int, password: Optional[str],
+                          timeout: float = 6.0) -> Optional[object]:
+    """One RFB handshake. With ``password=None`` it only detects the offered
+    security: returns ``"none"`` (no auth), ``"vncauth"`` (password required),
+    ``"other"``, or None (not RFB). With a password it completes VNC-auth and
+    returns True/False for accepted/rejected (None if unreachable/not VNC-auth).
+    Read-only: on success it stops right after the SecurityResult — no
+    framebuffer request, no input events."""
+    reader = writer = None
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout)
+        banner = await asyncio.wait_for(reader.readexactly(12), timeout)
+        if not banner.startswith(b"RFB "):
+            return None
+        try:
+            major, minor = int(banner[4:7]), int(banner[8:11])
+        except ValueError:
+            major, minor = 3, 3
+        ver = (major, minor) if (major, minor) <= (3, 8) else (3, 8)
+        writer.write(f"RFB {ver[0]:03d}.{ver[1]:03d}\n".encode("ascii"))
+        await writer.drain()
+
+        if ver >= (3, 7):
+            n = (await asyncio.wait_for(reader.readexactly(1), timeout))[0]
+            if n == 0:                                   # server refused (reason follows)
+                return None
+            types = await asyncio.wait_for(reader.readexactly(n), timeout)
+            if 1 in types:
+                sectype = 1
+            elif 2 in types:
+                sectype = 2
+                writer.write(b"\x02")                    # select VNC authentication
+                await writer.drain()
+            else:
+                return "other"
+        else:                                            # RFB 3.3: server dictates the type
+            sectype = struct.unpack(
+                ">I", await asyncio.wait_for(reader.readexactly(4), timeout))[0]
+
+        if sectype == 1:
+            return "none"
+        if sectype != 2:
+            return "other"
+        # VNC authentication required.
+        if password is None:
+            return "vncauth"
+        challenge = await asyncio.wait_for(reader.readexactly(16), timeout)
+        writer.write(_vnc_des_response(password, challenge))
+        await writer.drain()
+        result = struct.unpack(
+            ">I", await asyncio.wait_for(reader.readexactly(4), timeout))[0]
+        return result == 0                               # 0 = OK
+    except Exception:
+        return None
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+
+async def _vnc_weak_auth(host: str, port: int = 5900,
+                         timeout: float = 6.0) -> Optional[dict]:
+    """Detect a VNC server that requires no authentication, or accepts one of a
+    small set of default passwords. Each password attempt reconnects (RFB auth
+    is single-shot per connection). Returns an outcome dict, or None if the host
+    is not a VNC/RFB server or requires a password we do not have."""
+    first = await _vnc_probe_once(host, port, None, timeout)
+    if first is None:
+        return None
+    if first == "none":
+        return {"auth": "none"}
+    if first != "vncauth":
+        return {"auth": "other"}
+    for pwd in _VNC_DEFAULT_PASSWORDS:
+        ok = await _vnc_probe_once(host, port, pwd, timeout)
+        if ok is True:
+            return {"auth": "weak", "password_used": pwd}
+    return None                                          # reachable but not weak → no finding
+
+
 def _port_service_pairs(host: dict) -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
     for p in host.get("open_ports", []):
@@ -512,8 +1141,11 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
     ``net_data`` is the dict produced by ``scan_network`` (``{"hosts": [...]}``).
     Every finding is derived from an actually-open port/service; the active
     probes (SNMP default community + GETBULK amplification, IPMI RAKP hash
-    disclosure, anonymous-FTP login, RDP-NLA negotiation) are all strictly
-    READ-ONLY and each fires only on a proven, attacker-favourable response.
+    disclosure, anonymous-FTP login, RDP-NLA negotiation, NFS export dump plus a
+    read-only NFSv3 ACCESS check that reports whether an anonymous client is
+    granted write access, and the Tomcat / PostgreSQL / VNC default-credential
+    checks) are all strictly READ-ONLY and each fires only on a proven,
+    attacker-favourable response.
 
     ``active_probes`` gates the non-SNMP protocol probes; when ``None`` it
     follows ``active_snmp`` so a single "active vs. passive" decision drives all
@@ -565,6 +1197,10 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     evidence={"port": port, "service": svc or label.lower(),
                               "protocol": label},
                 ))
+
+        # 1a) Backdoor shells & RCE-by-design services (any network — a backdoor
+        #     is not "expected" internal reachability the way a database is).
+        findings.extend(_dangerous_service_findings(ip, host))
 
         # 1b) Directly-exposed database services (public/routable hosts only).
         if _is_public_host(ip):
@@ -691,6 +1327,181 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     confidence=0.85,
                     evidence={"port": rport, "nla_required": False, "proven": True},
                 ))
+
+        # 2d) NFS — read-only export enumeration (showmount -e). A share offered
+        # to "everyone" (*) is a direct access-control failure; the root/home/etc
+        # filesystem exported world-wide is a classic full-host compromise path.
+        nfs_present = any(
+            p in (111, 2049) or s in ("rpcbind", "portmapper", "nfs", "mountd",
+                                      "nfs_acl", "sunrpc")
+            for p, s in pairs)
+        if nfs_present and active_probes:
+            exports = await _nfs_exports(ip)
+            if exports:
+                world = [(d, g) for d, g in exports
+                         if any(tok in _NFS_WORLD_TOKENS or tok.endswith("/0")
+                                for tok in g)]
+                if world:
+                    sensitive = any(_nfs_path_is_sensitive(d) for d, _ in world)
+                    world_paths = sorted({d for d, _ in world})
+                    paths = ", ".join(world_paths)
+                    # Read-only NFSv3 ACCESS probe: does an anonymous client
+                    # actually get write access, or only read? (No data is touched.)
+                    writable: list[str] = []
+                    readonly: list[str] = []
+                    for d in world_paths[:5]:
+                        mode = await _nfs_world_write_check(ip, d)
+                        if mode == "read-write":
+                            writable.append(d)
+                        elif mode == "read-only":
+                            readonly.append(d)
+                    if writable:
+                        sev, cvss, access_mode = "critical", 9.1, "read-write"
+                        access_note = (
+                            " A read-only NFSv3 ACCESS check confirms an anonymous "
+                            f"client is granted write access to {', '.join(writable)}: "
+                            "an attacker can modify the share directly, for example "
+                            "planting an SSH authorized_keys or a cron job for code "
+                            "execution.")
+                    elif readonly:
+                        sev = "high" if sensitive else "medium"
+                        cvss = 7.5 if sensitive else 5.3
+                        access_mode = "read-only"
+                        access_note = (
+                            " A read-only NFSv3 ACCESS check shows anonymous clients "
+                            f"get read-only access to {', '.join(readonly)} (write "
+                            "denied, most likely root_squash); the contents are still "
+                            "world-readable.")
+                    else:
+                        sev = "critical" if sensitive else "high"
+                        cvss = 9.1 if sensitive else 7.5
+                        access_mode = "undetermined"
+                        access_note = (
+                            " Read-only versus read-write is set by the server's "
+                            "/etc/exports options and is not visible on the wire; "
+                            "where the export is read-write an attacker can also "
+                            "modify its contents.")
+                    nfs_f = _finding(
+                        f"{ip}:2049", "nfs_export_exposed", sev,
+                        "NFS Share Exported to the World",
+                        f"The NFS server exports {paths} to any host (share list: "
+                        "'*'). Any unauthenticated client on the network can mount "
+                        "the share and read its contents." + access_note +
+                        " Exporting the root, home or system filesystem this way is "
+                        "a direct path to credential theft and full host compromise "
+                        "(read SSH keys or /etc/shadow, drop an authorized_keys). "
+                        "Restrict exports to specific hosts, use root_squash, and "
+                        "require Kerberos (sec=krb5p) where possible.",
+                        confidence=0.95,
+                        evidence={"port": 2049, "world_exports": paths,
+                                  "access_mode": access_mode,
+                                  "writable_exports": ", ".join(writable) or None,
+                                  "all_exports": {d: g for d, g in exports},
+                                  "proven": True})
+                    nfs_f["typical_cvss"] = cvss
+                    findings.append(nfs_f)
+
+        # 2e) Apache Tomcat Manager — read-only default-credential check. Access to
+        # the Manager app means arbitrary WAR deployment, i.e. remote code execution.
+        tomcat_ports = sorted({
+            p for p, s in pairs
+            if p in (8080, 8180, 8443, 8888)
+            or any(t in s for t in ("tomcat", "coyote", "jserv"))})
+        if tomcat_ports and active_probes:
+            for tport in tomcat_ports:
+                hit = await _tomcat_manager_default_creds(ip, tport)
+                if hit:
+                    tc_f = _finding(
+                        f"{ip}:{tport}", "tomcat_manager_default_creds", "critical",
+                        "Apache Tomcat Manager Default Credentials",
+                        "The Tomcat Manager application accepted the vendor-default "
+                        f"credential '{hit['username']}:{hit['password_used']}'. The "
+                        "Manager app can deploy arbitrary web applications, so this "
+                        "grants remote code execution on the server (upload a WAR / "
+                        "JSP webshell). Change or remove the default users in "
+                        "tomcat-users.xml, restrict /manager and /host-manager to "
+                        "trusted hosts, and never expose the Manager to untrusted "
+                        "networks.",
+                        confidence=0.97,
+                        evidence={"port": tport, "username": hit["username"],
+                                  "password": hit["password_used"],
+                                  "path": "/manager/html",
+                                  "manager_ui_confirmed": hit.get("manager_ui_confirmed"),
+                                  "proven": True})
+                    tc_f["typical_cvss"] = 9.8
+                    findings.append(tc_f)
+                    break
+
+        # 2f) PostgreSQL — read-only default-credential check. A superuser login
+        # (postgres) means full data access and, on many builds, code execution.
+        pg_ports = sorted({p for p, s in pairs
+                           if p == 5432 or s in ("postgresql", "postgres")})
+        if pg_ports and active_probes:
+            for pgport in pg_ports:
+                hit = await _postgres_default_creds(ip, pgport)
+                if hit:
+                    v = f" (server {hit['server_version']})" if hit.get("server_version") else ""
+                    pg_f = _finding(
+                        f"{ip}:{pgport}", "weak_db_credentials", "critical",
+                        "PostgreSQL Default Credentials",
+                        "The PostgreSQL server accepted the default credential "
+                        f"'{hit['username']}:{hit['password_used']}'{v}. This grants "
+                        "full access to the database and, for the superuser account, "
+                        "frequently a path to command execution on the host (COPY ... "
+                        "FROM PROGRAM, untrusted PL/language, or writing files). "
+                        "Set a strong password for every role, remove default "
+                        "accounts, and firewall the port to the application tier.",
+                        confidence=0.97,
+                        evidence={"port": pgport, "username": hit["username"],
+                                  "password": hit["password_used"],
+                                  "database": hit.get("database"),
+                                  "server_version": hit.get("server_version"),
+                                  "proven": True})
+                    pg_f["typical_cvss"] = 9.8
+                    findings.append(pg_f)
+                    break
+
+        # 2g) VNC — read-only remote-framebuffer auth check (no auth / default
+        # password). VNC exposes the full interactive desktop, so either is a
+        # complete takeover of the console session.
+        vnc_ports = sorted({p for p, s in pairs
+                            if 5900 <= p <= 5905 or s in ("vnc", "rfb")
+                            or "vnc" in s})
+        if vnc_ports and active_probes:
+            for vport in vnc_ports:
+                outcome = await _vnc_weak_auth(ip, vport)
+                if not outcome:
+                    continue
+                if outcome.get("auth") == "none":
+                    vt, title, desc = (
+                        "vnc_no_auth",
+                        "VNC Server Requires No Authentication",
+                        "The VNC/RFB server offers the 'None' security type and "
+                        "accepts connections with no authentication whatsoever. Any "
+                        "client on the network gets full interactive control of the "
+                        "console desktop.")
+                    ev = {"port": vport, "auth": "none", "proven": True}
+                elif outcome.get("auth") == "weak":
+                    vt, title, desc = (
+                        "vnc_weak_credentials",
+                        "VNC Server Accepts a Default Password",
+                        "The VNC/RFB server accepted the default password "
+                        f"'{outcome['password_used']}'. This grants full interactive "
+                        "control of the console desktop to anyone who can reach the "
+                        "port.")
+                    ev = {"port": vport, "auth": "weak",
+                          "password": outcome["password_used"], "proven": True}
+                else:
+                    continue
+                vnc_f = _finding(
+                    f"{ip}:{vport}", vt, "critical", title,
+                    desc + " Require a strong password (or, better, tunnel VNC over "
+                    "SSH/VPN), restrict it to a management network, and never expose "
+                    "it to untrusted networks.",
+                    confidence=0.95, evidence=ev)
+                vnc_f["typical_cvss"] = 9.8
+                findings.append(vnc_f)
+                break
 
         # 3) SNMP — exposure + active read-only default-community probe
         snmp_ports = [p for p, s in pairs if p in (161,) or "snmp" in s]

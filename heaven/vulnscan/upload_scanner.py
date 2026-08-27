@@ -36,6 +36,7 @@ except ImportError:  # pragma: no cover
 
 from heaven.recon.auth_session import aiohttp_session_kwargs
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.upload")
 
@@ -127,6 +128,7 @@ async def _probe_form(session: "aiohttp.ClientSession", form: dict,
             async with session.post(action, data=data,
                                     timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                 body = await resp.text()
+                proof_capture.record(action, resp.status, body)
         except Exception as e:  # noqa: BLE001
             logger.debug("upload probe failed for %s (%s): %s", action, ext, e)
             continue

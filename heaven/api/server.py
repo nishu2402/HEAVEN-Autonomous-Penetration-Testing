@@ -3480,10 +3480,27 @@ def create_app() -> FastAPI:
                 # a second opinion instead of a misleading "unavailable".
                 verdict = await reviewer.review(body.get("finding", {}), force=True)
                 if verdict is None:
+                    # Surface the ACTUAL provider reason (rate limit, 503
+                    # overload, timeout, empty response) so the operator can tell
+                    # a transient hiccup from a misconfiguration — a generic "no
+                    # usable verdict" left them guessing.
+                    detail = getattr(reviewer, "last_error", None) or ""
+                    transient = any(
+                        tok in detail.lower() for tok in
+                        ("503", "unavailable", "overload", "high demand",
+                         "timeout", "timed out", "exhausted retries", "deadline")
+                    )
+                    if transient:
+                        msg = (f"The AI provider is busy ({detail}). This is "
+                               "usually temporary — try again in a moment.")
+                    elif detail:
+                        msg = (f"The AI second-opinion could not complete: {detail}. "
+                               "Check the AI provider status in Settings.")
+                    else:
+                        msg = ("The LLM did not return a usable verdict — try "
+                               "again, or check the AI provider status in Settings.")
                     return {"skipped": True, "reason": "no_verdict",
-                            "message": ("The LLM did not return a usable verdict — "
-                                        "try again, or check the AI provider status "
-                                        "in Settings.")}
+                            "detail": detail, "message": msg}
                 verdict_out = verdict.model_dump() if hasattr(verdict, "model_dump") else verdict.__dict__
                 verdict_out["skipped"] = False
                 return verdict_out

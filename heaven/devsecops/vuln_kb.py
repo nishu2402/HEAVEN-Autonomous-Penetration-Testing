@@ -164,7 +164,7 @@ _KB: dict[str, dict[str, Any]] = {
     "flash_crossdomain": {
         "title": "Legacy Flash (SWF) Content Referenced",
         "cwe": "CWE-1104",
-        "owasp": "A06:2025 Vulnerable and Outdated Components",
+        "owasp": "A03:2025 Software Supply Chain Failures",
         "mitre": "T1203 · Exploitation for Client Execution",
         "typical_cvss": 4.0,
         "description": (
@@ -278,7 +278,7 @@ _KB: dict[str, dict[str, Any]] = {
     "padding_oracle": {
         "title": "Potential CBC Padding Oracle",
         "cwe": "CWE-696",
-        "owasp": "A08:2025 Software and Data Integrity Failures",
+        "owasp": "A08:2025 Software or Data Integrity Failures",
         "mitre": "T1600 · Weaken Encryption",
         "typical_cvss": 7.4,
         "description": (
@@ -865,6 +865,30 @@ _KB: dict[str, dict[str, Any]] = {
         "references": [
             "https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html",
             "https://cwe.mitre.org/data/definitions/22.html",
+        ],
+    },
+    "file_upload": {
+        "title": "Unrestricted File Upload",
+        "cwe": "CWE-434",
+        "owasp": "A06:2025 Insecure Design",
+        "mitre": "T1608 · Stage Capabilities",
+        "typical_cvss": 8.8,
+        "description": (
+            "An upload form accepted a server-executable file with no content or "
+            "extension validation, letting an attacker plant a web shell or other "
+            "dangerous file in a web-reachable location."
+        ),
+        "impact": "Remote code execution, web-shell persistence, full server compromise.",
+        "remediation": (
+            "1. Validate uploads by content, not just extension, against a strict "
+            "allow-list of safe types.\n"
+            "2. Store uploads outside the web root or on a separate domain and "
+            "serve them non-executable.\n"
+            "3. Randomise stored filenames and strip active extensions."
+        ),
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html",
+            "https://cwe.mitre.org/data/definitions/434.html",
         ],
     },
     "ssti": {
@@ -2420,6 +2444,156 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://www.us-cert.gov/ncas/alerts/TA13-207A"],
     },
+    "backdoor_shell": {
+        "title": "Unauthenticated Backdoor Shell",
+        "cwe": "CWE-506",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1505.003 · Server Software Component",
+        "typical_cvss": 10.0,
+        "description": (
+            "A network port answers with an interactive command shell that "
+            "requires no authentication. Any client that can reach the port gets "
+            "direct command execution on the host, typically as root — the "
+            "hallmark of a bind-shell backdoor (e.g. Metasploitable's TCP 1524 "
+            "'root shell')."
+        ),
+        "impact": "Immediate, unauthenticated command execution and full host "
+                  "compromise.",
+        "remediation": (
+            "1. Treat the host as fully compromised and isolate it from the network.\n"
+            "2. Identify and remove the listener / backdoor process.\n"
+            "3. Rebuild from a known-good image and rotate every credential the host "
+            "could reach."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/506.html"],
+    },
+    "dangerous_service_exposed": {
+        "title": "Dangerous Service Exposed (remote code execution by design)",
+        "cwe": "CWE-306",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1210 · Exploitation of Remote Services",
+        "typical_cvss": 9.0,
+        "description": (
+            "A service that runs attacker-supplied code or commands by design is "
+            "reachable with no authentication — for example distributed Ruby "
+            "(dRuby), a Java RMI registry (remote class loading / deserialization) "
+            "or a distcc daemon. Their mere exposure to an untrusted network is the "
+            "vulnerability."
+        ),
+        "impact": "Unauthenticated remote code execution on the host running the "
+                  "service.",
+        "remediation": (
+            "1. Bind the service to localhost or an isolated management network.\n"
+            "2. Require an authenticated, encrypted transport.\n"
+            "3. Firewall the port to known, trusted clients only."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/306.html"],
+    },
+    "nfs_export_exposed": {
+        "title": "NFS Share Exported to the World",
+        "cwe": "CWE-552",
+        "owasp": "A01:2025 Broken Access Control",
+        "mitre": "T1005 · Data from Local System",
+        "typical_cvss": 9.1,
+        "description": (
+            "An NFS server exports a filesystem to any host (share list '*'). Any "
+            "unauthenticated client on the network can mount it and read — and, "
+            "where the export is read-write, modify — its contents. When the "
+            "exported path is the root, home or system filesystem this is a direct "
+            "path to credential theft and full host compromise."
+        ),
+        "impact": (
+            "Unauthenticated read/write of exported files: theft of SSH keys and "
+            "/etc/shadow, and (via a planted authorized_keys) interactive host access."
+        ),
+        "remediation": (
+            "1. Export only to specific hosts/subnets, never '*'.\n"
+            "2. Enable root_squash (the default) and export read-only where possible.\n"
+            "3. Require Kerberos (sec=krb5p) and firewall NFS/rpcbind to trusted hosts."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/552.html"],
+    },
+    "tomcat_manager_default_creds": {
+        "title": "Apache Tomcat Manager Default Credentials",
+        "cwe": "CWE-1392",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1078.001 · Default Accounts",
+        "typical_cvss": 9.8,
+        "description": (
+            "The Tomcat Manager application accepts a vendor-default credential. The "
+            "Manager can deploy arbitrary web applications, so access to it is "
+            "equivalent to remote code execution on the server."
+        ),
+        "impact": "Remote code execution via WAR/JSP webshell deployment; full server "
+                  "compromise.",
+        "remediation": (
+            "1. Change or remove the default users in tomcat-users.xml.\n"
+            "2. Restrict /manager and /host-manager to trusted hosts (RemoteAddrValve).\n"
+            "3. Never expose the Manager application to untrusted networks."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1078/001/"],
+    },
+    "weak_db_credentials": {
+        "title": "Database Default / Weak Credentials",
+        "cwe": "CWE-1392",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1078.001 · Default Accounts",
+        "typical_cvss": 9.8,
+        "description": (
+            "A database service (e.g. PostgreSQL) accepts a vendor-default or "
+            "trivially-guessable credential. A privileged/superuser login grants "
+            "full data access and, on many engines, a path to command execution on "
+            "the host."
+        ),
+        "impact": "Full read/write of all stored data and frequently code execution "
+                  "on the database host.",
+        "remediation": (
+            "1. Set a strong, unique password for every database role.\n"
+            "2. Remove or disable default accounts; restrict superuser logins.\n"
+            "3. Firewall the port to the application tier and require TLS."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1078/001/"],
+    },
+    "vnc_no_auth": {
+        "title": "VNC Server Requires No Authentication",
+        "cwe": "CWE-306",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1021.005 · Remote Services: VNC",
+        "typical_cvss": 9.8,
+        "description": (
+            "A VNC/RFB server offers the 'None' security type and accepts "
+            "connections with no authentication. Any client that can reach the port "
+            "gets full interactive control of the console desktop."
+        ),
+        "impact": "Unauthenticated, full interactive takeover of the graphical console "
+                  "session.",
+        "remediation": (
+            "1. Require authentication; never enable the 'None' security type.\n"
+            "2. Tunnel VNC over SSH/VPN and bind it to localhost.\n"
+            "3. Restrict the port to a management network."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1021/005/"],
+    },
+    "vnc_weak_credentials": {
+        "title": "VNC Server Accepts a Default Password",
+        "cwe": "CWE-1392",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1021.005 · Remote Services: VNC",
+        "typical_cvss": 9.8,
+        "description": (
+            "A VNC/RFB server accepts a well-known default password, granting full "
+            "interactive control of the console desktop to anyone who can reach the "
+            "port."
+        ),
+        "impact": "Full interactive takeover of the graphical console session with a "
+                  "guessable password.",
+        "remediation": (
+            "1. Set a strong, unique VNC password (VNC's own auth is 8 chars max — "
+            "prefer an SSH/VPN tunnel instead).\n"
+            "2. Bind VNC to localhost and tunnel it; restrict to a management network."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1021/005/"],
+    },
     # Positive posture confirmations (a control is correctly configured). Not a
     # weakness — no CWE/OWASP — but recorded as informational context so the
     # report shows what's *right*, not just what's wrong.
@@ -2902,6 +3076,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "exposed_database": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:L",
     "file_inclusion": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "path_traversal": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "file_upload": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
     "nosql_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
     "ldap_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
     "xpath_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
@@ -2981,6 +3156,13 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "snmp_default_community": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
     "cisco_smart_install": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "ipmi_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+    "backdoor_shell": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "dangerous_service_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "nfs_export_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "tomcat_manager_default_creds": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "weak_db_credentials": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "vnc_no_auth": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "vnc_weak_credentials": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "ipmi_hash_disclosure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "snmp_amplification": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:N/I:N/A:L",
     "ftp_anonymous": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
@@ -3569,4 +3751,16 @@ def enrich_finding(finding: dict) -> dict:
     # Low". An unconfirmed 'indicator' has its inherited class base capped to its
     # (low) severity; a published CVE score drives the label. One shared resolver.
     reconcile_severity(out)
+    # The ML predictor's raw risk_band reflects its *predicted* CVSS, which can
+    # outrank the reconciled, confirmation-aware severity (e.g. a banner-inferred
+    # "Potential" finding whose published base is lower). Pin it to the
+    # authoritative severity on read so no surface shows "risk_band: high" beside
+    # a Medium badge. Resolved on read, exactly like confirmation status.
+    final_sev = str(out.get("severity") or "").strip().lower()
+    if final_sev:
+        if out.get("risk_band"):
+            out["risk_band"] = final_sev
+        ev_out = out.get("evidence")
+        if isinstance(ev_out, dict) and ev_out.get("risk_band"):
+            ev_out["risk_band"] = final_sev
     return out

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.api")
 
@@ -141,6 +142,40 @@ def _value_reflected(body: dict, key: str, val: object) -> bool:
     return _lookup(body, key) == val
 
 
+# A GraphQL server that ENFORCES a depth/complexity/cost limit answers the
+# depth-bomb query with HTTP 200 + an ``errors`` array naming the limit. Firing
+# "no complexity limit" on such a response is a false positive.
+_GQL_LIMIT_WORDS = re.compile(
+    r"depth|complex|too deep|exceed|maximum|max (?:cost|node|depth)|"
+    r"cost limit|node limit|too (?:expensive|large)|budget|throttl", re.I)
+
+
+def _gql_rejected_on_complexity(data: object) -> bool:
+    """True if a GraphQL response carries an error that names a depth/complexity/
+    cost limit — i.e. the server rejected the deep query rather than processing it."""
+    errors = data.get("errors") if isinstance(data, dict) else None
+    if not isinstance(errors, list) or not errors:
+        return False
+    for e in errors:
+        msg = e.get("message", "") if isinstance(e, dict) else str(e)
+        if isinstance(msg, str) and _GQL_LIMIT_WORDS.search(msg):
+            return True
+    return False
+
+
+def _gql_batch_succeeded(data: object) -> int:
+    """Count entries in a batched GraphQL response that were actually PROCESSED
+    (a dict with a non-null ``data`` and no ``errors``). A server that rejects
+    batching returns error entries instead — those must not count, or a
+    batching-disabled server is falsely flagged."""
+    if not isinstance(data, list):
+        return 0
+    return sum(
+        1 for item in data
+        if isinstance(item, dict) and item.get("data") is not None and not item.get("errors")
+    )
+
+
 class GraphQLScanner:
     """GraphQL-specific security testing."""
 
@@ -201,12 +236,25 @@ class GraphQLScanner:
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status == 200:
+                        try:
+                            data = await resp.json(content_type=None)
+                        except Exception:
+                            logger.debug("non-JSON GraphQL reply — no complexity evidence",
+                                         exc_info=True)
+                            continue
+                        # A depth/cost-limited server answers 200 + an errors
+                        # array naming the limit; that is enforcement, not a gap.
+                        if _gql_rejected_on_complexity(data):
+                            break
                         findings.append(APIFinding(
                             target=url, vuln_type="graphql_complexity",
-                            severity="high", endpoint=endpoint,
-                            title="GraphQL: No Query Depth/Complexity Limit",
-                            description="Server processes deeply nested queries without limits.",
-                            confidence=0.80,
+                            severity="medium", endpoint=endpoint,
+                            title="GraphQL: deep query accepted without a complexity limit",
+                            description=("A deeply-nested query returned 200 with no depth/"
+                                         "complexity rejection error. Verify the server enforces "
+                                         "a query depth or cost budget on production data queries."),
+                            confidence=0.55,
+                            evidence={"needs_manual_verification": True},
                             remediation="Implement query depth limiting (max 10). Set complexity budgets.",
                             cwe="CWE-400",
                             owasp_api="API4:2023 Unrestricted Resource Consumption",
@@ -243,13 +291,21 @@ class GraphQLScanner:
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     if resp.status == 200:
-                        data = await resp.json()
-                        if isinstance(data, list) and len(data) > 50:
+                        try:
+                            data = await resp.json(content_type=None)
+                        except Exception:
+                            logger.debug("non-JSON GraphQL batch reply", exc_info=True)
+                            continue
+                        # Count only entries the server actually PROCESSED. A
+                        # batching-disabled server returns error entries — those
+                        # are enforcement, not an unlimited-batching finding.
+                        processed = _gql_batch_succeeded(data)
+                        if processed > 50:
                             findings.append(APIFinding(
                                 target=url, vuln_type="graphql_batching",
                                 severity="medium", endpoint=endpoint,
                                 title="GraphQL: Unlimited Query Batching",
-                                description=f"Server processes {len(data)} batched queries without limit.",
+                                description=f"Server processed {processed} batched queries without limit.",
                                 confidence=0.85,
                                 remediation="Limit batch query count to 10-20 max.",
                                 cwe="CWE-400",
@@ -291,6 +347,7 @@ class RESTAPIScanner:
                         if resp.status != 200:
                             continue
                         body = await resp.text()
+                        proof_capture.record(endpoint, resp.status, body)
                         if len(body) > 50 and not any(e in body.lower() for e in err_words):
                             distinct_objects[test_id] = body
                 except Exception:

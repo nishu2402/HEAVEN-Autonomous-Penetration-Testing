@@ -205,6 +205,19 @@ RFI_PATTERNS: list[re.Pattern] = [
     re.compile(rf"{re.escape(_RFI_HOST)}.*failed to open stream", re.I),
     re.compile(rf"(include|require)(_once)?\(\)?.*{re.escape(_RFI_HOST)}", re.I),
 ]
+# REFUSAL guards. When `allow_url_include` is Off (the PHP default since 5.2),
+# the interpreter still echoes an `include(http://<our host>/…)` warning naming
+# the probe — but it REFUSED to fetch it, so the target is NOT remotely
+# includable. Both messages below mean "blocked": PHP prints "URL file-access
+# is disabled in the server configuration" (allow_url_include=0) and then
+# "failed to open stream: no suitable wrapper could be found" (verified live on
+# DVWA/PHP 5.2). A genuinely RFI-capable host instead fails on the *network*
+# ("php_network_getaddresses: getaddrinfo failed" / "Connection refused") with
+# no disabled-wrapper notice, so these guards never mask a real RFI.
+RFI_BLOCKED_PATTERNS: list[re.Pattern] = [
+    re.compile(r"disabled in the server configuration", re.I),
+    re.compile(r"no suitable wrapper could be found", re.I),
+]
 
 # ── OS Command Injection ───────────────────────────────────────────
 # Output-based: shell metacharacters chaining `id` (we detect the uid=… output),
@@ -554,12 +567,27 @@ class InjectionScanner:
         concurrency: int = 20,
         request_delay: float = 0.0,
         user_agent: str = "HEAVEN-Scanner/1.0",
+        deadline_s: Optional[float] = None,
     ) -> None:
         self._sem = asyncio.Semaphore(concurrency)
         self._delay = request_delay
         self._headers = {"User-Agent": user_agent}
         self._seen: set[str] = set()
         self._findings: list[dict] = []
+        # Soft wall-clock budget. A slow or rate-limited target (an emulated VM,
+        # a WAF-throttled host) can make a full sweep exceed the orchestrator's
+        # hard per-task timeout, which cancels the coroutine and DISCARDS every
+        # finding gathered so far — the scan then reports zero injection on an
+        # app riddled with it, and dependent tasks (IDOR) are skipped as
+        # "failed". With a deadline set a hair under that hard timeout, the
+        # scanner stops launching new work and RETURNS what it already proved
+        # instead of losing it. None keeps the original unbounded behaviour.
+        self._deadline_s = deadline_s
+        # Proof transactions: the exact (status, response-body) captured for each
+        # URL fetched, keyed by URL. _add_finding attaches the matching one to a
+        # finding's evidence so "Proof of issue" shows the real HTTP response
+        # instead of a fabricated "HTTP 0 (0 bytes) — no response captured".
+        self._resp_cache: dict[str, tuple[int, str]] = {}
         # Time-based detection is only sound when the injected sleep is the ONLY
         # thing that could delay the response. The scanner probes every parameter
         # of a URL concurrently, so a genuinely-injectable param's SLEEP request
@@ -571,11 +599,53 @@ class InjectionScanner:
         # measurement (baseline + sleep probes) so each one runs in isolation.
         self._timing_lock = asyncio.Lock()
 
+    def _cache_response(self, url: str, status: int, body: str) -> None:
+        """Retain the proof transaction (status + bounded body) for ``url``.
+
+        Empty transactions (a dead probe) are not cached — an unproved URL must
+        never masquerade as a captured response. Bounded so a large crawl can't
+        grow the cache without limit."""
+        if status <= 0 and not body:
+            return
+        if len(self._resp_cache) > 500:
+            self._resp_cache.clear()
+        self._resp_cache[url] = (status, body[:4000])
+
+    async def _get_rec(self, session, url: str, headers: Optional[dict] = None,
+                       timeout: float = 8.0) -> tuple[int, str]:
+        """`_get` that also caches the response as proof evidence (see
+        :meth:`_cache_response`). Calls the module-level `_get` by name so tests
+        that monkeypatch it still take effect."""
+        status, body = await _get(session, url, headers, timeout)
+        self._cache_response(url, status, body)
+        return status, body
+
+    async def _post_rec(self, session, url: str, data: dict,
+                        headers: Optional[dict] = None,
+                        timeout: float = 8.0) -> tuple[int, str]:
+        """`_post` variant that caches the response as proof evidence."""
+        status, body = await _post(session, url, data, headers, timeout)
+        self._cache_response(url, status, body)
+        return status, body
+
     def _add_finding(self, **kwargs) -> None:
+        ev = kwargs.get("evidence") or {}
+        # Attach the proof transaction (status + response snippet) captured for
+        # the exact URL this finding was proved on so the report/UI show the real
+        # response — a GET finding keys on its injected `target`, a POST finding
+        # (whose target is the base URL) keys on evidence["url"].
+        cached = (self._resp_cache.get(kwargs.get("target", ""))
+                  or self._resp_cache.get(ev.get("url", "")))
+        if cached is not None:
+            status, body = cached
+            ev.setdefault("status", status)
+            if body:
+                ev.setdefault("response_body", body)
+            kwargs["evidence"] = ev
         key = _finding_key(
             kwargs.get("target", ""),
             kwargs.get("vuln_type", ""),
-            kwargs.get("evidence", {}).get("param", ""),
+            ev.get("param", ""),
         )
         if key in self._seen:
             return
@@ -592,7 +662,7 @@ class InjectionScanner:
             async with self._sem:
                 if self._delay:
                     await asyncio.sleep(self._delay)
-                status, body = await _get(session, injected_url, self._headers)
+                status, body = await self._get_rec(session, injected_url, self._headers)
 
             if not body:
                 continue
@@ -624,9 +694,9 @@ class InjectionScanner:
             url_true = _inject_param(url, param, true_pl)
             url_false = _inject_param(url, param, false_pl)
             async with self._sem:
-                _, body_true = await _get(session, url_true, self._headers)
+                _, body_true = await self._get_rec(session, url_true, self._headers)
             async with self._sem:
-                _, body_false = await _get(session, url_false, self._headers)
+                _, body_false = await self._get_rec(session, url_false, self._headers)
 
             if not body_true or not body_false:
                 continue
@@ -645,9 +715,9 @@ class InjectionScanner:
             reproduced = True
             if REQUIRE_BOOLEAN_REPRODUCTION:
                 async with self._sem:
-                    _, body_true2 = await _get(session, url_true, self._headers)
+                    _, body_true2 = await self._get_rec(session, url_true, self._headers)
                 async with self._sem:
-                    _, body_false2 = await _get(session, url_false, self._headers)
+                    _, body_false2 = await self._get_rec(session, url_false, self._headers)
                 reproduced = bool(body_true2 and body_false2 and _boolean_sqli_confirmed(
                     baseline_body, body_true2, body_false2, true_pl, false_pl))
             if not reproduced:
@@ -700,7 +770,7 @@ class InjectionScanner:
                 async with self._sem:
                     if self._delay:
                         await asyncio.sleep(self._delay)
-                    _, body = await _get(session, injected_url, self._headers)
+                    _, body = await self._get_rec(session, injected_url, self._headers)
                 if not body:
                     continue
                 if _UNION_MARK in _strip_reflection(body, payload):
@@ -739,7 +809,7 @@ class InjectionScanner:
             async with self._timing_lock:
                 t0 = time.monotonic()
                 async with self._sem:
-                    status, _ = await _get(session, _inject_param(url, param, value),
+                    status, _ = await self._get_rec(session, _inject_param(url, param, value),
                                            self._headers, timeout=timeout)
                 return status, time.monotonic() - t0
 
@@ -797,7 +867,7 @@ class InjectionScanner:
             async with self._sem:
                 if self._delay:
                     await asyncio.sleep(self._delay)
-                status, body = await _post(session, url, data, self._headers)
+                status, body = await self._post_rec(session, url, data, self._headers)
 
             if not body:
                 continue
@@ -833,7 +903,7 @@ class InjectionScanner:
                 async with self._sem:
                     if self._delay:
                         await asyncio.sleep(self._delay)
-                    st, _ = await _post(session, url, d, self._headers, timeout=timeout)
+                    st, _ = await self._post_rec(session, url, d, self._headers, timeout=timeout)
                 return st, time.monotonic() - t0
 
         _, pb1 = await _timed_post("1", 15.0)
@@ -885,7 +955,7 @@ class InjectionScanner:
             async with self._sem:
                 if self._delay:
                     await asyncio.sleep(self._delay)
-                status, body = await _get(session, injected_url, self._headers)
+                status, body = await self._get_rec(session, injected_url, self._headers)
 
             if _xss_is_executable(payload, body):
                 self._add_finding(
@@ -913,7 +983,7 @@ class InjectionScanner:
             async with self._sem:
                 if self._delay:
                     await asyncio.sleep(self._delay)
-                status, body = await _post(session, url, data, self._headers)
+                status, body = await self._post_rec(session, url, data, self._headers)
 
             if _xss_is_executable(payload, body):
                 self._add_finding(
@@ -947,13 +1017,13 @@ class InjectionScanner:
         async with self._sem:
             if self._delay:
                 await asyncio.sleep(self._delay)
-            await _post(session, url, data, self._headers)
+            await self._post_rec(session, url, data, self._headers)
         # Re-fetch the page fresh (GET) — persistence is proven only if the
         # canary comes back on a request that did NOT carry the payload.
         async with self._sem:
             if self._delay:
                 await asyncio.sleep(self._delay)
-            _, refetched = await _get(session, url, self._headers)
+            _, refetched = await self._get_rec(session, url, self._headers)
         if canary in refetched and _xss_is_executable(payload, refetched):
             self._add_finding(
                 target=url,
@@ -980,7 +1050,7 @@ class InjectionScanner:
             for payload, probe_name in XSS_PROBES[:2]:  # quick check only
                 headers = {**self._headers, header_name: payload}
                 async with self._sem:
-                    status, body = await _get(session, url, headers=headers)
+                    status, body = await self._get_rec(session, url, headers=headers)
 
                 # Require the payload to reflect in an EXECUTABLE form — a header
                 # echoed but HTML-escaped still contains the canary yet cannot run.
@@ -1013,9 +1083,9 @@ class InjectionScanner:
                 if self._delay:
                     await asyncio.sleep(self._delay)
                 if post:
-                    _, body = await _post(session, url, {**(other_fields or {}), param: payload}, self._headers)
+                    _, body = await self._post_rec(session, url, {**(other_fields or {}), param: payload}, self._headers)
                 else:
-                    _, body = await _get(session, _inject_param(url, param, payload), self._headers)
+                    _, body = await self._get_rec(session, _inject_param(url, param, payload), self._headers)
             return body or ""
 
         for payload, probe in LFI_PROBES:
@@ -1036,6 +1106,13 @@ class InjectionScanner:
         for payload, probe in RFI_PROBES:
             body = await _probe(payload)
             if not body:
+                continue
+            # The app echoed our host, but did it actually TRY to fetch it? A
+            # "URL file-access is disabled" / "no suitable wrapper" notice means
+            # allow_url_include is Off and PHP refused — that is a hardened
+            # target, not RFI. Suppress rather than mis-report (verified on
+            # DVWA/PHP 5.2, whose fi page prints exactly this on a remote URL).
+            if any(b.search(body) for b in RFI_BLOCKED_PATTERNS):
                 continue
             for pat in RFI_PATTERNS:
                 if pat.search(body) and not pat.search(baseline_body):
@@ -1066,10 +1143,10 @@ class InjectionScanner:
                     if self._delay:
                         await asyncio.sleep(self._delay)
                     if post:
-                        _, body = await _post(session, url, {**(other_fields or {}), param: payload},
+                        _, body = await self._post_rec(session, url, {**(other_fields or {}), param: payload},
                                               self._headers, timeout=timeout)
                     else:
-                        _, body = await _get(session, _inject_param(url, param, payload),
+                        _, body = await self._get_rec(session, _inject_param(url, param, payload),
                                              self._headers, timeout=timeout)
                 return time.monotonic() - t0, body or ""
             if timed:
@@ -1170,7 +1247,7 @@ class InjectionScanner:
 
         # GET param baseline
         if qs:
-            _, baseline = await _get(session, url, self._headers)
+            _, baseline = await self._get_rec(session, url, self._headers)
             tasks = []
             for param in qs:
                 tasks.append(self._test_sqli_param(session, url, param, baseline))
@@ -1199,7 +1276,7 @@ class InjectionScanner:
                 if not fields:
                     continue
 
-                _, baseline = await _post(session, action, fields, self._headers)
+                _, baseline = await self._post_rec(session, action, fields, self._headers)
 
                 tasks = []
                 for param in list(fields.keys()):
@@ -1259,6 +1336,18 @@ class InjectionScanner:
                 seen_urls.add(t)
                 unique_targets.append(t)
 
+        # Scan URLs that carry an injectable surface (a query string or a POST
+        # form) BEFORE bare, param-less URLs. build_injection_targets appends the
+        # param-bearing combined URLs last, so on a slow target a deadline-
+        # truncated sweep would otherwise spend its whole budget on pages that
+        # can never yield a finding. A stable sort keeps original order within
+        # each group, so behaviour is unchanged when the sweep runs to
+        # completion.
+        def _has_surface(u: str) -> bool:
+            return bool(merged_forms.get(u)) or bool(urlparse(u).query)
+
+        unique_targets.sort(key=lambda u: 0 if _has_surface(u) else 1)
+
         logger.info(f"InjectionScanner: testing {len(unique_targets)} URLs")
 
         connector = aiohttp.TCPConnector(ssl=False, limit=50)
@@ -1266,17 +1355,35 @@ class InjectionScanner:
         # --cookie-file` or `--auth` was used. Otherwise this is a no-op.
         from heaven.recon.auth_session import aiohttp_session_kwargs
         _auth_kw = aiohttp_session_kwargs()
+        partial = False
         async with aiohttp.ClientSession(connector=connector, **_auth_kw) as session:
             tasks = [
                 self._scan_url(session, url, forms=merged_forms.get(url))
                 for url in unique_targets
             ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            gathered = asyncio.gather(*tasks, return_exceptions=True)
+            if self._deadline_s and self._deadline_s > 0:
+                try:
+                    await asyncio.wait_for(gathered, timeout=self._deadline_s)
+                except (asyncio.TimeoutError, TimeoutError):
+                    # Deadline hit: wait_for cancelled the in-flight probes, but
+                    # every finding already added to self._findings survives — we
+                    # return those instead of letting the orchestrator's hard
+                    # timeout cancel this coroutine and drop them all.
+                    partial = True
+                    logger.warning(
+                        "InjectionScanner: %.0fs soft deadline reached — returning "
+                        "%d finding(s) gathered so far across %d URL(s) (partial)",
+                        self._deadline_s, len(self._findings), len(unique_targets),
+                    )
+            else:
+                await gathered
 
         logger.info(f"InjectionScanner: {len(self._findings)} candidate findings across {len(unique_targets)} URLs")
         return {
             "findings": self._findings,
             "urls_tested": len(unique_targets),
+            "partial": partial,
             "error": None,
         }
 
@@ -1292,6 +1399,7 @@ async def scan_for_injections(
     concurrency: int = 20,
     request_delay: float = 0.0,
     stealth_level: str = "normal",
+    time_budget: Optional[float] = None,
 ) -> dict:
     """
     Top-level function called from the orchestrator.
@@ -1301,6 +1409,11 @@ async def scan_for_injections(
       normal      → concurrency=20, delay=0
       stealth     → concurrency=10, delay=0.5
       paranoid    → concurrency=5,  delay=2.0
+
+    ``time_budget`` is a soft wall-clock deadline (seconds). When the sweep
+    exceeds it the scanner returns the findings gathered so far rather than
+    running until the orchestrator's hard per-task timeout cancels it and drops
+    every result. Leave it None (the default) for an unbounded sweep.
     """
     level_map = {
         "aggressive": (40, 0.0),
@@ -1310,5 +1423,6 @@ async def scan_for_injections(
     }
     concurrency, delay = level_map.get(stealth_level, (20, 0.0))
 
-    scanner = InjectionScanner(concurrency=concurrency, request_delay=delay)
+    scanner = InjectionScanner(concurrency=concurrency, request_delay=delay,
+                               deadline_s=time_budget)
     return await scanner.scan(targets, crawl_data=crawl_data, forms_by_url=forms_by_url)

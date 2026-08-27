@@ -44,6 +44,7 @@ from urllib.parse import urlparse
 
 from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("vulnscan.access_control")
 
@@ -123,6 +124,7 @@ async def _fetch(session: Any, url: str, timeout: float) -> _Resp:
             allow_redirects=False, ssl=False,
         ) as resp:
             body = await resp.text(errors="replace")
+            proof_capture.record(url, resp.status, body)
             return _classify(resp.status, body)
     except Exception:
         return _Resp(0, "", granted=False)

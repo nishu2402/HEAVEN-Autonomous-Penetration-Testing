@@ -160,3 +160,44 @@ def test_markdown_non_http_finding_shows_command_not_curl():
     assert "nmap" in md
     # The bogus "curl -i http://10.0.0.1:5432" must not appear.
     assert "curl -i http://10.0.0.1:5432" not in md
+
+
+# ── Internal scoring fields must never leak into the "Observed" proof block ───
+# Regression: the FindingDetail "Proof of Issue" panel dumps evidence_data. When
+# the ML predictor's raw fields (predicted_cvss_score / priority_score /
+# risk_band) were copied into evidence for the header, they also surfaced here
+# unreconciled and contradicted the reconciled header (e.g. "risk_band: high"
+# beside a Medium severity badge). They are engine-internal, not observations.
+
+def test_observed_block_excludes_internal_ml_scoring_fields():
+    finding = {
+        "vuln_type": "vulnerable_service",
+        "target": "192.168.0.162:139",
+        "severity": "medium",
+        "evidence": {
+            "product": "samba", "version": "3.X - 4.X", "exploit_available": True,
+            "predicted_cvss_score": 7.6, "priority_score": 3.8, "risk_band": "high",
+            "epss": 0.0, "in_kev": False, "criticality": "high",
+        },
+    }
+    observed = package_finding(finding).to_dict()["evidence_data"]
+    for leaked in ("predicted_cvss_score", "priority_score", "risk_band",
+                   "epss", "in_kev", "criticality"):
+        assert leaked not in observed, f"{leaked} must not surface as observed evidence"
+    # The genuine observations survive.
+    assert observed.get("product") == "samba"
+    assert observed.get("exploit_available") is True
+
+
+def test_enrich_finding_pins_risk_band_to_reconciled_severity():
+    # A banner-inferred finding: published base 6.0 -> reconciled Medium, while
+    # the ML risk_band says "high". enrich_finding must not leave them disagreeing.
+    from heaven.devsecops.vuln_kb import enrich_finding
+    out = enrich_finding({
+        "vuln_type": "vulnerable_service",
+        "title": "Samba username map script command execution (RCE)",
+        "severity": "medium", "confidence": 0.90, "cve_id": "CVE-2007-2447",
+        "evidence": {"cvss_base": 6.0, "risk_band": "high", "product": "samba"},
+    })
+    assert out["severity"] == "medium"
+    assert out["evidence"]["risk_band"] == "medium"

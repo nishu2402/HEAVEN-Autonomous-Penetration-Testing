@@ -430,12 +430,28 @@ export default function FindingDetail() {
             {ev.request_body ? "\n\n" + ev.request_body.slice(0, 1000) : ""}
           </div>
 
-          <div style={{ margin: "12px 0 8px", fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
-            RESPONSE, HTTP {ev.response_status} ({ev.response_size_bytes ?? "?"} bytes)
-          </div>
-          <div className="evidence-block">
-            {ev.response_excerpt?.slice(0, 2000) || "(no response captured)"}
-          </div>
+          {(ev.response_status > 0 || ev.response_excerpt) ? (
+            <>
+              <div style={{ margin: "12px 0 8px", fontSize: 11, color: "var(--text-1)", letterSpacing: "0.08em" }}>
+                RESPONSE{ev.response_status > 0 ? `, HTTP ${ev.response_status}` : ""}
+                {ev.response_size_bytes ? ` (${ev.response_size_bytes} bytes)` : ""}
+              </div>
+              {ev.response_excerpt ? (
+                <div className="evidence-block">
+                  {ev.response_excerpt.slice(0, 2000)}
+                </div>
+              ) : (
+                <p className="dim" style={{ fontSize: 12, fontStyle: "italic" }}>
+                  Status recorded; response body not retained for this finding.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="dim" style={{ fontSize: 12, fontStyle: "italic", marginTop: 12 }}>
+              The response body was not retained for this finding. Replay the
+              request from the Reproduce card above to capture the live response.
+            </p>
+          )}
         </div>
       )}
 

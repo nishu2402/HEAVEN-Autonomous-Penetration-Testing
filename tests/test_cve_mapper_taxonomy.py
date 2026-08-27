@@ -69,6 +69,16 @@ def test_vulnerable_service_resolves_in_kb():
     ("2.4.49", ["2.4.49"], True),
     ("1.0.1f", ["1.0.1a-1.0.1f"], True),
     ("9.9",    ["all_debian_packages"], True),
+    ("v1",     ["all"], True),           # distccd RCE-by-design, any version
+    # CVE-2023-21980 NVD windows (5.0.0–5.7.41 OR 8.0.0–8.0.32): an in-range 5.0
+    # matches, a patched 8.0.33 and an out-of-window 5.7.50 do not.
+    ("5.0.51a", ["5.0.0-5.7.41", ">=8.0.0", "<=8.0.32"], True),
+    ("8.0.40",  ["5.0.0-5.7.41", ">=8.0.0", "<=8.0.32"], False),
+    ("5.7.50",  ["5.0.0-5.7.41", ">=8.0.0", "<=8.0.32"], False),
+    # ProFTPD mod_copy floor: the module did not exist before 1.3.3, so pre-mod_copy
+    # 1.3.1 must NOT match while an unfixed 1.3.5 still does.
+    ("1.3.1",   [">=1.3.3", "<1.3.6b"],  False),
+    ("1.3.5",   [">=1.3.3", "<1.3.6b"],  True),
 ])
 def test_specs_match_version_windows(version, specs, expected):
     from heaven.vulnscan.cve_mapper import specs_match_version
@@ -122,3 +132,49 @@ async def test_potential_finding_stays_low_after_enrich():
     base = e.get("cvss_base") or (e.get("evidence") or {}).get("cvss_base") or 0
     assert 0 < float(base) <= 3.9          # capped to the low band, not 7.x
     assert e.get("cwe") and e.get("owasp")  # taxonomy present
+
+
+# ── Metasploitable-2 accuracy: real version-range false positives + real gaps ─
+
+@pytest.mark.asyncio
+async def test_metasploitable_proftpd_no_modcopy_or_terrapin_false_positives():
+    """ProFTPD 1.3.1 predates mod_copy (introduced 1.3.3), and Terrapin is an
+    SSH-transport flaw — neither must attach to a plain-FTP ProFTPD 1.3.1. The
+    MySQL 5.0.51a CVEs are deliberately NOT asserted absent here: NVD lists both
+    CVE-2023-21980 (5.0.0–5.7.41) and CVE-2012-2122 (all) as affecting 5.0.x, so
+    those remain genuine matches (see test_mysql_5051_* in test_cve_version_fp)."""
+    hosts = [{"host": "h", "open_ports": [
+        {"port": 2121, "service": "ftp", "product": "ProFTPD",
+         "banner": "ProFTPD 1.3.1", "version": "1.3.1"},
+    ]}]
+    cves = {v.get("cve") for v in await map_vulnerabilities(hosts, live_feed=None)}
+    assert "CVE-2019-12815" not in cves    # mod_copy — not built in 1.3.1
+    assert "CVE-2020-9273" not in cves     # mod_copy — not built in 1.3.1
+    assert "CVE-2023-48795" not in cves    # Terrapin belongs to SSH, not FTP
+
+
+@pytest.mark.asyncio
+async def test_metasploitable_signature_rces_are_flagged():
+    """distccd is RCE-by-design at any version; a version-less UnrealIRCd banner
+    surfaces as an honest low 'potential' naming the backdoor CVE; Metasploitable's
+    OpenSSH 4.7p1 is correctly NOT flagged for Terrapin (it predates the EtM/
+    ChaCha20 modes Terrapin needs)."""
+    hosts = [{"host": "h", "open_ports": [
+        {"port": 3632, "service": "distccd", "product": "distccd",
+         "banner": "distccd v1 (GNU) 4.2.4 (Ubuntu 4.2.4-1ubuntu4)", "version": "v1"},
+        {"port": 6667, "service": "irc",     "product": "UnrealIRCd",
+         "banner": "UnrealIRCd", "version": ""},
+        {"port": 22,   "service": "ssh",     "product": "OpenSSH",
+         "banner": "OpenSSH 4.7p1 Debian 8ubuntu1", "version": "4.7p1"},
+    ]}]
+    vulns = await map_vulnerabilities(hosts, live_feed=None)
+    by_cve = {v.get("cve"): v for v in vulns}
+    assert "CVE-2004-2687" in by_cve                       # distccd confirmed
+    assert by_cve["CVE-2004-2687"]["severity"] == "critical"
+    # Terrapin must NOT be flagged on 4.7p1 — it cannot negotiate the vulnerable
+    # ChaCha20-Poly1305 / EtM modes (added in OpenSSH 6.5 / 6.2).
+    assert "CVE-2023-48795" not in by_cve
+    # UnrealIRCd (version-less) surfaces as one low potential naming CVE-2010-2075.
+    unreal = [v for v in vulns if v.get("port") == 6667]
+    assert unreal and unreal[0]["vuln_type"] == "potential_vulnerable_service"
+    assert "CVE-2010-2075" in unreal[0]["evidence"]["candidate_cves"]

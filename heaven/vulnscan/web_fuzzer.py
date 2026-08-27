@@ -22,6 +22,7 @@ except ImportError:
     HAS_AIOHTTP = False
 
 from heaven.utils.logger import get_logger
+from heaven.vulnscan import proof_capture
 
 logger = get_logger("web_fuzzer")
 
@@ -175,6 +176,7 @@ async def _fuzz_host_header(session: "aiohttp.ClientSession",
             async with session.get(url, headers=hdrs, allow_redirects=False,
                                    timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 body = await resp.text()
+                proof_capture.record(url, resp.status, body)
                 location = resp.headers.get("Location", "")
                 # The host must be reflected in a SECURITY-SENSITIVE position, not
                 # merely echoed. A redirect Location built from the header, or an
@@ -359,6 +361,7 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
             async with session.get(url, headers={hdr: canary},
                                    timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 body = await resp.text()
+                proof_capture.record(url, resp.status, body)
                 cache_control = resp.headers.get("Cache-Control", "")
                 age = resp.headers.get("Age", "")
                 x_cache = resp.headers.get("X-Cache", "")

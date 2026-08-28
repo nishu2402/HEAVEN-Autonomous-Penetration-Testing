@@ -1,7 +1,7 @@
 🚀 HEAVEN has been deployed to namespace {{ .Release.Namespace }} as
 release {{ .Release.Name }}.
 
-⏳ It typically takes 30–60 seconds to become ready. Check status with:
+⏳ It typically takes 30-60 seconds to become ready. Check status with:
 
   kubectl rollout status deployment {{ include "heaven.fullname" . }} \
       -n {{ .Release.Namespace }}

@@ -55,16 +55,17 @@ it end-to-end and are scored by the metrics layer.
 
 | Metric | HEAVEN |
 |---|---:|
-| Categories covered | **11** |
+| Categories covered | **12** |
 | Recall (required ground truth) | **100%** (11 / 11) |
-| Precision | **100%** (15 / 15 findings real, 0 FP) |
+| Precision | **100%** (17 / 17 findings real, 0 FP) |
 | F1 | **100%** |
 | Runtime | ~13 s (in-process, no Docker/network) |
 
 Per-category recall: SQLi (error/blind/UNION) · reflected XSS · command
 injection · LFI · **SSRF** · **XXE** · **CORS** · **open redirect** · **weak
-JWT** · **insecure cookie** · **missing security headers**, all 100%. Full
-breakdown in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
+JWT** · **insecure cookie** · **missing security headers** · **server version
+disclosure**, all 100%. Full breakdown in
+[BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
 
 > SSRF and XXE are proven **out-of-band**, the target calls back to HEAVEN's
 > in-house OAST collaborator, so they are confirmed interactions, not heuristics.

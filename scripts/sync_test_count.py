@@ -4,8 +4,9 @@
 The primary Tests badge is a **live** GitHub Actions status badge (never stale),
 but the README also prints four counts in a few decorative spots:
 
-* the **test count** — the Project Summary table, the Project Structure listing
-  and the footer stat-line (also the hero poster's alt-text);
+* the **test count** — the Project Summary table, the Project Structure listing,
+  the footer stat-line (also the hero poster's alt-text) and the Development
+  section's `pytest tests/` quick-command comment;
 * the **module count** — the shields.io badge, the Project Summary table, the
   Project Structure listing and the footer stat-line;
 * the **API-route count** — the hero poster's alt-text, the Project Structure
@@ -61,6 +62,7 @@ _TEST_PATTERNS = (
     r"(\d+)( tests \(pytest matrix)",  # Project Summary table
     r"(\d+)( pytest tests)",           # Project Structure listing
     r"(\d+)( tests · )",               # footer stat-line + hero poster alt-text
+    r"(\d+)( tests\))",                # Development section quick-command comment
 )
 
 # Module-count spots where the number comes FIRST (marker is group 2).

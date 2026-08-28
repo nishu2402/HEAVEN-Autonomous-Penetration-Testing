@@ -2727,40 +2727,51 @@ def create_app() -> FastAPI:
                     "error": str(e)}
 
     @app.get("/api/ai/models")
-    async def ai_models(user: User = Depends(require_permission("config.modify"))):
-        """The model catalog for the Settings model picker.
+    async def ai_models(
+        refresh: bool = False,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """The model catalog for the Settings model picker — dynamic, not static.
 
-        Per provider: a curated list of known model ids (label + note), the
-        provider's default (used when the override is blank), and whether it's
-        keyless. Ollama's list is merged with the operator's actually-pulled
-        models so those appear as ready-to-use, first. Also returns the currently
-        active provider + model override so the UI can preselect them. The picker
-        always allows a custom id, so this never blocks a model.
+        Per provider HEAVEN discovers the models the operator's key/endpoint will
+        actually serve by querying that provider's live "list models" API, then
+        merges them with a curated short-list (which supplies friendly labels, the
+        note text, and the recommended default). So the picker shows every current
+        Claude / GPT / Gemini / DeepSeek model and every locally-pulled Ollama tag,
+        not just a hand-picked few. Live discovery only runs where it can succeed
+        (a keyed cloud provider, or a keyless local runtime); otherwise the curated
+        list stands. Every failure degrades to curated — the picker is never empty,
+        and a custom id is always allowed. `refresh=1` bypasses the short cache.
+
+        Response per provider: {models:[{id,label,note,recommended?}], default,
+        keyless, source:'live'|'catalog'|'curated', live_count}. `source` is
+        'live' when discovered from the operator's key/endpoint, 'catalog' when it
+        fell back to the broader offline known roster (no key yet), and 'curated'
+        for the short-list only. Also returns the active provider + model override
+        so the UI can preselect them.
         """
         from heaven.ai import llm_gateway as _gw
-        from heaven.ai import local_llm
         provider = (os.environ.get("HEAVEN_LLM_PROVIDER") or "").lower()
         model = (os.environ.get("HEAVEN_LLM_MODEL") or "").strip()
-        providers: dict[str, Any] = {}
-        for p in ("anthropic", "openai", "gemini", "deepseek", "ollama", "local"):
-            models = _gw.known_models(p)
-            if p == "ollama":
-                try:
-                    pulled = await asyncio.to_thread(local_llm.list_models)
-                except Exception:  # noqa: BLE001 — a dead Ollama just means no live models
-                    pulled = []
-                existing = {m["id"] for m in models}
-                extra = [{"id": name, "label": name, "note": "installed"}
-                         for name in pulled if name not in existing]
-                for m in models:
-                    if m["id"] in set(pulled):
-                        m["note"] = (m.get("note", "") + " · installed").strip(" ·")
-                models = extra + models
-            providers[p] = {
-                "models": models,
+        prov_names = ("anthropic", "openai", "gemini", "deepseek", "ollama", "local")
+
+        async def _one(p: str) -> tuple[str, dict[str, Any]]:
+            # One resolver (shared with the CLI) does the live→catalog→curated
+            # ladder. The blocking discovery call runs off the event loop.
+            merged, source, live_count = await asyncio.to_thread(
+                _gw.resolve_picker_models, p, None, use_cache=not refresh)
+            return p, {
+                "models": merged,
                 "default": _gw.PROVIDER_DEFAULT_MODELS.get(p, ""),
                 "keyless": p in _gw.LOCAL_PROVIDERS,
+                "source": source,
+                "live_count": live_count,
             }
+
+        # Discover every provider concurrently so the picker never waits on the
+        # sum of the round-trips, only the slowest one (each is bounded).
+        results = await asyncio.gather(*[_one(p) for p in prov_names])
+        providers = {p: info for p, info in results}
         return {"provider": provider, "model": model, "providers": providers,
                 "provider_default": _gw.PROVIDER_DEFAULT_MODELS.get(provider, "")}
 

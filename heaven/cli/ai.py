@@ -58,24 +58,58 @@ def ai_status() -> None:
 
 
 @ai_cmd.command("models")
-def ai_models() -> None:
-    """List locally-installed Ollama models."""
+@click.option("--provider", "-p", "provider", default=None,
+              help="anthropic | openai | gemini | deepseek | ollama | local. "
+                   "Defaults to the active provider, else Ollama.")
+def ai_models(provider: Optional[str]) -> None:
+    """List the models a provider will actually serve (discovered live).
+
+    With no --provider this lists the active provider's models (or Ollama's pulled
+    tags if none is configured). For a cloud provider it queries that provider's
+    live models API using your key, so you see every current model, not a fixed
+    short-list; the curated recommended picks are marked with a star.
+    """
+    import os
+
+    from heaven.ai import llm_gateway as gw
     from heaven.ai import local_llm
-    if not local_llm.is_ollama_installed():
-        _print(f"[yellow]Ollama not installed.[/yellow] {local_llm.install_hint()}")
-        return
-    if not local_llm.ollama_reachable():
-        _print("[yellow]Ollama server not reachable.[/yellow] Start it with "
-               "[cyan]ollama serve[/cyan] (or launch the Ollama app).")
-        return
-    models = local_llm.list_models()
+
+    p = (provider or os.environ.get("HEAVEN_LLM_PROVIDER") or "ollama").lower()
+
+    # Ollama keeps its friendly "is it installed / reachable" guidance.
+    if p == "ollama":
+        if not local_llm.is_ollama_installed():
+            _print(f"[yellow]Ollama not installed.[/yellow] {local_llm.install_hint()}")
+            return
+        if not local_llm.ollama_reachable():
+            _print("[yellow]Ollama server not reachable.[/yellow] Start it with "
+                   "[cyan]ollama serve[/cyan] (or launch the Ollama app).")
+            return
+
+    key = os.environ.get(gw.PROVIDER_KEY_ENVS.get(p, ""), "")
+    # One resolver (shared with the web picker): live where a key/runtime allows,
+    # else the broader offline catalog, else the curated short-list.
+    models, source, _live_n = gw.resolve_picker_models(p)
+
     if not models:
-        _print("[dim]No models pulled yet.[/dim] Try: "
-               f"[cyan]heaven ai pull {local_llm.DEFAULT_OLLAMA_MODEL}[/cyan]")
+        if p == "ollama":
+            _print("[dim]No models pulled yet.[/dim] Try: "
+                   f"[cyan]heaven ai pull {local_llm.DEFAULT_OLLAMA_MODEL}[/cyan]")
+        else:
+            _print(f"[dim]No models found for provider '{p}'.[/dim]")
         return
-    _print("[bold]Installed local models:[/bold]")
+
+    default = gw.PROVIDER_DEFAULT_MODELS.get(p, "")
+    _print(f"[bold]{p} models[/bold] [dim]({len(models)}, {source})[/dim]:")
     for m in models:
-        _print(f"  • {m}")
+        star = "[green]★[/green] " if m.get("recommended") else "  "
+        is_default = " [dim](default)[/dim]" if m["id"] == default else ""
+        note = f" [dim]— {m['note']}[/dim]" if m.get("note") else ""
+        _print(f"  {star}{m['id']}{is_default}{note}")
+    # If we're on the offline catalog because no key is set, say how to go live.
+    if source == "catalog" and gw.PROVIDER_KEY_ENVS.get(p) and not key:
+        _print(f"[dim]Showing the known catalog. Set {gw.PROVIDER_KEY_ENVS[p]} "
+               f"([cyan]heaven config[/cyan]) to list {p}'s live roster.[/dim]")
 
 
 @ai_cmd.command("pull")

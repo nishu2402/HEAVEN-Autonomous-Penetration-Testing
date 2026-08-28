@@ -105,6 +105,71 @@ def known_models(provider: str) -> list[dict[str, str]]:
     return [dict(m) for m in KNOWN_MODELS.get((provider or "").lower(), ())]
 
 
+# Broader "known roster" per cloud provider — the KEYLESS / offline fallback.
+#
+# Live discovery (below) needs a key: no cloud provider lets you list its models
+# unauthenticated. So before a key is set the picker used to drop back to the tiny
+# KNOWN_MODELS short-list, which is exactly the "it only shows a few basic models"
+# complaint. This catalog is a broader set of real, current model ids per provider
+# so the picker is comprehensive even with no key. It is a SUPERSET of KNOWN_MODELS
+# (the recommended picks stay starred on top); once a key IS present, the live
+# roster supersedes this entirely. The operator can always type any custom id, so a
+# model missing here is never blocked — this only saves typing. Real ids only; not
+# a capability claim, just the current families each provider serves.
+CATALOG_MODELS: dict[str, tuple[dict[str, str], ...]] = {
+    "anthropic": (
+        {"id": "claude-opus-5", "label": "Claude Opus 5", "note": "Most capable"},
+        {"id": "claude-sonnet-5", "label": "Claude Sonnet 5", "note": "Balanced, recommended"},
+        {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "note": "Fast & economical"},
+        {"id": "claude-opus-4-8", "label": "Claude Opus 4.8", "note": ""},
+        {"id": "claude-opus-4-1", "label": "Claude Opus 4.1", "note": ""},
+        {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5", "note": ""},
+        {"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet", "note": ""},
+        {"id": "claude-3-5-sonnet-latest", "label": "Claude 3.5 Sonnet", "note": ""},
+        {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku", "note": ""},
+        {"id": "claude-3-opus-latest", "label": "Claude 3 Opus", "note": ""},
+    ),
+    "openai": (
+        {"id": "gpt-4o", "label": "GPT-4o", "note": "Balanced, recommended"},
+        {"id": "gpt-4o-mini", "label": "GPT-4o mini", "note": "Fast & economical"},
+        {"id": "o3-mini", "label": "o3-mini", "note": "Reasoning, economical"},
+        {"id": "gpt-4.1", "label": "GPT-4.1", "note": ""},
+        {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini", "note": ""},
+        {"id": "gpt-4.1-nano", "label": "GPT-4.1 nano", "note": ""},
+        {"id": "gpt-4-turbo", "label": "GPT-4 Turbo", "note": ""},
+        {"id": "o3", "label": "o3", "note": "Reasoning"},
+        {"id": "o4-mini", "label": "o4-mini", "note": "Reasoning"},
+        {"id": "o1", "label": "o1", "note": ""},
+        {"id": "o1-mini", "label": "o1-mini", "note": ""},
+        {"id": "chatgpt-4o-latest", "label": "ChatGPT-4o (latest)", "note": ""},
+    ),
+    "gemini": (
+        {"id": "gemini-flash-latest", "label": "Gemini Flash (latest)",
+         "note": "Fast rolling alias, recommended"},
+        {"id": "gemini-pro-latest", "label": "Gemini Pro (latest)", "note": "Deeper reasoning"},
+        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "note": ""},
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "note": ""},
+        {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite", "note": ""},
+        {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "note": ""},
+        {"id": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash-Lite", "note": ""},
+    ),
+    # DeepSeek serves only these two — its catalog equals the curated set, so no
+    # separate entry is needed (catalog_models falls back to KNOWN_MODELS).
+}
+
+
+def catalog_models(provider: str) -> list[dict[str, str]]:
+    """Broader known roster for a provider — the keyless/offline picker fallback.
+
+    A superset of :func:`known_models` for cloud providers with a published family
+    (Anthropic / OpenAI / Gemini); for everything else it is the curated list
+    itself. Used only when live discovery can't run (no key); the operator can
+    still type any id.
+    """
+    p = (provider or "").lower()
+    return [dict(m) for m in CATALOG_MODELS.get(p, KNOWN_MODELS.get(p, ()))]
+
+
 PROVIDER_KEY_ENVS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
@@ -187,6 +252,263 @@ def _llm_timeout_s() -> float:
         return max(5.0, float(os.environ.get("HEAVEN_LLM_TIMEOUT", DEFAULT_LLM_TIMEOUT_S)))
     except (TypeError, ValueError):
         return DEFAULT_LLM_TIMEOUT_S
+
+
+# ═══════════════════════════════════════════
+# LIVE MODEL DISCOVERY
+# ═══════════════════════════════════════════
+#
+# KNOWN_MODELS above is a small curated set (nice labels + the recommended flag).
+# But operators asked to pick ANY model their key can actually reach — new
+# Claude / GPT / Gemini / DeepSeek releases, fine-tuned ids, org-private models,
+# every locally-pulled Ollama tag — not just the two or three we hand-picked.
+# Every provider exposes a "list models" endpoint, so HEAVEN queries it LIVE and
+# merges the result with the curated set. That turns the picker from a static
+# short-list into the operator's real, current roster (dynamic, not static).
+#
+# Design guarantees:
+#   • httpx-only — no provider SDK — so one code path covers every provider with
+#     zero extra dependencies (httpx is already a base install dep).
+#   • Every failure (no key, offline, blocked, rate-limited, bad JSON) degrades
+#     to the curated list. The picker is NEVER empty and this NEVER raises.
+#   • Results are cached briefly so opening Settings repeatedly doesn't hammer the
+#     provider APIs; a `refresh` bypasses the cache on demand.
+#   • The API key rides the provider's own auth header only — never a query
+#     string, never logged.
+
+# How long a provider's live roster stays cached (seconds). Model lists change on
+# the order of days, so a few minutes keeps the UI instant without going stale.
+_MODELS_LIST_TTL_S = 300.0
+_MODELS_CACHE: dict[str, tuple[float, list[dict[str, str]]]] = {}
+_MODELS_CACHE_LOCK = threading.Lock()
+
+# Bound the discovery round-trip so one slow provider never hangs the picker.
+_MODELS_FETCH_TIMEOUT_S = 8.0
+
+# OpenAI-compatible providers (OpenAI, DeepSeek) list EVERYTHING a key can touch —
+# embeddings, audio, image, moderation, legacy completion engines — none of which
+# HEAVEN can drive through /chat/completions. Any id containing one of these
+# tokens is not a chat model, so it's filtered out of the picker (selecting it
+# would only ever error). The list stays inclusive: a real chat id like
+# `gpt-4o` / `o3` / `chatgpt-4o-latest` survives.
+_NONCHAT_MODEL_TOKENS = (
+    "embedding", "embed", "whisper", "tts", "text-to-speech", "dall-e", "dalle",
+    "image", "vision-instruct", "audio", "realtime", "moderation", "transcribe",
+    "-search", "similarity", "-edit", "davinci", "babbage", "curie", "ada",
+    "codex", "-instruct", "rerank", "guard", "omni-moderation",
+)
+
+
+def _looks_chat_model(model_id: str) -> bool:
+    low = (model_id or "").lower()
+    return bool(low) and not any(tok in low for tok in _NONCHAT_MODEL_TOKENS)
+
+
+def _key_fingerprint(key: str) -> str:
+    """Short, non-reversible tag so the cache separates distinct keys without
+    ever storing the secret itself."""
+    if not key:
+        return "-"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+
+
+def _http_get_json(url: str, headers: dict[str, str], timeout: float,
+                   params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    import httpx
+    r = httpx.get(url, headers=headers or {}, params=params or None, timeout=timeout)
+    r.raise_for_status()
+    data = r.json()
+    return data if isinstance(data, dict) else {"data": data}
+
+
+def _live_anthropic(key: str, timeout: float) -> list[dict[str, str]]:
+    """Anthropic /v1/models (paginated). Returns newest-first, as the API does."""
+    out: list[dict[str, str]] = []
+    after: Optional[str] = None
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    for _ in range(10):  # page guard — 10 × 1000 covers any catalog
+        params: dict[str, Any] = {"limit": 1000}
+        if after:
+            params["after_id"] = after
+        data = _http_get_json("https://api.anthropic.com/v1/models", headers, timeout, params)
+        for m in data.get("data", []) or []:
+            mid = m.get("id")
+            if mid:
+                out.append({"id": str(mid), "label": str(m.get("display_name") or mid),
+                            "note": ""})
+        if not data.get("has_more"):
+            break
+        after = data.get("last_id")
+        if not after:
+            break
+    return out
+
+
+def _live_openai_compatible(base: str, key: str, timeout: float,
+                            *, chat_only: bool) -> list[dict[str, str]]:
+    """OpenAI-style GET {base}/models (also DeepSeek and generic local servers)."""
+    base = (base or "").rstrip("/")
+    if not base:
+        return []
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    data = _http_get_json(f"{base}/models", headers, timeout)
+    out: list[dict[str, str]] = []
+    for m in data.get("data", []) or []:
+        mid = m.get("id") if isinstance(m, dict) else m
+        if not mid:
+            continue
+        mid = str(mid)
+        if chat_only and not _looks_chat_model(mid):
+            continue
+        out.append({"id": mid, "label": mid, "note": ""})
+    return out
+
+
+def _live_gemini(key: str, timeout: float) -> list[dict[str, str]]:
+    """Gemini ListModels (paginated). Keeps only models that support
+    generateContent. The key rides the x-goog-api-key HEADER, never the URL."""
+    out: list[dict[str, str]] = []
+    token: Optional[str] = None
+    headers = {"x-goog-api-key": key}
+    for _ in range(10):
+        params: dict[str, Any] = {"pageSize": 1000}
+        if token:
+            params["pageToken"] = token
+        data = _http_get_json("https://generativelanguage.googleapis.com/v1beta/models",
+                              headers, timeout, params)
+        for m in data.get("models", []) or []:
+            methods = m.get("supportedGenerationMethods") or []
+            if "generateContent" not in methods:
+                continue
+            name = str(m.get("name") or "")
+            mid = name.split("/", 1)[1] if name.startswith("models/") else name
+            if mid:
+                out.append({"id": mid, "label": str(m.get("displayName") or mid), "note": ""})
+        token = data.get("nextPageToken")
+        if not token:
+            break
+    return out
+
+
+def _fetch_live_uncached(provider: str, key: str, timeout: float) -> list[dict[str, str]]:
+    if provider == "anthropic":
+        return _live_anthropic(key, timeout) if key else []
+    if provider == "openai":
+        return _live_openai_compatible("https://api.openai.com/v1", key, timeout,
+                                       chat_only=True) if key else []
+    if provider == "deepseek":
+        return _live_openai_compatible(_local_base_url("deepseek"), key, timeout,
+                                       chat_only=True) if key else []
+    if provider == "gemini":
+        return _live_gemini(key, timeout) if key else []
+    if provider == "ollama":
+        from heaven.ai import local_llm
+        names = local_llm.list_models(timeout=min(timeout, 4.0))
+        return [{"id": n, "label": n, "note": "installed"} for n in names]
+    if provider == "local":
+        base = _local_base_url("local")
+        return _live_openai_compatible(base, key, timeout, chat_only=False) if base else []
+    return []
+
+
+def fetch_live_models(provider: str, api_key: Optional[str] = None, *,
+                      timeout: Optional[float] = None,
+                      use_cache: bool = True) -> list[dict[str, str]]:
+    """The models a provider will actually serve, discovered live from its API.
+
+    Returns a list of ``{"id", "label", "note"}`` dicts (possibly empty). Offline-
+    safe and keyless-safe: any error degrades to ``[]`` and is never raised, so
+    callers can always fall back to :func:`known_models`. Successful lookups are
+    cached for ``_MODELS_LIST_TTL_S``; pass ``use_cache=False`` to force a refresh.
+    """
+    provider = (provider or "").lower()
+    key = api_key if api_key is not None else os.environ.get(
+        PROVIDER_KEY_ENVS.get(provider, ""), "")
+    cache_key = f"{provider}:{_key_fingerprint(key)}"
+    now = time.monotonic()
+    if use_cache:
+        with _MODELS_CACHE_LOCK:
+            hit = _MODELS_CACHE.get(cache_key)
+            if hit and (now - hit[0]) < _MODELS_LIST_TTL_S:
+                return [dict(m) for m in hit[1]]
+    to = timeout if timeout is not None else min(_llm_timeout_s(), _MODELS_FETCH_TIMEOUT_S)
+    try:
+        models = _fetch_live_uncached(provider, key, to)
+    except Exception:  # noqa: BLE001 — discovery is best-effort; fall back to curated
+        logger.debug("live model discovery failed for provider %r", provider, exc_info=True)
+        models = []
+    # Cache only successful, non-empty results — never pin an empty list from a
+    # transient blip (that would hide a working roster for the whole TTL).
+    if models:
+        with _MODELS_CACHE_LOCK:
+            _MODELS_CACHE[cache_key] = (now, [dict(m) for m in models])
+    return models
+
+
+def merge_models(curated: list[dict[str, str]],
+                 live: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Merge the curated short-list with the live roster into one picker list.
+
+    Curated entries come first (their friendly labels/notes and the
+    ``recommended`` flag are preserved, and a live marker like "installed" is
+    folded into their note); every live model not already curated is appended in
+    the provider's own order (Anthropic and Gemini already return newest-first).
+    Deduplicated by id. Entries carry a str->str/bool payload (the ``recommended``
+    flag is a bool), hence ``dict[str, Any]``.
+    """
+    live_by_id = {m["id"]: m for m in live if m.get("id")}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for m in curated:
+        d: dict[str, Any] = dict(m)
+        d["recommended"] = True
+        lv = live_by_id.get(d["id"])
+        if lv and lv.get("note") and lv["note"] not in (d.get("note") or ""):
+            d["note"] = (f'{d.get("note", "")} · {lv["note"]}').strip(" ·")
+        out.append(d)
+        seen.add(d["id"])
+    for m in live:
+        mid = m.get("id")
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        out.append(dict(m))
+    return out
+
+
+def resolve_picker_models(provider: str, api_key: Optional[str] = None, *,
+                          use_cache: bool = True
+                          ) -> tuple[list[dict[str, Any]], str, int]:
+    """Resolve the Settings model list for a provider, with a graceful ladder.
+
+    The single source of truth behind both the ``/api/ai/models`` endpoint and
+    ``heaven ai models``, so the web picker and the CLI always agree.
+
+    1. **live** — if the provider has a key (cloud) or is a local runtime, query
+       its real current roster and merge it on top of the curated short-list.
+    2. **catalog** — otherwise fall back to the broader offline :data:`CATALOG_MODELS`
+       so the picker is comprehensive even before a key is set (still merged, so
+       the recommended picks stay starred on top). This is the fix for "it only
+       shows a few basic models" when no key is configured yet.
+    3. **curated** — providers with no broader catalog (DeepSeek, local) just show
+       the curated list.
+
+    Returns ``(models, source, live_count)`` where ``source`` is
+    ``'live' | 'catalog' | 'curated'``. Never raises; always non-empty for a
+    provider that has any curated entry. The operator can still type any custom id.
+    """
+    p = (provider or "").lower()
+    curated = known_models(p)
+    key = api_key if api_key is not None else os.environ.get(
+        PROVIDER_KEY_ENVS.get(p, ""), "")
+    if key or p in LOCAL_PROVIDERS:
+        live = fetch_live_models(p, key or None, use_cache=use_cache)
+        if live:
+            return merge_models(curated, live), "live", len(live)
+    catalog = catalog_models(p)
+    if len(catalog) > len(curated):
+        return merge_models(curated, catalog), "catalog", 0
+    return merge_models(curated, []), "curated", 0
 
 
 # ═══════════════════════════════════════════

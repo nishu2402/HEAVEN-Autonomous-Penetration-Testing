@@ -361,15 +361,25 @@ class TestFindingFilters:
 
     @pytest.fixture
     def populated_store(self, store):
+        # Each finding pins its own cvss_base to a mid-band value so its declared
+        # severity is exactly what the store's write-time reconciliation resolves
+        # (critical=9.5 / high=8.0 / medium=5.5 / low=3.0). Without a real score
+        # the store would realign the label to the vuln class's KB base — correct
+        # behaviour, but it would make this filter/stats fixture depend on KB
+        # values. Pinning the score keeps the one-per-band spread deterministic.
         findings = [
             {"target": "host1", "vuln_type": "sqli", "param": "id",
-             "severity": "critical", "confidence": 0.95},
+             "severity": "critical", "confidence": 0.95,
+             "evidence": {"cvss_base": 9.5}},
             {"target": "host1", "vuln_type": "xss", "param": "q",
-             "severity": "high", "confidence": 0.88},
+             "severity": "high", "confidence": 0.88,
+             "evidence": {"cvss_base": 8.0}},
             {"target": "host2", "vuln_type": "sqli", "param": "user",
-             "severity": "medium", "confidence": 0.65},
+             "severity": "medium", "confidence": 0.65,
+             "evidence": {"cvss_base": 5.5}},
             {"target": "host3", "vuln_type": "ssrf", "param": "url",
-             "severity": "low", "confidence": 0.45},
+             "severity": "low", "confidence": 0.45,
+             "evidence": {"cvss_base": 3.0}},
             {"target": "host3", "vuln_type": "ssrf", "param": "callback",
              "severity": "info", "confidence": 0.35},
         ]

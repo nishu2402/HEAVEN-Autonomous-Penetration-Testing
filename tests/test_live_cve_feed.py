@@ -240,7 +240,11 @@ def test_live_cve_finding_persists_into_engagement(tmp_path):
 
     found = store.list_findings(scan_id="cve-s1")
     assert len(found) == 1
-    assert found[0].severity == "critical"
+    # The record's cvss is 8.1, which is the High band — the store reconciles the
+    # label to the real score, so a "critical" label on an 8.1 score (the exact
+    # "CVSS 8.1 / Critical" contradiction reconcile_severity exists to prevent) is
+    # persisted as High. regreSSHion (CVE-2024-6387) is in fact rated 8.1 High.
+    assert found[0].severity == "high"
 
 
 # ── Integration: the dynamic fallback inside map_vulnerabilities ─────────────

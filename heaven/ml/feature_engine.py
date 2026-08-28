@@ -45,8 +45,28 @@ class VulnFeatures:
         return np.array([self.features.get(f, 0.0) for f in FEATURE_NAMES])
 
 
+# Short-code and long-form values both appear in the wild (KB vectors use short
+# codes, NVD long form), so every map accepts either spelling.
+_AV_VALS = {"N": 1.0, "NETWORK": 1.0, "A": 0.75, "ADJACENT_NETWORK": 0.75,
+            "ADJACENT": 0.75, "L": 0.5, "LOCAL": 0.5, "P": 0.25, "PHYSICAL": 0.25}
+_AC_VALS = {"L": 1.0, "LOW": 1.0, "H": 0.5, "HIGH": 0.5}
+_PR_VALS = {"N": 1.0, "NONE": 1.0, "L": 0.66, "LOW": 0.66, "H": 0.33, "HIGH": 0.33}
+_IMPACT_VALS = {"H": 1.0, "HIGH": 1.0, "L": 0.5, "LOW": 0.5, "N": 0.0, "NONE": 0.0}
+
+
 def parse_cvss_vector(vector: str) -> dict[str, float]:
-    """Parse CVSS v3.1 vector string into numeric features."""
+    """Parse a CVSS vector string (v3.x or v4.0, short or long form) into the
+    model's numeric feature space.
+
+    CVSS v4.0 replaced Scope with a split impact set (Vulnerable-System VC/VI/VA
+    and Subsequent-System SC/SI/SA) and added Attack Requirements (AT). We fold
+    those back onto the same v3.x-shaped features the model was trained on, so a
+    v4.0 finding still yields a prediction: the impact features take the stronger
+    of the vulnerable and subsequent values, Scope is "changed" when the
+    subsequent system is impacted, and Attack Requirements: Present adds to
+    complexity. The trained model outputs a numeric base score, which is not tied
+    to a CVSS version.
+    """
     features = {
         "attack_vector": 0.5, "attack_complexity": 0.5, "privileges_required": 0.5,
         "user_interaction": 0.5, "scope_changed": 0.0,
@@ -55,29 +75,46 @@ def parse_cvss_vector(vector: str) -> dict[str, float]:
     if not vector:
         return features
 
-    impact_map = {"HIGH": 1.0, "LOW": 0.5, "NONE": 0.0}
-    ui_map = {"NONE": 1.0, "REQUIRED": 0.5}
-
+    m: dict[str, str] = {}
     for component in vector.split("/"):
         if ":" not in component:
             continue
         key, val = component.split(":", 1)
-        if key == "AV":
-            features["attack_vector"] = ATTACK_VECTOR_MAP.get(val, 0.5)
-        elif key == "AC":
-            features["attack_complexity"] = COMPLEXITY_MAP.get(val, 0.5)
-        elif key == "PR":
-            features["privileges_required"] = PRIVILEGES_MAP.get(val, 0.5)
-        elif key == "UI":
-            features["user_interaction"] = ui_map.get(val, 0.5)
-        elif key == "S":
-            features["scope_changed"] = 1.0 if val == "CHANGED" else 0.0
-        elif key == "C":
-            features["conf_impact"] = impact_map.get(val, 0.5)
-        elif key == "I":
-            features["integ_impact"] = impact_map.get(val, 0.5)
-        elif key == "A":
-            features["avail_impact"] = impact_map.get(val, 0.5)
+        m[key.strip().upper()] = val.strip().upper()
+
+    is_v4 = "AT" in m or "VC" in m or (vector or "").strip().upper().startswith("CVSS:4")
+
+    if "AV" in m:
+        features["attack_vector"] = _AV_VALS.get(m["AV"], 0.5)
+    if "AC" in m:
+        features["attack_complexity"] = _AC_VALS.get(m["AC"], 0.5)
+    # v4.0 Attack Requirements: Present is an added hurdle, like High complexity.
+    if m.get("AT") in ("P", "PRESENT"):
+        features["attack_complexity"] = min(features["attack_complexity"], 0.5)
+    if "PR" in m:
+        features["privileges_required"] = _PR_VALS.get(m["PR"], 0.5)
+    if "UI" in m:
+        # NONE keeps 1.0; any interaction (v3 REQUIRED, v4 PASSIVE/ACTIVE) is 0.5.
+        features["user_interaction"] = 1.0 if m["UI"] in ("N", "NONE") else 0.5
+
+    if is_v4:
+        vc, sc = _IMPACT_VALS.get(m.get("VC", "N"), 0.0), _IMPACT_VALS.get(m.get("SC", "N"), 0.0)
+        vi, si = _IMPACT_VALS.get(m.get("VI", "N"), 0.0), _IMPACT_VALS.get(m.get("SI", "N"), 0.0)
+        va, sa = _IMPACT_VALS.get(m.get("VA", "N"), 0.0), _IMPACT_VALS.get(m.get("SA", "N"), 0.0)
+        features["conf_impact"] = max(vc, sc)
+        features["integ_impact"] = max(vi, si)
+        features["avail_impact"] = max(va, sa)
+        # Impact crossing into a subsequent system is v4.0's analogue of Scope:Changed.
+        features["scope_changed"] = 1.0 if (sc or si or sa) else 0.0
+    else:
+        if "S" in m:
+            features["scope_changed"] = 1.0 if m["S"] in ("C", "CHANGED") else 0.0
+        if "C" in m:
+            features["conf_impact"] = _IMPACT_VALS.get(m["C"], 0.5)
+        if "I" in m:
+            features["integ_impact"] = _IMPACT_VALS.get(m["I"], 0.5)
+        if "A" in m:
+            features["avail_impact"] = _IMPACT_VALS.get(m["A"], 0.5)
 
     return features
 

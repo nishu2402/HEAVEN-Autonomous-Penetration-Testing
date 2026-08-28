@@ -86,15 +86,25 @@ class OSVVuln:
 
 
 def _parse_severity(record: dict) -> tuple[str, float, str]:
-    """Return (vector, score, label) from an OSV record's severity fields."""
-    vector = ""
+    """Return (vector, score, label) from an OSV record's severity fields.
+
+    An OSV advisory may carry both a CVSS_V4 and a CVSS_V3 entry; prefer v4.0 as
+    the authoritative score (the current standard) and fall back to v3.x.
+    """
+    by_ver: dict[str, str] = {}
     for sev in record.get("severity", []) or []:
         if not isinstance(sev, dict):
             continue
         # CVSS_V3 / CVSS_V4 records carry the vector string in "score".
-        if str(sev.get("type", "")).upper().startswith("CVSS") and sev.get("score"):
-            vector = str(sev["score"])
-            break
+        typ = str(sev.get("type", "")).upper()
+        if typ.startswith("CVSS") and sev.get("score"):
+            if typ.startswith("CVSS_V4"):
+                by_ver.setdefault("4", str(sev["score"]))
+            elif typ.startswith("CVSS_V3"):
+                by_ver.setdefault("3", str(sev["score"]))
+            else:
+                by_ver.setdefault("other", str(sev["score"]))
+    vector = by_ver.get("4") or by_ver.get("3") or by_ver.get("other", "")
 
     score = base_score_from_vector(vector) if vector else 0.0
     if score <= 0:

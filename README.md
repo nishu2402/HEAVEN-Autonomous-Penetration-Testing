@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2144 tests · 56 CLI commands · 91 API routes · 25 UI pages · 13 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2179 tests · 56 CLI commands · 91 API routes · 25 UI pages · 13 scan modes · CVSS ML predictor R²=0.9925 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -110,7 +110,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 2144 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 2179 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 180 |
 | ⌨️ **CLI Commands** | 56 |
@@ -150,7 +150,7 @@ It runs three ways from the **same engagement dataset**:
 | 🔓 **Post-Exploitation** | **self-contained privesc engines for Linux _and_ Windows**. Linux: GTFOBins-scored SUID/sudo/caps · docker/lxd escape · writable `/etc/passwd` · cron/PATH hijack; Windows: unquoted service paths · writable service binaries · `SeImpersonate`/`SeBackup` token privileges · AlwaysInstallElevated · autologon/registry creds · UAC posture, no linPEAS/WinPEAS download · **loot harvester** (SSH keys · AWS/GCP/Azure creds · kubeconfig · `.env`/`.netrc`/`.pgpass`/history; secrets redacted, plaintext never persisted) · **credential-reuse loop** feeding SSH/SMB/PsExec lateral movement + pass-the-hash · **ATT&CK-tagged kill-chain** · optional LLM path prioritisation · BloodHound AD collection. Run `heaven postex {enum,loot,full}` (`--os windows` / auto-detected) |
 | ☁️ **Cloud Misconfiguration** | **credential-free** public storage-bucket exposure (S3 / GCS / Azure Blob, listable vs private proven from the provider's own response, not guessed) · cloud-metadata SSRF catalog (AWS IMDS / GCP / Azure) that turns an SSRF into confirmed credential theft · plus **authenticated** account audit (EC2/S3 public ACL & policy & encryption · security-group `0.0.0.0/0` on sensitive ports · public RDS · IAM admin policies) · read-only **IAM privilege audit** of the *authenticated identity*: over-privileged principals (`*`/`*`) · console users without MFA · stale/unrotated & root access keys · weak password policy (`heaven cloud iam`, secret never read/logged). Run `heaven cloud storage <target>` |
 | 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini / DeepSeek / local) · **deterministic fallback needs no API key** |
-| 📊 **Risk Scoring** | CVSS-v3 ML predictor (R²=0.9925, 13-feature ExtraTrees) · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
+| 📊 **Risk Scoring** | CVSS v4.0 (current standard) scored alongside CVSS v3.1 · ML base-score predictor (R²=0.9925, 13-feature ExtraTrees) for findings with no published score · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
 | 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA: dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
 | 📄 **Reporting** | 8 formats from CLI and web UI: PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL |
@@ -694,7 +694,7 @@ Every finding carries a defensible **evidence package**: request/response, copy-
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,50:FF6E00,100:7400B8"/>
 </p>
 
-HEAVEN predicts a CVSS-v3 base score for every finding using a 13-feature `ExtraTreesRegressor` trained on the NVD (held-out **R²=0.9925**), then layers on:
+HEAVEN scores every finding with **CVSS v4.0**, the current standard, and shows its **CVSS v3.1** score alongside (the calibrated score that drives the severity band). Published CVE scores come straight from NVD / OSV, preferring v4.0 when the advisory carries it; for a finding with no published score HEAVEN predicts a base score using a 13-feature `ExtraTreesRegressor` trained on the NVD (held-out **R²=0.9925**), then layers on:
 
 - **EPSS** exploit-probability and **CISA KEV** membership
 - An **asset-criticality** multiplier (`scope add --criticality crown_jewel`)
@@ -749,7 +749,7 @@ heaven/                   ← Python package (180 modules)
 └── cli/                  Click CLI - one module per command group (56 commands)
 
 heaven-ui/                React + Vite web console (25 pages)
-tests/                    2144 pytest tests + native & DVWA benchmark suites
+tests/                    2179 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -835,7 +835,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>2144 tests · 180 modules · 56 CLI commands · 91 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>2179 tests · 180 modules · 56 CLI commands · 91 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

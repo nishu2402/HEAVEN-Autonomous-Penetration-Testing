@@ -34,6 +34,13 @@ class CVERecord:
     severity: str = "info"
     cvss_base: float = 0.0
     cvss_vector: str = ""
+    cvss_version: str = ""
+    # CVSS v4.0 and v3.1 companions, populated when NVD publishes each metric so
+    # a finding can show the current standard alongside the legacy score.
+    cvss4_vector: str = ""
+    cvss4_base: float = 0.0
+    cvss31_vector: str = ""
+    cvss31_base: float = 0.0
     cwe_id: str = ""
     epss_score: float = 0.0
     exploit_available: bool = False
@@ -137,20 +144,16 @@ class NVDClient:
                 cve_data = item.get("cve", {})
                 cve_id = cve_data.get("id", "")
 
-                # Extract CVSS
-                cvss_base = 0.0
-                cvss_vector = ""
-                severity = "info"
-                metrics = cve_data.get("metrics", {})
-
-                for version_key in ["cvssMetricV31", "cvssMetricV30", "cvssMetricV2"]:
-                    if version_key in metrics:
-                        metric = metrics[version_key][0]
-                        cvss_data = metric.get("cvssData", {})
-                        cvss_base = cvss_data.get("baseScore", 0.0)
-                        cvss_vector = cvss_data.get("vectorString", "")
-                        severity = metric.get("baseSeverity", "").lower() or _score_to_severity(cvss_base)
-                        break
+                # Extract CVSS (prefer v4.0, keep v4.0/v3.1 companions).
+                cvss = parse_cvss_metrics(cve_data.get("metrics", {}))
+                cvss_base = cvss["cvss_base"]
+                cvss_vector = cvss["cvss_vector"]
+                cvss_version = cvss["cvss_version"]
+                severity = cvss["severity"]
+                cvss4_vector = cvss["cvss4_vector"]
+                cvss4_base = cvss["cvss4_base"]
+                cvss31_vector = cvss["cvss31_vector"]
+                cvss31_base = cvss["cvss31_base"]
 
                 # Extract description
                 descriptions = cve_data.get("descriptions", [])
@@ -172,6 +175,11 @@ class NVDClient:
                     severity=severity,
                     cvss_base=cvss_base,
                     cvss_vector=cvss_vector,
+                    cvss_version=cvss_version,
+                    cvss4_vector=cvss4_vector or "",
+                    cvss4_base=float(cvss4_base or 0.0),
+                    cvss31_vector=cvss31_vector or "",
+                    cvss31_base=float(cvss31_base or 0.0),
                     cwe_id=cwe,
                     in_kev=cve_id in self._kev_cves,
                     published=cve_data.get("published", ""),
@@ -284,7 +292,11 @@ async def lookup_vulnerabilities(scan_id: str = "", cpes: Optional[list[str]] = 
         for r in records:
             all_vulns.append({
                 "cve_id": r.cve_id, "title": r.title, "severity": r.severity,
-                "cvss_base": r.cvss_base, "in_kev": r.in_kev, "asset": cpe,
+                "cvss_base": r.cvss_base, "cvss_vector": r.cvss_vector,
+                "cvss_version": r.cvss_version,
+                "cvss4_vector": r.cvss4_vector, "cvss4_base": r.cvss4_base,
+                "cvss31_vector": r.cvss31_vector, "cvss31_base": r.cvss31_base,
+                "in_kev": r.in_kev, "asset": cpe,
                 "description": r.description
             })
             stats[r.severity] = stats.get(r.severity, 0) + 1
@@ -331,3 +343,47 @@ def _score_to_severity(score: float) -> str:
     if score >= 0.1:
         return "low"
     return "info"
+
+
+def parse_cvss_metrics(metrics: dict) -> dict:
+    """Resolve the authoritative CVSS score from an NVD ``metrics`` block.
+
+    NVD now publishes ``cvssMetricV40`` for some CVEs; prefer it as the current
+    standard, then fall back to v3.1 / v3.0 / v2 for the large body of CVEs that
+    carry only those. The v4.0 and v3.1 metrics are also returned as explicit
+    companions when present, so a finding can show one next to the other.
+    """
+    metrics = metrics or {}
+    cvss_base = 0.0
+    cvss_vector = cvss_version = ""
+    severity = "info"
+    for version_key, ver in (
+        ("cvssMetricV40", "4.0"), ("cvssMetricV31", "3.1"),
+        ("cvssMetricV30", "3.0"), ("cvssMetricV2", "2.0"),
+    ):
+        if metrics.get(version_key):
+            data = metrics[version_key][0].get("cvssData", {})
+            cvss_base = float(data.get("baseScore", 0.0) or 0.0)
+            cvss_vector = str(data.get("vectorString", "") or "")
+            cvss_version = ver
+            severity = (metrics[version_key][0].get("baseSeverity", "")
+                        or data.get("baseSeverity", "")).lower() \
+                or _score_to_severity(cvss_base)
+            break
+
+    cvss4_vector = cvss31_vector = ""
+    cvss4_base = cvss31_base = 0.0
+    if metrics.get("cvssMetricV40"):
+        d = metrics["cvssMetricV40"][0].get("cvssData", {})
+        cvss4_vector = str(d.get("vectorString", "") or "")
+        cvss4_base = float(d.get("baseScore", 0.0) or 0.0)
+    if metrics.get("cvssMetricV31"):
+        d = metrics["cvssMetricV31"][0].get("cvssData", {})
+        cvss31_vector = str(d.get("vectorString", "") or "")
+        cvss31_base = float(d.get("baseScore", 0.0) or 0.0)
+    return {
+        "cvss_base": cvss_base, "cvss_vector": cvss_vector,
+        "cvss_version": cvss_version, "severity": severity,
+        "cvss4_vector": cvss4_vector, "cvss4_base": cvss4_base,
+        "cvss31_vector": cvss31_vector, "cvss31_base": cvss31_base,
+    }

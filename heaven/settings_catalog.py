@@ -130,6 +130,18 @@ SETTINGS: tuple[SettingSpec, ...] = (
         secret=False, placeholder="off", choices=("", "on", "off"),
     ),
 
+    # ── Scoring ──
+    SettingSpec(
+        "HEAVEN_CVSS_BADGE_VERSION", "Severity badge CVSS version", "Scoring",
+        "Which CVSS version drives the severity badge. '3.1' (default) uses "
+        "HEAVEN's calibrated band; every finding still shows both a v4.0 and a "
+        "v3.1 score. '4.0' bands the badge on the raw CVSS v4.0 score instead — "
+        "the current standard, but it rescores some low-impact classes higher by "
+        "design, so they will read hotter. Set it before scanning for a "
+        "consistent run.",
+        secret=False, placeholder="3.1", choices=("", "3.1", "4.0"),
+    ),
+
     # ── Recon enrichment ──
     SettingSpec(
         "NVD_API_KEY", "NVD API key", "Recon enrichment",

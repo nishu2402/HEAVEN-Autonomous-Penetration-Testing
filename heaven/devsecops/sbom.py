@@ -51,6 +51,59 @@ def _component_name(details: dict) -> str:
             or details.get("name") or "").strip()
 
 
+def _cvss_ratings(v: dict) -> list[dict[str, Any]]:
+    """CycloneDX rating objects for a finding, one per CVSS version it carries.
+
+    Emits a CVSSv4 rating (the current standard) and a CVSSv3.1 rating when the
+    finding has each, with the real vector attached; falls back to the numeric
+    score under the version implied by any vector on the finding.
+    """
+    from heaven.utils.cvss import (base_score_from_vector, cvss_version_of,
+                                    severity_from_score)
+    ev = v.get("evidence") if isinstance(v.get("evidence"), dict) else {}
+
+    def _pick(*keys: str) -> Any:
+        for src in (v, ev):
+            for k in keys:
+                val = src.get(k)
+                if val:
+                    return val
+        return None
+
+    ratings: list[dict[str, Any]] = []
+    _METHOD = {"4.0": "CVSSv4", "3.1": "CVSSv31", "3.0": "CVSSv3", "2.0": "CVSSv2"}
+
+    def _rating(vector: str, score: Any, method: str) -> dict[str, Any]:
+        try:
+            sc = float(score)
+        except (TypeError, ValueError):
+            sc = base_score_from_vector(vector)
+        r: dict[str, Any] = {"method": method}
+        if sc and sc > 0:
+            r["score"] = round(sc, 1)
+            r["severity"] = severity_from_score(sc).title()
+        if vector:
+            r["vector"] = vector
+        return r
+
+    v4_vec = _pick("cvss4_vector")
+    if v4_vec:
+        ratings.append(_rating(str(v4_vec), _pick("cvss4_base"), "CVSSv4"))
+    v31_vec = _pick("cvss31_vector")
+    if v31_vec:
+        ratings.append(_rating(str(v31_vec), _pick("cvss31_base"), "CVSSv31"))
+
+    if not ratings:
+        own = str(_pick("cvss_vector") or "")
+        method = _METHOD.get(cvss_version_of(own), "other")
+        score = _pick("cvss_base", "risk_score", "predicted_cvss_score")
+        if own or score:
+            r = _rating(own, score, method)
+            if r.get("score") or r.get("vector"):
+                ratings.append(r)
+    return ratings
+
+
 def generate_cyclonedx_sbom(scan_data: dict[str, Any],
                             output_path: Optional[str] = None) -> dict:
     """Build a CycloneDX 1.5 SBOM dict from discovered assets + findings.
@@ -110,12 +163,9 @@ def generate_cyclonedx_sbom(scan_data: dict[str, Any],
                        "url": f"https://nvd.nist.gov/vuln/detail/{cve}"},
             "description": v.get("title") or v.get("description") or "",
         }
-        rating = v.get("risk_score") or v.get("predicted_cvss_score")
-        try:
-            if rating:
-                entry["ratings"] = [{"score": float(rating), "method": "CVSSv3"}]
-        except (TypeError, ValueError):
-            pass
+        entry_ratings = _cvss_ratings(v)
+        if entry_ratings:
+            entry["ratings"] = entry_ratings
         vulnerabilities.append(entry)
 
     sbom: dict[str, Any] = {

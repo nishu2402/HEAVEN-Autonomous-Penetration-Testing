@@ -1,23 +1,35 @@
 """
-HEAVEN — CVSS base-score calculator (v3.1 in-house + v4.0 via the reference lib).
+HEAVEN CVSS base-score calculator (dual version: v4.0 and v3.1).
 
-A faithful implementation of the CVSS v3.1 specification's base-score formula
-(https://www.first.org/cvss/v3.1/specification-document, section 7.1), plus
-CVSS v4.0 base scoring delegated to the reference-grade ``cvss`` library (v4.0
-has no closed-form formula — it is a published MacroVector lookup, so we use the
-vetted implementation rather than re-deriving the table). Used to turn a CVSS
-vector string (e.g. the ones OSV / GHSA advisories carry) into a numeric base
-score and a severity label, so findings get a real, non-fabricated score
-instead of a hand-picked severity constant.
+CVSS v4.0 is the current standard (https://www.first.org/cvss/v4.0/), so HEAVEN
+scores and surfaces it as the primary number, alongside CVSS v3.1 for continuity
+and for the large body of published CVEs that still carry only a v3.1 vector.
 
-This is a deterministic standard — not a model, not a heuristic. Two *different*
+Two scorers back this:
+
+  * v3.1 is a faithful in-house implementation of the specification's base-score
+    formula (https://www.first.org/cvss/v3.1/specification-document, section 7.1).
+  * v4.0 has no closed-form formula (it is a published MacroVector lookup), so we
+    delegate to the reference-grade ``cvss`` library rather than re-deriving the
+    table. When the library is unavailable or a vector is malformed the v4.0
+    scorer returns 0.0 and callers fall back to a severity label as before.
+
+Both turn a CVSS vector string (for example the ones OSV / GHSA / NVD advisories
+carry) into a numeric base score and a severity label, so findings get a real,
+non-fabricated score instead of a hand-picked severity constant.
+
+This is a deterministic standard, not a model or a heuristic. Two different
 vulnerability classes get genuinely different scores; the same class scores the
 same (a CVSS base score is a property of the weakness, not the individual URL).
+The two versions score the same weakness differently by design (FIRST states
+v4.0 is not meant to reproduce v3.1), so HEAVEN keeps both and never forces one
+to match the other.
 """
 from __future__ import annotations
 
 import contextlib
 import math
+import os
 from typing import Any, Optional
 
 # ── Metric coefficients (CVSS v3.1 spec, section 7.4) ──
@@ -46,6 +58,27 @@ def parse_vector(vector: str) -> dict[str, str]:
             key, _, val = part.partition(":")
             out[key.strip().upper()] = val.strip().upper()
     return out
+
+
+def cvss_version_of(vector: str) -> str:
+    """Return the CVSS version a vector string declares: ``"4.0"``, ``"3.1"``,
+    ``"3.0"``, ``"2.0"``, or ``""`` when it carries no ``CVSS:x.y`` prefix.
+
+    Used to label a score honestly (a v4.0 vector is shown as v4.0, a v3.1 as
+    v3.1) rather than assuming a single version everywhere.
+    """
+    v = (vector or "").strip().upper()
+    if v.startswith("CVSS:4.0"):
+        return "4.0"
+    if v.startswith("CVSS:3.1"):
+        return "3.1"
+    if v.startswith("CVSS:3.0"):
+        return "3.0"
+    if v.startswith("CVSS:2.0") or (v and not v.startswith("CVSS:")):
+        # A bare "AV:N/AC:L/..." string with no prefix is the legacy v2 / v3
+        # shorthand; treat an explicit CVSS:2.0 as v2 and leave the rest blank.
+        return "2.0" if v.startswith("CVSS:2.0") else ""
+    return ""
 
 
 def _v4_base_score(vector: str) -> float:
@@ -378,6 +411,58 @@ def _environmental_modified_base(
     return _roundup(min(raw, 10.0))
 
 
+def _own_vector(finding: dict[str, Any]) -> str:
+    """The finding's own (published) CVSS vector, from the finding or evidence."""
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    return str(finding.get("cvss_vector") or ev.get("cvss_vector") or "")
+
+
+def _v4_contextual(
+    vector: str,
+    finding: dict[str, Any],
+    criticality: Optional[str],
+    exposure: Optional[str],
+) -> float:
+    """CVSS v4.0 contextual score via the reference library's Threat +
+    Environmental metrics, driven by the same real per-finding signals HEAVEN
+    already collects. Returns 0.0 when the library is unavailable or the vector
+    will not score, so the caller degrades to the base score.
+
+    v4.0 dropped Report Confidence, so the detector's confidence has no v4.0
+    metric to map onto; the adjustment uses Exploit Maturity (E), the asset's
+    Security Requirements (CR/IR/AR), and network exposure (Modified Attack
+    Vector) only.
+    """
+    try:
+        from cvss import CVSS4  # type: ignore[import-untyped]
+    except Exception:  # noqa: BLE001 - lib optional; degrade to base
+        return 0.0
+    parts = [vector.strip().rstrip("/")]
+
+    # Exploit Maturity: KEV / public exploit -> Attacked; EPSS present -> POC.
+    if _finding_flag(finding, ("in_kev", "kev", "cisa_kev")) or _finding_flag(
+        finding, ("exploit_available", "exploit_db", "metasploit")
+    ):
+        parts.append("E:A")
+    elif _finding_and_evidence_num(finding, ("epss", "epss_score")) is not None:
+        parts.append("E:P")
+
+    # Security Requirements from the asset's criticality tag.
+    crit = (criticality or _finding_criticality(finding) or "medium").strip().lower()
+    sr = {"crown_jewel": "H", "high": "H", "medium": "M", "low": "L"}.get(crit)
+    if sr and sr != "M":  # M is the spec default; only add when it changes scoring
+        parts.append(f"CR:{sr}/IR:{sr}/AR:{sr}")
+
+    # Modified Attack Vector: an internal-only target is not internet-reachable.
+    if _mav_override(exposure) == "A":
+        parts.append("MAV:A")
+
+    try:
+        return float(CVSS4("/".join(parts)).base_score)
+    except Exception:  # noqa: BLE001 - malformed must never break a scan
+        return 0.0
+
+
 def contextual_score(
     finding: dict[str, Any],
     *,
@@ -401,6 +486,15 @@ def contextual_score(
     base = objective_base_score(finding)
     if base <= 0:
         return 0.0
+
+    # A finding whose own authoritative vector is v4.0 (a CVE with a published
+    # v4.0 score) is adjusted with v4.0's own Threat + Environmental metrics via
+    # the reference library, so its contextual number stays on the same standard
+    # as its base. Everything else uses the in-house v3.1 environmental recompute.
+    own = _own_vector(finding)
+    if cvss_version_of(own) == "4.0":
+        s = _v4_contextual(own, finding, criticality, exposure)
+        return min(round(s, 1), 10.0) if s > 0 else base
 
     e = _exploit_maturity_coeff(finding)
     rc = _report_confidence_coeff(finding)
@@ -477,6 +571,36 @@ def _has_published_score(finding: dict[str, Any]) -> bool:
     ) is not None
 
 
+def cvss_badge_version() -> str:
+    """Which CVSS version drives the severity badge.
+
+    Default ``"3.1"`` — HEAVEN's calibrated band. FIRST's v4.0 rescoring runs hot
+    at the low end for some low-impact classes (a bare verbose-error page can band
+    Medium under v4.0 where v3.1 bands Low), so the badge stays on the calibrated
+    v3.1 score by default and v4.0 is shown alongside as a labelled companion.
+
+    Set ``HEAVEN_CVSS_BADGE_VERSION=4.0`` to badge on the raw CVSS v4.0 score
+    instead. This is a deliberate, single-switch operator choice — the whole
+    product then bands on v4.0, and those low-impact classes will read hotter by
+    the standard's design. Any value other than 4 / 4.0 is treated as 3.1.
+    """
+    return "4.0" if (os.environ.get("HEAVEN_CVSS_BADGE_VERSION") or "").strip() in ("4", "4.0") else "3.1"
+
+
+def badge_base_score(finding: dict[str, Any]) -> float:
+    """The base score that drives the severity badge, honouring the badge-version
+    toggle. Default: the calibrated objective (v3.1-anchored) base. When the
+    operator has opted into v4.0 badging AND the finding carries a real v4.0 base,
+    that raw v4.0 score drives the band instead. Falls back to the objective base
+    whenever no v4.0 score is available, so a mixed corpus never loses its badge.
+    """
+    if cvss_badge_version() == "4.0":
+        v4 = _finding_float(finding, ("cvss4_base", "cvss4_base_score"))
+        if v4 is not None and v4 > 0:
+            return v4
+    return objective_base_score(finding)
+
+
 def reconcile_severity(finding: dict[str, Any]) -> dict[str, Any]:
     """Keep a finding's qualitative ``severity`` and its resolved CVSS base score
     in the *same* band, so a report never shows "CVSS 8.1 / Low". Mutates and
@@ -495,8 +619,11 @@ def reconcile_severity(finding: dict[str, Any]) -> dict[str, Any]:
     A confirmed finding whose class base is *more* severe than a hand-set label
     has its label raised to match (the class genuinely warrants it); a
     confirmed finding is never silently *downgraded* off a KB estimate alone.
+
+    The band-driving score is resolved through :func:`badge_base_score`, so the
+    default calibrated v3.1 badge and the opt-in v4.0 badge share this one path.
     """
-    base = objective_base_score(finding)
+    base = badge_base_score(finding)
     if base <= 0:
         return finding
     label = str(finding.get("severity") or "").strip().lower()

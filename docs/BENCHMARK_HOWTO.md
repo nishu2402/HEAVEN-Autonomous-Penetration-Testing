@@ -25,7 +25,7 @@ pip install pyyaml semgrep   # benchmark + SAST extras
 docker --version            # 20+
 docker compose version      # 2+
 pytest --version             # 8+
-heaven --version             # 1.0+
+heaven --version             # 3.0+
 ```
 
 ---

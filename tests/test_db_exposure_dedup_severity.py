@@ -115,7 +115,7 @@ def test_legacy_row_severity_reconciled_on_open(tmp_path):
     read-only open the findings list uses — so existing data is fixed without a
     re-scan. Guarded by user_version, the backfill runs once."""
     db = tmp_path / "legacy.db"
-    store = EngagementStore(db)               # materialise the schema
+    EngagementStore(db)                       # materialise the schema
     now = datetime.now(timezone.utc).isoformat()
     # Write a legacy row directly, bypassing the reconciling upsert, and reset
     # the migration marker so the next open runs the one-time backfill.

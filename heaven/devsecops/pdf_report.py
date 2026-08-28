@@ -34,6 +34,7 @@ from xml.sax.saxutils import escape as _xml_escape  # nosec B406 -- escape() is 
 from heaven.devsecops.compliance_report import (
     SEVERITY_META,
     ComplianceReportGenerator,
+    _cvss_with_band,
     _fmt_cvss,
     roadmap_action_lines,
 )
@@ -45,7 +46,17 @@ logger = get_logger("devsecops.pdf")
 _SEV_ORDER = {k: v["order"] for k, v in SEVERITY_META.items()}
 _OWASP = ComplianceReportGenerator()  # reuse OWASP_MAP / _owasp_for — keeps reports in sync
 
-# CVSS v3.1 vectors per vuln class (illustrative; shown when known)
+
+def _vkb_cvss4(vuln_type: str) -> str:
+    """The class's CVSS v4.0 vector from the knowledge base (lazy import), or ''."""
+    try:
+        from heaven.devsecops.vuln_kb import cvss4_vector_for
+        return cvss4_vector_for(vuln_type)
+    except Exception:  # noqa: BLE001 - KB optional; a blank cell is acceptable
+        return ""
+
+
+# CVSS v3.1 vectors per vuln class (illustrative fallback; shown when known)
 _CVSS_VECTORS = {
     "sqli": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "sql_injection": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
@@ -475,7 +486,7 @@ class PDFReportGenerator:
                         ("PTES", "Penetration Testing Execution Standard phases"),
                         ("NIST SP 800-115", "Technical assessment methodology"),
                         ("MITRE ATT&CK", "Adversary technique mapping (where applicable)"),
-                        ("CVSS v3.1 / EPSS / CISA KEV",
+                        ("CVSS v4.0 and v3.1 / EPSS / CISA KEV",
                          "Severity, exploit-likelihood & known-exploited enrichment")]:
             std.append([Paragraph(_esc(fw), styles["cell"]), Paragraph(_esc(use), styles["cell"])])
         story.append(table(std, [55 * mm, cw - 55 * mm]))
@@ -607,9 +618,13 @@ class PDFReportGenerator:
         # ── 7. Risk methodology ──
         story.append(heading("3.", "Risk Rating Methodology"))
         story.append(Paragraph(
-            "Each finding's severity derives from its CVSS v3.1 base score, adjusted for real-world "
-            "exploitability (EPSS) and presence on the CISA Known Exploited Vulnerabilities catalog. "
-            "Remediation SLAs are guidance and should be tailored to the organisation's risk appetite.",
+            "Each finding carries two standard base scores, CVSS v4.0 (the current standard) and CVSS "
+            "v3.1, each labelled with the band it falls in. The severity badge follows the calibrated "
+            "v3.1 score, adjusted for real-world exploitability (EPSS) and presence on the CISA Known "
+            "Exploited Vulnerabilities catalog. CVSS v4.0 scores some low-impact classes higher than "
+            "v3.1 by design, so the two standard bands can differ for one finding; the badge stays on the "
+            "calibrated score rather than tracking that low-end lift. Remediation SLAs are guidance and "
+            "should be tailored to the organisation's risk appetite.",
             styles["body"]))
         rm = [[Paragraph("Severity", styles["th"]), Paragraph("CVSS range", styles["th"]),
                Paragraph("Recommended remediation SLA", styles["th"])]]
@@ -874,7 +889,15 @@ class PDFReportGenerator:
         ev = f.get("evidence") or {}
         title = f.get("title") or f.get("vuln_type") or "Finding"
         cvss = _OWASP._finding_cvss(f)
+        cvss4 = _OWASP._finding_cvss4(f)
         contextual = _OWASP._finding_contextual_cvss(f)
+        _own_vec = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
+        _own_is_v4 = _own_vec.startswith("CVSS:4")
+        v4_vec = (f.get("cvss4_vector") or ev.get("cvss4_vector")
+                  or (_own_vec if _own_is_v4 else _vkb_cvss4(f.get("vuln_type") or "")))
+        v31_vec = (f.get("cvss31_vector") or ev.get("cvss31_vector")
+                   or ("" if _own_is_v4 else _own_vec)
+                   or _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), ""))
         # Upgrade any legacy 2021 tag stored on the finding to its 2025 label.
         owasp = _fw.normalize_owasp(f.get("owasp") or "") or _OWASP._owasp_for(f.get("vuln_type", "")) or "—"
 
@@ -888,15 +911,16 @@ class PDFReportGenerator:
         meta_pairs = [
             ("Target", f.get("target") or "—"), ("Severity", m["label"]),
             ("Confirmation", _conf_of(f)),
-            ("CVSS base (class)", cvss),
+            ("CVSS v4.0 base", _cvss_with_band(cvss4)),
+            ("CVSS v3.1 base", _cvss_with_band(cvss)),
             ("Contextual CVSS", contextual),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
             ("CWE", f.get("cwe") or "—"), ("OWASP", owasp),
             ("CVE", f.get("cve_id") or f.get("cve") or "—"),
             ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
-            ("CVSS vector", f.get("cvss_vector")
-             or _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), "—")),
+            ("CVSS v4.0 vector", v4_vec or "—"),
+            ("CVSS v3.1 vector", v31_vec or "—"),
             ("Status", (f.get("status") or "open").title()),
         ]
         mt = Table([[Paragraph(_esc(k), styles["cellb"]), Paragraph(_esc(v), styles["cell"])]

@@ -140,6 +140,51 @@ class NVDPipeline:
         "epss_score_pct", "in_kev",
     ]
 
+    @staticmethod
+    def _v4_to_v3_shaped(v4: dict) -> dict:
+        """Recast a CVSS v4.0 ``cvssData`` block into the v3.x-shaped keys the
+        13-feature row builder reads (attackVector / attackComplexity /
+        privilegesRequired / userInteraction / scope / *Impact / baseScore).
+
+        This is the training-side twin of feature_engine.parse_cvss_vector: v4.0
+        split impact into Vulnerable-System (VC/VI/VA) and Subsequent-System
+        (SC/SI/SA) and added Attack Requirements (AT), so the impacts take the
+        stronger of the two systems, Scope is "CHANGED" when a subsequent system
+        is hit, and AT:Present is folded in as extra complexity. Returns an empty
+        dict when there is no v4.0 baseScore to learn from.
+        """
+        if not v4 or v4.get("baseScore") is None:
+            return {}
+
+        _rank = {"HIGH": 3, "LOW": 2, "NONE": 1}
+        _label = {3: "HIGH", 2: "LOW", 1: "NONE"}
+
+        def stronger(a: str, b: str) -> str:
+            return _label[max(_rank.get((a or "NONE").upper(), 1),
+                              _rank.get((b or "NONE").upper(), 1))]
+
+        ui = (v4.get("userInteraction") or "NONE").upper()
+        at = (v4.get("attackRequirements") or "NONE").upper()
+        ac = (v4.get("attackComplexity") or "LOW").upper()
+        sub_hit = any((v4.get(k) or "NONE").upper() != "NONE"
+                      for k in ("subConfidentialityImpact", "subIntegrityImpact",
+                                "subAvailabilityImpact"))
+        return {
+            "attackVector":          v4.get("attackVector", ""),
+            # AT:Present is an added precondition, so treat it like High complexity.
+            "attackComplexity":      "HIGH" if at == "PRESENT" else ac,
+            "privilegesRequired":    v4.get("privilegesRequired", ""),
+            "userInteraction":       "NONE" if ui == "NONE" else "REQUIRED",
+            "scope":                 "CHANGED" if sub_hit else "UNCHANGED",
+            "confidentialityImpact": stronger(v4.get("vulnConfidentialityImpact"),
+                                              v4.get("subConfidentialityImpact")),
+            "integrityImpact":       stronger(v4.get("vulnIntegrityImpact"),
+                                              v4.get("subIntegrityImpact")),
+            "availabilityImpact":    stronger(v4.get("vulnAvailabilityImpact"),
+                                              v4.get("subAvailabilityImpact")),
+            "baseScore":             v4.get("baseScore"),
+        }
+
     def parse_dataset(self, jsonl_path: Path):
         """
         Parse NVD JSONL dataset into feature arrays for model training.
@@ -176,7 +221,22 @@ class NVDPipeline:
                     metrics = metrics31 if metrics31 else metrics30
                     score = metrics.get("baseScore")
                     if score is None:
-                        continue
+                        # No v3.x metric. Modern CVEs increasingly ship a v4.0
+                        # score and nothing else, and dropping them here quietly
+                        # starves the trainer of the newest data. Fold the v4.0
+                        # metric onto the same 13-feature v3.x shape the model
+                        # expects (the same mapping the inference path uses in
+                        # feature_engine.parse_cvss_vector) so a v4.0-only CVE is
+                        # trained on instead of discarded. v3.x, when present,
+                        # still wins, so the target scale stays v3.x-dominant.
+                        metrics = self._v4_to_v3_shaped(
+                            (cve.get("metrics", {})
+                             .get("cvssMetricV40", [{}])[0]
+                             .get("cvssData", {}))
+                        )
+                        score = metrics.get("baseScore")
+                        if score is None:
+                            continue
 
                     published = cve.get("published", "")
                     try:

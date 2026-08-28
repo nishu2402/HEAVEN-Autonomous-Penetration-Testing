@@ -20,7 +20,7 @@ import hashlib
 import json
 import re
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -781,6 +781,13 @@ class Finding:
 class EngagementStore:
     """SQLite-backed engagement state. One DB file per engagement."""
 
+    # One-time data migrations (not schema) are guarded by PRAGMA user_version so
+    # they run once per DB. Bump when a new _migrate_data step is added.
+    _SCHEMA_VERSION = 1
+    # db paths already migrated in THIS process, so a read-heavy page doesn't
+    # re-open a connection just to re-check user_version on every store build.
+    _MIGRATED_PATHS: set[str] = set()
+
     def __init__(self, db_path: Path | str, *, create: bool = True):
         self.db_path = Path(db_path)
         self._create = create
@@ -794,6 +801,14 @@ class EngagementStore:
         if create:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_schema()
+        elif self.db_path.exists():
+            # An existing engagement opened read-only (the findings list uses this
+            # path) still gets the one-time data migrations, so a legacy row's
+            # stored severity is reconciled the first time it is *viewed* — not
+            # only after the next re-scan. Guarded by user_version, so it runs once
+            # and never blocks a read if anything goes wrong.
+            with suppress(Exception):
+                self._migrate_data()
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -838,6 +853,60 @@ class EngagementStore:
             cols = {r["name"] for r in c.execute("PRAGMA table_info(engagement)")}
             if "tester" not in cols:
                 c.execute("ALTER TABLE engagement ADD COLUMN tester TEXT")
+        self._migrate_data()
+
+    def _migrate_data(self) -> None:
+        """Run one-time, idempotent DATA migrations, guarded by PRAGMA
+        user_version so they run once per DB no matter how often it is opened.
+        Cheap after the first run: a single PRAGMA read, then a no-op."""
+        key = str(self.db_path)
+        if key in self._MIGRATED_PATHS:
+            return
+        with self._conn() as c:
+            row = c.execute("PRAGMA user_version").fetchone()
+            version = int((row[0] if row else 0) or 0)
+            if version < self._SCHEMA_VERSION:
+                if version < 1:
+                    # v1: realign every stored severity to the CVSS-reconciled
+                    # band so the findings list stops showing "Critical" for a
+                    # finding whose detail page (which already reconciled on read)
+                    # shows "High".
+                    self._reconcile_stored_severities(c)
+                # PRAGMA can't be parametrised; the value is a trusted constant.
+                c.execute(f"PRAGMA user_version = {int(self._SCHEMA_VERSION)}")
+        self._MIGRATED_PATHS.add(key)
+
+    def _reconcile_stored_severities(self, c: sqlite3.Connection) -> None:
+        """Realign every legacy row's stored ``severity`` to the authoritative,
+        CVSS-reconciled band, so a DB written before write-time reconciliation
+        stops disagreeing with its own detail page / report. Idempotent."""
+        try:
+            from heaven.devsecops.vuln_kb import canonical_severity
+        except Exception:  # noqa: BLE001 - KB optional; leave rows untouched
+            return
+        rows = c.execute(
+            "SELECT id, target, vuln_type, title, severity, cve_id, confidence, "
+            "evidence_json FROM findings"
+        ).fetchall()
+        for r in rows:
+            ev: dict = {}
+            if r["evidence_json"]:
+                try:
+                    ev = json.loads(r["evidence_json"])
+                except json.JSONDecodeError:
+                    ev = {}
+            canon = ""
+            with suppress(Exception):
+                canon = canonical_severity({
+                    "target": r["target"], "vuln_type": r["vuln_type"],
+                    "title": r["title"], "severity": r["severity"],
+                    "cve_id": r["cve_id"] or "", "confidence": r["confidence"],
+                    "evidence": ev,
+                })
+            if canon and canon != (r["severity"] or "").strip().lower():
+                c.execute(
+                    "UPDATE findings SET severity = ? WHERE id = ?", (canon, r["id"])
+                )
 
     # ── Engagement metadata ────────────────────────────────────────────
     def create_engagement(self, name: str, client: str = "",
@@ -1502,15 +1571,31 @@ class EngagementStore:
             confidence_bucket = (
                 finding.get("confidence_bucket") or _confidence_bucket(confidence)
             )
+            # Persist the AUTHORITATIVE severity, not the raw detector label: the
+            # band reconciled against the finding's real CVSS base (a published CVE
+            # score drives the label; an unconfirmed indicator is capped to its low
+            # band). Storing the reconciled band is what keeps the findings list,
+            # dashboard tally, severity filter/sort and the detail/report in
+            # agreement — they used to disagree because only the detail/report
+            # reconciled on read (an LFI at CVSS 8.1 showed as Critical in the list
+            # but High on its detail page). The KB is optional, so a failure here
+            # must never block persisting a finding: fall back to the raw label.
+            severity = finding.get("severity", "info")
+            with suppress(Exception):
+                from heaven.devsecops.vuln_kb import canonical_severity
+                canon = canonical_severity({**finding, "evidence": evidence})
+                if canon:
+                    severity = canon
 
             if existing:
                 # Dedup — refresh last_seen_at + seen_count + the (re-computed) risk
-                # score, but preserve human-set fields (status, notes).
+                # score and reconciled severity (a re-scan may resolve a better
+                # score), but preserve human-set fields (status, notes).
                 c.execute(
                     "UPDATE findings SET last_seen_at = ?, seen_count = seen_count + 1, "
-                    "scan_id = ?, evidence_json = ?, risk_score = ? "
+                    "scan_id = ?, evidence_json = ?, risk_score = ?, severity = ? "
                     "WHERE id = ?",
-                    (now, scan_id, evidence_json, risk_score, fid),
+                    (now, scan_id, evidence_json, risk_score, severity, fid),
                 )
             else:
                 c.execute(
@@ -1522,7 +1607,7 @@ class EngagementStore:
                     (
                         fid, scan_id, target, vuln_type,
                         finding.get("title", finding.get("type", "Unknown")),
-                        finding.get("severity", "info"),
+                        severity,
                         confidence,
                         confidence_bucket,
                         _cve_id_of(finding),

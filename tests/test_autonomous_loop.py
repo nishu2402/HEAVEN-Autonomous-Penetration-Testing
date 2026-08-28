@@ -138,11 +138,15 @@ class TestAutonomousLoopDiffMath:
         })
 
         async def fake_execute_action(action, eng_store, cfg):
-            # Add one NEW high-severity finding
+            # Add one NEW high-severity finding. Pin its CVSS base to the High band
+            # so the store's write-time reconciliation keeps it High — an XSS's
+            # curated class base is Medium, which would otherwise realign the label
+            # and this test is about the id-diff, not severity policy.
             eng_store.upsert_finding("s1", {
                 "id": "newly-found-high", "target": "10.0.0.1",
                 "vuln_type": "xss", "title": "New high",
                 "severity": "high", "confidence": 0.9,
+                "evidence": {"cvss_base": 8.0},
             })
 
         async def fake_llm_next(*_a, **_kw):

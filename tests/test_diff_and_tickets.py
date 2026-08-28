@@ -234,3 +234,73 @@ class TestTicketingConfig:
         r = await lin.create_issue({"id": "x", "severity": "critical"})
         assert r["ok"] is False
         assert "not configured" in r["error"].lower()
+
+
+# ═══════════════════════════════════════════
+# RISK DRIFT — severity-weighted posture delta
+# ═══════════════════════════════════════════
+
+
+class TestRiskDrift:
+    """Risk drift rolls the OPEN findings at each point into a severity-weighted
+    index so the reading tracks the mix, not only the count: closing a critical
+    while opening lows must read as an improvement even though the total rises."""
+
+    def _row(self, sev, vt, rid):
+        from heaven.devsecops.diff_finder import FindingDiffRow
+        return FindingDiffRow(id=rid, target="t", vuln_type=vt, title=vt,
+                              severity=sev, confidence=0.9)
+
+    def _report(self):
+        from heaven.devsecops.diff_finder import DiffReport
+        r = DiffReport(baseline_scan_id="base1234", current_scan_id="curr5678")
+        # baseline open = unchanged + resolved ; current open = unchanged + new + regressed
+        r.unchanged = [self._row("high", "sqli", "u1"), self._row("low", "hdr", "u2")]
+        r.resolved = [self._row("critical", "rce", "r1")]
+        r.new = [self._row("low", "cookie", "n1"), self._row("low", "banner", "n2")]
+        r.regressed = [self._row("high", "xss", "g1")]
+        return r
+
+    def test_index_tracks_severity_mix_not_count(self):
+        rd = self._report().risk_drift()
+        # baseline: crit(10) + high(7) + low(1) = 18 over 3 findings
+        # current:  high(7)*2 + low(1)*3 = 17 over 5 findings
+        assert rd["baseline"]["index"] == 18.0
+        assert rd["current"]["index"] == 17.0
+        assert rd["baseline"]["open_total"] == 3
+        assert rd["current"]["open_total"] == 5
+        # Total findings went UP (3 -> 5) but risk fell because a critical closed.
+        assert rd["delta"] == -1.0
+        assert rd["direction"] == "improved"
+
+    def test_counts_split_by_severity(self):
+        rd = self._report().risk_drift()
+        assert rd["baseline"]["counts"]["critical"] == 1
+        assert rd["current"]["counts"]["critical"] == 0
+        assert rd["current"]["counts"]["high"] == 2
+        assert rd["current"]["counts"]["low"] == 3
+
+    def test_worsened_when_new_critical_appears(self):
+        from heaven.devsecops.diff_finder import DiffReport
+        r = DiffReport(baseline_scan_id="b", current_scan_id="c")
+        r.unchanged = [self._row("low", "hdr", "u1")]
+        r.new = [self._row("critical", "rce", "n1")]
+        rd = r.risk_drift()
+        assert rd["direction"] == "worsened"
+        assert rd["delta"] > 0
+
+    def test_empty_baseline_has_no_pct(self):
+        from heaven.devsecops.diff_finder import DiffReport
+        r = DiffReport(baseline_scan_id="b", current_scan_id="c")
+        r.new = [self._row("high", "sqli", "n1")]   # nothing open at baseline
+        rd = r.risk_drift()
+        assert rd["baseline"]["index"] == 0.0
+        assert rd["pct_change"] is None
+        assert rd["direction"] == "worsened"
+
+    def test_risk_drift_in_to_dict(self):
+        d = self._report().to_dict()
+        assert "risk_drift" in d
+        assert d["risk_drift"]["direction"] == "improved"
+        # Existing summary keys are untouched (backward compatible).
+        assert set(d["summary"]) >= {"new", "resolved", "regressed", "unchanged"}

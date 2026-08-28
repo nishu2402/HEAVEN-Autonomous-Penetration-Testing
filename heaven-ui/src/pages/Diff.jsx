@@ -45,7 +45,8 @@ export default function DiffPage() {
         <h2 style={{ color: "var(--cyan)", marginTop: 0 }}>↹ Scan Diff</h2>
         <p className="page-lead">
           Compare two scans of the same engagement. Bucketed output: NEW · RESOLVED ·
-          REGRESSED · UNCHANGED. <strong>Regressed</strong> = a finding that was marked
+          REGRESSED · UNCHANGED, plus a <strong>risk drift</strong> reading of how the
+          open-risk posture moved. <strong>Regressed</strong> = a finding that was marked
           <code> fixed</code> / <code>false_positive</code> / <code>accepted_risk</code>
           but was observed again in the current scan.
         </p>
@@ -121,6 +122,8 @@ export default function DiffPage() {
             )}
           </div>
 
+          {report.risk_drift && <RiskDriftCard drift={report.risk_drift} />}
+
           <FindingBucket title="🆕 New findings" rows={report.new} onOpen={navigate} />
           <FindingBucket title="⚠️ Regressed (closed → reopened)" rows={report.regressed} onOpen={navigate} />
           <FindingBucket title="✅ Resolved" rows={report.resolved} dim onOpen={navigate} />
@@ -136,6 +139,47 @@ function Stat({ label, value, color, sub, highlight }) {
       <div className="mini-stat-label">{label}</div>
       <div className="mini-stat-value" style={{ color }}>{value}</div>
       {sub && <div className="mini-stat-sub">{sub}</div>}
+    </div>
+  );
+}
+
+function RiskDriftCard({ drift }) {
+  const dir = drift.direction || "unchanged";
+  // Down = risk fell = good (cyan); up = risk rose = bad (crit); flat = neutral.
+  const color = dir === "improved" ? "var(--cyan)" : dir === "worsened" ? "var(--crit)" : "var(--text-2)";
+  const arrow = dir === "improved" ? "↓" : dir === "worsened" ? "↑" : "→";
+  const pct = drift.pct_change == null ? "" : ` (${drift.pct_change > 0 ? "+" : ""}${drift.pct_change}%)`;
+  const sevs = ["critical", "high", "medium", "low", "info"];
+  const bc = drift.baseline?.counts || {};
+  const cc = drift.current?.counts || {};
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div className="card-title">⚖ Risk drift</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 28, fontWeight: 700, color }}>
+          {drift.baseline?.index ?? 0} {arrow} {drift.current?.index ?? 0}
+        </div>
+        <div style={{ color, fontWeight: 600 }}>{dir}{pct}</div>
+        <div className="dim" style={{ fontSize: 12 }}>
+          severity-weighted open-risk index (lower is better)
+        </div>
+      </div>
+      <table className="data-table" style={{ marginTop: 10 }}>
+        <thead><tr>
+          <th>Severity</th>
+          <th className="num" style={{ width: 120 }}>Baseline open</th>
+          <th className="num" style={{ width: 120 }}>Current open</th>
+        </tr></thead>
+        <tbody>
+          {sevs.filter((s) => (bc[s] || 0) || (cc[s] || 0)).map((s) => (
+            <tr key={s}>
+              <td style={{ color: sevColor(s), fontWeight: 600 }}>{s}</td>
+              <td className="num">{bc[s] || 0}</td>
+              <td className="num">{cc[s] || 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -192,6 +192,27 @@ export default function FindingDetail() {
   const f  = data.finding || {};
   const ev = data.evidence_package || {};
 
+  // CVSS v4.0 is the current standard, shown alongside v3.1. Pick each version's
+  // vector without mislabelling a finding whose own published vector is v4.0.
+  const ownIsV4 = String(f.cvss_vector || "").startsWith("CVSS:4");
+  const cvss4Vector = f.cvss4_vector || ev.cvss4_vector || (ownIsV4 ? f.cvss_vector : "");
+  const cvss31Vector = f.cvss31_vector || ev.cvss31_vector || (!ownIsV4 ? (f.cvss_vector || ev.cvss_vector) : "");
+  // Each CVSS number carries its own standard band (same FIRST cut-offs for both
+  // versions), so a bare score never looks like it contradicts the badge.
+  const cvssBand = (s) => {
+    const n = Number(s);
+    if (!(n > 0)) return "";
+    if (n >= 9.0) return "critical";
+    if (n >= 7.0) return "high";
+    if (n >= 4.0) return "medium";
+    return "low";
+  };
+  const v31Base = Number(f.predicted_cvss_score) > 0 ? Number(f.predicted_cvss_score)
+                : Number(f.typical_cvss) > 0 ? Number(f.typical_cvss) : 0;
+  const v4Band = cvssBand(f.cvss4_base);
+  // Only worth explaining when v4.0's own band lands above the calibrated badge.
+  const v4BandDiffers = v4Band && v4Band !== String(f.severity || "").toLowerCase();
+
   return (
     <div className="page">
       {/* Header */}
@@ -244,15 +265,29 @@ export default function FindingDetail() {
               {f.confidence_bucket && <span className="dim" style={{ marginLeft: 6 }}>({f.confidence_bucket})</span>}
             </td></tr>
             <tr><td>CVE</td><td>{cveCell(f)}</td></tr>
-            <tr><td>CVSS base</td><td>
-              {Number(f.predicted_cvss_score) > 0
-                ? <>{Number(f.predicted_cvss_score).toFixed(1)}
-                    <span className="dim" style={{ marginLeft: 6 }}>(base score)</span></>
-                : Number(f.typical_cvss) > 0
-                  ? <>{Number(f.typical_cvss).toFixed(1)}
-                      <span className="dim" style={{ marginLeft: 6 }}>(typical for class)</span></>
-                  : "—"}
+            <tr><td>CVSS v4.0 base</td><td>
+              {Number(f.cvss4_base) > 0
+                ? <>{Number(f.cvss4_base).toFixed(1)}
+                    <span className={`sev-pill sev-${v4Band}`} style={{ marginLeft: 8, fontSize: 10 }}>{v4Band}</span>
+                    <span className="dim" style={{ marginLeft: 6 }}>(current standard)</span></>
+                : "—"}
             </td></tr>
+            <tr><td>CVSS v3.1 base</td><td>
+              {v31Base > 0
+                ? <>{v31Base.toFixed(1)}
+                    <span className={`sev-pill sev-${cvssBand(v31Base)}`} style={{ marginLeft: 8, fontSize: 10 }}>{cvssBand(v31Base)}</span>
+                    <span className="dim" style={{ marginLeft: 6 }}>
+                      {Number(f.predicted_cvss_score) > 0 ? "(calibrated, sets the badge)" : "(typical for class)"}
+                    </span></>
+                : "—"}
+            </td></tr>
+            {v4BandDiffers && (
+              <tr><td></td><td className="dim" style={{ fontSize: 11.5 }}>
+                The badge above is HEAVEN&apos;s calibrated severity. CVSS v4.0 scores some low-impact
+                classes higher than v3.1 by design, so its band ({v4Band}) can sit above the badge; the
+                badge stays on the calibrated score rather than following that lift.
+              </td></tr>
+            )}
             <tr><td>Contextual CVSS</td><td>
               {f.contextual_cvss_score?.toFixed?.(1) ?? "—"}
               <span className="dim" style={{ marginLeft: 6 }}>
@@ -267,7 +302,8 @@ export default function FindingDetail() {
                 ? <tr><td>OWASP IoT Top 10</td><td>{f.owasp_iot}</td></tr>
                 : <tr><td>OWASP</td><td>{f.owasp || ev.owasp || "—"}</td></tr>}
             <tr><td>MITRE ATT&CK</td><td>{f.mitre_technique || ev.mitre || "—"}</td></tr>
-            <tr><td>CVSS vector</td><td className="mono" style={{ fontSize: 12 }}>{f.cvss_vector || ev.cvss_vector || "—"}</td></tr>
+            <tr><td>CVSS v4.0 vector</td><td className="mono" style={{ fontSize: 12 }}>{cvss4Vector || "—"}</td></tr>
+            <tr><td>CVSS v3.1 vector</td><td className="mono" style={{ fontSize: 12 }}>{cvss31Vector || "—"}</td></tr>
             <tr><td>Seen</td><td className="dim">
               {f.seen_count ?? 1}×{f.last_seen_at ? ` (last: ${f.last_seen_at.slice(0, 10)})` : ""}
             </td></tr>

@@ -30,6 +30,8 @@ from typing import Any
 from xml.sax.saxutils import escape, quoteattr  # nosec B406
 
 from heaven.utils.cvss import (
+    base_score_from_vector,
+    cvss_version_of,
     is_confirmed_finding,
     objective_base_score,
     severity_from_score,
@@ -37,6 +39,30 @@ from heaven.utils.cvss import (
 
 from heaven import __version__ as _TOOL_VERSION   # SARIF/JUnit driver version tracks the app
 _INFO_URI = "https://github.com/heaven-security/heaven"
+
+
+def _cvss4_base(f: dict[str, Any]) -> float:
+    """The finding's CVSS v4.0 base score (the current standard), or 0.0."""
+    ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+    for src in (f, ev):
+        try:
+            v = float(src.get("cvss4_base"))  # type: ignore[arg-type]
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if 0.0 < v <= 10.0:
+            return v
+    vec = str((f.get("cvss4_vector") or ev.get("cvss4_vector") or ""))
+    if not vec:
+        own = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
+        if cvss_version_of(own) == "4.0":
+            vec = own
+        else:
+            try:
+                from heaven.devsecops.vuln_kb import cvss4_vector_for
+                vec = cvss4_vector_for(f.get("vuln_type") or f.get("type") or "")
+            except Exception:  # noqa: BLE001 - KB optional
+                vec = ""
+    return base_score_from_vector(vec) if vec else 0.0
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -93,6 +119,7 @@ def findings_to_sarif(findings: list[dict[str, Any]], *,
         rid = _rule_id(f)
         severity = _sev(f)
         base = objective_base_score(f) or 0.0
+        _v4_base = _cvss4_base(f)
         confirmation = "Confirmed" if is_confirmed_finding(f) else "Potential"
 
         if rid not in rules:
@@ -136,6 +163,10 @@ def findings_to_sarif(findings: list[dict[str, Any]], *,
             "properties": {
                 "severity": severity,
                 "security-severity": f"{base:.1f}",
+                "cvss-v4": f"{_v4_base:.1f}",
+                # v4.0's own qualitative band, so a consumer never reads a bare
+                # v4.0 number as if it should match the calibrated severity.
+                "cvss-v4-severity": severity_from_score(_v4_base) if _v4_base > 0 else "none",
                 "confirmation": confirmation,
                 "confidence": float(f.get("confidence") or 0.0),
                 "cve": _cve(f),

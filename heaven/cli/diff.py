@@ -28,8 +28,9 @@ def diff(baseline_scan_id: str, current_scan_id: str,
          include_unchanged: bool, output: Optional[str]) -> None:
     """Compare two scans of the same engagement.
 
-    Bucketed output: NEW · RESOLVED · REGRESSED · PROMOTED · DEMOTED · UNCHANGED.
-    `regressed` is the most-important bucket — those are findings that were
+    Bucketed output: NEW · RESOLVED · REGRESSED · UNCHANGED, plus a risk-drift
+    line showing how the severity-weighted open-risk index moved between the two
+    scans. `regressed` is the most-important bucket — those are findings that were
     dispositioned closed (fixed / false_positive / accepted_risk) but came
     back in the current scan.
 
@@ -72,6 +73,14 @@ def diff(baseline_scan_id: str, current_scan_id: str,
                f"({s['regressed_critical_or_high']} critical/high) "
                + ("← URGENT" if s['regressed_critical_or_high'] else ""))
         _print(f"  = Unchanged: [dim]{s['unchanged']:4}[/dim]")
+
+        rd = report.risk_drift()
+        arrow = {"improved": "↓", "worsened": "↑", "unchanged": "→"}[rd["direction"]]
+        rd_color = {"improved": "green", "worsened": "red", "unchanged": "dim"}[rd["direction"]]
+        pct = f" ({rd['pct_change']:+.0f}%)" if rd["pct_change"] is not None else ""
+        _print(f"  ⚖ Risk drift: [{rd_color}]{rd['baseline']['index']:.0f} {arrow} "
+               f"{rd['current']['index']:.0f}{pct}[/{rd_color}]  [dim]open-risk index, "
+               f"{rd['direction']}[/dim]")
 
         def _print_bucket(title: str, rows, color: str = "") -> None:
             if not rows:

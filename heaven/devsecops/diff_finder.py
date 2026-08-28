@@ -29,6 +29,27 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+# Illustrative severity weights for the risk-drift index (higher = more risk).
+# The index is a severity-weighted count of the OPEN findings at each point, so
+# it moves when the mix shifts, not only when totals do (one critical closing
+# outweighs three lows opening). Findings carry a severity but not a per-row
+# CVSS score at the diff layer, so the index is deliberately a transparent
+# severity roll-up, not a re-derived CVSS sum.
+_RISK_WEIGHT = {"critical": 10.0, "high": 7.0, "medium": 4.0, "low": 1.0, "info": 0.0}
+_SEVERITIES = ("critical", "high", "medium", "low", "info")
+
+
+def _sev_counts(rows: list["FindingDiffRow"]) -> dict[str, int]:
+    counts = {s: 0 for s in _SEVERITIES}
+    for r in rows:
+        if r.severity in counts:
+            counts[r.severity] += 1
+    return counts
+
+
+def _risk_index(counts: dict[str, int]) -> float:
+    return round(sum(_RISK_WEIGHT.get(s, 0.0) * n for s, n in counts.items()), 1)
+
 
 @dataclass
 class FindingDiffRow:
@@ -68,6 +89,42 @@ class DiffReport:
         """Most-important number — fixes that came back."""
         return sum(1 for r in self.regressed if r.severity in ("critical", "high"))
 
+    def risk_drift(self) -> dict[str, Any]:
+        """How the engagement's open-risk posture moved between the two scans.
+
+        The open set at the baseline is what was live then (unchanged + resolved);
+        the open set now is what is live in the current scan (unchanged + new +
+        regressed, since regressed findings were dispositioned closed and have
+        been observed again). Each set is rolled up into a severity-weighted risk
+        index; a negative delta means risk went down (posture improved).
+        """
+        base_rows = self.unchanged + self.resolved
+        curr_rows = self.unchanged + self.new + self.regressed
+        base_counts = _sev_counts(base_rows)
+        curr_counts = _sev_counts(curr_rows)
+        base_index = _risk_index(base_counts)
+        curr_index = _risk_index(curr_counts)
+        delta = round(curr_index - base_index, 1)
+        if base_index > 0:
+            pct = round(100.0 * delta / base_index, 1)
+        else:
+            pct = None
+        if delta < 0:
+            direction = "improved"
+        elif delta > 0:
+            direction = "worsened"
+        else:
+            direction = "unchanged"
+        return {
+            "baseline": {"index": base_index, "open_total": len(base_rows),
+                         "counts": base_counts},
+            "current": {"index": curr_index, "open_total": len(curr_rows),
+                        "counts": curr_counts},
+            "delta": delta,
+            "pct_change": pct,
+            "direction": direction,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "baseline_scan_id": self.baseline_scan_id,
@@ -80,6 +137,7 @@ class DiffReport:
                 "critical_new": self.critical_new,
                 "regressed_critical_or_high": self.regressed_critical_or_high,
             },
+            "risk_drift": self.risk_drift(),
             "new": [_row_dict(r) for r in self.new],
             "resolved": [_row_dict(r) for r in self.resolved],
             "regressed": [_row_dict(r) for r in self.regressed],
@@ -208,6 +266,22 @@ def render_diff_markdown(report: DiffReport,
     if s["regressed_critical_or_high"]:
         lines.append(f"> 🚨 **{s['regressed_critical_or_high']} previously-fixed "
                      f"critical/high finding(s) came back.**\n")
+
+    rd = report.risk_drift()
+    arrow = {"improved": "↓", "worsened": "↑", "unchanged": "→"}[rd["direction"]]
+    pct = f" ({rd['pct_change']:+.0f}%)" if rd["pct_change"] is not None else ""
+    lines.append("## Risk drift\n")
+    lines.append(f"Open-risk index **{rd['baseline']['index']:.0f} {arrow} "
+                 f"{rd['current']['index']:.0f}**{pct} — posture "
+                 f"**{rd['direction']}**.\n")
+    lines.append("| Severity | Baseline open | Current open |")
+    lines.append("|---|---:|---:|")
+    for sev in ("critical", "high", "medium", "low", "info"):
+        b = rd["baseline"]["counts"].get(sev, 0)
+        c = rd["current"]["counts"].get(sev, 0)
+        if b or c:
+            lines.append(f"| {sev} | {b} | {c} |")
+    lines.append("")
 
     def _section(title: str, rows: list[FindingDiffRow]) -> None:
         if not rows:

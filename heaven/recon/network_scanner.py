@@ -1768,28 +1768,56 @@ async def _nmap_ping_sweep(
     return live
 
 
+def _sweep_socket_cap() -> int:
+    """Ceiling on concurrent liveness sockets, kept safely under the process's
+    file-descriptor budget. Each host fans out to every liveness port at once, so
+    a host-only bound would let peak sockets reach hosts x ports (~16.5k for a
+    /16) — enough to exhaust a default FD limit (macOS 256, many Linux 1024) or
+    the ~16k local ephemeral-port range, at which point every connect errors and
+    live hosts are silently misread as dead. Cap concurrent connections at a
+    quarter of the FD soft limit, clamped to a sane [64, 500]."""
+    try:
+        import resource  # POSIX only; Windows falls through to the default.
+        soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft and soft > 0:
+            return max(64, min(500, soft // 4))
+    except Exception:
+        logger.debug("FD-limit probe unavailable; using default sweep cap", exc_info=True)
+    return 500
+
+
 async def _tcp_ping_sweep(hosts: list[str], timeout: float = 2.0) -> list[str]:
     """Pure-Python liveness fallback: a host is live if it accepts a TCP connect
     on any common port. No raw sockets required, so it works on a minimal install
-    with no nmap. Probes run highly concurrently, so a /24 sweeps in seconds."""
-    sem = asyncio.Semaphore(500)
+    with no nmap. Probes run highly concurrently, so a /24 sweeps in seconds.
+
+    Concurrency is bounded on the *scarce* resource — open sockets — by one global
+    semaphore acquired around each connect, so peak file descriptors stay at
+    :func:`_sweep_socket_cap` no matter how wide the range or how many liveness
+    ports fan out. A per-host bound gates how many hosts are in flight (so we do
+    not queue millions of pending probes for a big CIDR) without inflating the
+    socket count."""
+    conn_cap = _sweep_socket_cap()
+    conn_sem = asyncio.Semaphore(conn_cap)
+    host_sem = asyncio.Semaphore(max(16, conn_cap // 2))
     probe_timeout = min(1.5, max(0.4, timeout))
 
     async def _port_open(host: str, port: int) -> bool:
-        try:
-            fut = asyncio.open_connection(host, port)
-            _reader, writer = await asyncio.wait_for(fut, timeout=probe_timeout)
-            writer.close()
+        async with conn_sem:
             try:
-                await writer.wait_closed()
+                fut = asyncio.open_connection(host, port)
+                _reader, writer = await asyncio.wait_for(fut, timeout=probe_timeout)
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (OSError, asyncio.TimeoutError):
+                    pass
+                return True
             except (OSError, asyncio.TimeoutError):
-                pass
-            return True
-        except (OSError, asyncio.TimeoutError):
-            return False
+                return False
 
     async def _alive(host: str) -> Optional[str]:
-        async with sem:
+        async with host_sem:
             outcomes = await asyncio.gather(
                 *[_port_open(host, p) for p in _LIVENESS_PROBE_PORTS]
             )

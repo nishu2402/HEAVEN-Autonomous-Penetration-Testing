@@ -177,7 +177,8 @@ def parse_circl_response(data: Any) -> list[LiveCVE]:
 
 
 def _circl_cvss(item: dict[str, Any]) -> float:
-    for key in ("cvss3", "cvss", "cvss4"):
+    # Prefer the CVSS v4.0 score (current standard) when the record carries one.
+    for key in ("cvss4", "cvss3", "cvss"):
         v = item.get(key)
         if isinstance(v, (int, float)):
             return float(v)

@@ -103,6 +103,24 @@ def _fmt_cvss(value: Any) -> str:
         return str(value)
 
 
+def _cvss_with_band(score_str: str) -> str:
+    """Append the standard qualitative band to a CVSS score string.
+
+    ``"6.9"`` becomes ``"6.9 (Medium)"`` so a reader never sees a bare number
+    that looks like it contradicts the severity badge. The band uses the same
+    FIRST cut-offs for CVSS v4.0 and v3.1, so each score is labelled with the
+    band that score genuinely falls in. ``"—"`` and blanks pass through.
+    """
+    try:
+        val = float(score_str)
+    except (TypeError, ValueError):
+        return score_str
+    if val <= 0:
+        return score_str
+    from heaven.utils.cvss import severity_from_score
+    return f"{score_str} ({severity_from_score(val).title()})"
+
+
 def _short(text: Any, limit: int = 220) -> str:
     """Summarise long text at a WORD boundary (never mid-word).
 
@@ -722,7 +740,7 @@ class ComplianceReportGenerator:
             <tr><td>PTES</td><td>Penetration Testing Execution Standard phases</td></tr>
             <tr><td>NIST SP 800-115</td><td>Technical assessment methodology</td></tr>
             <tr><td>MITRE ATT&amp;CK</td><td>Adversary technique mapping (where applicable)</td></tr>
-            <tr><td>CVSS v3.1 / EPSS / CISA KEV</td><td>Severity, exploit-likelihood &amp; known-exploited enrichment</td></tr>
+            <tr><td>CVSS v4.0 and v3.1 / EPSS / CISA KEV</td><td>Severity, exploit-likelihood &amp; known-exploited enrichment</td></tr>
           </table>
         </div>"""
 
@@ -890,10 +908,14 @@ class ComplianceReportGenerator:
             rows += (f'<tr><td><span class="pill" style="background:{m["color"]}">{m["label"]}</span></td>'
                      f'<td>{m["cvss"]}</td><td>{m["sla"]}</td></tr>')
         return f"""<div class="page section" id="risk"><h2>Risk Rating Methodology</h2>
-          <p>Each finding is assigned a severity derived from its CVSS v3.1 base score and adjusted for
-          real-world exploitability (EPSS) and whether the issue is on the CISA Known Exploited
-          Vulnerabilities catalog. Recommended remediation timeframes (SLAs) are guidance and should be
-          tailored to the organisation's risk appetite.</p>
+          <p>Each finding carries two standard base scores: CVSS v4.0, the current standard, and CVSS
+          v3.1 alongside, each labelled with the band it falls in. The severity badge follows the
+          calibrated v3.1 score, then adjusts for real-world exploitability (EPSS) and whether the issue
+          is on the CISA Known Exploited Vulnerabilities catalog. CVSS v4.0 scores some low-impact
+          classes higher than v3.1 by design, so the two standard bands can differ for the same finding;
+          the badge stays on the calibrated score rather than tracking that low-end lift. Recommended
+          remediation timeframes (SLAs) are guidance and should be tailored to the organisation's risk
+          appetite.</p>
           <table>
             <tr><th style="width:130px">Severity</th><th>CVSS range</th><th>Recommended remediation SLA</th></tr>
             {rows}
@@ -926,7 +948,9 @@ class ComplianceReportGenerator:
           flags as unconfirmed or low-confidence, so it never over-states a heuristic "indicator".
           <b>Contextual</b> is the per-finding CVSS Temporal + Environmental score, adjusted for this
           finding's exploit maturity (EPSS / public exploit / CISA KEV), detection confidence and the
-          asset's criticality &amp; exposure. Severity always matches the score band.</p>
+          asset's criticality &amp; exposure. The severity badge matches the calibrated (v3.1) score
+          band; the CVSS v4.0 companion on each finding can band higher for low-impact classes by
+          design.</p>
           <table>
             <tr><th style="width:40px">#</th><th>Finding</th><th style="width:90px">Severity</th>
                 <th style="width:88px">Confirmation</th>
@@ -949,8 +973,16 @@ class ComplianceReportGenerator:
         m = SEVERITY_META[sev]
         ev = f.get("evidence") or {}
         title = f.get("title") or f.get("vuln_type") or "Finding"
+        from heaven.devsecops import vuln_kb as _vkb
         cvss = self._finding_cvss(f)
+        cvss4 = self._finding_cvss4(f)
         contextual = self._finding_contextual_cvss(f)
+        own_vec = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
+        own_is_v4 = own_vec.startswith("CVSS:4")
+        v4_vec = (f.get("cvss4_vector") or ev.get("cvss4_vector")
+                  or (own_vec if own_is_v4 else _vkb.cvss4_vector_for(f.get("vuln_type") or "")))
+        v31_vec = (f.get("cvss31_vector") or ev.get("cvss31_vector")
+                   or ("" if own_is_v4 else own_vec))
 
         # Classification: an IoT/OT finding is labelled against its own
         # framework (OWASP IoT Top 10 / IEC 62443), a web finding against the
@@ -966,7 +998,8 @@ class ComplianceReportGenerator:
             ("Target", f.get("target") or "—", False),
             ("Severity", m["label"], False),
             ("Confirmation", _conf_pill(f), True),
-            ("CVSS base (class)", cvss, False),
+            ("CVSS v4.0 base", _cvss_with_band(cvss4), False),
+            ("CVSS v3.1 base", _cvss_with_band(cvss), False),
             ("Contextual CVSS", contextual, False),
             ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—", False),
             ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—", False),
@@ -975,7 +1008,8 @@ class ComplianceReportGenerator:
             # CVE links straight to the live NVD record — dynamic, not a bare string.
             ("CVE", self._cve_links(f), True),
             ("MITRE ATT&CK", f.get("mitre_technique") or "—", False),
-            ("CVSS vector", f.get("cvss_vector") or "—", False),
+            ("CVSS v4.0 vector", v4_vec or "—", False),
+            ("CVSS v3.1 vector", v31_vec or "—", False),
             ("Status", (f.get("status") or "open").title(), False),
         ]
         meta_html = "".join(
@@ -1163,6 +1197,31 @@ class ComplianceReportGenerator:
             if 0.0 < v <= 10.0:
                 return f"{v:.1f}"
         return "—"
+
+    def _finding_cvss4(self, f: dict) -> str:
+        """CVSS v4.0 base score to display (1-dp string), or '—'. This is the
+        current-standard companion to :meth:`_finding_cvss` (which stays on the
+        calibrated score that drives the severity band). Uses the v4.0 score
+        stamped by ``enrich_finding``, else the class's v4.0 vector, else the
+        finding's own vector when it is already v4.0."""
+        from heaven.devsecops.vuln_kb import cvss4_vector_for
+        from heaven.utils import cvss as _cvss
+
+        ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+        for src in (f, ev):
+            try:
+                v = float(src.get("cvss4_base"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if 0.0 < v <= 10.0:
+                return f"{v:.1f}"
+        vec = cvss4_vector_for(f.get("vuln_type") or "")
+        if not vec:
+            own = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
+            if _cvss.cvss_version_of(own) == "4.0":
+                vec = own
+        s = _cvss.base_score_from_vector(vec) if vec else 0.0
+        return f"{s:.1f}" if s > 0 else "—"
 
     def _finding_contextual_cvss(self, f: dict) -> str:
         """Per-finding CVSS **contextual** score (Temporal + Environmental).

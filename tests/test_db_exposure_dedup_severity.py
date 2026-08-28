@@ -11,8 +11,12 @@ was realigned back down to the class's 8.6 (High) band by ``reconcile_severity``
 """
 import asyncio
 import copy
+import json
+import sqlite3
+from datetime import datetime, timezone
 
-from heaven.engagement import dedup_findings
+from heaven.devsecops.vuln_kb import enrich_finding
+from heaven.engagement import EngagementStore, dedup_findings
 from heaven.recon import network_exposure as ne
 from heaven.utils.cvss import reconcile_severity
 
@@ -75,6 +79,63 @@ def test_two_detectors_one_exposed_db_dedup_to_one():
     assert len(db) == 1, db
     # The richer network_exposure copy wins (carries the public_exposure marker).
     assert db[0]["evidence"].get("public_exposure") is True
+
+
+def test_list_and_detail_agree_on_reconciled_severity(tmp_path):
+    """The findings LIST and the finding DETAIL must show the SAME severity.
+
+    The reported bug: an LFI at CVSS 8.1 showed as Critical in the list (raw
+    stored label) but High on its detail page (which reconciles on read). The
+    store now persists the reconciled band, so the list's stored severity equals
+    the detail path's enriched severity — both High, matching the 8.1 score."""
+    store = EngagementStore(tmp_path / "e.db")
+    store.create_engagement("sev")
+    fid = store.upsert_finding("s1", {
+        "target": "http://h/mutillidae/index.php", "vuln_type": "lfi",
+        "title": "Local File Inclusion", "severity": "critical",
+        "confidence": 0.9, "param": "page",
+    })
+    stored = store.get_finding(fid)
+    # What the LIST endpoint returns (the raw stored column) is already canonical.
+    assert stored.severity == "high"
+    # What the DETAIL endpoint shows (enrich reconciles on read) is identical —
+    # never a contradiction between the two surfaces again.
+    detail = enrich_finding({
+        "target": stored.target, "vuln_type": stored.vuln_type,
+        "title": stored.title, "severity": stored.severity,
+        "confidence": stored.confidence, "cve_id": stored.cve_id,
+        "evidence": stored.evidence,
+    })
+    assert detail["severity"] == stored.severity == "high"
+
+
+def test_legacy_row_severity_reconciled_on_open(tmp_path):
+    """A row written before write-time reconciliation (raw ``critical`` on an 8.1
+    LFI) is corrected the first time the store is opened — including the
+    read-only open the findings list uses — so existing data is fixed without a
+    re-scan. Guarded by user_version, the backfill runs once."""
+    db = tmp_path / "legacy.db"
+    store = EngagementStore(db)               # materialise the schema
+    now = datetime.now(timezone.utc).isoformat()
+    # Write a legacy row directly, bypassing the reconciling upsert, and reset
+    # the migration marker so the next open runs the one-time backfill.
+    with sqlite3.connect(db) as c:
+        c.execute("INSERT INTO scans (id, started_at, status) VALUES (?, ?, 'completed')",
+                  ("sc", now))
+        c.execute(
+            "INSERT INTO findings (id, scan_id, target, vuln_type, title, severity, "
+            "confidence, first_seen_at, last_seen_at, seen_count, status, evidence_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'open', ?)",
+            ("legacy1", "sc", "http://h/x", "lfi", "LFI", "critical", 0.9, now, now,
+             json.dumps({})),
+        )
+        c.execute("PRAGMA user_version = 0")
+    EngagementStore._MIGRATED_PATHS.discard(str(db))
+    # Read-only open, exactly like the findings list — the backfill still runs.
+    reopened = EngagementStore(db, create=False)
+    assert reopened.get_finding("legacy1").severity == "high"
+    with sqlite3.connect(db) as c:
+        assert c.execute("PRAGMA user_version").fetchone()[0] == EngagementStore._SCHEMA_VERSION
 
 
 def test_orchestrator_db_check_no_longer_uses_reversed_slug():

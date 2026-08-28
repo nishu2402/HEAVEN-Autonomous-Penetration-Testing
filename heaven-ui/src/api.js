@@ -402,9 +402,12 @@ export const Settings = {
   // models / recommended default).
   aiLocalStatus: () => api("/ai/local/status"),
   // Model catalog for the provider-aware model picker. → { provider, model,
-  // provider_default, providers: { <p>: { models:[{id,label,note}], default,
-  //   keyless } } }.  Ollama's list is merged with the operator's pulled models.
-  aiModels: () => api("/ai/models"),
+  // provider_default, providers: { <p>: { models:[{id,label,note,recommended}],
+  //   default, keyless, source:'live'|'curated', live_count } } }. Each provider's
+  // list is discovered LIVE from its API (every current model + pulled Ollama
+  // tag), merged with a curated recommended short-list. refresh=true bypasses the
+  // server's short cache to re-query the providers.
+  aiModels: (refresh) => api("/ai/models" + (refresh ? "?refresh=1" : "")),
   // One-click: point HEAVEN at a local model + live-test it.
   // payload: { provider:'ollama'|'local', model?, host?, base_url? }
   // → { ok, provider, model, test:{available,reason}, status }

@@ -3640,6 +3640,49 @@ def remediation_text(finding: dict) -> str:
     return "\n".join(lines)
 
 
+def _backfill_published_cvss(out: dict, ev: dict) -> None:
+    """Backfill a CVE finding's real published CVSS base from the bundled inline
+    DB when it lost its numeric score (e.g. data persisted before per-finding
+    CVSS wiring), so the reconciler aligns the label to the true per-CVE number
+    rather than a generic class fallback. Offline, so a stale Critical CVE is
+    never demoted to its class base. Mutates ``out`` / ``ev`` in place."""
+    from heaven.utils.cvss import _finding_float
+    if _finding_float(out, ("cvss_base", "cvss_base_score", "cvss_score", "cvss")) is not None:
+        return
+    cve = out.get("cve") or out.get("cve_id") or ev.get("cve")
+    if not cve:
+        return
+    with contextlib.suppress(Exception):  # inline DB optional
+        from heaven.vulnscan.cve_mapper import published_cvss_for
+        pub = published_cvss_for(cve)
+        if pub:
+            out["cvss_base"] = pub
+            ev["cvss_base"] = pub
+            out["evidence"] = ev
+
+
+def canonical_severity(finding: dict) -> str:
+    """The one authoritative severity band for a finding, shared by every surface
+    (findings list, detail, dashboard tally, report) so they can never disagree —
+    the drift that let the list show "Critical" while the detail page showed
+    "High" for the same CVSS 8.1 finding.
+
+    It is the detector's qualitative band reconciled against the finding's real
+    resolved CVSS base: a published CVE score drives the label up or down, an
+    unconfirmed / low-confidence indicator is capped to its low band, and a
+    finding with no resolvable score keeps its label untouched. Pure — it copies
+    the finding and never mutates the caller's dict. Returns "" only when the
+    finding carries no severity at all.
+    """
+    from heaven.utils.cvss import reconcile_severity
+    out = dict(finding)
+    ev = dict(out.get("evidence") or {})
+    out["evidence"] = ev
+    _backfill_published_cvss(out, ev)
+    reconcile_severity(out)
+    return str(out.get("severity") or "").strip().lower()
+
+
 def enrich_finding(finding: dict) -> dict:
     """Return a shallow copy of `finding` with KB defaults filled into any
     missing description / remediation / references / mitre / cwe / owasp /
@@ -3730,26 +3773,15 @@ def enrich_finding(finding: dict) -> dict:
             )
         out["typical_cvss"] = typical
 
-    # Backfill the REAL published CVSS for a finding that carries a CVE id but
-    # lost its numeric score (e.g. data persisted before per-finding CVSS wiring),
-    # so its severity band and CVSS column agree on the true per-CVE number rather
-    # than a generic class fallback. Offline (bundled inline CVE DB), so a stale
-    # Critical CVE is never demoted to its class base by the reconciler below.
-    from heaven.utils.cvss import _finding_float, reconcile_severity
-    if _finding_float(out, ("cvss_base", "cvss_base_score", "cvss_score", "cvss")) is None:
-        cve = out.get("cve") or out.get("cve_id") or ev.get("cve")
-        with contextlib.suppress(Exception):  # inline DB optional
-            from heaven.vulnscan.cve_mapper import published_cvss_for
-            pub = published_cvss_for(cve)
-            if pub:
-                out["cvss_base"] = pub
-                ev["cvss_base"] = pub
-                out["evidence"] = ev
-
     # Keep the finding's qualitative severity and its resolved CVSS base score in
     # the same band, so no surface ever shows a contradiction like "CVSS 8.1 /
-    # Low". An unconfirmed 'indicator' has its inherited class base capped to its
-    # (low) severity; a published CVE score drives the label. One shared resolver.
+    # Low": backfill a CVE's real published base from the bundled inline DB, then
+    # reconcile the label to it (an unconfirmed 'indicator' is capped to its low
+    # band instead). This is the SAME resolver the store applies at write time and
+    # the one-time legacy backfill applies, so the findings list, dashboard,
+    # detail and report can never disagree on a finding's severity.
+    from heaven.utils.cvss import reconcile_severity
+    _backfill_published_cvss(out, ev)
     reconcile_severity(out)
     # The ML predictor's raw risk_band reflects its *predicted* CVSS, which can
     # outrank the reconciled, confirmation-aware severity (e.g. a banner-inferred

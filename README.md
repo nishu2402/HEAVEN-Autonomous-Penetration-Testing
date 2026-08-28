@@ -216,7 +216,7 @@ external scanner tools, and the web UI, and writes a ready-to-use `.env`. Pick
 your OS:
 
 ```bash
-# macOS / Linux — one line, no clone needed (git is the only prerequisite)
+# macOS / Linux: one line, no clone needed (git is the only prerequisite)
 curl -fsSL https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/main/scripts/install.sh | bash
 ```
 
@@ -768,7 +768,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (2012 tests)
+pytest tests/                  # full suite, ~3.5 min (2179 tests)
 heaven self-audit              # security self-check
 ```
 

@@ -30,10 +30,10 @@ pytest tests/benchmarks/test_native_benchmark.py -s
 
 | Metric | Result |
 |---|---|
-| Precision | **100%**: 15 / 15 reported findings are real (0 false positives) |
+| Precision | **100%**: 17 / 17 reported findings are real (0 false positives) |
 | Recall (required vulns) | **100%**: 11 / 11 required classes detected |
 | F1 | **100%** |
-| Categories covered | **11**: SQLi (error/blind/UNION), LFI, cmdi, reflected XSS, **SSRF, XXE, CORS, open redirect, weak JWT, insecure cookie, missing security headers** |
+| Categories covered | **12**: SQLi (error/blind/UNION), LFI, cmdi, reflected XSS, **SSRF, XXE, CORS, open redirect, weak JWT, insecure cookie, missing security headers, server version disclosure** |
 | Parameter attribution | correct (`id`, `url`, …, never the `Submit` button) |
 | Out-of-band proof | SSRF + XXE confirmed by a **real callback** to HEAVEN's in-house collaborator, not a heuristic |
 | False positives on reflective/escaped endpoints | **0** (SQLi/cmdi reflection-guarded; CORS/redirect canary-confirmed) |
@@ -53,8 +53,9 @@ pytest tests/benchmarks/test_native_benchmark.py -s
 | Open redirect | 1 / 1 | 1 | 1 |
 | Weak JWT (cracked secret) | 1 / 1 | 1 | 1 |
 | Insecure session cookie | 1 / 1 | 1 | 1 |
-| Missing security headers | 1 / 1 | 1 | 1 |
-| **Total** | **13 / 13** | **15** | **15** |
+| Missing security headers | 1 / 1 | 2 | 2 |
+| Server / version disclosure | 1 / 1 | 1 | 1 |
+| **Total** | **14 / 14** | **17** | **17** |
 
 This is a *controlled functional benchmark*, the target is a known, labelled
 surface, so it measures HEAVEN's end-to-end detection **and** attribution
@@ -71,7 +72,7 @@ real vulnerabilities:
 
 | Metric | Result |
 |---|---|
-| **Recall (detection-required)** | **100%, 10 / 10** (measured against the labelled ground truth on the native target) |
+| **Recall (detection-required)** | **100%, 10 / 10** (measured against the labelled ground truth on the live DVWA target) |
 | **Precision** | **100%**: every reported finding maps to a labelled ground-truth entry, zero false positives (measured live) |
 | **F1** | **100%** |
 | Endpoints discovered behind login | **34 pages, 17 under `/vulnerabilities/*`** (sqli, exec, fi, brute, csrf, upload, …) |
@@ -97,16 +98,16 @@ Docker-free run above). Both use the same deterministic scanners.
 
 | Class | Technique | Verified |
 |---|---|---|
-| **SQL injection** | error-based · boolean-blind · UNION-based · time-based blind | ✅ [D][N] `critical sqli — param 'id'` |
-| **Local File Inclusion** | path traversal + `php://` wrappers, content-leak confirmed | ✅ [D][N] `critical lfi — param 'page'` |
-| **OS command injection** | output-based (`id`/echo) + differential time-based | ✅ [D][N] `critical cmdi — param 'ip'` |
+| **SQL injection** | error-based · boolean-blind · UNION-based · time-based blind | ✅ [D][N] `critical sqli on param 'id'` |
+| **Local File Inclusion** | path traversal + `php://` wrappers, content-leak confirmed | ✅ [D][N] `critical lfi on param 'page'` |
+| **OS command injection** | output-based (`id`/echo) + differential time-based | ✅ [D][N] `critical cmdi on param 'ip'` |
 | **Reflected XSS** | execution-aware (escaping-resistant FP filter) | ✅ [D][N] |
 | **CSRF** | state-changing form with no anti-CSRF token; catches the tokenless **GET** password change, excludes login/search forms | ✅ [D] `high csrf_missing_token` |
 | **Remote File Inclusion** | best-effort remote-fetch detection | ✅ [D] probe wired |
-| **SSRF** | out-of-band: target callback to in-house OAST collaborator | ✅ [N] `high ssrf — param 'url'` |
+| **SSRF** | out-of-band: target callback to in-house OAST collaborator | ✅ [N] `high ssrf on param 'url'` |
 | **XXE** | out-of-band: `SYSTEM` entity resolves to the collaborator | ✅ [N] `high xxe` |
 | **CORS misconfiguration** | reflected `Origin` + `Allow-Credentials`, canary origin | ✅ [N] `high cors_misconfig` |
-| **Open redirect** | canary-host `Location` match (never fires same-site) | ✅ [N] `open_redirect — param 'url'` |
+| **Open redirect** | canary-host `Location` match (never fires same-site) | ✅ [N] `open_redirect on param 'url'` |
 | **Weak / forgeable JWT** | `alg:none` + in-house HMAC secret crack (secret = proof) | ✅ [N] `critical jwt_weak_secret` |
 | **Insecure session cookie** | missing `HttpOnly` / `Secure` / `SameSite` | ✅ [N] `insecure_cookie` |
 | Security posture | headers, TLS, cookies, request-smuggling, version disclosure | ✅ [D][N] |

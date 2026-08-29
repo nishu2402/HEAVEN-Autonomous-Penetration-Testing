@@ -167,8 +167,10 @@ def test_quota_error_fails_fast_without_retry() -> None:
     assert "exhausted retries" not in resp.error    # message reflects the fast-fail
 
 
-def test_transient_error_is_retried() -> None:
-    """A transient 503 should be retried across all attempts before giving up."""
+def test_overload_error_is_retried_once_then_stops() -> None:
+    """A 503/504 overload is transient, so it IS retried — but only once (not the
+    full budget): re-sending the same request to a busy provider rarely clears it,
+    and an interactive caller must not wait out 3x the timeout."""
     gw = _bare_gateway()
     calls = {"n": 0}
 
@@ -179,5 +181,22 @@ def test_transient_error_is_retried() -> None:
     gw._dispatch = boom  # type: ignore[assignment]
     resp = gw.complete(LLMRequest(prompt="hi"))
     assert not resp.ok()
-    assert calls["n"] == LLMGateway.MAX_RETRIES     # genuinely transient → retried
+    assert calls["n"] == 2                           # overload → one quick retry only
+    assert resp.error and "exhausted retries" in resp.error
+
+
+def test_generic_transient_is_retried_full_budget() -> None:
+    """A non-overload transient (connection reset) still gets the full retry budget —
+    the one-retry cap is specific to overload/deadline errors, not all retryables."""
+    gw = _bare_gateway()
+    calls = {"n": 0}
+
+    def boom(prompt, system, req):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        raise RuntimeError("connection reset by peer")
+
+    gw._dispatch = boom  # type: ignore[assignment]
+    resp = gw.complete(LLMRequest(prompt="hi"))
+    assert not resp.ok()
+    assert calls["n"] == LLMGateway.MAX_RETRIES     # genuinely transient → full budget
     assert resp.error and "exhausted retries" in resp.error

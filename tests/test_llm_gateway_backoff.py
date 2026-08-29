@@ -32,6 +32,7 @@ from typing import Any
 import pytest
 
 from heaven.ai.llm_gateway import (
+    MAX_OVERLOAD_COOLDOWN_S,
     LLMGateway,
     LLMRequest,
     _parse_retry_after,
@@ -142,14 +143,75 @@ def test_cooldown_disabled_via_env(monkeypatch) -> None:
     assert gw._ratelimited_until == 0.0
 
 
-def test_transient_error_does_not_arm_cooldown() -> None:
-    """A transient 503 is retried but must NOT arm the rate-limit cooldown — the
-    next call must still be allowed to reach the network."""
+def test_persistent_overload_arms_short_cooldown(monkeypatch) -> None:
+    """A 503/504 is transient and retried, but when it PERSISTS across the retry the
+    provider is genuinely overloaded right now. Arm a SHORT, self-clearing cooldown
+    so a bulk pass short-circuits to its non-LLM fallback instead of hammering a
+    provider that cannot answer. The window stays well under the quota cooldown, so
+    interactive use resumes in seconds — and it is NOT the quota breaker (a 504 is
+    not a rate limit)."""
+    monkeypatch.delenv("HEAVEN_LLM_OVERLOAD_COOLDOWN", raising=False)
     gw = _gw()
-    gw._dispatch = _raise("503 UNAVAILABLE")  # type: ignore[assignment]
+    gw._dispatch = _raise(  # type: ignore[assignment]
+        "504 DEADLINE_EXCEEDED. Deadline expired before operation could complete.")
+    resp = gw.complete(LLMRequest(prompt="a"))
+    assert not resp.ok() and "DEADLINE_EXCEEDED" in resp.error
+    remaining = gw._ratelimited_until - time.monotonic()
+    assert 0.0 < remaining <= MAX_OVERLOAD_COOLDOWN_S, "short overload window, not a quota one"
+    assert remaining < 30.0 + 1e-6
+    assert gw._ratelimit_gate() is not None
+
+
+def test_overload_retries_are_capped() -> None:
+    """An overload/deadline is retried at most ONCE (2 dispatches), not the full
+    budget — an interactive caller fails fast instead of waiting out 3x the timeout."""
+    gw = _gw()
+    calls = {"n": 0}
+
+    def boom(prompt, system, req):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        raise RuntimeError("504 DEADLINE_EXCEEDED")
+
+    gw._dispatch = boom  # type: ignore[assignment]
     gw.complete(LLMRequest(prompt="a"))
-    assert gw._ratelimited_until == 0.0, "a 503 is not a rate limit — no cooldown"
+    assert calls["n"] == 2, "overload retried exactly once, then stops"
+
+
+def test_one_off_overload_self_heals_without_cooldown() -> None:
+    """A genuine one-off 503 clears on the single quick retry: the call succeeds and
+    NO cooldown is armed (only a persistent overload arms one)."""
+    gw = _gw()
+    calls = {"n": 0}
+
+    def flaky(prompt, system, req):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("503 UNAVAILABLE")
+        from heaven.ai.llm_gateway import LLMResponse
+        return LLMResponse(text="ok", provider="gemini", model=gw.model)
+
+    gw._dispatch = flaky  # type: ignore[assignment]
+    resp = gw.complete(LLMRequest(prompt="a"))
+    assert resp.ok() and resp.text == "ok"
+    assert calls["n"] == 2, "retried once and succeeded"
+    assert gw._ratelimited_until == 0.0, "a recovered one-off overload must not arm a cooldown"
     assert gw._ratelimit_gate() is None
+
+
+def test_generic_transient_uses_full_retry_budget() -> None:
+    """A non-overload transient error (e.g. connection reset) still gets the full
+    retry budget — the cap is specific to overload/deadline, not all retryables."""
+    gw = _gw()
+    calls = {"n": 0}
+
+    def boom(prompt, system, req):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        raise RuntimeError("connection reset by peer")
+
+    gw._dispatch = boom  # type: ignore[assignment]
+    gw.complete(LLMRequest(prompt="a"))
+    assert calls["n"] == 3, "generic transient error keeps the full 3-attempt budget"
+    assert gw._ratelimited_until == 0.0, "not an overload — no cooldown"
 
 
 def test_auth_error_does_not_arm_cooldown() -> None:

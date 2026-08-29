@@ -26,14 +26,14 @@ def _load():
 # A faithful slice of the poster: the aria-label plus the x-anchored stat block.
 _POSTER_SNIPPET = (
     '<svg aria-label="HEAVEN. 1856 tests, 55 CLI commands, 77 API routes, '
-    '25 UI pages, 13 scan modes, CVSS ML predictor R-squared 0.9925.">'
+    '25 UI pages, 13 scan modes, CVSS ML predictor R-squared 0.91.">'
     '<g text-anchor="middle">'
     '<text x="155"  y="426" font-size="28">1856</text>'
     '<text x="349"  y="426" font-size="28">55</text>'
     '<text x="543"  y="426" font-size="28">77</text>'
     '<text x="737"  y="426" font-size="28">25</text>'
     '<text x="931"  y="426" font-size="28">13</text>'
-    '<text x="1125" y="426" font-size="24">0.9925</text>'
+    '<text x="1125" y="426" font-size="24">0.91</text>'
     '</g></svg>'
 )
 
@@ -52,7 +52,7 @@ def test_sync_poster_updates_only_collected_counts():
     # The hand-set figures and the ML R² are untouched (no collector for them).
     assert '<text x="737"  y="426" font-size="28">25</text>' in out   # UI pages
     assert '<text x="931"  y="426" font-size="28">13</text>' in out   # scan modes
-    assert ">0.9925<" in out
+    assert ">0.91<" in out
     assert "25 UI pages, 13 scan modes" in out
     assert "1856" not in out and ">55<" not in out and ">77<" not in out
 

@@ -2791,6 +2791,26 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://learn.microsoft.com/windows-server/remote/remote-desktop-services/clients/remote-desktop-allow-access"],
     },
+    "denial_of_service": {
+        "title": "Denial of Service",
+        "cwe": "CWE-400",
+        "owasp": "A06:2025 Insecure Design",
+        "mitre": "T1499 · Endpoint Denial of Service",
+        "typical_cvss": 7.5,
+        "description": (
+            "The service can be driven into resource exhaustion or a crash by a "
+            "crafted request or traffic pattern, making it unavailable to legitimate "
+            "users. A denial of service affects AVAILABILITY only — on its own it "
+            "does not disclose or modify data."
+        ),
+        "impact": "Loss of availability for the affected service or host.",
+        "remediation": (
+            "1. Enforce rate limiting and request size/complexity caps.\n"
+            "2. Add timeouts, connection limits and per-client resource quotas.\n"
+            "3. Front the service with a DoS-aware proxy/CDN and autoscaling."
+        ),
+        "references": ["https://cwe.mitre.org/data/definitions/400.html"],
+    },
 }
 
 # Severity → typical CVSS fallback when the class is unknown.
@@ -2973,6 +2993,11 @@ _ALIASES: dict[str, str] = {
     "graphql_batching": "graphql_dos",
     "graphql_complexity": "graphql_dos",
     "graphql_alias_overloading": "graphql_dos",
+    # Generic denial of service (specific DoS classes above keep their own entry).
+    "dos": "denial_of_service",
+    "ddos": "denial_of_service",
+    "resource_exhaustion": "denial_of_service",
+    "availability_impact": "denial_of_service",
     "api_key_leakage": "secret_exposure",
     "exposed_secret": "secret_exposure",  # nosec B105 -- taxonomy string, not a secret
     "hardcoded_secret": "secret_exposure",  # nosec B105 -- taxonomy string, not a secret
@@ -3139,6 +3164,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "vulnerable_component": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "graphql_introspection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "graphql_dos": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+    "denial_of_service": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
     "secret_exposure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",  # nosec B105
     "smtp_no_starttls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "ssh_hardening": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
@@ -3307,6 +3333,7 @@ _CVSS4_VECTOR_BY_KEY: dict[str, str] = {
     "vulnerable_component": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
     "graphql_introspection": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
     "graphql_dos": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
+    "denial_of_service": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
     "secret_exposure": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",  # nosec B105
     "smtp_no_starttls": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
     "ssh_hardening": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",

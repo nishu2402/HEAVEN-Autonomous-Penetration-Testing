@@ -2,9 +2,10 @@
 HEAVEN — NVD CVSS Risk Model
 
 Loads the trained NVD ExtraTreesRegressor (13-feature CVSS-v3 predictor,
-R²≈0.99; see data/models/NVD_model.MODEL_CARD.md) and predicts a CVSS base
-score (0–10) for a finding. This is the model wired into the scan pipeline's
-ML-scoring phase via ``score_vulnerabilities()``.
+5-fold CV R²≈0.91; see data/models/NVD_model.MODEL_CARD.md) and predicts a CVSS
+base score (0–10) for a finding. This is the vector half of the hybrid model
+wired into the scan pipeline's ML-scoring phase via ``score_vulnerabilities()``;
+the description/type half lives in :mod:`heaven.ml.desc_model`.
 
 Cross-platform: Linux, macOS, Windows.
 """
@@ -27,7 +28,7 @@ from heaven.utils.logger import get_logger
 logger = get_logger("ml.risk")
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# The 48 MB NVD model is intentionally NOT shipped in the wheel or committed to
+# The NVD model (~6 MB) is intentionally NOT shipped in the wheel or committed to
 # git (it's gitignored), so `pip install` and `git clone` users don't have it
 # until they fetch it with `heaven download-model`. The download lands in the
 # user cache dir below, so the search path has to include it — otherwise the
@@ -306,24 +307,80 @@ def _extract_nvd_features(finding: dict) -> dict:
     }
 
 
+def _has_cvss_signal(finding: dict) -> bool:
+    """True when a finding carries a real, published CVSS vector or base score.
+
+    Those findings feed the 13-feature vector model, which reverse-engineers the
+    CVSS calculator to ~R²=0.91. Findings WITHOUT a published score instead route
+    to the description/type model, which is grounded in ~337k real CVEs rather
+    than a hand-curated class constant.
+    """
+    vec = str(finding.get("cvss_vector") or "")
+    if vec.strip().upper().startswith("CVSS:"):
+        return True
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    for src in (finding, ev):
+        for key in ("cvss_base", "cvss_base_score", "cvss_score", "cvss"):
+            try:
+                v = float(src.get(key))  # type: ignore[union-attr,arg-type]
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if 0.0 < v <= 10.0:
+                return True
+    return False
+
+
 async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[Any, Any]]] = None, **kwargs) -> dict[str, Any]:
-    """Score vulnerabilities with the NVD CVSS prediction model (called by orchestrator)."""
-    logger.info("Running ML risk scoring with NVD CVSS model...")
+    """Score vulnerabilities with HEAVEN's hybrid CVSS model (called by orchestrator).
+
+    Hybrid routing per finding:
+      * a real published CVSS vector/score → the 13-feature vector model
+        (:class:`HeavenRiskModel`, ~R²=0.91 — it reverses the CVSS calculator);
+      * otherwise → the description/type model (:mod:`heaven.ml.desc_model`,
+        a TF-IDF + Ridge text model trained on ~316k real CVEs; on the flagged
+        findings HEAVEN actually routes to it, R²≈0.63 and the right severity
+        band ~99% within one level) instead of a class constant.
+    Both degrade cleanly: with no models, each finding keeps its own base score.
+    """
+    logger.info("Running ML risk scoring with hybrid CVSS model...")
     model = get_model()
     findings = findings or []
     scored_findings = []
 
+    from heaven.ml.desc_model import derive_flags, get_desc_model
     from heaven.ml.nvd_pipeline import NVDPipeline
 
-    for f in findings:
-        # Extract NVD-compatible 13-feature vector for the model
-        nvd_features = _extract_nvd_features(f)
-        predicted = model.predict_cvss_score(nvd_features)
+    desc_model = get_desc_model()
+    n_vector = n_desc = 0
 
-        # Fall back to feature_engine if the NVD model wasn't loaded
-        if predicted == 5.0 and not model._regression_mode:
-            fe_features = extract_features(f)
-            predicted = model.predict_cvss_score(fe_features.features)
+    for f in findings:
+        # Route to the description model only when (a) no published CVSS exists AND
+        # (b) the finding matches one of the vuln-type flags the model was trained
+        # on. Outside those seven classes the description model has no signal (all
+        # flags zero → a flat generic prediction that would UNDERSTATE, say, an
+        # SSRF), so those findings keep the vector model's curated per-class vector.
+        use_desc = (
+            desc_model.available
+            and not _has_cvss_signal(f)
+            and any(derive_flags(f).values())
+        )
+        predicted = 0.0
+        if use_desc:
+            predicted = desc_model.predict(f)
+            if predicted > 0.0:
+                f["cvss_model"] = "description"
+                n_desc += 1
+        if predicted <= 0.0:
+            # Extract NVD-compatible 13-feature vector for the model
+            nvd_features = _extract_nvd_features(f)
+            predicted = model.predict_cvss_score(nvd_features)
+            f["cvss_model"] = "vector"
+            n_vector += 1
+
+            # Fall back to feature_engine if the NVD model wasn't loaded
+            if predicted == 5.0 and not model._regression_mode:
+                fe_features = extract_features(f)
+                predicted = model.predict_cvss_score(fe_features.features)
 
         epss = f.get("epss_score", 0.0)
         in_kev = f.get("in_kev", False)
@@ -336,9 +393,15 @@ async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[
         )
         scored_findings.append(f)
 
+    metrics = model.get_metrics()
+    metrics["hybrid"] = {
+        "description_model": desc_model.get_metrics(),
+        "scored_by_vector": n_vector,
+        "scored_by_description": n_desc,
+    }
     return {
         "scored": len(scored_findings),
         "model_version": model.version,
-        "metrics": model.get_metrics(),
+        "metrics": metrics,
         "risk_scores": scored_findings,
     }

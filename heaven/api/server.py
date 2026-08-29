@@ -2069,6 +2069,7 @@ def create_app() -> FastAPI:
     ):
         """List findings from the active engagement (optionally one scan)."""
         from heaven.engagement import is_attack_plan_artifact
+        from heaven.devsecops.vuln_kb import enrich_finding
         store = _read_store()
         results = store.list_findings(
             severity=severity, status=status, target=target,
@@ -2078,8 +2079,11 @@ def create_app() -> FastAPI:
         # Drop any attack-chain planner steps that older scans persisted as
         # pseudo-findings (vuln_type is a bare MITRE technique like ``T1190`` with
         # no taxonomy) so a re-scan isn't needed to clear the blank rows.
+        # Enrich each row from the knowledge base so the list carries the SAME
+        # per-finding taxonomy and CVSS v4.0 / v3.1 scores + vectors the detail
+        # view and reports show — the list must never disagree with them.
         findings = [
-            {**f.__dict__, "confirmation": _confirmation_of(f.__dict__)}
+            {**enrich_finding(f.__dict__), "confirmation": _confirmation_of(f.__dict__)}
             for f in results
             if not is_attack_plan_artifact(f.__dict__)
         ]

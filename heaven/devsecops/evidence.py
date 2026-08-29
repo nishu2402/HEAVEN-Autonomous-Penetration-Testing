@@ -138,7 +138,7 @@ class EvidencePackage:
             "",
             f"**ID:** `{self.finding_id}`  ",
             f"**Severity:** {self.severity}  ",
-            f"**Confidence:** {self.confidence:.2f} ({self.confidence_bucket})  ",
+            f"**Confidence:** {self.confidence:.0%} ({self.confidence_bucket})  ",
         ]
         if self.cve_id:
             lines.append(f"**CVE:** {self.cve_id}  ")

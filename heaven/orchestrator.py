@@ -1168,6 +1168,11 @@ class ScanOrchestrator:
 
         all_vulns, all_assets, all_dns = [], [], []
         sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        # CVE id -> {in_kev, epss} from the NVD CPE catalog sweep (Vulnerability
+        # Mapping task). Threat-intel enrichment we cross-reference onto the real
+        # findings after dedup, so KEV / EPSS from the broad NVD sweep lands on
+        # the curated findings that actually name a host and port.
+        nvd_threat_intel: dict[str, dict] = {}
 
         for tid, res in self.results.items():
             if res.state != TaskState.COMPLETED or not res.data:
@@ -1187,6 +1192,13 @@ class ScanOrchestrator:
             # the summary so the Assets view and the report's DNS section render
             # the attack surface's naming layer, not just host/port inventory.
             all_dns.extend(data.get("dns_records", []))
+            for cve in data.get("nvd_cve_catalog", []):
+                cid = str(cve.get("cve_id") or "").upper()
+                if cid:
+                    nvd_threat_intel[cid] = {
+                        "in_kev": bool(cve.get("in_kev")),
+                        "epss": cve.get("epss_score", 0.0),
+                    }
 
         # Fold each web detector's captured request/response into the findings
         # that lack one, so "Proof of issue" shows the real transaction instead
@@ -1206,6 +1218,19 @@ class ScanOrchestrator:
         # and engagement store all agree on the finding count.
         from heaven.engagement import dedup_findings
         all_vulns = dedup_findings(all_vulns)
+        # Cross-reference the NVD sweep's KEV / EPSS onto the real findings by CVE
+        # id. KEV (CISA Known-Exploited) is a strong triage signal the inline
+        # mapper does not carry; only fill gaps, never overwrite a value a
+        # detector already set.
+        if nvd_threat_intel:
+            for f in all_vulns:
+                ti = nvd_threat_intel.get(str(f.get("cve_id") or "").upper())
+                if not ti:
+                    continue
+                if ti["in_kev"] and not f.get("in_kev"):
+                    f["in_kev"] = True
+                if ti["epss"] and not f.get("epss") and not f.get("epss_score"):
+                    f["epss_score"] = ti["epss"]
         for f in all_vulns:
             sev = (f.get("severity") or "info").lower()
             if sev in sev_counts:
@@ -1797,7 +1822,20 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 for p in data.get("profiles", []):
                     for tech in p.get("tech", []):
                         cpes.append(f"cpe:2.3:a:{tech.lower()}:{tech.lower()}:*:*:*:*:*:*:*")
-            return await lookup_vulnerabilities(scan_id=orch.scan_id, cpes=list(set(cpes)))
+            result = await lookup_vulnerabilities(scan_id=orch.scan_id, cpes=list(set(cpes)))
+            # This NVD CPE sweep returns a broad CVE *catalog* keyed by CPE, not
+            # host-anchored findings — the entries carry no vuln_type / target /
+            # confidence, so emitting them as "vulnerabilities" floods the live
+            # view with hundreds of blank conf=0.00 lines, inflates the running
+            # findings counter, and then every one is dropped by dedup (no stable
+            # identity). The curated inline+live CVE mapper (`_cve_map`) is the
+            # authoritative finding source. Publish the catalog under a key the
+            # orchestrator does NOT collect as findings so it stays out of the
+            # finding stream, and keep its KEV/EPSS enrichment for a post-dedup
+            # cross-reference onto the real findings by CVE id.
+            if isinstance(result, dict) and "vulnerabilities" in result:
+                result["nvd_cve_catalog"] = result.pop("vulnerabilities")
+            return result
         except ImportError:
             return {}
 

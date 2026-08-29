@@ -48,7 +48,13 @@ export default function Findings() {
 
   const load = useCallback(() => {
     setLoading(true);
-    Engagement.findings(filters)
+    // The UI takes "Min confidence" as a percentage (0-100) to match the CONF
+    // column; the API expects a 0-1 fraction, so convert before sending.
+    const query = { ...filters };
+    if (query.min_confidence !== "" && query.min_confidence != null) {
+      query.min_confidence = Number(query.min_confidence) / 100;
+    }
+    Engagement.findings(query)
       .then((d) => { setData(d); setError(null); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -141,7 +147,9 @@ export default function Findings() {
           color: Number(f.confidence) >= 0.9 ? 'var(--text-0)'
                : Number(f.confidence) >= 0.7 ? 'var(--med)' : 'var(--high)',
         }}>
-          {Number(f.confidence).toFixed(2)}
+          {Number.isFinite(Number(f.confidence))
+            ? `${Math.round(Number(f.confidence) * 100)}%`
+            : "—"}
         </span>
       </td>
       <td><span className={`status-pill status-${f.status}`}>{f.status}</span></td>
@@ -197,8 +205,9 @@ export default function Findings() {
             onChange={(e) => setFilters(f => ({ ...f, target: e.target.value }))} />
         </label>
         <label className="form-group">
-          <span className="form-label">Min confidence</span>
-          <input className="form-input" type="number" min="0" max="1" step="0.05"
+          <span className="form-label">Min confidence %</span>
+          <input className="form-input" type="number" min="0" max="100" step="5"
+            placeholder="0-100"
             value={filters.min_confidence}
             onKeyDown={(e) => { if (e.key === "Enter") load(); }}
             onChange={(e) => setFilters(f => ({ ...f, min_confidence: e.target.value }))} />

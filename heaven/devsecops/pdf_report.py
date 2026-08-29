@@ -893,11 +893,16 @@ class PDFReportGenerator:
         contextual = _OWASP._finding_contextual_cvss(f)
         _own_vec = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
         _own_is_v4 = _own_vec.startswith("CVSS:4")
+        from heaven.devsecops import vuln_kb as _vkb
+        _band = _vkb._resolve_severity_band(f, ev)
         v4_vec = (f.get("cvss4_vector") or ev.get("cvss4_vector")
-                  or (_own_vec if _own_is_v4 else _vkb_cvss4(f.get("vuln_type") or "")))
+                  or (_own_vec if _own_is_v4 else _vkb_cvss4(f.get("vuln_type") or ""))
+                  or _vkb._generic_cvss_for_severity(_band, version="4.0"))
         v31_vec = (f.get("cvss31_vector") or ev.get("cvss31_vector")
                    or ("" if _own_is_v4 else _own_vec)
-                   or _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), ""))
+                   or _vkb.cvss_vector_for(f.get("vuln_type") or "")
+                   or _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), "")
+                   or _vkb._generic_cvss_for_severity(_band))
         # Upgrade any legacy 2021 tag stored on the finding to its 2025 label.
         owasp = _fw.normalize_owasp(f.get("owasp") or "") or _OWASP._owasp_for(f.get("vuln_type", "")) or "—"
 

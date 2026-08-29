@@ -698,9 +698,14 @@ def scan(
 
     if engagement_store:
         scan_id = summary.get("scan_id", orch.scan_id)
+        # The orchestrator publishes the SAME deduped list under both
+        # "vulnerabilities" and "findings" (they are one object). Concatenating
+        # them upserts every finding twice and doubles the reported count
+        # (e.g. "126" for 63 real findings). Take one; fall back to the other.
         findings_in_summary = (
-            summary.get("vulnerabilities", [])
-            + summary.get("findings", [])
+            summary.get("vulnerabilities")
+            or summary.get("findings")
+            or []
         )
         persisted = 0
         for f in findings_in_summary:

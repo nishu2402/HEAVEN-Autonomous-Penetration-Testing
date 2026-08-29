@@ -408,7 +408,7 @@ class JiraAlerter:
             f"Finding ID: {finding.get('id','')}\n"
             f"Target:     {finding.get('target','')}\n"
             f"Severity:   {sev}\n"
-            f"Confidence: {finding.get('confidence', 0):.2f}\n"
+            f"Confidence: {finding.get('confidence', 0):.0%}\n"
             f"CVE:        {finding.get('cve_id','—')}\n"
             f"Title:      {finding.get('title','')}\n\n"
             f"Detected by HEAVEN. Open the finding for evidence + curl repro."
@@ -483,7 +483,7 @@ class LinearAlerter:
             f"**Finding ID:** {finding.get('id','')}\n"
             f"**Target:** `{finding.get('target','')}`\n"
             f"**Severity:** {sev}\n"
-            f"**Confidence:** {finding.get('confidence', 0):.2f}\n"
+            f"**Confidence:** {finding.get('confidence', 0):.0%}\n"
             f"**CVE:** {finding.get('cve_id','—')}\n\n"
             f"Detected by HEAVEN. Open the finding evidence for repro details."
         )

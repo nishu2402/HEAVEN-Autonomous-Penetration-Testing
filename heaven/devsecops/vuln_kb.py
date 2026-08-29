@@ -377,7 +377,9 @@ _KB: dict[str, dict[str, Any]] = {
         "cwe": "CWE-287",
         "owasp": "A07:2025 Authentication Failures",
         "mitre": "T1078 · Valid Accounts",
-        "typical_cvss": 4.3,
+        # Aligned with the class CVSS vector (a network low-confidentiality
+        # auth-surface weakness), same band as directory_listing.
+        "typical_cvss": 5.3,
         "description": (
             "An alternate (API/mobile) authentication endpoint is reachable and "
             "advertises no rate-limit controls. Alternate channels often skip the "
@@ -1640,7 +1642,10 @@ _KB: dict[str, dict[str, Any]] = {
         "cwe": "",
         "owasp": "",
         "mitre": "T1590 · Gather Victim Network Information",
-        "typical_cvss": 1.0,
+        # Aligned with the class CVSS vector (a network-readable low-confidentiality
+        # info disclosure), same band as version_disclosure, so the detail view's
+        # base score and vector never contradict each other.
+        "typical_cvss": 3.5,
         "description": (
             "Informational reconnaissance data enumerated from public DNS "
             "(MX records, SOA administrative contact, DKIM selectors). No "
@@ -2045,7 +2050,9 @@ _KB: dict[str, dict[str, Any]] = {
         "cwe": "",
         "owasp": "",
         "mitre": "T1595 · Active Scanning",
-        "typical_cvss": 2.0,
+        # Aligned with the class CVSS vector so the base score and vector agree
+        # (a low, unconfirmed heuristic lead).
+        "typical_cvss": 3.5,
         "description": (
             "A heuristic/ML check flagged behaviour that deviates from the expected "
             "baseline. This is a lead for manual review, not a confirmed "
@@ -3188,6 +3195,33 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "cloud_iam_weak_password_policy": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
     "cloud_iam_public_access": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N",
     "cloud_iam_authenticated": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+    # Web-tier / client-side / session / mail classes (WSTG). Each vector is
+    # faithful to the weakness and calibrated so its base score sits in the same
+    # band as the class's typical_cvss — so no real finding ever shows a blank
+    # CVSS v3.1 vector alongside its v4.0 companion.
+    "alt_channel_auth_weakness": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "anomaly_heuristic": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "client_resource_manipulation": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "cross_site_script_inclusion": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "css_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "dns_info": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "dom_xss_sink": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "flash_crossdomain": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "insecure_postmessage": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "long_session_timeout": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "nuclei": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "open_registration": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N",
+    "padding_oracle": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "password_autocomplete_enabled": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "perimeter_defense": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+    "permissive_crossdomain_policy": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N",
+    "security_question_reset": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "sensitive_browser_storage": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "sensitive_cache_control": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "session_token_in_url": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N",
+    "smtp_header_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+    "source_comment_disclosure": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+    "ssi_injection": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L",
     "posture_ok": "",
 }
 
@@ -3328,6 +3362,32 @@ _CVSS4_VECTOR_BY_KEY: dict[str, str] = {
     "cloud_iam_weak_password_policy": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
     "cloud_iam_public_access": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:N/SC:H/SI:H/SA:N",
     "cloud_iam_authenticated": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
+    # CVSS v4.0 companions for the web-tier / client-side / session / mail classes
+    # above. Keyed identically to the v3.1 table so every KB class carries both a
+    # v3.1 and a v4.0 vector — no finding is ever left with a blank v4.0 cell.
+    "alt_channel_auth_weakness": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "anomaly_heuristic": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "client_resource_manipulation": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
+    "cross_site_script_inclusion": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "css_injection": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "dns_info": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "dom_xss_sink": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:L/VI:L/VA:N/SC:L/SI:L/SA:N",
+    "flash_crossdomain": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:A/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
+    "insecure_postmessage": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:L/VI:L/VA:N/SC:L/SI:L/SA:N",
+    "long_session_timeout": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
+    "nuclei": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "open_registration": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N",
+    "padding_oracle": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",
+    "password_autocomplete_enabled": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:A/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "perimeter_defense": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "permissive_crossdomain_policy": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "security_question_reset": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "sensitive_browser_storage": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "sensitive_cache_control": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "session_token_in_url": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "smtp_header_injection": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N",
+    "source_comment_disclosure": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "ssi_injection": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:L/SC:N/SI:N/SA:N",
     "posture_ok": "",
 }
 
@@ -3376,23 +3436,26 @@ def lookup(vuln_type: str) -> dict[str, Any]:
 # severity-based CVSS vector is supplied.
 
 # Generic CVSS v3.1 vectors by severity band — the last-resort so the "CVSS
-# vector" column is populated even for an otherwise-unclassified finding.
+# vector" column is populated even for an otherwise-unclassified finding. Each
+# vector is authored to compute a base score *inside* its own band (verified in
+# tests) so a generic fallback never contradicts the finding's severity label
+# (e.g. relabelling a "high" finding "critical" when its score is reconciled).
 _GENERIC_CVSS_BY_SEVERITY: dict[str, str] = {
-    "critical": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-    "high":     "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
-    "medium":   "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
-    "low":      "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
-    "info":     "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+    "critical": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",  # 9.8
+    "high":     "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",  # 8.1
+    "medium":   "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",  # 6.5
+    "low":      "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N",  # 3.1
+    "info":     "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",  # 0.0
 }
 
 # The same last-resort by-band vectors expressed in CVSS v4.0, so the v4.0 column
-# is populated for an unclassified finding too.
+# is populated for an unclassified finding too — each also scored inside its band.
 _GENERIC_CVSS4_BY_SEVERITY: dict[str, str] = {
-    "critical": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
-    "high":     "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",
-    "medium":   "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
-    "low":      "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
-    "info":     "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "critical": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",  # 10.0
+    "high":     "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:L/VA:N/SC:N/SI:N/SA:N",  # 7.1
+    "medium":   "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",  # 6.9
+    "low":      "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:A/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",  # 2.1
+    "info":     "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",  # 0.0
 }
 
 # Keyword → (CWE, OWASP, MITRE). First match wins, so ordered specific → generic.
@@ -3543,6 +3606,34 @@ def _generic_cvss_for_severity(severity: str, version: str = "3.1") -> str:
     table = (_GENERIC_CVSS4_BY_SEVERITY if str(version).startswith("4")
              else _GENERIC_CVSS_BY_SEVERITY)
     return table.get((severity or "").strip().lower(), "")
+
+
+def _resolve_severity_band(out: dict, ev: dict | None = None) -> str:
+    """Resolve a finding to one of the five CVSS severity bands
+    (``critical``/``high``/``medium``/``low``/``info``) — never blank.
+
+    Prefers the finding's own qualitative severity; when that is missing or
+    non-standard it is derived from the best available numeric score (published
+    CVE base, ML-predicted, class typical, engine risk). Guarantees every finding
+    resolves to a band that ``_generic_cvss_for_severity`` can turn into a vector,
+    so no finding is ever left with a blank CVSS cell. Falls back to ``info``
+    (a zero-impact, honest score) only when there is no severity and no score at
+    all — never an invented non-zero score."""
+    from heaven.utils.cvss import severity_from_score
+    sev = (out.get("severity") or "").strip().lower()
+    if sev in _GENERIC_CVSS_BY_SEVERITY:
+        return sev
+    ev = ev if isinstance(ev, dict) else {}
+    for key in ("predicted_cvss_score", "cvss_base", "typical_cvss",
+                "cvss4_base", "risk_score"):
+        for src in (out, ev):
+            try:
+                val = float(src.get(key))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if val > 0.0:
+                return severity_from_score(val)
+    return "info"
 
 
 # ── Dynamic, per-CVE remediation for known-vulnerable-component findings ──
@@ -3910,8 +4001,11 @@ def enrich_finding(finding: dict) -> dict:
     # conservative severity-based vector rather than a blank cell.
     if not out.get("cvss_vector"):
         vec = cvss_vector_for(finding.get("vuln_type", ""))
-        if not vec and not entry:
-            vec = _generic_cvss_for_severity(out.get("severity", ""))
+        if not vec:
+            # No curated class vector (an uncurated class, or a curated entry that
+            # intentionally carries none) — fall back to a severity-band generic
+            # so the v3.1 vector cell is never blank for any finding.
+            vec = _generic_cvss_for_severity(_resolve_severity_band(out, ev))
         if vec:
             out["cvss_vector"] = vec
 
@@ -3936,17 +4030,22 @@ def enrich_finding(finding: dict) -> dict:
             v4vec = out.get("cvss_vector") or ""
         else:
             v4vec = cvss4_vector_for(finding.get("vuln_type", ""))
-            if not v4vec and not entry:
-                v4vec = _generic_cvss_for_severity(out.get("severity", ""), version="4.0")
+            if not v4vec:
+                # Same guarantee as the v3.1 side: a severity-band generic so the
+                # v4.0 cell is never blank for any finding (uncurated class or an
+                # intentionally vector-less curated entry).
+                v4vec = _generic_cvss_for_severity(
+                    _resolve_severity_band(out, ev), version="4.0")
         if v4vec:
             out["cvss4_vector"] = v4vec
-    if out.get("cvss4_vector") and not out.get("cvss4_base"):
-        s4 = base_score_from_vector(out["cvss4_vector"])
-        if s4 > 0:
-            out["cvss4_base"] = round(s4, 1)
+    if out.get("cvss4_vector") and out.get("cvss4_base") is None:
+        # Compute the base from the vector via the reference scorer. Stored even
+        # when 0.0 (a genuinely zero-impact / positive-posture finding) so the
+        # field is always present and the UI/report renders a number, not a blank.
+        out["cvss4_base"] = round(base_score_from_vector(out["cvss4_vector"]), 1)
     if out.get("cvss4_vector"):
         ev.setdefault("cvss4_vector", out["cvss4_vector"])
-    if out.get("cvss4_base"):
+    if out.get("cvss4_base") is not None:
         ev.setdefault("cvss4_base", out["cvss4_base"])
     ev.setdefault("cvss_version", out["cvss_version"])
     out["evidence"] = ev

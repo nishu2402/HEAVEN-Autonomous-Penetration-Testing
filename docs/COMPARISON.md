@@ -27,7 +27,7 @@ all three competitors so the comparison is a one-command diff.
 | **Jira / Linear ticketing** | ✅ built-in | ⚠️ plugin | ⚠️ plugin | ❌ | ✅ | ✅ |
 | **SIEM forwarding** (Splunk HEC / Elastic) | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | **Reproducibility** (`--seed` + replay) | ✅ unique | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **CVSS prediction via ML** | ✅ R²=0.9925 | ❌ | ❌ | ❌ | ⚠️ uses NVD | ⚠️ |
+| **CVSS prediction via ML** | ✅ hybrid R²=0.91 / 0.63 (right band 99% within one level) | ❌ | ❌ | ❌ | ⚠️ uses NVD | ⚠️ |
 | **EPSS + CISA KEV scoring** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | **Exploit-DB integration** | ✅ | ❌ | ❌ | ❌ | ⚠️ | ❌ |
 | **Post-exploitation** (linpeas / BloodHound / lateral) | ✅ | ❌ | ❌ | ⚠️ via shell | ❌ | ❌ |

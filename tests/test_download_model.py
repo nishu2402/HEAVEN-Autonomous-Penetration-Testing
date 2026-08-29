@@ -1,6 +1,6 @@
 """HEAVEN — tests for `heaven download-model` and the model search path.
 
-The 48 MB NVD CVSS model is not shipped in the wheel or committed to git, so pip
+The NVD CVSS model (~6 MB) is not shipped in the wheel or committed to git, so pip
 and clone users fetch it with `heaven download-model`. These tests exercise the
 fetch/verify/atomic-install logic offline (via `file://` URLs) and confirm the
 loader search path includes the cache dir the download lands in — so a fetched

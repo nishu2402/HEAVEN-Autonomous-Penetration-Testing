@@ -27,7 +27,7 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
     from heaven.ml.nvd_pipeline import NVDPipeline
     import joblib
     from sklearn.ensemble import ExtraTreesRegressor
-    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import train_test_split, cross_val_score, KFold
     from sklearn.metrics import r2_score, mean_squared_error
 
     pipeline = NVDPipeline()
@@ -62,6 +62,18 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
     mae  = float(np.mean(np.abs(y_test - y_pred)))
 
+    # A single 80/20 split is high-variance on a dataset this size, so also report
+    # 5-fold cross-validated R²/MAE — the honest, stable accuracy figure that the
+    # model card and docs quote (a lone split can swing ±0.03 R² by luck).
+    print("Cross-validating (5-fold)…")
+    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    cv_r2_scores = cross_val_score(model, X, y, cv=cv, scoring="r2", n_jobs=-1)
+    cv_mae_scores = -cross_val_score(
+        model, X, y, cv=cv, scoring="neg_mean_absolute_error", n_jobs=-1)
+    cv_r2 = float(cv_r2_scores.mean())
+    cv_r2_std = float(cv_r2_scores.std())
+    cv_mae = float(cv_mae_scores.mean())
+
     model_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, model_dir / "cvss_regressor.joblib")
     (model_dir / "feature_names.json").write_text(json.dumps(feature_names))
@@ -77,13 +89,22 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
     feat_json.write_text(json.dumps(feature_names))
     print(f"NVD_model.pkl updated → {nvd_model_out}")
 
+    import sklearn
     metrics = {
         "r2": round(r2, 4), "rmse": round(rmse, 4),
         "mae": round(mae, 4), "n_train": int(len(y_train)),
         "n_test": int(len(y_test)),
+        # Cross-validated (the headline accuracy quoted in docs/model card):
+        "cv_r2": round(cv_r2, 4), "cv_r2_std": round(cv_r2_std, 4),
+        "cv_mae": round(cv_mae, 4), "cv_folds": 5,
+        "n_samples": int(len(y)),
+        # Provenance so a version-skew warning on load is traceable to the trainer:
+        "sklearn_version": sklearn.__version__,
+        "n_features": int(X.shape[1]),
     }
     (model_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    print(f"R²={r2:.4f}  RMSE={rmse:.4f}  MAE={mae:.4f}")
+    print(f"split R²={r2:.4f}  RMSE={rmse:.4f}  MAE={mae:.4f}")
+    print(f"5-fold CV R²={cv_r2:.4f}±{cv_r2_std:.4f}  MAE={cv_mae:.4f}  (sklearn {sklearn.__version__})")
     print(f"Model saved: {model_dir}/cvss_regressor.joblib")
     return metrics
 

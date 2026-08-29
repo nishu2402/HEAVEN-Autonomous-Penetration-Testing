@@ -543,6 +543,25 @@ def _ratelimit_cooldown_s() -> float:
     return max(0.0, v)
 
 
+# A server-overload / deadline (503/504/UNAVAILABLE/DEADLINE_EXCEEDED) is transient,
+# but when it PERSISTS across a retry it means the provider is genuinely busy right
+# now. That arms a SEPARATE, much shorter cooldown than a quota 429: overload clears
+# in seconds, so short-circuiting a bulk pass for a few seconds is enough to stop
+# hammering a provider that can't answer, without stalling interactive use.
+# HEAVEN_LLM_OVERLOAD_COOLDOWN=0 disables this breaker.
+DEFAULT_OVERLOAD_COOLDOWN_S = 8.0
+MAX_OVERLOAD_COOLDOWN_S = 30.0
+
+
+def _overload_cooldown_s() -> float:
+    """Default cooldown after a persistent overload/deadline. 0 disables it."""
+    try:
+        v = float(os.environ.get("HEAVEN_LLM_OVERLOAD_COOLDOWN", DEFAULT_OVERLOAD_COOLDOWN_S))
+    except (TypeError, ValueError):
+        return DEFAULT_OVERLOAD_COOLDOWN_S
+    return max(0.0, v)
+
+
 # Retry-After hints appear in provider error strings in several shapes:
 #   Gemini:   "... retry in 39.2s"  /  "retryDelay: '40s'"
 #   OpenAI:   "Please try again in 20s"  /  "retry-after: 30"
@@ -579,6 +598,21 @@ _AUTH_ERROR_TOKENS = (
     "unauthorized", "401", "403", "permission denied",
     "api key not valid", "invalid api key", "invalid_api_key",
     "authentication", "invalid_request_error",
+)
+# Server-overload / deadline / gateway-timeout tokens. A subset of the RETRYABLE
+# set (none of these appear in the rate-limit or auth lists), but distinguished so
+# the loop can cap their retries and arm the short overload cooldown. Kept specific
+# to avoid mislabelling unrelated messages (e.g. bare "500" would match token
+# counts, so 500-class server errors are matched by phrase instead of the code).
+_OVERLOAD_ERROR_TOKENS = (
+    "deadline_exceeded", "deadline expired", "deadline exceeded",
+    "overloaded", "overload", "high demand",
+    "unavailable", "service unavailable", "temporarily unavailable",
+    "bad gateway", "gateway timeout",
+    "timed out", "read timeout", "request timed out",
+    "server is overloaded", "server had an error", "server_error",
+    "internal server error", "try again later",
+    "503", "502", "504", "529",
 )
 
 
@@ -919,17 +953,35 @@ class LLMGateway:
                         self._arm_ratelimit_cooldown(e)
                     logger.warning(f"LLM call failed (non-retryable, not retrying): {e}")
                     break
-                if attempt < self.MAX_RETRIES - 1:
+                # A server-overload / deadline (503/504/UNAVAILABLE/DEADLINE_EXCEEDED)
+                # is transient, but re-sending the same request rarely clears it on a
+                # short backoff and an interactive caller must not wait out 3x the
+                # timeout. Give it a SINGLE quick retry: a genuine one-off blip
+                # self-heals on that retry, while a provider that is really busy fails
+                # twice — the signal to stop and arm the short cooldown below.
+                max_attempts = 2 if self._is_overload_error(e) else self.MAX_RETRIES
+                if attempt < max_attempts - 1:
                     retried = True
                     delay = min(
                         self.BASE_BACKOFF_S * (2 ** attempt) + random.uniform(0, 1),  # nosec B311
                         self.MAX_BACKOFF_S,
                     )
                     logger.warning(
-                        f"LLM call failed (attempt {attempt + 1}/{self.MAX_RETRIES}): "
+                        f"LLM call failed (attempt {attempt + 1}/{max_attempts}): "
                         f"{e}. Retrying in {delay:.1f}s"
                     )
                     time.sleep(delay)
+                else:
+                    break
+
+        # A persistent overload/deadline (retried and still failing) means the
+        # provider is genuinely busy right now. Arm a SHORT, self-clearing cooldown
+        # so the rest of a bulk pass (dozens of concurrent FP reviews) short-circuits
+        # to its non-LLM fallback instead of each call burning the retry budget
+        # against a provider that cannot answer. Distinct from the quota breaker: the
+        # window is small, so interactive use resumes within seconds.
+        if last_error is not None and self._is_overload_error(last_error):
+            self._arm_overload_cooldown(last_error)
 
         latency_ms = (time.time() - start) * 1000
         prefix = "exhausted retries" if retried else "LLM call failed"
@@ -1523,6 +1575,15 @@ class LLMGateway:
         return any(tok in msg for tok in _RATELIMIT_ERROR_TOKENS)
 
     @staticmethod
+    def _is_overload_error(exc: Exception) -> bool:
+        """Whether an error is a server overload / deadline / gateway timeout —
+        retryable, but capped to one quick retry, and arms the short overload
+        cooldown when it persists. Distinct from a 429 (which never retries) and
+        from an auth error (which fails instantly)."""
+        msg = str(exc).lower()
+        return any(tok in msg for tok in _OVERLOAD_ERROR_TOKENS)
+
+    @staticmethod
     def _is_local_unreachable(exc: Exception) -> bool:
         """Whether an error means a LOCAL endpoint isn't answering (server down,
         connection refused, timed out). Used only on the local path to fail fast
@@ -1572,8 +1633,9 @@ class LLMGateway:
     # ── rate-limit circuit breaker ────────────────────────────────────────
 
     def _ratelimit_gate(self) -> Optional[str]:
-        """If a rate-limit cooldown is active, return the short-circuit message
-        (so the caller falls back immediately); otherwise None. Read defensively
+        """If a cooldown is active (quota OR overload — both share this window),
+        return the short-circuit message so the caller falls back immediately;
+        otherwise None. The ``reason`` carries the actual cause. Read defensively
         so gateways built via ``__new__`` in tests never AttributeError."""
         until = getattr(self, "_ratelimited_until", 0.0)
         if until <= 0.0:
@@ -1581,9 +1643,29 @@ class LLMGateway:
         remaining = until - time.monotonic()
         if remaining <= 0.0:
             return None
-        reason = getattr(self, "_ratelimit_reason", "") or "rate limited"
-        return (f"rate-limited: skipping LLM call for {remaining:.0f}s "
-                f"(cooldown after: {reason})")
+        reason = getattr(self, "_ratelimit_reason", "") or "provider busy"
+        return (f"provider cooling down: skipping LLM call for {remaining:.0f}s "
+                f"(after: {reason})")
+
+    def _set_cooldown(self, exc: Exception, window: float, label: str) -> None:
+        """Set the shared self-clearing cooldown window. Both breakers (quota and
+        overload) route through here so they can't drift; the reason string carries
+        the actual cause. Reads the lock defensively so a gateway built via
+        ``__new__`` in tests never AttributeErrors."""
+        deadline = time.monotonic() + window
+        reason = str(exc)[:200]
+        lock = getattr(self, "_ratelimit_lock", None)
+        if lock is not None:
+            with lock:
+                self._ratelimited_until = deadline
+                self._ratelimit_reason = reason
+        else:  # __new__-built test double without a lock
+            self._ratelimited_until = deadline
+            self._ratelimit_reason = reason
+        logger.warning(
+            f"LLM {label} — pausing LLM calls for {window:.0f}s "
+            f"(further calls fall back to non-LLM paths): {exc}"
+        )
 
     def _arm_ratelimit_cooldown(self, exc: Exception) -> None:
         """Enter a cooldown after a rate-limit error so the rest of a scan's
@@ -1595,20 +1677,24 @@ class LLMGateway:
         if cooldown <= 0.0:
             return
         hint = _parse_retry_after(str(exc))
-        window = min(hint if hint is not None else cooldown, MAX_RATELIMIT_COOLDOWN_S)
-        window = max(window, 1.0)
-        lock = getattr(self, "_ratelimit_lock", None)
-        if lock is not None:
-            with lock:
-                self._ratelimited_until = time.monotonic() + window
-                self._ratelimit_reason = str(exc)[:200]
-        else:  # __new__-built test double without a lock
-            self._ratelimited_until = time.monotonic() + window
-            self._ratelimit_reason = str(exc)[:200]
-        logger.warning(
-            f"LLM rate-limited — pausing LLM calls for {window:.0f}s "
-            f"(further calls fall back to non-LLM paths): {exc}"
-        )
+        window = max(1.0, min(hint if hint is not None else cooldown, MAX_RATELIMIT_COOLDOWN_S))
+        self._set_cooldown(exc, window, "rate-limited")
+
+    def _arm_overload_cooldown(self, exc: Exception) -> None:
+        """Enter a SHORT cooldown after a persistent overload/deadline so a bulk
+        pass stops hammering a busy provider and falls back to its non-LLM path.
+        Window = Retry-After hint when present, else the short default, clamped to
+        MAX_OVERLOAD_COOLDOWN_S. Never shortens a longer quota cooldown already in
+        effect. HEAVEN_LLM_OVERLOAD_COOLDOWN=0 disables it."""
+        cooldown = _overload_cooldown_s()
+        if cooldown <= 0.0:
+            return
+        # A quota 429 cooldown is longer and more authoritative — don't stomp it.
+        if self._ratelimit_gate() is not None:
+            return
+        hint = _parse_retry_after(str(exc))
+        window = max(1.0, min(hint if hint is not None else cooldown, MAX_OVERLOAD_COOLDOWN_S))
+        self._set_cooldown(exc, window, "provider overloaded")
 
     def _audit(self, req: LLMRequest, resp: LLMResponse) -> None:
         """Emit one structured log line per call — picked up by the audit handler."""

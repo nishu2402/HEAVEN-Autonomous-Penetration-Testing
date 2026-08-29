@@ -30,7 +30,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and de-duplicated, and it degrades cleanly to the built-in catalog when a provider
   is unreachable or unconfigured, so a model is always selectable.
 
+- **Hybrid CVSS risk model with a description-based fallback trained on 337k real
+  CVEs.** The ML risk scorer is now two models working together. When a finding
+  carries real CVSS metrics, the 13-feature ExtraTrees vector model scores it (as
+  before). When a finding has no published score (a heuristic web or network
+  finding), HEAVEN now uses a new text model — a TF-IDF vectoriser over the
+  finding's own description plus vulnerability-type flags, fed to a Ridge regressor —
+  trained on the NVD_Cybersecurity dataset. It reads what the finding actually says
+  instead of collapsing the class onto a hand-picked constant, so two SQL-injection
+  findings with different impact wording get different scores, grounded in how
+  hundreds of thousands of real CVEs of that shape scored. It is trained and measured
+  on the population HEAVEN actually routes to it — the 315,648 CVEs with a real
+  (non-zero) CVSS score, of which the 177,763 that carry a vuln-type flag are the true
+  deployment population. On that deployment population honest 5-fold cross-validation
+  is R²=0.63 and MAE=0.79, and it lands the right severity band 99% of the time within
+  one level. (The ~22k score-0 informational CVEs the model never sees in practice are
+  dropped from training rather than left in to inflate R² with trivial zeros; the leaky
+  CVSS sub-scores that would push R² to a meaningless 0.999 are also excluded.) The
+  model, its metrics and its per-type grounding are documented in
+  `data/models/NVD_model.MODEL_CARD.md`; it is trained by
+  `heaven train-model --csv <NVD_Cybersecurity_Dataset.csv>` and lives in
+  `heaven/ml/desc_model.py`. It degrades cleanly: with the model absent, the hybrid
+  uses the vector model for every finding, exactly as before, so nothing regresses
+  offline or without the dataset.
+
+- **Severity-band accuracy is now reported for the description model, on the
+  population it actually runs on.** R² is a harsh lens for a CVSS predictor — the same
+  vuln class genuinely spans a wide score range in the NVD data, so no honest feature
+  available at scan time can pin the exact number. What matters is landing the finding
+  in the right severity band, and on the deployment population (flagged findings) the
+  model does: **70.4% exact band, 98.9% within one band** (5-fold, out-of-fold).
+  `heaven train-model`, the model meta and `get_metrics()` now surface both the
+  real-finding metrics (`cv_r2` / `cv_mae` / `cv_band_exact` / `cv_band_within1`) and
+  the deployment metrics (`deploy_r2` / `deploy_mae` / `deploy_band_exact` /
+  `deploy_band_within1`). An exhaustive architecture search (word+char n-grams,
+  gradient boosting on a TruncatedSVD of the TF-IDF, MAE-loss linear models, and a
+  direct severity-band classifier) confirmed nothing honestly beats this linear text
+  model on the deployment population. The score a client actually sees is still
+  computed exactly from each finding's CVSS vector (the reference formula, R²=1.0) and
+  reconciled to it; the text model is only a ranking hint for scoreless findings,
+  pinned to the authoritative severity, so it can never move a report's badge.
+
 ### Changed
+
+- **CVSS model retrained under the current scikit-learn, with honest reproducible
+  metrics.** The vector model was re-pickled under scikit-learn 1.9.0, which clears
+  the 1.8.0 to 1.9.0 version-skew warning (and the risk of silently invalid results
+  it warns about) and shrinks the artifact from about 48 MB to about 6 MB with no
+  loss of accuracy. Its advertised accuracy is now the figure `heaven train-model`
+  actually reproduces from the in-repo dataset, 5-fold cross-validated R-squared 0.91,
+  rather than the R-squared 0.9925 earlier docs quoted from a larger, non-reproducible
+  dump. The trainer now records cross-validated metrics and the scikit-learn version
+  in `metrics.json`, and the README, posters, comparison table and model card all
+  state the reproducible number. Because the model binary changed, `download-model`'s
+  pinned SHA-256 and size were updated to the retrained artifact; re-upload
+  `data/models/NVD_model.pkl` and `cvss_text_model.joblib` to the GitHub Release so a
+  fresh `download-model` matches what `train-model` produces.
 
 - **Confidence is shown as a percentage.** Every place a finding's confidence
   surfaces now reads as `0-100%` instead of a raw `0.90`: the Findings, Finding
@@ -52,6 +107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path. A live end-to-end scan dropped from about 240 seconds to 116.
 
 ### Fixed
+
+- **A generic Denial-of-Service finding is now scored with an availability vector.**
+  A bare `denial_of_service` / `dos` / `ddos` finding resolved to a generic high-severity
+  vector implying full confidentiality and integrity loss with **no** availability
+  impact (`C:H/I:H/A:N`) — the opposite of what a DoS is — and `denial_of_service`
+  carried no CWE. It now has its own knowledge-base entry: an availability-impact
+  vector (`AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H`, base 7.5), CWE-400 and MITRE T1499,
+  with `dos`/`ddos`/`resource_exhaustion` aliased to it. Specific DoS classes
+  (`graphql_dos`, `snmp_amplification`) keep their own narrower vectors.
 
 - **CVSS base score and vector no longer come up blank on any finding.** Twenty-three
   knowledge-base vulnerability classes, mostly web, client-side, session and mail
@@ -81,6 +145,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the finding stream, and its CISA KEV and EPSS threat-intel is cross-referenced
   onto the real findings by CVE id after de-duplication (filling gaps only), so the
   intelligence is preserved without ever appearing as a phantom finding.
+
+- **The AI false-positive review no longer stalls or fails hard when the model
+  provider is overloaded.** A provider that answers with an overload or deadline error
+  (for example Gemini's `504 DEADLINE_EXCEEDED`, or a `503 UNAVAILABLE`) used to be
+  retried the full budget, three attempts each waiting out the request timeout, and
+  still fail; on a bulk pass every borderline finding repeated that against the same
+  busy provider. Such errors are now their own class: a genuine one-off blip clears on
+  a single quick retry, an interactive "second opinion" fails fast instead of waiting
+  minutes, and a provider that stays overloaded arms a short, self-clearing cooldown so
+  the rest of the pass falls back to the deterministic path immediately rather than
+  hammering the provider. The window is much shorter than the quota breaker's (overload
+  clears in seconds) and is tunable with `HEAVEN_LLM_OVERLOAD_COOLDOWN`. A busy provider
+  never causes a real finding to be dropped: an unavailable verdict simply leaves the
+  finding untouched.
 
 ## [3.1.0]: 2026-08-27
 

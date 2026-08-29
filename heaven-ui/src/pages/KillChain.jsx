@@ -147,7 +147,7 @@ export default function KillChain() {
                   <td><span className={`sev-pill sev-${f.severity}`}>{f.severity}</span></td>
                   <td><code style={{ fontSize: 11 }}>{f.vuln_type}</code></td>
                   <td className="ellipsis" title={f.target}>{f.target}</td>
-                  <td>{Number(f.confidence).toFixed(2)}</td>
+                  <td>{Number.isFinite(Number(f.confidence)) ? `${Math.round(Number(f.confidence) * 100)}%` : "—"}</td>
                   <td><span className={`status-pill status-${f.status}`}>{f.status}</span></td>
                 </tr>
               ))}

@@ -66,7 +66,7 @@ def findings(engagement: Optional[str], severity: Optional[str],
                         else "[yellow]POTENTIAL[/yellow]")
             _print(
                 f"  [{sev_color}]{f.severity[:4].upper():4}[/{sev_color}] "
-                f"{conf_tag} {f.id}  conf={f.confidence:.2f}  "
+                f"{conf_tag} {f.id}  conf={f.confidence:.0%}  "
                 f"{f.vuln_type:18} {f.target[:40]:40} [dim]{f.status}[/dim]"
             )
         _print(f"\n[dim]{len(results)} finding(s) shown.[/dim]")

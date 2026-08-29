@@ -175,7 +175,7 @@ def export_burp_xml(findings: Iterable[dict],
             f"HEAVEN finding: {f.get('id', '')}  "
             f"type={f.get('vuln_type', '')}  "
             f"sev={f.get('severity', '')}  "
-            f"conf={f.get('confidence', 0):.2f}  "
+            f"conf={f.get('confidence', 0):.0%}  "
             f"status={f.get('status', 'open')}"
         )
 

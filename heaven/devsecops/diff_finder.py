@@ -293,7 +293,7 @@ def render_diff_markdown(report: DiffReport,
             sev_em = {"critical": "🔴", "high": "🟠", "medium": "🟡",
                       "low": "🔵", "info": "⚪"}.get(r.severity, "·")
             lines.append(f"| {sev_em} {r.severity} | `{r.vuln_type}` | "
-                         f"{r.target[:60]} | {r.confidence:.2f} | "
+                         f"{r.target[:60]} | {r.confidence:.0%} | "
                          f"{(r.title or '')[:60]} |")
         if len(rows) > 50:
             lines.append(f"\n*(+{len(rows) - 50} more — truncated)*\n")

@@ -9,6 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dual-version CVSS: every finding now carries both CVSS v4.0 and v3.1.** HEAVEN
+  scores each finding with CVSS v4.0, the current standard, and shows its CVSS v3.1
+  score and vector alongside it (the calibrated score that still drives the severity
+  band). Published CVE scores come straight from NVD / OSV, preferring the v4.0
+  vector when the advisory carries one; a finding with no published score is scored
+  by the ML base-score predictor and then expressed in both versions. The HTML and
+  PDF reports show all four CVSS cells (v4.0 base + vector, v3.1 base + vector), the
+  finding-detail and findings-list views agree with the reports, and the SARIF
+  export carries the v4.0 score as `cvss-v4` / `cvss-v4-severity` next to the
+  GitHub-native v3.1 `security-severity`.
+
+- **Live AI model discovery.** The model picker no longer relies only on a built-in
+  catalog. For a configured provider it now queries that provider's own model list
+  at pick time and merges the live result with the curated defaults, so a
+  newly-released model (for example a freshly-published Gemini or a just-pulled
+  Ollama tag) shows up without waiting for a HEAVEN release. The merge is additive
+  and de-duplicated, and it degrades cleanly to the built-in catalog when a provider
+  is unreachable or unconfigured, so a model is always selectable.
+
+### Changed
+
+- **Confidence is shown as a percentage.** Every place a finding's confidence
+  surfaces now reads as `0-100%` instead of a raw `0.90`: the Findings, Finding
+  detail, Kill-chain and Diff pages, the `heaven findings` / `heaven diff` CLI
+  output, and the alert, evidence, Burp and diff Markdown exports. The stored value
+  stays `0-1` in the database and in every machine-readable format (JSON, SARIF), so
+  this is a display change only; the findings-list "min confidence" filter accepts a
+  `0-100` value and converts it before it hits the API.
+
+- **AI false-positive triage now reviews borderline findings concurrently.** The
+  optional LLM second-opinion pass used to walk borderline findings one at a time,
+  one blocking model round-trip each, so on a service-rich host the triage phase
+  spent roughly 112 seconds waiting on the network. It now fans the reviews out with
+  bounded concurrency (tunable with `HEAVEN_FP_REVIEW_CONCURRENCY`, default 5),
+  collapsing that phase to a few seconds while staying gentle on the provider. The
+  borderline-band gate still short-circuits out-of-band findings before any network
+  call, a single failed review can no longer sink the batch, and the gateway's
+  rate-limit breaker still arms on the first 429 and falls back to the deterministic
+  path. A live end-to-end scan dropped from about 240 seconds to 116.
+
+### Fixed
+
+- **CVSS base score and vector no longer come up blank on any finding.** Twenty-three
+  knowledge-base vulnerability classes, mostly web, client-side, session and mail
+  issues, had no vector in either the v3.1 or the v4.0 table, so on a web-heavy
+  engagement it could look like "every finding is blank." Faithful v3.1 and v4.0
+  vectors were authored for all of them (both tables are now key-aligned with the
+  knowledge base, scores computed with the reference `cvss` library and verified in
+  range), and finding enrichment now always falls back to a severity-band generic
+  vector, so no finding is ever left without a score. Generic band vectors that had
+  drifted (a generic "high" that scored up into the Critical band) were re-authored
+  to score inside their own band, and the HTML / PDF / compliance reports and the
+  findings-list endpoint now enrich findings the same way the detail view does, so
+  the list, the detail page and the report never disagree.
+
+- **`heaven scan` no longer double-counts persisted findings.** The command summed
+  two summary keys that both point at the same deduplicated list, so it reported
+  twice the real number (for example "Persisted 126 findings" for 63 real ones; the
+  database itself was always correct because the upsert is idempotent). It now
+  reports the true count.
+
+- **The NVD vulnerability-mapping task no longer pollutes the finding stream.** That
+  task publishes a broad, CPE-keyed CVE catalog for threat intelligence, but it did
+  so under a key the finding collector treats as findings, so hundreds of
+  identity-less catalog entries flashed through the live scan view as zero-confidence
+  blanks, inflated the running findings counter mid-scan, and were then all discarded
+  by de-duplication (they have no stable identity). The catalog is now kept separate
+  from the finding stream, and its CISA KEV and EPSS threat-intel is cross-referenced
+  onto the real findings by CVE id after de-duplication (filling gaps only), so the
+  intelligence is preserved without ever appearing as a phantom finding.
+
 ## [3.1.0]: 2026-08-27
 
 ### Added

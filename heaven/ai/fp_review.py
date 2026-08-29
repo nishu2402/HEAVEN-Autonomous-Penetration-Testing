@@ -19,6 +19,7 @@ authoritative for any high-confidence FP signal.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 try:
@@ -189,6 +190,24 @@ class FPReviewer:
 # ═══════════════════════════════════════════
 
 
+def _review_concurrency() -> int:
+    """How many borderline findings to review in parallel.
+
+    Each review is one independent LLM round-trip, so on a scan with dozens of
+    borderline findings a strictly-sequential loop spends minutes blocked on the
+    network (measured: 112s of wall-clock on a live host). Bounded concurrency
+    collapses that to a few seconds while staying gentle on the provider — and
+    the gateway's own rate-limit breaker still arms on the first 429, after which
+    every remaining review falls back to the non-LLM path. Override with
+    ``HEAVEN_FP_REVIEW_CONCURRENCY``; a local LLM may want a lower value.
+    """
+    import os
+    try:
+        return max(1, min(16, int(os.environ.get("HEAVEN_FP_REVIEW_CONCURRENCY", "5"))))
+    except (TypeError, ValueError):
+        return 5
+
+
 async def review_borderline_findings(
     findings: list[dict],
     review_band: tuple[float, float] = DEFAULT_REVIEW_BAND,
@@ -196,14 +215,25 @@ async def review_borderline_findings(
     """Run the LLM reviewer over every borderline finding in-place.
 
     Returns the same list (mutated). Non-borderline findings pass
-    through unchanged. Safe to call when LLM is unavailable — does
-    nothing in that case.
+    through unchanged (``review`` short-circuits them before any network I/O).
+    Safe to call when LLM is unavailable — does nothing in that case. Reviews
+    run with bounded concurrency so a scan is not serialized on the LLM.
     """
     reviewer = FPReviewer(review_band=review_band)
     if not reviewer.available:
         return findings
-    for f in findings:
-        verdict = await reviewer.review(f)
+
+    sem = asyncio.Semaphore(_review_concurrency())
+
+    async def _review_one(f: dict) -> None:
+        async with sem:
+            try:
+                verdict = await reviewer.review(f)
+            except Exception as e:  # noqa: BLE001 — one bad review must not sink the batch
+                logger.debug(f"fp review errored for one finding: {e}")
+                return
         if verdict is not None:
             reviewer.apply(f, verdict)
+
+    await asyncio.gather(*(_review_one(f) for f in findings))
     return findings

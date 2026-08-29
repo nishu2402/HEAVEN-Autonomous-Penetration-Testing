@@ -351,8 +351,14 @@ class ComplianceReportGenerator:
         it. Unknown ids are ignored (a normal report).
         """
         from heaven.devsecops import compliance_frameworks as _cf
+        from heaven.devsecops.vuln_kb import enrich_finding
         meta = meta or {}
-        findings = findings or []
+        # Enrich from the knowledge base so every rendered finding carries its
+        # description / remediation / CWE / OWASP / MITRE and — crucially — a
+        # CVSS v4.0 and v3.1 base score + vector, never a blank cell. Idempotent,
+        # so a finding already enriched upstream (the web export path) is
+        # unaffected. This keeps the CLI report identical to the web/API output.
+        findings = [enrich_finding(dict(f)) for f in (findings or [])]
         eng = engagement_name or meta.get("client") or "HEAVEN Engagement"
         fw = _cf.get_framework(compliance_framework) if compliance_framework else None
         compliance_title = fw.title if fw else ""
@@ -979,10 +985,14 @@ class ComplianceReportGenerator:
         contextual = self._finding_contextual_cvss(f)
         own_vec = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
         own_is_v4 = own_vec.startswith("CVSS:4")
+        _band = _vkb._resolve_severity_band(f, ev)
         v4_vec = (f.get("cvss4_vector") or ev.get("cvss4_vector")
-                  or (own_vec if own_is_v4 else _vkb.cvss4_vector_for(f.get("vuln_type") or "")))
+                  or (own_vec if own_is_v4 else _vkb.cvss4_vector_for(f.get("vuln_type") or ""))
+                  or _vkb._generic_cvss_for_severity(_band, version="4.0"))
         v31_vec = (f.get("cvss31_vector") or ev.get("cvss31_vector")
-                   or ("" if own_is_v4 else own_vec))
+                   or ("" if own_is_v4 else own_vec)
+                   or _vkb.cvss_vector_for(f.get("vuln_type") or "")
+                   or _vkb._generic_cvss_for_severity(_band))
 
         # Classification: an IoT/OT finding is labelled against its own
         # framework (OWASP IoT Top 10 / IEC 62443), a web finding against the
@@ -1220,6 +1230,13 @@ class ComplianceReportGenerator:
             own = str(f.get("cvss_vector") or ev.get("cvss_vector") or "")
             if _cvss.cvss_version_of(own) == "4.0":
                 vec = own
+        if not vec:
+            # Uncurated class with no own v4.0 vector — resolve a severity-band
+            # generic so the v4.0 base is never blank for a real finding.
+            from heaven.devsecops.vuln_kb import (
+                _generic_cvss_for_severity, _resolve_severity_band)
+            vec = _generic_cvss_for_severity(
+                _resolve_severity_band(f, ev), version="4.0")
         s = _cvss.base_score_from_vector(vec) if vec else 0.0
         return f"{s:.1f}" if s > 0 else "—"
 

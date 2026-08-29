@@ -92,7 +92,7 @@ def diff(baseline_scan_id: str, current_scan_id: str,
                              "info": "dim"}.get(r.severity, "dim")
                 _print(f"  [{sev_color}]{r.severity[:4].upper():4}[/{sev_color}] "
                        f"{r.vuln_type:20} {(r.target or '')[:50]:50}  "
-                       f"conf={r.confidence:.2f}")
+                       f"conf={r.confidence:.0%}")
             if len(rows) > 10:
                 _print(f"  [dim]… and {len(rows) - 10} more[/dim]")
 

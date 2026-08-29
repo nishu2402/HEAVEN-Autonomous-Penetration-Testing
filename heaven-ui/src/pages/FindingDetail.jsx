@@ -207,8 +207,12 @@ export default function FindingDetail() {
     if (n >= 4.0) return "medium";
     return "low";
   };
+  // The v3.1 base to show: the calibrated per-finding score, else the class
+  // typical. `null` only when neither is present (then the row shows "—").
   const v31Base = Number(f.predicted_cvss_score) > 0 ? Number(f.predicted_cvss_score)
-                : Number(f.typical_cvss) > 0 ? Number(f.typical_cvss) : 0;
+                : Number(f.typical_cvss) > 0 ? Number(f.typical_cvss)
+                : Number.isFinite(Number(f.predicted_cvss_score)) ? Number(f.predicted_cvss_score)
+                : Number.isFinite(Number(f.typical_cvss)) ? Number(f.typical_cvss) : null;
   const v4Band = cvssBand(f.cvss4_base);
   // Only worth explaining when v4.0's own band lands above the calibrated badge.
   const v4BandDiffers = v4Band && v4Band !== String(f.severity || "").toLowerCase();
@@ -260,22 +264,24 @@ export default function FindingDetail() {
             )}
             <tr><td>Confidence</td><td>
               <span style={{ color: Number(f.confidence) >= 0.9 ? "var(--text-0)" : "var(--med)" }}>
-                {Number(f.confidence).toFixed(2)}
+                {Number.isFinite(Number(f.confidence))
+                  ? `${Math.round(Number(f.confidence) * 100)}%`
+                  : "—"}
               </span>
               {f.confidence_bucket && <span className="dim" style={{ marginLeft: 6 }}>({f.confidence_bucket})</span>}
             </td></tr>
             <tr><td>CVE</td><td>{cveCell(f)}</td></tr>
             <tr><td>CVSS v4.0 base</td><td>
-              {Number(f.cvss4_base) > 0
+              {f.cvss4_base != null && Number.isFinite(Number(f.cvss4_base))
                 ? <>{Number(f.cvss4_base).toFixed(1)}
-                    <span className={`sev-pill sev-${v4Band}`} style={{ marginLeft: 8, fontSize: 10 }}>{v4Band}</span>
+                    {v4Band && <span className={`sev-pill sev-${v4Band}`} style={{ marginLeft: 8, fontSize: 10 }}>{v4Band}</span>}
                     <span className="dim" style={{ marginLeft: 6 }}>(current standard)</span></>
                 : "—"}
             </td></tr>
             <tr><td>CVSS v3.1 base</td><td>
-              {v31Base > 0
+              {v31Base != null
                 ? <>{v31Base.toFixed(1)}
-                    <span className={`sev-pill sev-${cvssBand(v31Base)}`} style={{ marginLeft: 8, fontSize: 10 }}>{cvssBand(v31Base)}</span>
+                    {cvssBand(v31Base) && <span className={`sev-pill sev-${cvssBand(v31Base)}`} style={{ marginLeft: 8, fontSize: 10 }}>{cvssBand(v31Base)}</span>}
                     <span className="dim" style={{ marginLeft: 6 }}>
                       {Number(f.predicted_cvss_score) > 0 ? "(calibrated, sets the badge)" : "(typical for class)"}
                     </span></>

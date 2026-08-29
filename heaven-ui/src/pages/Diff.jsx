@@ -205,7 +205,7 @@ function FindingBucket({ title, rows, dim, onOpen }) {
               <td style={{ color: sevColor(r.severity), fontWeight: 600 }}>{r.severity}</td>
               <td><code>{r.vuln_type}</code></td>
               <td style={{ wordBreak: "break-all" }}>{r.target}</td>
-              <td className="num">{r.confidence?.toFixed?.(2) ?? "—"}</td>
+              <td className="num">{Number.isFinite(Number(r.confidence)) ? `${Math.round(Number(r.confidence) * 100)}%` : "—"}</td>
             </tr>
           ))}
         </tbody>

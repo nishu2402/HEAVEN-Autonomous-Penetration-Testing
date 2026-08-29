@@ -34,6 +34,9 @@ models/
 # NVD raw dataset — downloaded at training time, not needed in repo
 nvd_data/nvd_dataset.jsonl
 nvd_data/*.jsonl
+# NVD_Cybersecurity CSV for the description model — large, trained out-of-band
+nvd_data/*.csv
+data/nvd/*.csv
 
 # Lock files for uv (project uses pip + requirements.txt, not uv)
 uv.lock

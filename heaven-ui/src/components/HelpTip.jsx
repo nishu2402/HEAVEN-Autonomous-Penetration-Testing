@@ -20,7 +20,7 @@ import { createPortal } from "react-dom";
 
 // Canonical glossary — keep definitions short and operator-friendly.
 export const TERMS = {
-  cvss: "CVSS: Common Vulnerability Scoring System (0-10 severity). HEAVEN shows two standard base scores per finding, CVSS v4.0 (the current standard) and CVSS v3.1, each labelled with its own band. The severity badge follows the calibrated v3.1 score; v4.0 scores some low-impact classes higher by design, so its band can sit above the badge. Findings without a published score use HEAVEN's ML base-score predictor (R²=0.99).",
+  cvss: "CVSS: Common Vulnerability Scoring System (0-10 severity). HEAVEN shows two standard base scores per finding, CVSS v4.0 (the current standard) and CVSS v3.1, each labelled with its own band. The severity badge follows the calibrated v3.1 score; v4.0 scores some low-impact classes higher by design, so its band can sit above the badge. The badge is always reconciled to the exact CVSS-vector computation. Findings without a published score use HEAVEN's hybrid ML predictor as a ranking signal: a CVSS-vector model (R²=0.91) when metrics exist, else a TF-IDF text model trained on 316k real NVD CVEs (measured on the findings it actually scores: R²=0.63; it lands the right severity band 99% of the time within one level).",
   epss: "EPSS: Exploit Prediction Scoring System: the probability (0-1) a vulnerability will be exploited in the wild within ~30 days.",
   kev: "CISA KEV: the Known Exploited Vulnerabilities catalog. Membership means the vuln is actively being exploited right now.",
   severity: "Severity: the impact band (critical → high → medium → low → info), derived from the CVSS score.",

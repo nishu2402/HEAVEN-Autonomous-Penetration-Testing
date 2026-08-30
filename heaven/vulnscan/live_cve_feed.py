@@ -60,9 +60,12 @@ logger = get_logger("vulnscan.live_cve")
 _CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "cve"
 CIRCL_SEARCH_URL = "https://cve.circl.lu/api/search/{vendor}/{product}"
 _CACHE_TTL_S = 7 * 24 * 3600  # a CVE record is stable enough to cache for a week
-# Bump when the cached LiveCVE shape changes so old entries (e.g. pre-EPSS/
-# Exploit-DB enrichment) are treated as a cache miss instead of served stale.
-_CACHE_SCHEMA = "v2"
+# Bump when the cached LiveCVE shape OR the meaning of a field changes, so old
+# entries are treated as a cache miss instead of served stale. v3: version_confirmed
+# now reflects a genuine exact/lower-bounded NVD match (rangeless "before X"
+# matches are no longer auto-confirmed), so pre-v3 caches would keep serving the
+# old over-confident value for up to the TTL — invalidate them.
+_CACHE_SCHEMA = "v3"
 
 
 @dataclass
@@ -422,9 +425,13 @@ class LiveCVEFeed:
                     severity=r.severity, cvss=r.cvss_base, cvss_vector=r.cvss_vector,
                     cwe=r.cwe_id, published=r.published, references=r.references,
                     source="nvd", in_kev=r.in_kev,
-                    # NVD's virtualMatchString applies its own version-range logic,
-                    # so a returned record for a versioned CPE is version-confirmed.
-                    version_confirmed=bool(version),
+                    # NVD's virtualMatchString matches a versioned query against a
+                    # rangeless ``<X`` ceiling with no floor, so an ancient build
+                    # "matches" a CVE whose vulnerable code postdates it (ProFTPD
+                    # 1.3.1 vs a <1.3.10 mod_sftp CVE). Confirm only when NVD's
+                    # matched CPE node is exact-version or genuinely lower-bounded;
+                    # a rangeless match collapses into one honest "potential".
+                    version_confirmed=bool(version) and r.version_bounded,
                 ))
             return out
         finally:

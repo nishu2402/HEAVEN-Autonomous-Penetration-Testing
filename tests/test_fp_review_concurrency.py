@@ -115,6 +115,67 @@ def test_no_provider_is_a_noop(monkeypatch):
     assert all("llm_review_kept" not in f for f in findings)
 
 
+def test_no_provider_with_borderline_logs_actionable_hint(monkeypatch, caplog):
+    """When there's nothing to review with, say so once — actionably."""
+    fpr = _fpr()
+
+    class _Down:
+        available = True  # gateway.available; reviewer.available also needs pydantic
+
+        async def acomplete(self, req):  # pragma: no cover - unavailable path
+            raise AssertionError("should not be reached when unavailable")
+
+    down = _Down()
+    down.available = False
+    monkeypatch.setattr(fpr, "get_gateway", lambda: down)
+    findings = [_mk(0.5, i) for i in range(3)]  # all in the borderline band
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(fpr.review_borderline_findings(findings))
+
+    msg = " ".join(r.message for r in caplog.records)
+    assert "heaven ai setup" in msg
+    assert "3 borderline" in msg
+
+
+def test_no_provider_and_no_borderline_is_silent(monkeypatch, caplog):
+    """No borderline findings → nothing to review → no noise."""
+    fpr = _fpr()
+
+    class _Down:
+        available = False
+
+        async def acomplete(self, req):  # pragma: no cover
+            raise AssertionError("unavailable")
+
+    monkeypatch.setattr(fpr, "get_gateway", lambda: _Down())
+    findings = [_mk(0.95, 0), _mk(0.1, 1)]  # neither is in band
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(fpr.review_borderline_findings(findings))
+
+    assert not any("AI false-positive review" in r.message for r in caplog.records)
+
+
+def test_ratelimited_provider_logs_partial_skip_notice(monkeypatch, caplog):
+    """A quota/rate-limit breaker armed at the end → one actionable partial-skip note."""
+    fpr = _fpr()
+
+    class _RateLimited(_CountingGateway):
+        rate_limited = True  # breaker armed (as after exhausting a free tier)
+
+    gw = _RateLimited(fpr)
+    monkeypatch.setattr(fpr, "get_gateway", lambda: gw)
+    findings = [_mk(0.5, i) for i in range(4)]
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(fpr.review_borderline_findings(findings))
+
+    msg = " ".join(r.message for r in caplog.records)
+    assert "rate limit" in msg.lower()
+    assert "heaven ai setup" in msg
+
+
 def test_one_bad_review_does_not_sink_the_batch(monkeypatch):
     fpr = _fpr()
 

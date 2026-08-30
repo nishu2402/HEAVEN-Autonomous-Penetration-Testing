@@ -83,6 +83,66 @@ def test_search_uses_virtual_match_string():
     assert recs[0].severity == "critical"
 
 
+def test_version_bounded_distinguishes_rangeless_from_bounded():
+    """A rangeless ``versionEndExcluding`` (no floor) must NOT be marked
+    version_bounded for an ancient build, while an exact-version or lower-bounded
+    node must. This is the ProFTPD-1.3.1 case: NVD's server-side match returns a
+    <1.3.10 mod_sftp CVE for 1.3.1 (mod_sftp did not exist in 1.3.1), alongside a
+    genuinely-applicable CVE that enumerates 1.3.1 explicitly.
+    """
+    payload = {"vulnerabilities": [
+        {"cve": {  # rangeless: <1.3.10, no start bound -> POTENTIAL, not confirmed
+            "id": "CVE-2026-53994",
+            "descriptions": [{"lang": "en", "value": "ProFTPD mod_sftp heap overflow"}],
+            "metrics": {}, "weaknesses": [],
+            "configurations": [{"nodes": [{"cpeMatch": [{
+                "criteria": "cpe:2.3:a:proftpd:proftpd:*:*:*:*:*:*:*:*",
+                "versionEndExcluding": "1.3.10"}]}]}],
+        }},
+        {"cve": {  # exact-version applicability of 1.3.1 -> CONFIRMED
+            "id": "CVE-2011-4130",
+            "descriptions": [{"lang": "en", "value": "ProFTPD response pool UAF"}],
+            "metrics": {}, "weaknesses": [],
+            "configurations": [{"nodes": [{"cpeMatch": [
+                {"criteria": "cpe:2.3:a:proftpd:proftpd:*:*:*:*:*:*:*:*",
+                 "versionEndIncluding": "1.3.3"},
+                {"criteria": "cpe:2.3:a:proftpd:proftpd:1.3.1:*:*:*:*:*:*:*"}]}]}],
+        }},
+        {"cve": {  # bounded window that 1.3.1 satisfies -> CONFIRMED
+            "id": "CVE-2099-0001",
+            "descriptions": [{"lang": "en", "value": "bounded window"}],
+            "metrics": {}, "weaknesses": [],
+            "configurations": [{"nodes": [{"cpeMatch": [{
+                "criteria": "cpe:2.3:a:proftpd:proftpd:*:*:*:*:*:*:*:*",
+                "versionStartIncluding": "1.3.0", "versionEndExcluding": "1.3.5"}]}]}],
+        }},
+    ]}
+    client = NVDClient()
+    client._client = _FakeClient(_FakeResp(200, payload))
+    recs = asyncio.run(client.search_by_cpe(
+        "cpe:2.3:a:proftpd:proftpd:1.3.1:*:*:*:*:*:*:*"))
+    bounded = {r.cve_id: r.version_bounded for r in recs}
+    assert bounded["CVE-2026-53994"] is False   # rangeless -> potential
+    assert bounded["CVE-2011-4130"] is True      # exact 1.3.1 -> confirmed
+    assert bounded["CVE-2099-0001"] is True      # lower-bounded window -> confirmed
+
+
+def test_version_bounded_false_when_no_version_queried():
+    payload = {"vulnerabilities": [{"cve": {
+        "id": "CVE-2021-41773",
+        "descriptions": [{"lang": "en", "value": "x"}], "metrics": {}, "weaknesses": [],
+        "configurations": [{"nodes": [{"cpeMatch": [{
+            "criteria": "cpe:2.3:a:proftpd:proftpd:*:*:*:*:*:*:*:*",
+            "versionStartIncluding": "1.0.0", "versionEndExcluding": "9.9"}]}]}],
+    }}]}
+    client = NVDClient()
+    client._client = _FakeClient(_FakeResp(200, payload))
+    # wildcard version in the query -> cannot confirm any version
+    recs = asyncio.run(client.search_by_cpe(
+        "cpe:2.3:a:proftpd:proftpd:*:*:*:*:*:*:*:*"))
+    assert recs[0].version_bounded is False
+
+
 def test_search_404_with_key_flags_invalid_key():
     client = NVDClient()
     client.api_key = "bad-key"

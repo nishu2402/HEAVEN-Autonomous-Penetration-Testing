@@ -1,9 +1,11 @@
-# HEAVEN: DVWA Benchmark Results
+# HEAVEN: Benchmark Results
 
-Real, reproducible results from running HEAVEN against a **live
-[DVWA](https://github.com/digininja/DVWA)** target (the standard "Damn
-Vulnerable Web Application"). Every number below comes from an actual scan of a
-running container, not a mock or a unit test.
+Real, reproducible results from running HEAVEN against **live** targets: the
+standard **[DVWA](https://github.com/digininja/DVWA)** ("Damn Vulnerable Web
+Application") for the web tier, and **Metasploitable-2** for the network /
+service tier. Every number below comes from an actual scan of a running target,
+not a mock or a unit test, and each is scored through the same precision /
+recall / F1 metrics layer.
 
 > **How this was run:** DVWA (official multi-arch `ghcr.io/digininja/dvwa` image
 > with a MariaDB backend, run native so timing checks are not distorted by
@@ -61,6 +63,52 @@ This is a *controlled functional benchmark*, the target is a known, labelled
 surface, so it measures HEAVEN's end-to-end detection **and** attribution
 precisely and repeatably. It is not a claim about any live third-party app; the
 live-DVWA results below are the complement to it.
+
+---
+
+## Network / service tier: Metasploitable-2
+
+The benchmarks above score the **web** tier. HEAVEN also has a **network /
+service** benchmark that scores host:port findings (backdoors, service-CVE
+clusters, default credentials, cleartext protocols, end-of-life software)
+against a labelled ground truth (`tests/benchmarks/ground_truth/msf2.yaml`),
+through the **same precision / recall / F1 metrics layer** the web benchmarks
+use. The target is the canonical intentionally-vulnerable
+[Metasploitable-2](https://docs.rapid7.com/metasploit/metasploitable-2/) VM.
+
+The VM is not bundled. You point the benchmark at your own authorised lab host,
+so it stays opt-in and CI-safe (the metrics extension, the ground truth, and the
+matcher are still protected in CI by an always-on fixture replay that needs no
+VM):
+
+```bash
+HEAVEN_RUN_BENCHMARKS=1 HEAVEN_MSF2_TARGET=<your-lab-ip> \
+  ./venv/bin/python -m pytest tests/benchmarks/test_msf2_baseline.py -v -s
+```
+
+Measured live against a running Metasploitable-2 host:
+
+| Metric | Result |
+|---|---|
+| Precision | **100%**: 47 / 47 reported findings map to a labelled entry (0 false positives) |
+| Recall (signature vulns) | **100%**: 11 / 11 must-find criticals detected |
+| F1 | **100%** |
+| Signature vulns missed | **0** |
+| Scan duration | ~159 s (network mode, explicit service port set) |
+
+The eleven detection-required signature findings are the ones a competent
+network assessment must surface: the **vsftpd 2.3.4 backdoor** (CVE-2011-2523),
+**Samba usermap RCE** (CVE-2007-2447), **distccd RCE** (CVE-2004-2687), the
+**ingreslock** root bind shell, **dRuby** and **Java RMI** exposures, the
+world-readable **NFS** export, and default credentials on **Tomcat manager**,
+**PostgreSQL**, **VNC**, and **SSH**. The remaining labelled entries (service-CVE
+clusters, cleartext r-services, exposed databases, EOL software, SMB weaknesses)
+are the real supporting findings, which is what lets precision be measured
+honestly rather than by ignoring everything the scan legitimately reports.
+
+Like the web tier, every finding comes from a deterministic scanner observing
+the service, not from an LLM. Version-unconfirmed service CVEs are folded into
+one honest low-confidence roll-up rather than asserted as confirmed.
 
 ---
 

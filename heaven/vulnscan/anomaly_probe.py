@@ -1199,6 +1199,7 @@ class WebAnomalyProbe:
                     ) as resp:
                         body = await resp.text()
                         location = resp.headers.get("Location", "")
+                        resp_status = resp.status
                 except Exception:
                     logger.debug("suppressed non-fatal exception", exc_info=True)
                     continue
@@ -1210,7 +1211,19 @@ class WebAnomalyProbe:
                 in_location = canary in location
                 in_url_context = (f"//{canary}" in body
                                   or f'="{canary}' in body or f"='{canary}" in body)
-                if in_location or in_url_context:
+                # A path-normalization 3xx (Apache mod_dir trailing slash) reflects
+                # the request Host by server default — in BOTH the Location header
+                # AND the auto-generated "moved here" body href — but is NOT an
+                # exploitable injection: the requester controls its own Host and the
+                # target is just the path it asked for. This was the sole DVWA-
+                # benchmark host-header FP (a 301 to /config/). Suppress the whole
+                # response when it is a normalization redirect; a genuine injection
+                # is a body sink on a real page or an app redirect to a DIFFERENT
+                # location, neither of which is a normalization redirect.
+                from heaven.vulnscan.web_fuzzer import _is_path_normalization_redirect
+                is_norm = _is_path_normalization_redirect(url, location, resp_status)
+                in_location = in_location and not is_norm
+                if (in_location or in_url_context) and not is_norm:
                     candidates.append(AnomalyCandidate(
                         target=url, category="host_header_injection",
                         confidence=0.85, severity="medium",

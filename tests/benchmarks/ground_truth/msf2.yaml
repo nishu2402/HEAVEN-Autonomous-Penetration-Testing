@@ -1,0 +1,406 @@
+# Ground truth for HEAVEN's network / service-tier benchmark against
+# Metasploitable-2 — the canonical intentionally-vulnerable Linux VM
+# (Rapid7). This is the service-tier analogue of dvwa.yaml: it scores
+# recall / precision on host:port service findings (backdoors, RCE service
+# CVEs, default credentials, cleartext protocols, EOL software) instead of
+# web routes.
+#
+# tier: network → the metrics matcher keys on (service port, category), not
+# on a URL path. A null `port` marks a host-level fact (SMB, host banner)
+# matched on category alone. `service` and `cve` fields are human
+# documentation; the loader ignores them.
+#
+# Run it live (the VM is NOT bundled — you point it at your own authorised lab):
+#   HEAVEN_RUN_BENCHMARKS=1 HEAVEN_MSF2_TARGET=192.168.0.162 \
+#     ./venv/bin/python -m pytest tests/benchmarks/test_msf2_baseline.py -v -s
+#
+# detection_required entries are the signature Metasploitable-2 findings a
+# competent network assessment MUST surface — the recall floor is measured on
+# these. The remaining entries are real supporting findings (labelled so a
+# genuine detection is scored as a true positive, not a false positive), which
+# is what lets precision be measured honestly.
+
+target_app: metasploitable-2
+version: "2.0.0"
+tier: network
+# base_url is the target host; the harness overrides it from HEAVEN_MSF2_TARGET.
+base_url: "192.168.0.162"
+
+vulnerabilities:
+  # ── Signature critical / high findings (detection_required) ─────────────
+  - id: msf2-vsftpd-backdoor
+    service: vsftpd 2.3.4
+    port: 21
+    category: vulnerable_service
+    cve: CVE-2011-2523
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-506
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "vsftpd 2.3.4 smiley-face backdoor — unauthenticated root shell on :6200."
+
+  - id: msf2-samba-usermap-rce
+    service: Samba 3.x (smbd)
+    port: 139
+    category: vulnerable_service
+    cve: CVE-2007-2447
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-78
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Samba username map script command execution — unauthenticated RCE."
+
+  - id: msf2-distccd-rce
+    service: distccd
+    port: 3632
+    category: vulnerable_service
+    cve: CVE-2004-2687
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-78
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "distccd accepts and runs arbitrary compile jobs — unauthenticated RCE."
+
+  - id: msf2-ingreslock-backdoor
+    service: ingreslock bind shell
+    port: 1524
+    category: backdoor
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-489
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Root bind shell listening on 1524 — connect for an unauthenticated shell."
+
+  - id: msf2-druby-rce
+    service: distributed Ruby (dRuby)
+    port: 8787
+    category: exposed_service
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-306
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "dRuby remote method server exposed — unauthenticated RCE via marshalled objects."
+
+  - id: msf2-nfs-world-export
+    service: NFS (rpc.mountd)
+    port: 2049
+    category: exposed_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-732
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Root filesystem exported to the world (no_root_squash) — full read/write."
+
+  - id: msf2-java-rmi-exposed
+    service: Java RMI registry
+    port: 1099
+    category: exposed_service
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-306
+    severity: high
+    difficulty: low
+    detection_required: true
+    notes: "RMI registry allows remote class loading — unauthenticated RCE."
+
+  - id: msf2-tomcat-manager-default-creds
+    service: Apache Tomcat manager
+    port: 8180
+    category: weak_auth
+    owasp: "A07:2025-Authentication-Failures"
+    cwe: CWE-1392
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Tomcat /manager accepts default credentials — WAR deploy → RCE."
+
+  - id: msf2-postgres-default-creds
+    service: PostgreSQL 8.3
+    port: 5432
+    category: weak_auth
+    owasp: "A07:2025-Authentication-Failures"
+    cwe: CWE-1392
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "postgres:postgres default credentials accepted."
+
+  - id: msf2-vnc-default-password
+    service: VNC
+    port: 5900
+    category: weak_auth
+    owasp: "A07:2025-Authentication-Failures"
+    cwe: CWE-1392
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "VNC accepts the default 'password' — full desktop access."
+
+  - id: msf2-ssh-default-creds
+    service: OpenSSH
+    port: 22
+    category: weak_auth
+    owasp: "A07:2025-Authentication-Failures"
+    cwe: CWE-1392
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "Default account credentials (e.g. user:user, msfadmin:msfadmin) accepted over SSH."
+
+  # ── Supporting real findings (labelled; not required for the recall floor) ─
+  # Service CVE clusters. HEAVEN emits one vulnerable_service finding per
+  # matched CVE on the port; one GT entry credits the whole cluster on that port.
+  - id: msf2-proftpd-cve-cluster
+    service: ProFTPD 1.3.1
+    port: 2121
+    category: vulnerable_service
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1395
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "ProFTPD 1.3.1 known-CVE cluster (mod_sql, mod_tls, directory traversal, etc.)."
+
+  - id: msf2-openssh-cve-cluster
+    service: OpenSSH 4.7p1
+    port: 22
+    category: vulnerable_service
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1395
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "OpenSSH known-CVE cluster (scp/ProxyCommand injection, username enumeration)."
+
+  - id: msf2-apache-httpd-cve-cluster
+    service: Apache httpd 2.2.8
+    port: 80
+    category: vulnerable_service
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1395
+    severity: medium
+    difficulty: low
+    detection_required: false
+    notes: "Apache httpd 2.2.8 known-CVE cluster (mod_mime overread, Optionsbleed)."
+
+  - id: msf2-mysql-cve-cluster
+    service: MySQL 5.0.51a
+    port: 3306
+    category: vulnerable_service
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1395
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "MySQL 5.0.51a known-CVE cluster (auth-bypass timing, group-replication DoS)."
+
+  # Cleartext-credential protocols.
+  - id: msf2-ftp-cleartext-21
+    service: FTP
+    port: 21
+    category: cleartext_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-319
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "FTP transmits credentials in cleartext."
+
+  - id: msf2-ftp-cleartext-2121
+    service: FTP (ProFTPD)
+    port: 2121
+    category: cleartext_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-319
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "Second FTP listener (ProFTPD) in cleartext."
+
+  - id: msf2-telnet-cleartext
+    service: Telnet
+    port: 23
+    category: cleartext_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-319
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "Telnet transmits credentials in cleartext."
+
+  - id: msf2-rexec-cleartext
+    service: rexec
+    port: 512
+    category: cleartext_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-319
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "BSD r-service rexec — cleartext, trust-based auth."
+
+  - id: msf2-rlogin-cleartext
+    service: rlogin
+    port: 513
+    category: cleartext_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-319
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "BSD r-service rlogin — cleartext, trust-based auth."
+
+  - id: msf2-rsh-cleartext
+    service: rsh
+    port: 514
+    category: cleartext_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-319
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "BSD r-service rsh — cleartext, trust-based auth."
+
+  # Exposed databases.
+  - id: msf2-mysql-exposed
+    service: MySQL
+    port: 3306
+    category: exposed_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-668
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "MySQL bound to a public interface."
+
+  - id: msf2-postgres-exposed
+    service: PostgreSQL
+    port: 5432
+    category: exposed_service
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-668
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "PostgreSQL bound to a public interface."
+
+  # End-of-life / unsupported software.
+  - id: msf2-eol-mysql
+    service: MySQL 5.0.51
+    port: 3306
+    category: eol_software
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1104
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "MySQL 5.0 is long past end of life."
+
+  - id: msf2-eol-postgres
+    service: PostgreSQL 8.3.0
+    port: 5432
+    category: eol_software
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1104
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "PostgreSQL 8.3 is long past end of life."
+
+  - id: msf2-eol-bind
+    service: ISC BIND 9.4.2
+    port: 53
+    category: eol_software
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1104
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "ISC BIND 9.4.2 is long past end of life."
+
+  - id: msf2-eol-apache
+    service: Apache HTTP Server 2.2.8
+    port: 80
+    category: eol_software
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1104
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "Apache httpd 2.2.8 is long past end of life."
+
+  - id: msf2-eol-jserv
+    service: Apache Jserv 1.3 (AJP)
+    port: 8009
+    category: eol_software
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1104
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "Apache Jserv / AJP 1.3 connector is long past end of life."
+
+  # Anonymous access.
+  - id: msf2-anonymous-ftp
+    service: FTP
+    port: 21
+    category: anonymous_access
+    owasp: "A07:2025-Authentication-Failures"
+    cwe: CWE-1392
+    severity: medium
+    difficulty: low
+    detection_required: false
+    notes: "Anonymous FTP login allowed."
+
+  # ── Host-level facts (no distinct port; matched on category) ────────────
+  - id: msf2-smb-signing-not-required
+    service: Samba (SMB)
+    port: null
+    category: smb_signing
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-287
+    severity: high
+    difficulty: low
+    detection_required: false
+    notes: "SMB signing not required — NTLM relay exposure."
+
+  - id: msf2-smb-null-session
+    service: Samba (SMB)
+    port: null
+    category: smb_null_session
+    owasp: "A02:2025-Security-Misconfiguration"
+    cwe: CWE-306
+    severity: medium
+    difficulty: low
+    detection_required: false
+    notes: "SMB null session allows share / user enumeration."
+
+  - id: msf2-smb-host-information
+    service: Samba (SMB)
+    port: null
+    category: info_disclosure
+    owasp: "A01:2025-Broken-Access-Control"
+    cwe: CWE-200
+    severity: info
+    difficulty: low
+    detection_required: false
+    notes: "SMB host / domain banner disclosure."
+
+  - id: msf2-potential-service-cves
+    service: various (version-unconfirmed)
+    port: null
+    category: vulnerable_service
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-1395
+    severity: low
+    difficulty: low
+    detection_required: false
+    notes: >
+      Host-level roll-up of version-unconfirmed service CVEs (Postfix, ProFTPD,
+      VNC, UnrealIRCd) — honest low-confidence candidates where the banner did
+      not expose an exact version to bound the match.

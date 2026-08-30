@@ -551,6 +551,12 @@ def _ratelimit_cooldown_s() -> float:
 # HEAVEN_LLM_OVERLOAD_COOLDOWN=0 disables this breaker.
 DEFAULT_OVERLOAD_COOLDOWN_S = 8.0
 MAX_OVERLOAD_COOLDOWN_S = 30.0
+# How long after a 429 a following overload/deadline is treated as the SAME
+# rate-limit (and so arms the long cooldown, not the short overload one). A
+# rate-limited free tier commonly serves slow 504/DEADLINE_EXCEEDED for the
+# concurrent calls in a bulk pass; without this a scan burns minutes round-
+# tripping those timeouts (measured: 179s of AI-triage against a throttled key).
+RATELIMIT_STICKY_WINDOW_S = 90.0
 
 
 def _overload_cooldown_s() -> float:
@@ -753,6 +759,13 @@ class LLMGateway:
         self._ratelimited_until: float = 0.0
         self._ratelimit_reason: str = ""
         self._ratelimit_lock = threading.Lock()
+        # Monotonic time of the last genuine 429/quota error. A free-tier provider
+        # that is rate-limiting often ALSO returns slow 504/DEADLINE_EXCEEDED for
+        # concurrent calls; those look like a transient overload (short 8s cooldown)
+        # but are really the same rate-limit. If a deadline/overload lands soon
+        # after a 429, it is escalated to the long rate-limit cooldown so a bulk
+        # pass stops round-tripping slow timeouts (see _arm_overload_cooldown).
+        self._last_ratelimit_at: float = 0.0
 
         # Hybrid fallback: if the PRIMARY provider is unavailable or returns
         # nothing, transparently retry once on HEAVEN_LLM_FALLBACK_PROVIDER
@@ -777,6 +790,14 @@ class LLMGateway:
     @property
     def available(self) -> bool:
         return self._client is not None
+
+    @property
+    def rate_limited(self) -> bool:
+        """True while the provider rate-limit / overload breaker is armed, i.e.
+        calls are currently short-circuited to the non-LLM fallback. Lets a caller
+        surface an actionable operator notice ("switch to a paid key / local
+        model") instead of silently degrading a whole scan's AI review."""
+        return self._ratelimit_gate() is not None
 
     # ── client init per provider ──────────────────────────────────────────
 
@@ -1380,7 +1401,8 @@ class LLMGateway:
             # Guarded: a schema the SDK's converter can't represent degrades to
             # the hint-only path (the schema hint is already in `system`).
             schema = req.response_schema
-            if schema is not None and hasattr(schema, "model_json_schema"):
+            if (schema is not None and hasattr(schema, "model_json_schema")
+                    and getattr(self, "_gemini_native_schema_ok", True)):
                 try:
                     types.GenerateContentConfig(
                         response_mime_type="application/json",
@@ -1403,19 +1425,35 @@ class LLMGateway:
                 result = self._client.models.generate_content(
                     model=self.model, contents=prompt, config=config,
                 )
-            except Exception:
-                # A few models (e.g. gemini-2.5-pro) reject a zero thinking
-                # budget. Retry with thinking left on but a larger budget so its
-                # reasoning tokens don't starve the visible answer. Keep the
-                # structured-output request (schema) if one was set.
+            except Exception as first_err:
+                # Two distinct first-call failures are recoverable on one retry:
+                #  1. A few models (e.g. gemini-2.5-pro) reject a zero thinking
+                #     budget — retry with thinking on and a larger budget.
+                #  2. The Gemini *Developer* API rejects a response_schema that
+                #     carries `additionalProperties` (Pydantic v2 emits it for
+                #     dict / model-with-extra fields): "additionalProperties is
+                #     only supported in Gemini Enterprise Agent Platform mode".
+                #     Retrying with the SAME schema just fails again, so drop to
+                #     the JSON-hint path (the schema hint is already in `system`)
+                #     and let `_parse_structured` recover the object.
+                msg = str(first_err).lower()
+                schema_rejected = ("additionalproperties" in msg
+                                   or "response_schema" in msg
+                                   or "response schema" in msg
+                                   or "not supported in the schema" in msg)
                 retry_kwargs: dict[str, Any] = dict(
                     max_output_tokens=max(req.max_tokens, 2048) + 1024,
                     temperature=req.temperature,
                     system_instruction=system or None,
                 )
-                if base_kwargs.get("response_schema") is not None:
+                if base_kwargs.get("response_schema") is not None and not schema_rejected:
                     retry_kwargs["response_mime_type"] = "application/json"
                     retry_kwargs["response_schema"] = base_kwargs["response_schema"]
+                elif schema_rejected:
+                    # This endpoint (Gemini Developer API) won't take our schema —
+                    # stop attempting native structured output for the rest of the
+                    # session so later calls go straight to the JSON-hint path.
+                    self._gemini_native_schema_ok = False
                 config = types.GenerateContentConfig(**retry_kwargs)
                 result = self._client.models.generate_content(
                     model=self.model, contents=prompt, config=config,
@@ -1674,6 +1712,9 @@ class LLMGateway:
         always clamped to MAX_RATELIMIT_COOLDOWN_S. HEAVEN_LLM_RATELIMIT_COOLDOWN=0
         disables the breaker."""
         cooldown = _ratelimit_cooldown_s()
+        # Record the 429 timestamp even when the breaker is disabled, so a
+        # following slow deadline is still recognised as continued rate-limiting.
+        self._last_ratelimit_at = time.monotonic()
         if cooldown <= 0.0:
             return
         hint = _parse_retry_after(str(exc))
@@ -1691,6 +1732,14 @@ class LLMGateway:
             return
         # A quota 429 cooldown is longer and more authoritative — don't stomp it.
         if self._ratelimit_gate() is not None:
+            return
+        # A deadline/overload landing soon after a real 429 is the same throttled
+        # free tier serving slow 504s to the bulk pass, not a one-off blip. Escalate
+        # to the long rate-limit cooldown so the rest of the pass short-circuits
+        # instead of round-tripping ~14 more multi-second timeouts.
+        last_429 = getattr(self, "_last_ratelimit_at", 0.0)
+        if last_429 > 0.0 and (time.monotonic() - last_429) <= RATELIMIT_STICKY_WINDOW_S:
+            self._arm_ratelimit_cooldown(exc)
             return
         hint = _parse_retry_after(str(exc))
         window = max(1.0, min(hint if hint is not None else cooldown, MAX_OVERLOAD_COOLDOWN_S))

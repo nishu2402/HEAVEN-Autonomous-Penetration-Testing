@@ -33,6 +33,7 @@ import pytest
 
 from heaven.ai.llm_gateway import (
     MAX_OVERLOAD_COOLDOWN_S,
+    RATELIMIT_STICKY_WINDOW_S,
     LLMGateway,
     LLMRequest,
     _parse_retry_after,
@@ -162,6 +163,44 @@ def test_persistent_overload_arms_short_cooldown(monkeypatch) -> None:
     assert gw._ratelimit_gate() is not None
 
 
+def test_deadline_soon_after_429_escalates_to_long_cooldown(monkeypatch) -> None:
+    """A 504/DEADLINE_EXCEEDED landing soon after a real 429 is the SAME throttled
+    free tier serving slow deadlines to a bulk pass — not a one-off blip. It must
+    arm the LONG rate-limit cooldown (default 20s) so the rest of the pass short-
+    circuits, instead of the short 8s overload window that keeps expiring and lets
+    each slow timeout round-trip (the measured 179s AI-triage burn)."""
+    monkeypatch.delenv("HEAVEN_LLM_RATELIMIT_COOLDOWN", raising=False)
+    monkeypatch.delenv("HEAVEN_LLM_OVERLOAD_COOLDOWN", raising=False)
+    gw = _gw()
+    gw._last_ratelimit_at = 0.0
+    # 1) a genuine 429 records the rate-limit timestamp and arms the long cooldown
+    gw._dispatch = _raise("429 RESOURCE_EXHAUSTED. Quota exceeded")  # type: ignore[assignment]
+    gw.complete(LLMRequest(prompt="a"))
+    assert gw._last_ratelimit_at > 0.0
+    # 2) that cooldown elapses, but the 429 was moments ago (inside the sticky window)
+    gw._ratelimited_until = time.monotonic() - 1.0
+    # 3) a slow 504 now lands → escalate to the long (~20s) window, not the 8s one
+    gw._dispatch = _raise("504 DEADLINE_EXCEEDED")  # type: ignore[assignment]
+    gw.complete(LLMRequest(prompt="b"))
+    remaining = gw._ratelimited_until - time.monotonic()
+    assert remaining > 15.0  # escalated to the ~20s rate-limit window, not the 8s one
+    assert gw._ratelimit_gate() is not None
+
+
+def test_deadline_without_recent_429_stays_short(monkeypatch) -> None:
+    """A 504 with NO recent 429 is a real transient overload — it must keep the
+    short 8s cooldown, not escalate. Guards the escalation from over-firing."""
+    monkeypatch.delenv("HEAVEN_LLM_OVERLOAD_COOLDOWN", raising=False)
+    gw = _gw()
+    # a 429 far in the past (older than the sticky window) must NOT escalate
+    gw._last_ratelimit_at = time.monotonic() - (RATELIMIT_STICKY_WINDOW_S + 30.0)
+    gw._dispatch = _raise("504 DEADLINE_EXCEEDED")  # type: ignore[assignment]
+    gw.complete(LLMRequest(prompt="a"))
+    remaining = gw._ratelimited_until - time.monotonic()
+    assert 0.0 < remaining <= MAX_OVERLOAD_COOLDOWN_S  # short overload window only
+    assert remaining < 15.0
+
+
 def test_overload_retries_are_capped() -> None:
     """An overload/deadline is retried at most ONCE (2 dispatches), not the full
     budget — an interactive caller fails fast instead of waiting out 3x the timeout."""
@@ -212,6 +251,18 @@ def test_generic_transient_uses_full_retry_budget() -> None:
     gw.complete(LLMRequest(prompt="a"))
     assert calls["n"] == 3, "generic transient error keeps the full 3-attempt budget"
     assert gw._ratelimited_until == 0.0, "not an overload — no cooldown"
+
+
+def test_rate_limited_property_reflects_breaker_state() -> None:
+    """The public ``rate_limited`` property mirrors the internal breaker gate so a
+    caller (e.g. the FP-review pass) can surface an actionable notice."""
+    gw = _gw()
+    assert gw.rate_limited is False              # nothing armed
+    gw._dispatch = _raise("429 RESOURCE_EXHAUSTED; retry in 20s")  # type: ignore[assignment]
+    gw.complete(LLMRequest(prompt="a"))          # arms the cooldown
+    assert gw.rate_limited is True
+    gw._ratelimited_until = time.monotonic() - 1.0  # let it expire
+    assert gw.rate_limited is False
 
 
 def test_auth_error_does_not_arm_cooldown() -> None:

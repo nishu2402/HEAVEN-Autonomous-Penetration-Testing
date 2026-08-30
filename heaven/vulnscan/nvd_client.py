@@ -49,6 +49,12 @@ class CVERecord:
     references: list[str] = field(default_factory=list)
     cpe_matches: list[str] = field(default_factory=list)
     remediation: str = ""
+    # True only when the queried version matches an EXACT-version CPE or a
+    # lower-BOUNDED window for the product. A rangeless upper-bound-only match
+    # (``versionEndExcluding`` with no start) leaves this False: NVD lists no
+    # introduced-version, so an ancient build (ProFTPD 1.3.1 vs a ``<1.3.10``
+    # mod_sftp CVE) cannot be *confirmed* affected — only flagged "potential".
+    version_bounded: bool = False
 
 
 class NVDClient:
@@ -103,6 +109,15 @@ class NVDClient:
         cpe = _normalize_cpe(cpe)
         if cpe in self._cache:
             return self._cache[cpe]
+
+        # The product token + concrete version being queried, so each returned
+        # CVE can be classed as a genuine (exact/bounded) match vs a rangeless
+        # upper-bound-only one — see _match_is_bounded.
+        _cpe_parts = cpe.split(":")
+        q_product = _cpe_parts[4] if len(_cpe_parts) > 4 else ""
+        q_version = _cpe_parts[5] if len(_cpe_parts) > 5 else ""
+        if q_version in ("*", "-"):
+            q_version = ""
 
         await self._rate_wait()
         client = await self._get_client()
@@ -184,6 +199,8 @@ class NVDClient:
                     in_kev=cve_id in self._kev_cves,
                     published=cve_data.get("published", ""),
                     references=[r.get("url", "") for r in cve_data.get("references", [])[:5]],
+                    version_bounded=_match_is_bounded(
+                        q_version, q_product, cve_data.get("configurations", [])),
                 )
                 records.append(record)
 
@@ -313,6 +330,57 @@ async def lookup_vulnerabilities(scan_id: str = "", cpes: Optional[list[str]] = 
     await client.close()
     stats["total_cves"] = len(all_vulns)
     return {**stats, "vulnerabilities": all_vulns}
+
+
+def _iter_cpe_matches(configurations: list) -> "list[dict]":
+    """Flatten every ``cpeMatch`` entry across an NVD 2.0 ``configurations`` block
+    (top-level nodes and any nested ``children``)."""
+    out: list[dict] = []
+    for cfg in configurations or []:
+        for node in cfg.get("nodes", []) or []:
+            out.extend(node.get("cpeMatch", []) or [])
+            for child in node.get("children", []) or []:
+                out.extend(child.get("cpeMatch", []) or [])
+    return out
+
+
+def _match_is_bounded(query_version: str, product_token: str,
+                      configurations: list) -> bool:
+    """True when *query_version* matches an EXACT-version CPE or a lower-bounded
+    window for *product_token* in this CVE's applicability config.
+
+    NVD's ``virtualMatchString`` matches a versioned query against a rangeless
+    ``versionEndExcluding`` ceiling with **no** ``versionStartIncluding`` floor,
+    so every version below the fix "matches" — even one released years before the
+    vulnerable code existed (ProFTPD 1.3.1 vs a ``<1.3.10`` mod_sftp CVE, OpenSSH
+    4.7 vs a ``<9.6`` CVE). Without a floor the affected set is genuinely open
+    below, so such a match is treated as *potential*, not *confirmed*. A node that
+    pins an exact version, or carries a real lower bound the version satisfies
+    jointly with its upper bound, is a genuine confirmation.
+    """
+    if not query_version:
+        return False
+    from heaven.vulnscan.cve_mapper import _parse_ver  # lazy: avoid import cycle
+    qv = _parse_ver(query_version)
+    for m in _iter_cpe_matches(configurations):
+        parts = (m.get("criteria", "") or "").split(":")
+        if len(parts) < 6 or parts[4] != product_token:
+            continue
+        cpe_ver = parts[5]
+        if cpe_ver not in ("*", "-", ""):
+            if _parse_ver(cpe_ver) == qv:      # exact-version applicability
+                return True
+            continue
+        vsi, vse = m.get("versionStartIncluding"), m.get("versionStartExcluding")
+        if not (vsi or vse):                   # rangeless / upper-bound-only
+            continue
+        lo_ok = qv >= _parse_ver(vsi) if vsi else qv > _parse_ver(vse)
+        vei, vee = m.get("versionEndIncluding"), m.get("versionEndExcluding")
+        hi_ok = (qv <= _parse_ver(vei) if vei
+                 else qv < _parse_ver(vee) if vee else True)
+        if lo_ok and hi_ok:
+            return True
+    return False
 
 
 def _normalize_cpe(cpe: str) -> str:

@@ -203,6 +203,20 @@ class RaceConditionDetector:
         if data is None:
             data = {}
 
+        # A TOCTOU race needs a STATE-CHANGING target. Read-only diagnostic pages
+        # (phpinfo, server-status/info, opcache/apc stats) have no state to race,
+        # but their per-request resource counters (memory allocated, uptime,
+        # opcache hits) diverge under concurrent load while staying stable in a
+        # short sequential baseline — which used to slip past the guard below as a
+        # bogus low "race" (seen live on DVWA's /?phpinfo=1). These endpoints can
+        # never be a genuine race, so skip them outright.
+        _READONLY_MARKERS = ("phpinfo", "server-status", "server-info",
+                             "nginx_status", "status?full", "opcache", "apc.php",
+                             "info.php", "/status", "/metrics", "/health")
+        u = url.lower()
+        if any(m in u for m in _READONLY_MARKERS):
+            return None
+
         async def send_request():
             try:
                 async with session.request(method, url, data=data,
@@ -253,10 +267,14 @@ class RaceConditionDetector:
             # a race. Only divergence that appears under concurrency but NOT when
             # the same request is serialised points at a genuine TOCTOU.
             seq_hashes = set()
-            for _ in range(2):
+            for _ in range(4):
                 r = await send_request()
                 if r and 200 <= r["status"] < 300:
                     seq_hashes.add(r["body_hash"])
+            # A genuinely deterministic state-change endpoint returns ONE body
+            # across all serialized samples. More samples (4) catch a page whose
+            # divergence is just per-request nonces/timestamps/counters that a
+            # 2-sample baseline happened to draw identical.
             if len(seq_hashes) != 1:
                 return None   # inherently dynamic response, not a race signal
             return AdvancedFinding(
@@ -665,6 +683,9 @@ class CredentialSprayer:
             ("user", "user"), ("test", "test"), ("guest", "guest"),
             ("ubuntu", "ubuntu"), ("pi", "raspberry"), ("vagrant", "vagrant"),
             ("deploy", "deploy"), ("ansible", "ansible"),
+            # Widely-shipped appliance / training-VM defaults (msfadmin has sudo,
+            # so it is a root-equivalent hit, not just a shell).
+            ("msfadmin", "msfadmin"), ("administrator", "administrator"),
         ]
 
         for username, password in ssh_creds:

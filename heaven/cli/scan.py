@@ -426,7 +426,15 @@ def scan(
             task = p.current_task or ""
             print(f"{ts}  [{phase:14}] {pct:5.1f}%  {task}", flush=True)
 
+        from heaven.engagement import is_attack_plan_artifact
+
         def _tail_finding(f: dict) -> None:
+            # Attack-chain planner steps (bare MITRE technique ids, conf 0.00) are
+            # hypotheses, not detections — the store drops them via the same
+            # predicate. Skip them here too so the live tail and its running counts
+            # match what actually persists (no "[high] T1083 conf=0.00" noise).
+            if is_attack_plan_artifact(f):
+                return
             ts = _time.strftime("%H:%M:%S")
             sev = (f.get("severity") or "info").lower()
             tail_sev_counts[sev] = tail_sev_counts.get(sev, 0) + 1
@@ -614,7 +622,14 @@ def scan(
                 ts = _time.strftime("%H:%M:%S")
                 log_lines.append(f"{ts}  ✓ {task_name}")
 
+        from heaven.engagement import is_attack_plan_artifact
+
         def finding_callback(finding: dict) -> None:
+            # Skip attack-chain planner hypotheses (bare MITRE technique ids,
+            # conf 0.00) so the HUD's live severity counts match the persisted
+            # findings the store keeps — the store drops these via the same check.
+            if is_attack_plan_artifact(finding):
+                return
             findings_log.append(finding)
             sev = (finding.get("severity") or "info").lower()
             if sev in sev_counts:

@@ -175,3 +175,35 @@ def test_cli_asset_path_overlays_operator_labels():
     assert device_name_label(after) == "Reception PC (operator-set)"
     assert after["device_type"] == "Workstation"
     assert after["device_type_source"] == "manual"
+
+
+# ── EOL product precision: Apache HTTP Server vs the other "Apache" products ──
+def test_apache_httpd_eol_excludes_tomcat_and_ajp():
+    """Regression: the Apache-httpd EOL rule matched a bare "apache", so
+    Metasploitable's Tomcat (:8180, Coyote/1.1) and AJP (:8009, Jserv v1.3) were
+    flagged "Apache httpd 2.2" EOL off their PROTOCOL version (1.1/1.3 < 2.4) —
+    two false positives with a garbled doubled-version title. The rule now
+    requires an httpd context; only the real Apache HTTP Server fires, cleanly."""
+    from heaven.vulnscan.eol_scanner import _product_findings
+
+    real = _product_findings("h:80", "Apache httpd", "2.2.8", "Apache/2.2.8 (Ubuntu)")
+    titles = [f["title"] for f in real]
+    assert titles == ["Unsupported / End-of-Life Software: Apache HTTP Server 2.2.8"]
+
+    # Tomcat / AJP / Coyote must NOT be flagged as Apache httpd off a protocol ver.
+    for prod, ver, banner in [
+        ("Apache Jserv", "1.3", "Apache Jserv (Protocol v1.3)"),
+        ("Apache Tomcat/Coyote JSP engine", "1.1", "Apache-Coyote/1.1"),
+    ]:
+        out = _product_findings("h:x", prod, ver, banner)
+        assert not any("Apache" in f["title"] for f in out), (prod, out)
+
+
+def test_endoflife_slug_excludes_tomcat_and_ajp_from_apache():
+    """The dynamic endoflife.date path had the same bug: "apache" alone mapped
+    Apache Jserv (AJP) / Tomcat to the Apache HTTP Server feed, flagging their
+    PROTOCOL version EOL ("Apache Jserv 1.3"). httpd context is now required."""
+    from heaven.vulnscan.eol_scanner import _endoflife_slug
+    assert _endoflife_slug("Apache httpd", "Apache/2.2.8") == "apache"
+    assert _endoflife_slug("Apache Jserv", "Apache Jserv (Protocol v1.3)") == ""
+    assert _endoflife_slug("Apache Tomcat/Coyote", "Apache-Coyote/1.1") == "tomcat"

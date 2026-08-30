@@ -1166,15 +1166,30 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                         cand = sorted({lc.cve_id for lc in unconfirmed})
                         examples = [lc.cve_id for lc in sorted(
                             unconfirmed, key=lambda x: x.cvss, reverse=True)[:6]]
-                        all_vulns.append({
-                            "host": host_name,
-                            "port": port_info.get("port", 0),
-                            "target": host_name,
-                            "vuln_type": "potential_vulnerable_service",
-                            "title": f"Potential vulnerable service: {label} "
-                                     f"(version unconfirmed)",
-                            "severity": "low",
-                            "description": (
+                        # Two distinct "unconfirmed" cases collapse here; word each
+                        # accurately so the report never overstates OR misdescribes:
+                        #  - version KNOWN (e.g. OpenSSH 9.9) but every candidate CVE
+                        #    lists only a "fixed-in" ceiling with no introduced-version
+                        #    floor, so NVD's range cannot prove THIS build is affected;
+                        #  - version UNKNOWN (bare product banner), so applicability
+                        #    can't be established from the outside at all.
+                        if version_str:
+                            title = (f"Potential CVEs for {label} {version_str} "
+                                     f"(affected range unbounded below)")
+                            desc = (
+                                f"{label} {version_str} was identified, but each of "
+                                f"the {len(cand)} candidate CVEs (e.g. "
+                                f"{', '.join(examples)}) lists only a fixed-in ceiling "
+                                f"with no introduced-version floor in NVD, so the range "
+                                f"cannot confirm this specific build is affected — a "
+                                f"CVE fixed in a later release often does not reach a "
+                                f"much older one. UNVERIFIED candidates: confirm against "
+                                f"the vendor advisory or an authenticated check (the "
+                                f"active verifier can promote a proven one)."
+                            )
+                        else:
+                            title = f"Potential vulnerable service: {label} (version unconfirmed)"
+                            desc = (
                                 f"{label} was identified on this host but a running "
                                 f"version could not be confirmed against any CVE's "
                                 f"affected range, so applicability cannot be established "
@@ -1184,7 +1199,15 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                                 f"name may refer to a different implementation or "
                                 f"platform — confirm the exact product and version "
                                 f"before treating any as present."
-                            ),
+                            )
+                        all_vulns.append({
+                            "host": host_name,
+                            "port": port_info.get("port", 0),
+                            "target": host_name,
+                            "vuln_type": "potential_vulnerable_service",
+                            "title": title,
+                            "severity": "low",
+                            "description": desc,
                             "product": product_key,
                             "version": version_str or "undetermined",
                             "confidence": 0.3,

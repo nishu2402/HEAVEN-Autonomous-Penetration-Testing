@@ -150,6 +150,25 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
 # ── 2. Host Header Injection ───────────────────────────────────────────────────
 _ATTACKER_HOST = "evil-heaven-probe.attacker.example"
 
+def _is_path_normalization_redirect(request_url: str, location: str,
+                                    status: int) -> bool:
+    """True when a 3xx merely normalizes the path the client requested (adds a
+    trailing slash, canonicalizes scheme/host) rather than redirecting to a NEW
+    app-chosen location. Such a redirect reflects the request Host by server
+    default (Apache mod_dir, ``UseCanonicalName Off``) but is not an exploitable
+    host-header injection — the client already controls its own Host. The target
+    path (ignoring host) equals the requested path give or take a trailing slash.
+    """
+    if not (300 <= status < 400) or not location:
+        return False
+    try:
+        req = urllib.parse.urlparse(request_url)
+        loc = urllib.parse.urlparse(location, scheme=req.scheme)
+    except ValueError:
+        return False
+    return req.path.rstrip("/") == loc.path.rstrip("/")
+
+
 async def _fuzz_host_header(session: "aiohttp.ClientSession",
                              url: str) -> list[dict]:
     """
@@ -188,7 +207,18 @@ async def _fuzz_host_header(session: "aiohttp.ClientSession",
                 in_url_context = (f"//{_ATTACKER_HOST}" in body
                                   or f'="{_ATTACKER_HOST}' in body
                                   or f"='{_ATTACKER_HOST}" in body)
-                if in_location or in_url_context:
+                # A path-normalization 3xx (Apache mod_dir adding a trailing slash,
+                # scheme/host canonicalization) reflects the Host by server default
+                # — in BOTH the Location header AND the auto-generated "moved here"
+                # body href — but is NOT an app-built redirect: its target path is
+                # just the path we requested (± "/"), and the requester controls its
+                # own Host, so the victim-forged-Host exploit model does not apply
+                # (the sole DVWA-benchmark FP: a 301 to /config/). Suppress the whole
+                # normalization response; a genuine injection is a body url-sink on a
+                # real page or a redirect the app built to a DIFFERENT location.
+                is_norm = _is_path_normalization_redirect(url, location, resp.status)
+                in_location = in_location and not is_norm
+                if (in_location or in_url_context) and not is_norm:
                     injected_hdr = next(iter(hdrs))
                     findings.append(_finding(
                         url, "host_header_injection", "high",

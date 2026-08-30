@@ -368,6 +368,58 @@ async def test_host_header_injection_needs_reflection_not_just_diff():
     assert any(c.category == "host_header_injection" for c in cands)
 
 
+def test_host_header_path_normalization_redirect_is_not_injection():
+    """The sole DVWA-benchmark host-header FP: Apache's mod_dir trailing-slash 301
+    (GET /config → 301 //<host>/config/) reflects the request Host by server
+    default. It is not an exploitable injection — the client controls its own
+    Host and the redirect target is just the requested path. Only an app redirect
+    to a DIFFERENT location (reset link, dashboard) counts."""
+    from heaven.vulnscan.web_fuzzer import _is_path_normalization_redirect as norm
+    A = "heaven-hhi-abc.invalid"
+    # mod_dir slash normalization → NOT an injection (suppress)
+    assert norm("http://127.0.0.1:8080/config", f"http://{A}/config/", 301) is True
+    assert norm("http://h/dir/", f"https://{A}/dir", 301) is True
+    # app-built redirect to a different path using the host → genuine (flag)
+    assert norm("http://h/login", f"http://{A}/dashboard", 302) is False
+    assert norm("http://h/account", f"http://{A}/reset?t=1", 302) is False
+    # non-redirects never count as normalization
+    assert norm("http://h/x", "", 200) is False
+
+
+@pytest.mark.asyncio
+async def test_host_header_mod_dir_normalization_redirect_is_suppressed():
+    """The persistent DVWA-benchmark host-header FP: Apache's mod_dir trailing-slash
+    301 reflects the injected Host in BOTH the Location header and the auto-
+    generated 'moved here' body href. That is server-default normalization of the
+    path the client requested, not an app sink — it must be suppressed even though
+    the canary is 'reflected'."""
+    from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
+    probe = WebAnomalyProbe()
+
+    def moddir(url, headers):
+        host = (headers.get("Host") or headers.get("X-Forwarded-Host")
+                or headers.get("X-Host") or headers.get("Forwarded") or "")
+        loc = f"http://{host}/config/"
+        body = ('<html><head><title>301 Moved Permanently</title></head><body>'
+                f'<h1>Moved Permanently</h1><p>The document has moved '
+                f'<a href="{loc}">here</a>.</p></body></html>')
+        return _HResp(301, body, headers={"Location": loc})
+
+    cands = await probe._test_header_injection(_HSession(moddir), "http://t/config")
+    assert all(c.category != "host_header_injection" for c in cands), \
+        "a mod_dir trailing-slash 301 reflecting Host is normalization, not injection"
+
+    # A genuine app redirect to a DIFFERENT path using the host still flags.
+    def app_redirect(url, headers):
+        host = headers.get("Host") or headers.get("X-Forwarded-Host") or ""
+        loc = f"http://{host}/password-reset?token=abc"
+        return _HResp(302, "redirecting", headers={"Location": loc})
+
+    cands = await probe._test_header_injection(_HSession(app_redirect), "http://t/account")
+    assert any(c.category == "host_header_injection" for c in cands), \
+        "an app redirect to a different location using the host is a genuine injection"
+
+
 @pytest.mark.asyncio
 async def test_ip_restriction_bypass_needs_deny_to_allow():
     from heaven.vulnscan.anomaly_probe import WebAnomalyProbe

@@ -242,6 +242,58 @@ class TestFindingDedup:
         assert is_host_level("no_x_content_type") and is_host_level("xml_accepted")
         assert not is_host_level("xss") and not is_host_level("sqli") and not is_host_level("idor")
 
+    def test_potential_rollups_per_product_do_not_collide(self):
+        """Regression: two DIFFERENT products' version-undetermined roll-ups on one
+        host (ProFTPD on 2121, UnrealIRCd on 6667) must each survive — they share
+        the bare-host target and carry no CVE/param, so without a product
+        discriminator they collapsed into one row and a whole product's candidate
+        CVEs vanished. The SAME product across ports still collapses to one."""
+        from heaven.engagement import dedup_findings
+        findings = [
+            {"target": "10.0.0.5", "port": 2121, "vuln_type": "potential_vulnerable_service",
+             "product": "proftpd", "severity": "low", "confidence": 0.3,
+             "evidence": {"candidate_cves": ["CVE-2026-53994", "CVE-2020-9272"]}},
+            {"target": "10.0.0.5", "port": 6667, "vuln_type": "potential_vulnerable_service",
+             "product": "unrealircd", "severity": "low", "confidence": 0.3,
+             "evidence": {"candidate_cves": ["CVE-2010-2075"]}},
+            # same product on a second port must still collapse into its own roll-up
+            {"target": "10.0.0.5", "port": 2100, "vuln_type": "potential_vulnerable_service",
+             "product": "proftpd", "severity": "low", "confidence": 0.3,
+             "evidence": {"candidate_cves": ["CVE-2026-53994"]}},
+        ]
+        out = dedup_findings(findings)
+        pots = [f for f in out if f["vuln_type"] == "potential_vulnerable_service"]
+        prods = sorted(str(f.get("product")) for f in pots)
+        assert prods == ["proftpd", "unrealircd"], f"one roll-up per product, got {prods}"
+
+    def test_store_persists_per_product_rollups_distinctly(self, store):
+        """Regression: upsert_finding computed the identity inline instead of via
+        _finding_identity, so the per-product discriminator for
+        potential_vulnerable_service was applied by the in-memory dedup but LOST at
+        persist — two products' roll-ups re-collided in the store and one product's
+        candidate CVEs vanished. Both paths now share _finding_identity."""
+        store.record_scan_start("sc1", name="10.0.0.5", mode="network",
+                                config={"targets": {"ips": ["10.0.0.5"]}})
+        for prod, port, cves in [
+            ("proftpd", 2121, ["CVE-2026-53994", "CVE-2020-9272"]),
+            ("unrealircd", 6667, ["CVE-2010-2075"]),
+            ("postfix", 25, ["CVE-2011-1720"]),
+        ]:
+            store.upsert_finding("sc1", {
+                "target": "10.0.0.5", "port": port,
+                "vuln_type": "potential_vulnerable_service", "product": prod,
+                "severity": "low", "confidence": 0.3,
+                "title": f"Potential vulnerable service: {prod}",
+                "evidence": {"candidate_cves": cves},
+            })
+        import sqlite3
+        conn = sqlite3.connect(store.db_path)
+        n = conn.execute(
+            "SELECT COUNT(*) FROM findings WHERE vuln_type='potential_vulnerable_service'"
+        ).fetchone()[0]
+        conn.close()
+        assert n == 3, f"each product keeps its own roll-up at persist, got {n}"
+
     def test_injection_payloads_collapse_to_one_finding(self):
         """Regression (real DVWA finding): probing ONE injectable parameter with
         N payloads carries the payload in the query string, so each probe used to

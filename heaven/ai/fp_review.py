@@ -220,7 +220,19 @@ async def review_borderline_findings(
     run with bounded concurrency so a scan is not serialized on the LLM.
     """
     reviewer = FPReviewer(review_band=review_band)
+    # Borderline findings are the only ones this pass would second-opinion; count
+    # them once so any "AI review skipped" notice can be specific and actionable.
+    in_band = [f for f in findings if reviewer.in_band(float(f.get("confidence", 0) or 0))]
     if not reviewer.available:
+        if in_band:
+            logger.warning(
+                "AI false-positive review skipped: no LLM provider available — "
+                f"{len(in_band)} borderline finding(s) kept their deterministic "
+                "score. Enable a second opinion with `heaven ai setup` (a local "
+                "model needs no key) or by setting a provider API key."
+            )
+        return findings
+    if not in_band:
         return findings
 
     sem = asyncio.Semaphore(_review_concurrency())
@@ -235,5 +247,17 @@ async def review_borderline_findings(
         if verdict is not None:
             reviewer.apply(f, verdict)
 
-    await asyncio.gather(*(_review_one(f) for f in findings))
+    await asyncio.gather(*(_review_one(f) for f in in_band))
+
+    # If the provider's rate-limit / quota breaker is armed at the end, the run
+    # exhausted its budget mid-pass and the remaining borderline findings fell
+    # back to the deterministic score. Say so once, actionably — this is the
+    # "free tier ran out at scale" case, not a defect.
+    if getattr(reviewer.gateway, "rate_limited", False):
+        logger.warning(
+            "AI false-positive review was partially skipped: the LLM provider hit "
+            "its rate limit / quota during this scan, so some borderline findings "
+            "kept their deterministic score. For large engagements use a paid key "
+            "or a local model (`heaven ai setup`)."
+        )
     return findings

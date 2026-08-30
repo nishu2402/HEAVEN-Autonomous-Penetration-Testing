@@ -518,6 +518,17 @@ def _finding_identity(f: dict) -> tuple[str, str, str, str, str, str]:
     endpoint = f.get("endpoint", "") or f.get("url", "") or ""
     cve = _cve_id_of(f)
     port = str(f.get("port", "") or "")
+    # A version-undetermined product roll-up (``potential_vulnerable_service``)
+    # carries no CVE/param/endpoint and is targeted at the bare host, so two
+    # DIFFERENT products on one host (ProFTPD on 2121, UnrealIRCd on 6667) would
+    # otherwise share the identity ``host|potential_vulnerable_service|`` and
+    # collapse into one row — silently dropping a whole product's candidate-CVE
+    # list. Fold the product into the identity so each product keeps its own
+    # roll-up, while the SAME product seen on several ports still collapses.
+    if vuln_type.strip().lower() == "potential_vulnerable_service":
+        prod = str(f.get("product", "") or "").strip().lower()
+        if prod:
+            param = f"{param}|{prod}" if param else prod
     return str(target), str(vuln_type), str(param), str(endpoint), cve, port
 
 
@@ -1494,12 +1505,12 @@ class EngagementStore:
         seen_count and updates last_seen_at, but preserves operator_notes
         and status.
         """
-        target = finding.get("target", "") or finding.get("target_url", "") or finding.get("host", "")
-        vuln_type = finding.get("vuln_type", "") or finding.get("type", "") or "unknown"
-        param = _param_of(finding)
-        endpoint = finding.get("endpoint", "") or finding.get("url", "") or ""
-        cve = _cve_id_of(finding)
-        port = str(finding.get("port", "") or "")
+        # Derive identity from the SAME single source dedup_findings uses, so the
+        # store can't drift from the in-memory dedup (they did: the per-product
+        # discriminator for `potential_vulnerable_service` lived only in
+        # _finding_identity, so two products' roll-ups deduped in memory but then
+        # RE-collided here at persist and one product's candidate CVEs vanished).
+        target, vuln_type, param, endpoint, cve, port = _finding_identity(finding)
         # Always derive the id from content. A scanner-supplied "id" is not a
         # stable cross-scan identifier and would defeat dedup — the content
         # hash IS the canonical id. The CVE + port are part of the identity so

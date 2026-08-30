@@ -257,3 +257,29 @@ def test_kill_chain_endpoint_exists(api_client):
     assert "attack_path" in data
     assert "mermaid" in data
     assert data["report"]["phase_count"] == 7
+
+
+class TestRaceConditionPrecision:
+    """The low-confidence TOCTOU heuristic must not fire on read-only pages."""
+
+    def test_readonly_info_endpoints_are_skipped(self):
+        """A race needs a state-changing target. phpinfo / server-status / metrics
+        have no state, but their per-request resource counters diverge under
+        concurrency and used to manufacture a bogus low 'race_condition' (the 1
+        false positive keeping DVWA's benchmark at 97.9% precision). These are
+        skipped outright — no network call, immediate None."""
+        import asyncio
+        from heaven.vulnscan.advanced_attacks import RaceConditionDetector
+        for url in ("http://127.0.0.1:8080/?phpinfo=1", "http://h/server-status",
+                    "http://h/info.php", "http://h/metrics", "http://h/opcache.php"):
+            out = asyncio.run(RaceConditionDetector.test_race(
+                session=None, url=url, method="POST", data={"x": "1"}))
+            assert out is None, url
+
+    def test_get_never_evidences_a_race(self):
+        """A GET carries no state, so it can never evidence a race."""
+        import asyncio
+        from heaven.vulnscan.advanced_attacks import RaceConditionDetector
+        out = asyncio.run(RaceConditionDetector.test_race(
+            session=None, url="http://h/transfer", method="GET"))
+        assert out is None

@@ -36,6 +36,13 @@ CANONICAL_CATEGORIES = {
     # Client-side DOM XSS (a source→sink flow in the page's own JavaScript),
     # tracked apart from reflected/stored server-side XSS.
     "dom_xss",
+    # ── Network / service tier (the MSF2-class benchmark) ──────────────────
+    # These score host/port findings, not URL routes. A "vulnerable_service" is
+    # a CVE/exploit-tagged network service (vsftpd backdoor, Samba usermap RCE,
+    # distccd, OpenSSH/ProFTPD/Apache/MySQL CVE clusters). The rest split out the
+    # distinct service-tier weaknesses so each scores on its own line.
+    "vulnerable_service", "backdoor", "cleartext_service", "eol_software",
+    "exposed_service", "smb_signing", "smb_null_session", "anonymous_access",
 }
 
 _TYPE_TO_CATEGORY: dict[str, str] = {
@@ -133,6 +140,38 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     "sensitive_file": "info_disclosure", "directory_listing": "info_disclosure",
     # Client-side DOM XSS sink flows.
     "dom_xss_sink": "dom_xss", "dom_xss": "dom_xss", "dom_based_xss": "dom_xss",
+    # ── Network / service tier (MSF2-class) ────────────────────────────────
+    # CVE / exploit-tagged network services. cve_mapper emits the generic
+    # "vulnerable_service" for every version-matched service CVE (vsftpd
+    # backdoor, Samba usermap, distccd, OpenSSH/ProFTPD/Apache/MySQL clusters);
+    # the version-unconfirmed roll-up is "potential_vulnerable_service".
+    "vulnerable_service": "vulnerable_service",
+    "potential_vulnerable_service": "vulnerable_service",
+    # Unauthenticated backdoor shell (ingreslock 1524, and any planted shell).
+    "backdoor_shell": "backdoor", "backdoor": "backdoor",
+    # Plaintext-credential protocols (FTP/Telnet/rexec/rlogin/rsh).
+    "cleartext_service": "cleartext_service",
+    # End-of-life / unsupported software (its own line, not folded into misconfig
+    # so the service tier credits each EOL package distinctly).
+    "unsupported_software": "eol_software", "eol_software": "eol_software",
+    "end_of_life_software": "eol_software",
+    # A dangerous service reachable from the network: exposed DB, Java RMI,
+    # distributed Ruby, world-readable NFS export.
+    "database_exposed": "exposed_service", "dangerous_service_exposed": "exposed_service",
+    "nfs_export_exposed": "exposed_service", "service_exposed": "exposed_service",
+    # SMB weaknesses (host-level; no distinct port on the finding).
+    "smb_signing_not_required": "smb_signing", "smb_signing": "smb_signing",
+    "smb_null_session": "smb_null_session",
+    # Anonymous / unauthenticated access to a service (anonymous FTP).
+    "ftp_anonymous": "anonymous_access", "anonymous_ftp": "anonymous_access",
+    "anonymous_access": "anonymous_access",
+    # Service-tier credential weaknesses all land on weak_auth (distinct ports
+    # keep them separate): DB default creds, VNC default password, Tomcat
+    # manager default creds, SSH default creds.
+    "weak_db_credentials": "weak_auth", "vnc_weak_credentials": "weak_auth",
+    "tomcat_manager_default_creds": "weak_auth",
+    # SMB host/domain banner is information disclosure.
+    "domain_information": "info_disclosure", "smb_host_information": "info_disclosure",
 }
 
 
@@ -148,6 +187,30 @@ def normalize_category(vuln_type: str) -> str:
     return _TYPE_TO_CATEGORY.get(head, key)
 
 
+def parse_service_port(target: str) -> Optional[int]:
+    """Extract the service port from a HEAVEN finding ``target`` string.
+
+    Network findings target a ``host:port`` (``192.168.0.162:445``,
+    ``ssh://192.168.0.162:22``); host-level facts target a bare host
+    (``192.168.0.162``) and have no port. Returns the port int, or ``None`` for
+    a bare host / a web URL with a path (the web matcher ignores port anyway).
+    """
+    if not target:
+        return None
+    t = target.strip()
+    if "://" in t:
+        t = t.split("://", 1)[1]
+    # Drop any path/query so a web URL's port isn't mistaken for a service port.
+    t = t.split("/", 1)[0].split("?", 1)[0]
+    if t.startswith("["):            # [ipv6]:port
+        tail = t.split("]:", 1)[1] if "]:" in t else ""
+    elif t.count(":") == 1:          # host:port (ipv4 / hostname)
+        tail = t.rsplit(":", 1)[1]
+    else:                            # bare host, or bare ipv6 → no service port
+        tail = ""
+    return int(tail) if tail.isdigit() else None
+
+
 # ═══════════════════════════════════════════
 # FINDING / GROUND-TRUTH TYPES
 # ═══════════════════════════════════════════
@@ -161,6 +224,9 @@ class Finding:
     parameter: str = ""
     confidence: float = 0.0
     severity: str = ""
+    # Service port for network-tier findings (parsed from a host:port target).
+    # None for host-level facts and for web URLs (the web matcher ignores it).
+    port: Optional[int] = None
 
     @property
     def category(self) -> str:
@@ -175,12 +241,14 @@ class Finding:
                 evidence = json.loads(evidence) if isinstance(evidence, str) else {}
             except (TypeError, ValueError, json.JSONDecodeError):
                 evidence = {}
+        target = d.get("target", "") or d.get("url", "")
         return cls(
-            url=d.get("target", "") or d.get("url", ""),
+            url=target,
             vuln_type=d.get("vuln_type", "") or d.get("type", ""),
             parameter=evidence.get("parameter", "") or evidence.get("param", ""),
             confidence=float(d.get("confidence", 0) or 0),
             severity=d.get("severity", ""),
+            port=parse_service_port(target),
         )
 
 
@@ -199,6 +267,13 @@ class GroundTruthEntry:
     difficulty: str
     detection_required: bool
     notes: str = ""
+    # ── Network/service tier ──────────────────────────────────────────────
+    # tier="web" (default) → match by URL path + category (unchanged behaviour).
+    # tier="network" → match by (service port, category); a null ``port`` means
+    # a host-level fact (SMB signing/null session, host banner) matched on
+    # category alone against a finding that likewise carries no port.
+    tier: str = "web"
+    port: Optional[int] = None
 
 
 @dataclass
@@ -220,10 +295,14 @@ class GroundTruth:
                 "PyYAML required to load benchmark ground truth. Install: pip install pyyaml"
             ) from e
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # A file-level ``tier`` sets the default for every entry (so a network
+        # ground truth doesn't repeat ``tier: network`` on all 40 rows); an
+        # individual entry may still override it.
+        default_tier = str(data.get("tier", "web"))
         entries = [
             GroundTruthEntry(
                 id=v["id"],
-                endpoint=v["endpoint"],
+                endpoint=v.get("endpoint", ""),
                 method=v.get("method", "GET").upper(),
                 parameter=v.get("parameter"),
                 category=v["category"],
@@ -234,6 +313,8 @@ class GroundTruth:
                 difficulty=v.get("difficulty", "low"),
                 detection_required=bool(v.get("detection_required", True)),
                 notes=v.get("notes", ""),
+                tier=str(v.get("tier", default_tier)),
+                port=v.get("port"),
             )
             for v in data.get("vulnerabilities") or []
         ]
@@ -266,13 +347,28 @@ class GroundTruth:
 def matches(finding: Finding, gt: GroundTruthEntry) -> bool:
     """True if `finding` plausibly corresponds to ground-truth entry `gt`.
 
-    Rules (all must hold):
+    Web tier (``gt.tier == "web"``, the default) — all must hold:
       1. The finding URL contains the GT endpoint path.
       2. The finding's canonical category equals GT's category.
       3. If GT specifies a parameter AND the finding reports one, they match.
          (We tolerate missing parameter info on the finding side because not
          every scanner attributes findings to a specific input.)
+
+    Network tier (``gt.tier == "network"``) — a service finding is a host:port,
+    not a route, so match on (port, category):
+      1. The finding's canonical category equals GT's category.
+      2. If GT names a port, the finding must be on that port. If GT's port is
+         null (a host-level fact — SMB signing, host banner), the finding must
+         likewise be host-level (carry no port), so a port-specific finding on
+         the same host cannot spuriously satisfy it.
     """
+    if gt.tier == "network":
+        if finding.category != gt.category:
+            return False
+        if gt.port is None:
+            return finding.port is None
+        return finding.port == gt.port
+
     if not gt.endpoint or gt.endpoint not in (finding.url or ""):
         return False
     if finding.category != gt.category:

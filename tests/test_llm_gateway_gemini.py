@@ -131,6 +131,55 @@ def test_gemini_uses_native_structured_output() -> None:
     assert resp.structured is not None and resp.structured.keep is True
 
 
+class _FakeModelsRejectSchema:
+    """Raises the Gemini Developer API's additionalProperties rejection on the
+    first call (native schema), succeeds on the retry — capturing that retry's
+    config so the test can assert the schema was dropped."""
+
+    def __init__(self, result: _FakeResult) -> None:
+        self._result = result
+        self.calls = 0
+        self.captured: dict[str, Any] = {}
+
+    def generate_content(self, model: str, contents: str, config: Any) -> _FakeResult:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError(
+                "400 INVALID_ARGUMENT: additionalProperties is only supported in "
+                "Gemini Enterprise Agent Platform mode, not in Gemini Developer API mode.")
+        self.captured = {"model": model, "contents": contents, "config": config}
+        return self._result
+
+
+def test_gemini_schema_rejection_falls_back_to_hint_path() -> None:
+    """When the Developer API rejects the native response_schema
+    (additionalProperties), the dispatcher must retry ONCE without the schema
+    (JSON-hint path — the hint is already in system_instruction) and parse the
+    object, instead of bubbling the error up to the outer 3x retry loop."""
+    try:
+        from pydantic import BaseModel
+    except ImportError:  # pragma: no cover
+        return
+
+    class Verdict(BaseModel):
+        keep: bool
+        reasoning: str = ""
+
+    gw = _gateway_with(_FakeResult('{"keep": true, "reasoning": "ok"}'))
+    gw._client.models = _FakeModelsRejectSchema(gw._client.models._result)  # type: ignore[attr-defined]
+    resp = gw.complete(LLMRequest(
+        prompt="review", system="analyst", response_schema=Verdict, max_tokens=256,
+    ))
+    # Exactly one retry (2 dispatches), and the retry dropped native schema.
+    assert gw._client.models.calls == 2
+    cfg = gw._client.models.captured["config"]
+    assert getattr(cfg, "response_schema", None) is None
+    # The schema hint kept it parseable, so the verdict still comes back.
+    assert resp.structured is not None and resp.structured.keep is True
+    # And native schema is disabled for subsequent calls this session.
+    assert gw._gemini_native_schema_ok is False
+
+
 def test_gemini_empty_response_surfaces_reason() -> None:
     """An empty completion (MAX_TOKENS before any text) must report a reason,
     not a silent blank — so operators see *why* the AI produced nothing."""

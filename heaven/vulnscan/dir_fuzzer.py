@@ -815,6 +815,12 @@ def _is_benign_public_path(path: str) -> bool:
     p = (path or "").lower()
     if p in _BENIGN_ENTRY_PATHS:
         return True
+    # RFC 8615 "/.well-known/" URIs are standardized PUBLIC metadata (ACME
+    # challenges, security.txt, OIDC discovery, MTA-STS …). A 200 on one is the
+    # designed behaviour, not a sensitive-file exposure — flagging /.well-known/
+    # or /.well-known/acme-challenge/ as "sensitive" was a false positive.
+    if p == "/.well-known" or p.startswith("/.well-known/"):
+        return True
     return p.rsplit("/", 1)[-1] in _BENIGN_PUBLIC_FILES
 
 

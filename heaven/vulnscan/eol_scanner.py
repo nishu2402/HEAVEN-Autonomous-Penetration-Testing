@@ -107,9 +107,16 @@ _PRODUCT_EOL: list[tuple[str, str, Optional[tuple[int, ...]], str, str, str]] = 
     ("Adobe Flash Player", r"flash\s*player|shockwave\s*flash", None, "2020-12-31",
      "high", "Adobe Flash Player reached end of life on 2020-12-31 and is blocked "
      "by modern browsers."),
-    ("Apache httpd 2.2", r"apache", (2, 4), "2017-12-31", "medium",
-     "Apache httpd branches before 2.4 are end-of-life and receive no security "
-     "fixes."),
+    # Match Apache HTTP Server ONLY — require an httpd/`Apache/<n>` context so the
+    # OTHER "Apache" products (Tomcat, Jserv/AJP, Coyote, Traffic Server) don't
+    # match this rule and get flagged EOL off their PROTOCOL version (AJP 1.3,
+    # Coyote 1.1 are < 2.4 and used to fire a bogus "Apache httpd 2.2" finding on
+    # Metasploitable's :8009 / :8180). Display carries no branch number so the
+    # detected version isn't doubled ("Apache httpd 2.2 2.2.8").
+    ("Apache HTTP Server", r"apache[ /]?httpd|apache/\d|\bhttpd\b", (2, 4),
+     "2017-12-31", "medium",
+     "Apache HTTP Server branches before 2.4 are end-of-life and receive no "
+     "security fixes."),
     ("PHP", r"\bphp\b", (8, 1), "2025-12-31", "medium",
      "PHP versions before 8.1 have reached end of security support. Upgrade to a "
      "supported 8.x branch."),
@@ -189,7 +196,11 @@ _EOL_MAX_LOOKUPS = 16
 # Detected product string (regex) → endoflife.date product slug.
 _ENDOFLIFE_SLUGS: list[tuple[str, str]] = [
     (r"nginx", "nginx"),
-    (r"apache|httpd", "apache"),
+    # "apache" alone matched the OTHER Apache products (Tomcat, Jserv/AJP,
+    # Coyote), sending their PROTOCOL version to the Apache HTTP Server EOL feed
+    # ("Apache Jserv 1.3" flagged EOL). Require an httpd context; Tomcat matches
+    # its own slug on the next line.
+    (r"apache[ /]?httpd|apache/\d|\bhttpd\b", "apache"),
     (r"tomcat", "tomcat"),
     (r"\bphp\b", "php"),
     (r"mariadb", "mariadb"),

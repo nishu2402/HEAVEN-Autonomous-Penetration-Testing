@@ -225,6 +225,20 @@ def test_severity_for_is_status_aware():
     assert _severity_for("/anything", 401) == "low"
 
 
+def test_well_known_paths_are_not_sensitive():
+    """RFC 8615 /.well-known/ URIs are standardized PUBLIC metadata (ACME
+    challenges, security.txt, OIDC discovery). A 200 on them is by design, so they
+    must be benign — flagging /.well-known/acme-challenge/ as a 'sensitive_file'
+    (seen live on certifiedhacker.com) was a false positive. Genuinely sensitive
+    dotfiles/paths stay flagged."""
+    from heaven.vulnscan.dir_fuzzer import _is_benign_public_path
+    for p in ("/.well-known/", "/.well-known/acme-challenge/",
+              "/.well-known/security.txt", "/.well-known/openid-configuration"):
+        assert _is_benign_public_path(p) is True, p
+    for p in ("/.env", "/.git/config", "/admin", "/backup.sql"):
+        assert _is_benign_public_path(p) is False, p
+
+
 def test_gitignore_is_not_an_exposed_git_directory():
     """A served /.gitignore (or .gitattributes / .github) merely shares the
     ".git" prefix — it is NOT the VCS directory. It must not be rated critical or

@@ -328,13 +328,43 @@ def classify_bucket_response(provider: str, status: int, body: str) -> tuple[str
 
 
 class CloudStorageScanner:
-    """Probe guessable S3/GCS/Azure buckets for public exposure. No credentials."""
+    """Probe guessable S3/GCS/Azure buckets for public exposure. No credentials.
+
+    ``endpoint_url`` points the scanner at an S3-compatible object store instead
+    of the public AWS/GCS/Azure hostnames. Real black-box engagements routinely
+    turn up such endpoints — MinIO, Ceph RADOS Gateway, LocalStack, Wasabi,
+    DigitalOcean Spaces — and a world-readable bucket there leaks data exactly
+    like a public S3 bucket does. When set (directly or via the
+    ``HEAVEN_S3_ENDPOINT`` environment variable) the scanner probes only the
+    ``s3`` provider, path-style by default (``{endpoint}/{bucket}/``), which is
+    what MinIO / Ceph / LocalStack serve.
+    """
 
     def __init__(self, providers: Optional[list[str]] = None,
-                 concurrency: int = 20, timeout: float = 8.0):
-        self.providers = providers or ["s3", "gcs", "azure"]
+                 concurrency: int = 20, timeout: float = 8.0,
+                 endpoint_url: Optional[str] = None, path_style: bool = True):
+        import os
+        self.endpoint_url = (
+            (endpoint_url or os.environ.get("HEAVEN_S3_ENDPOINT") or "")
+            .strip().rstrip("/") or None)
+        self.path_style = path_style
+        if self.endpoint_url:
+            # A custom S3-compatible endpoint only makes sense for the s3 API.
+            self.providers = ["s3"]
+        else:
+            self.providers = providers or ["s3", "gcs", "azure"]
         self.concurrency = concurrency
         self.timeout = timeout
+
+    def _urls_for(self, bucket: str) -> dict[str, str]:
+        """Candidate URL per provider for ``bucket`` — honoring an S3-compatible
+        ``endpoint_url`` when one is configured."""
+        if self.endpoint_url:
+            if self.path_style:
+                return {"s3": f"{self.endpoint_url}/{bucket}/"}
+            u = urlparse(self.endpoint_url)
+            return {"s3": f"{u.scheme}://{bucket}.{u.netloc}/"}
+        return _bucket_urls(bucket)
 
     async def scan(self, target: str, extra_names: Optional[list[str]] = None,
                    limit: int = 60) -> CloudStorageResult:
@@ -369,10 +399,10 @@ class CloudStorageScanner:
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
             tasks = [
-                probe(session, provider, bucket, _bucket_urls(bucket)[provider])
+                probe(session, provider, bucket, self._urls_for(bucket)[provider])
                 for bucket in candidates
                 for provider in self.providers
-                if provider in _bucket_urls(bucket)
+                if provider in self._urls_for(bucket)
             ]
             await asyncio.gather(*tasks, return_exceptions=True)
 

@@ -55,7 +55,8 @@ SERVICES = "\n".join([
 AIE = "    AlwaysInstallElevated    REG_DWORD    0x1\n"
 AUTOLOGON = ("    AutoAdminLogon    REG_SZ    1\n"
              "    DefaultUserName    REG_SZ    Administrator\n"
-             "    DefaultPassword    REG_SZ    Sup3rSecret\n")
+             "    DefaultPassword    REG_SZ    Sup3rSecret\n"
+             "    CachedLogonsCount    REG_SZ    10\n")
 UAC_OFF = "    EnableLUA    REG_DWORD    0x0\n"
 CMDKEY = "    Target: Domain:interactive=WEB01\\Administrator\n"
 UNATTEND = r"UNATTEND_FILE:C:\Windows\Panther\Unattend.xml"
@@ -113,6 +114,18 @@ def test_dangerous_privilege_and_credential_vectors():
     assert "UAC is disabled (EnableLUA = 0)" in titles
     assert "Unattended-install answer file present" in titles
     assert any("Saved credentials in the vault" in t for t in titles)
+
+
+def test_cached_domain_logons_flagged_when_nonzero():
+    res = parse_windows_enumeration("web01", "svcapp", _full_outputs())
+    titles = [v["title"] for v in res.vectors]
+    assert any("Cached domain credentials enabled (CachedLogonsCount = 10)" in t
+               for t in titles)
+    # Count 0 → no finding (best practice, no false positive).
+    zero = parse_windows_enumeration("web01", "svcapp", {
+        "autologon": "    CachedLogonsCount    REG_SZ    0\n",
+    })
+    assert not any("Cached domain credentials" in v["title"] for v in zero.vectors)
 
 
 def test_autologon_password_value_never_leaks():

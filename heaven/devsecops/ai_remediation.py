@@ -46,7 +46,7 @@ class AIRemediationEngine:
         self.available = self._gateway.available
         if not self.available:
             logger.warning(
-                "AI Remediation gateway unavailable — set ANTHROPIC_API_KEY, "
+                "AI Remediation gateway unavailable: set ANTHROPIC_API_KEY, "
                 "OPENAI_API_KEY, GEMINI_API_KEY, or DEEPSEEK_API_KEY (and install "
                 "the matching SDK; DeepSeek needs none)."
             )

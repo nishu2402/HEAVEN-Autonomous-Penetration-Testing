@@ -11,12 +11,14 @@ import json
 from heaven.vulnscan.cloud_scanner import (
     BucketResult,
     CloudStorageResult,
+    CloudStorageScanner,
     base_names_from_target,
     classify_bucket_response,
     classify_metadata_response,
     generate_bucket_candidates,
     metadata_finding,
     metadata_ssrf_candidates,
+    _bucket_urls,
 )
 
 
@@ -130,3 +132,36 @@ def test_storage_result_findings_and_redaction_of_state():
     assert d["open_count"] == 1
     # to_dict is JSON-safe.
     assert json.loads(json.dumps(d))["candidates_tried"] == 60
+
+
+# ── S3-compatible endpoint override (MinIO / Ceph RGW / LocalStack) ──────────
+def test_default_scanner_uses_public_provider_urls():
+    """With no endpoint, the scanner probes the three public providers exactly as
+    before — endpoint support must not change default behavior."""
+    sc = CloudStorageScanner()
+    assert sc.endpoint_url is None
+    assert set(sc.providers) == {"s3", "gcs", "azure"}
+    assert sc._urls_for("acme-backups") == _bucket_urls("acme-backups")
+
+
+def test_endpoint_override_is_path_style_s3_only():
+    """A custom S3-compatible endpoint constrains probing to the s3 API and uses
+    path-style URLs ({endpoint}/{bucket}/) — what MinIO/Ceph/LocalStack serve."""
+    sc = CloudStorageScanner(endpoint_url="http://127.0.0.1:9000/")
+    assert sc.endpoint_url == "http://127.0.0.1:9000"  # trailing slash trimmed
+    assert sc.providers == ["s3"]
+    assert sc._urls_for("heaven-public") == {
+        "s3": "http://127.0.0.1:9000/heaven-public/"}
+
+
+def test_endpoint_override_virtual_host_style():
+    sc = CloudStorageScanner(endpoint_url="http://minio.local:9000", path_style=False)
+    assert sc._urls_for("data") == {"s3": "http://data.minio.local:9000/"}
+
+
+def test_endpoint_from_environment(monkeypatch):
+    monkeypatch.setenv("HEAVEN_S3_ENDPOINT", "http://ceph.internal:7480")
+    sc = CloudStorageScanner()
+    assert sc.endpoint_url == "http://ceph.internal:7480"
+    assert sc.providers == ["s3"]
+    assert sc._urls_for("b") == {"s3": "http://ceph.internal:7480/b/"}

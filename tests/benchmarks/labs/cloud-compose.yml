@@ -1,0 +1,46 @@
+# HEAVEN benchmark: cloud object-storage lab
+#
+# A real S3-compatible object store (MinIO) with a genuinely PUBLIC, listable
+# bucket — the exact real-world weakness HEAVEN's cloud scanner hunts for
+# (world-readable buckets). MinIO speaks the real S3 API, so an anonymous
+# GET on the bucket returns a real `<ListBucketResult>` XML listing, which
+# HEAVEN's `classify_bucket_response` reports as an open/listable bucket
+# (critical, exposed_storage_bucket).
+#
+# The scanner reaches it via its S3-compatible endpoint override
+# (HEAVEN_S3_ENDPOINT / --endpoint http://127.0.0.1:9000), the same way a
+# black-box tester points HEAVEN at a MinIO / Ceph RGW / LocalStack endpoint.
+#
+# SECURITY: binds to loopback ONLY. The bucket is intentionally public; nothing
+# sensitive is placed in it (a single benign marker object).
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: heaven-lab-minio
+    command: ["server", "/data", "--address", ":9000"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "127.0.0.1:9000:9000"
+    restart: "no"
+
+  # One-shot: create a public bucket with a benign object, then exit.
+  minio-init:
+    image: minio/mc:latest
+    container_name: heaven-lab-minio-init
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        until mc alias set lab http://minio:9000 minioadmin minioadmin; do
+          echo "waiting for minio..."; sleep 2
+        done
+        mc mb --ignore-existing lab/heaven-public
+        echo "benign public lab marker (not sensitive)" | mc pipe lab/heaven-public/exposed.txt
+        mc anonymous set public lab/heaven-public
+        echo "lab bucket ready: public + listable"
+    restart: "no"

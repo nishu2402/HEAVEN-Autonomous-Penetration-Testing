@@ -367,6 +367,20 @@ class TestWebUrlBridge:
         assert targets["urls"] == []
         assert not [t for t in orch.tasks.values() if "discovered services" in t.name]
 
+    def test_open_smtp_port_injects_relay_probe(self):
+        """A bare host with an open SMTP port (no mail domain to MX-resolve) must
+        still gain a relay/posture probe task, so an open relay on an internal box
+        is reachable — not only mail servers found via a domain's MX record."""
+        targets = {"ips": ["10.0.0.25"], "urls": [], "ports": "1-1000",
+                   "stealth_level": "normal"}
+        orch = build_full_scan(targets, scan_mode=ScanMode.FULL)
+        orch._inject_service_tasks({"hosts": [{
+            "ip": "10.0.0.25",
+            "open_ports": [{"port": 25, "service": "smtp"}],
+        }]})
+        smtp = [t for t in orch.tasks.values() if "SMTP Relay" in t.name]
+        assert smtp, "no SMTP relay/posture task injected for the open port 25"
+
     def test_network_mode_does_not_bridge(self):
         """NETWORK mode has no web scanners in its pipeline, so deriving web URLs
         would be wasted work — the bridge must stay a no-op there."""

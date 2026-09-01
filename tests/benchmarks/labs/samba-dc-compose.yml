@@ -1,0 +1,33 @@
+# HEAVEN benchmark: Active Directory lab (real Samba AD Domain Controller).
+#
+# A genuine Samba AD DC (realm HEAVEN.LOCAL) that speaks real Kerberos, LDAP and
+# SMB/RPC. HEAVEN's AD-mode probes run against it with no special access:
+#   * kerberos_preauth_probe -> "kerberos_user_enumeration": the KDC returns
+#     distinct errors for existing vs absent accounts, so seeded users
+#     (administrator, alice, bob, svc_sql) are confirmed with no credentials and
+#     no lockout risk. It must NOT emit asrep_roasting here (Samba's KDC does not
+#     honour DONT_REQUIRE_PREAUTH), which live-guards the AS-REP false-positive
+#     fix.
+#   * coercion_surface_probe -> "ntlm_coercion": binding (only) to the MS-RPRN
+#     spoolss pipe over an authenticated SMB session proves the coercion
+#     interface is reachable; the coercion call itself is never issued.
+#
+# SECURITY: every port binds to loopback ONLY (127.0.0.1). This is a disposable,
+# self-contained DC with seeded test accounts and no real data.
+services:
+  samba-dc:
+    build: ./samba-dc
+    image: heaven-lab-samba-dc:latest
+    container_name: heaven-lab-samba-dc
+    hostname: dc1
+    # Samba AD DC needs a few privileges for its internal DNS + directory store;
+    # privileged keeps the throwaway lab simple. It is loopback-bound only.
+    privileged: true
+    ports:
+      - "127.0.0.1:88:88"       # Kerberos (TCP)
+      - "127.0.0.1:88:88/udp"   # Kerberos (UDP)
+      - "127.0.0.1:135:135"     # RPC endpoint mapper
+      - "127.0.0.1:139:139"     # NetBIOS session
+      - "127.0.0.1:389:389"     # LDAP
+      - "127.0.0.1:445:445"     # SMB (named-pipe RPC)
+    restart: "no"

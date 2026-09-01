@@ -164,7 +164,7 @@ def os_label(host: dict) -> str:
             acc = 0
         return f"{os_guess} (fingerprinted, {acc}%)" if acc else f"{os_guess} (fingerprinted)"
     if source == "heuristic":
-        return f"{os_guess} (heuristic — unconfirmed)"
+        return f"{os_guess} (heuristic, unconfirmed)"
     return os_guess
 
 
@@ -500,7 +500,7 @@ def port_source_label(p: dict) -> str:
     """
     source = (p.get("source") or "active").lower()
     if source == "passive:internetdb":
-        return "passive (public OSINT — unconfirmed)"
+        return "passive (public OSINT, unconfirmed)"
     if source == "passive+active":
         return "active (OSINT-corroborated)"
     if p.get("corroborated_by"):
@@ -526,12 +526,12 @@ def render_markdown(assets: Optional[list], *, already_normalized: bool = False)
         f"{tot['hosts']} host(s), {tot['open_ports']} open port(s), "
         f"{tot['distinct_services']} distinct service(s). Ports, service versions "
         "and OS are reported exactly as observed by nmap; an OS marked "
-        "*(heuristic — unconfirmed)* is a TTL guess, not a stack fingerprint."
+        "*(heuristic, unconfirmed)* is a TTL guess, not a stack fingerprint."
     )
     if has_passive:
         note += (
             " The **Source** column records provenance: *active* ports were "
-            "proven by direct scan; *passive (public OSINT — unconfirmed)* ports "
+            "proven by direct scan; *passive (public OSINT, unconfirmed)* ports "
             "come from Shodan's public internet-scan data and could not be "
             "confirmed from the scan origin; *OSINT-corroborated* ports were seen "
             "in public data and then confirmed by a read-only re-probe."

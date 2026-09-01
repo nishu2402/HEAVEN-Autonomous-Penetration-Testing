@@ -717,7 +717,7 @@ class ComplianceReportGenerator:
             finding(s) are <span class="confpill conf-confirmed">Confirmed</span> (proven by direct
             observation or active validation) and <strong>{potential_total}</strong> are
             <span class="confpill conf-potential">Potential</span> (inferred from a service version
-            banner — the "backport" caveat applies — and not confirmed from the outside). The Overall
+            banner, the "backport" caveat applies, and not confirmed from the outside). The Overall
             Risk rating above counts confirmed findings only.</p>
           <h3>Key Findings</h3>
           <table><tr><th style="width:90px">Severity</th><th style="width:88px">Confirmation</th>
@@ -792,14 +792,14 @@ class ComplianceReportGenerator:
                          if meta_bits else "")
             host_blocks.append(
                 f'<h3>{_esc(h.get("host"))} '
-                f'<span class="muted small">— {_esc(os_txt)}</span></h3>{meta_html}{tbl}'
+                f'<span class="muted small">· {_esc(os_txt)}</span></h3>{meta_html}{tbl}'
             )
         return f"""<div class="page section" id="inventory"><h2>Host &amp; Service Inventory</h2>
           <p>The network scan mapped <strong>{tot['hosts']}</strong> host(s) exposing
           <strong>{tot['open_ports']}</strong> open port(s) across
           <strong>{tot['distinct_services']}</strong> distinct service(s). Ports, service
           versions and operating systems are reported exactly as observed by the scanner.
-          An OS marked <em>(heuristic — unconfirmed)</em> was inferred from a TTL value, not a
+          An OS marked <em>(heuristic, unconfirmed)</em> was inferred from a TTL value, not a
           full stack fingerprint, and should be treated as indicative only. Where the scan
           observed them, a host's device name, device type and MAC address are shown; a MAC
           address appears only for a host on the same local segment scanned with sufficient
@@ -848,7 +848,7 @@ class ComplianceReportGenerator:
         return f"""<div class="page section" id="content-discovery">
           <h2>Content Discovery</h2>
           <p>Directory and file brute-forcing discovered
-          <strong>{len(hits)}</strong> interesting path(s) — admin panels, exposed
+          <strong>{len(hits)}</strong> interesting path(s): admin panels, exposed
           files, backups, API docs and other resources returning a live status
           code (200 / 3xx / 401 / 403 …). Each is listed below and detailed, with
           remediation, in the Findings section.</p>
@@ -895,7 +895,7 @@ class ComplianceReportGenerator:
             wild = " · Wildcard DNS present" if n.get("wildcard") else ""
             blocks.append(
                 f'<h3>{_esc(n.get("domain"))} '
-                f'<span class="muted small">— DNSSEC: {dnssec}{_esc(wild)}</span></h3>'
+                f'<span class="muted small">· DNSSEC: {dnssec}{_esc(wild)}</span></h3>'
                 f'{rec_tbl}{sub_tbl}'
             )
         return f"""<div class="page section" id="dns"><h2>DNS Enumeration</h2>
@@ -948,9 +948,9 @@ class ComplianceReportGenerator:
           <p class="muted small">The <b>Confirmation</b> column separates
           <span class="confpill conf-confirmed">Confirmed</span> findings (proven by direct
           observation or active validation) from <span class="confpill conf-potential">Potential</span>
-          ones (inferred from a service version banner and not confirmed from the outside — vendors
+          ones (inferred from a service version banner and not confirmed from the outside; vendors
           routinely backport fixes without bumping the banner). The <b>CVSS</b> column is the
-          standards base score for the finding's weakness class — reduced for a detection the scanner
+          standards base score for the finding's weakness class, reduced for a detection the scanner
           flags as unconfirmed or low-confidence, so it never over-states a heuristic "indicator".
           <b>Contextual</b> is the per-finding CVSS Temporal + Environmental score, adjusted for this
           finding's exploit maturity (EPSS / public exploit / CISA KEV), detection confidence and the
@@ -1366,7 +1366,7 @@ class ComplianceReportGenerator:
                      f'<td class="small">{n}</td></tr>')
         return f"""<div class="page section" id="owasp"><h2>OWASP Top 10 (2025) Coverage</h2>
           <p class="small muted">Every identified finding mapped to its OWASP Top 10 (2025) risk
-          category — {covered} of 10 categories have findings in this engagement. Categories marked
+          category: {covered} of 10 categories have findings in this engagement. Categories marked
           <em>Not observed</em> had no matching finding (either tested-clean or out of this scan's scope).</p>
           <table>
             <tr><th style="width:90px">Control</th><th>Category &amp; findings</th><th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
@@ -1435,7 +1435,7 @@ class ComplianceReportGenerator:
         return f"""<div class="page section" id="owasp-api"><h2>OWASP API Security Top 10 (2023) Coverage</h2>
           <p class="small muted">API findings (REST / GraphQL / gRPC) mapped to the
           <a href="https://owasp.org/API-Security/editions/2023/en/0x11-t10/">OWASP API Security Top 10 (2023)</a>
-          — {covered} of 10 categories have findings. API-layer authorization and resource-consumption
+          · {covered} of 10 categories have findings. API-layer authorization and resource-consumption
           risks are scored here, not under the web OWASP Top 10, so neither matrix double-counts.</p>
           <table>
             <tr><th style="width:90px">Category</th><th>Risk &amp; findings</th><th style="width:130px">Status</th><th style="width:70px">Count</th></tr>
@@ -1451,7 +1451,7 @@ class ComplianceReportGenerator:
             _fw.OWASP_IOT_2018, _fw.iot_category_id, findings)
         return f"""<div class="page section" id="owasp-iot"><h2>OWASP IoT Top 10 (2018) Coverage</h2>
           <p class="small muted">Consumer and building-automation device findings mapped to the
-          <a href="{_fw.OWASP_IOT_REFERENCE}">OWASP IoT Top 10 (2018)</a> — {covered} of 10
+          <a href="{_fw.OWASP_IOT_REFERENCE}">OWASP IoT Top 10 (2018)</a> · {covered} of 10
           categories have findings. This is the IoT-specific companion to the web OWASP Top 10:
           device authentication, insecure network services and default settings are scored here,
           not under the web risks.</p>
@@ -1470,7 +1470,7 @@ class ComplianceReportGenerator:
         return f"""<div class="page section" id="ot-ics"><h2>OT / ICS Security Coverage (IEC 62443)</h2>
           <p class="small muted">Industrial-control findings mapped to the
           <a href="{_fw.IEC_62443_REFERENCE}">IEC 62443-3-3</a> foundational requirements and
-          cross-referenced to <a href="{_fw.ATTACK_ICS_REFERENCE}">MITRE ATT&amp;CK for ICS</a> —
+          cross-referenced to <a href="{_fw.ATTACK_ICS_REFERENCE}">MITRE ATT&amp;CK for ICS</a>:
           {covered} of 7 requirements have findings. A read-only external scan primarily exercises
           FR1 (authentication) and FR5 (network segmentation); the full list is shown so coverage is
           an honest statement, not a cherry-picked subset.</p>
@@ -1517,12 +1517,12 @@ class ComplianceReportGenerator:
                f'{_esc(fw.title)}</a>' if fw.reference else _esc(fw.title))
         return f"""<div class="page section" id="compliance"><h2>{_esc(fw.title)} Compliance Mapping</h2>
           <p class="small muted">Identified findings mapped to{ref}
-          ({_esc(fw.subtitle)}) — {covered} of {total} controls have findings providing
+          ({_esc(fw.subtitle)}): {covered} of {total} controls have findings providing
           evidence of a gap in this engagement. A control marked <em>Not observed</em> had no
           matching finding: either tested-clean, out of this scan's scope, or a
           governance / physical / policy control this technical assessment cannot evidence.</p>
           <p class="note">This is a <strong>control-coverage view</strong> to guide remediation
-          and audit preparation — it maps technical findings to controls and is <strong>not an
+          and audit preparation: it maps technical findings to controls and is <strong>not an
           attestation of compliance</strong>, which requires a full audit of policy, process and
           physical safeguards beyond the scope of an automated assessment.</p>
           <table>

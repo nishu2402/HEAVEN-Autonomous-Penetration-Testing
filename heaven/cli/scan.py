@@ -30,6 +30,31 @@ class _SkipHud(Exception):
     scan persistence."""
 
 
+def _read_spec_source(src: str) -> str:
+    """Return the raw text of an --api-spec source: a local file path, an http(s)
+    URL (fetched read-only with a short timeout), or inline JSON/YAML text."""
+    p = Path(src)
+    if p.exists() and p.is_file():
+        return p.read_text(encoding="utf-8", errors="replace")
+    if src.lower().startswith(("http://", "https://")):
+        import urllib.request
+        req = urllib.request.Request(src, headers={"User-Agent": "HEAVEN"})
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 — operator-supplied
+            return resp.read().decode("utf-8", errors="replace")
+    # Treat the argument itself as inline spec text (JSON/YAML).
+    return src
+
+
+def _first_origin(urls: list[str]) -> Optional[str]:
+    """The scheme://host[:port] origin of the first URL target, or None."""
+    from urllib.parse import urlparse
+    for u in urls:
+        pr = urlparse(u if "://" in u else f"http://{u}")
+        if pr.scheme and pr.netloc:
+            return f"{pr.scheme}://{pr.netloc}"
+    return None
+
+
 def _print_inventory(assets: Optional[list]) -> None:
     """Print the host & service inventory (open ports / versions / OS).
 
@@ -105,6 +130,12 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
 @click.option("--ad-dc", default="", help="Active Directory Domain Controller IP/hostname")
 @click.option("--iot", is_flag=True, help="Enable IoT/SCADA/OT scanning")
 @click.option("--api-scan", is_flag=True, help="Enable advanced API security scanning")
+@click.option("--api-spec", "api_spec_src", default=None,
+              help="OpenAPI/Swagger, Postman, or GraphQL-introspection file (or URL) — "
+                   "every operation it declares is tested, not just crawled ones.")
+@click.option("--api-base-url", default=None,
+              help="Base URL to resolve --api-spec operations against "
+                   "(overrides the spec's own server list).")
 @click.option("--container", is_flag=True, help="Enable Container/Kubernetes scanning")
 @click.option("--mitre-map", is_flag=True, help="Enable MITRE ATT&CK mapping")
 @click.option("--engagement", help="Engagement name — persists findings into engagement DB")
@@ -142,6 +173,11 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
               help="Full autonomous mode: --auto-prove + --verify + chain post-exploitation "
                    "modules (linpeas / cred-reuse) from initial-access findings. Requires "
                    "explicit operator authorization.")
+@click.option("--exploit", "active_exploit", is_flag=True,
+              help="Active exploitation: after recon, drive the real exploit path against "
+                   "discovered services and CONFIRM remote code execution with a benign proof "
+                   "command (id; uname -a). Safe by default (read-only proof, no persistence). "
+                   "Implied by `-m exploit`. Requires explicit operator authorization.")
 @click.option("--watch-tail", is_flag=True,
               help="Headless mode: disable the Rich live HUD and stream a flat log line per "
                    "phase / finding to stdout. Better for CI, ssh sessions, and `tee` piping.")
@@ -167,7 +203,9 @@ def scan(
     seed: Optional[int], cookie_file: Optional[str], auth: str,
     low_priv_cookie_file: Optional[str] = None, low_priv_auth: str = "",
     auto_prove: bool = False, verify: bool = False, autonomous: bool = False,
+    active_exploit: bool = False,
     watch_tail: bool = False, cloud_buckets: bool = False, evade: bool = False,
+    api_spec_src: Optional[str] = None, api_base_url: Optional[str] = None,
 ) -> None:
     """Launch a vulnerability scan against specified targets."""
     print_banner()
@@ -232,6 +270,14 @@ def scan(
         verify = True
         _print("[bold magenta]⚙ AUTONOMOUS MODE[/bold magenta] — auto-prove + active-verify + post-ex chaining enabled")
 
+    # `-m exploit` is itself a request to actively exploit — imply the flag so
+    # the gated task runs in either invocation form.
+    if str(mode).lower() == "exploit":
+        active_exploit = True
+    if active_exploit:
+        _print("[bold red]⚔ ACTIVE EXPLOITATION[/bold red] — confirming RCE via the "
+               "real exploit path with a benign proof command")
+
     targets: dict[str, Any] = {
         "ips": list(target), "urls": list(url),
         "repositories": list(repo), "cloud_providers": list(cloud),
@@ -240,8 +286,34 @@ def scan(
         "enable_iot": iot, "enable_api_scan": api_scan,
         "enable_container": container, "enable_mitre": mitre_map,
         "auto_prove": auto_prove, "verify": verify, "autonomous": autonomous,
+        "active_exploit": active_exploit,
         "cloud_buckets": cloud_buckets, "evade": evade,
     }
+
+    # Spec-driven API surface: parse the operator's OpenAPI / Postman / GraphQL
+    # contract and feed EVERY declared operation into the URL list, so the API +
+    # injection scanners test the full documented surface — not only what the
+    # crawler linked its way to. A relative/example server in the spec is resolved
+    # against --api-base-url (falling back to the first --url target's origin).
+    if api_spec_src:
+        try:
+            from heaven.vulnscan.api_spec import load_api_spec
+            spec_text = _read_spec_source(api_spec_src)
+            base = api_base_url or _first_origin(list(url))
+            spec = load_api_spec(spec_text, base_url=base)
+            spec_urls = spec.to_urls(base_url=base)
+            new_urls = [u for u in spec_urls if u and u not in targets["urls"]]
+            targets["urls"].extend(new_urls)
+            targets["enable_api_scan"] = True
+            _print(f"[cyan]API spec:[/cyan] {spec.fmt or 'spec'} "
+                   f"'{spec.title or api_spec_src}' → {len(spec.operations)} "
+                   f"operation(s), {len(new_urls)} new endpoint(s) added.")
+            if not base and any(u.startswith("/") for u in spec_urls):
+                _print("[yellow]  Spec paths are relative and no base URL was "
+                       "given — pass --api-base-url or a --url target.[/yellow]")
+        except Exception as e:  # noqa: BLE001
+            _print(f"[red]Could not load --api-spec:[/red] {e}")
+            raise SystemExit(2)
 
     # Engagement scope check — second authorization gate
     engagement_store = None

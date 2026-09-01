@@ -268,7 +268,7 @@ def test_inventory_markdown_shows_provenance():
     ]}]
     md = render_markdown(assets)
     assert "Source" in md
-    assert "passive (public OSINT — unconfirmed)" in md
+    assert "passive (public OSINT, unconfirmed)" in md
     assert "public internet-scan data" in md
 
 
@@ -277,6 +277,6 @@ def test_port_source_label():
     assert port_source_label({}) == "active"
     assert port_source_label({"corroborated_by": "internetdb"}) == "active + OSINT"
     assert port_source_label(
-        {"source": "passive:internetdb"}) == "passive (public OSINT — unconfirmed)"
+        {"source": "passive:internetdb"}) == "passive (public OSINT, unconfirmed)"
     assert port_source_label(
         {"source": "passive+active"}) == "active (OSINT-corroborated)"

@@ -143,6 +143,18 @@ _OAUTH_PATHS = [
     "/.well-known/openid-configuration",
 ]
 
+# ── SAML SSO endpoints (metadata is fetched read-only and parsed) ──────────────
+_SAML_METADATA_PATHS = [
+    "/saml/metadata", "/saml2/metadata", "/saml/metadata.xml",
+    "/sso/saml/metadata", "/auth/saml2/metadata",
+    "/simplesaml/saml2/idp/metadata.php", "/Shibboleth.sso/Metadata",
+    "/FederationMetadata/2007-06/FederationMetadata.xml",
+]
+_SAML_SSO_PATHS = [
+    "/saml/sso", "/saml2/sso", "/sso/saml", "/saml/login",
+    "/simplesaml/saml2/idp/SSOService.php", "/adfs/ls/",
+]
+
 # ── Session cookie names ───────────────────────────────────────────────────────
 _SESSION_COOKIE_NAMES = re.compile(
     r"sess(ion)?id|auth|token|jwt|bearer|sid|JSESSIONID|PHPSESSID|ASP\.NET_SessionId",
@@ -639,6 +651,144 @@ async def _audit_oauth(session: "aiohttp.ClientSession", url: str) -> list[dict]
     return findings
 
 
+# ── SAML SSO misconfiguration ───────────────────────────────────────────────────
+
+def _parse_saml_metadata(xml_text: str) -> dict:
+    """Parse SAML/federation metadata for signing posture. Returns
+    ``{want_assertions_signed: bool|None, authn_requests_signed: bool|None,
+    entity_id: str}``. XML is parsed with defusedxml when available so a hostile
+    metadata document cannot turn our own parser into an XXE/billion-laughs sink."""
+    out: dict = {"want_assertions_signed": None, "authn_requests_signed": None,
+                 "entity_id": ""}
+    try:
+        try:
+            from defusedxml.ElementTree import fromstring as _fromstring
+        except Exception:
+            from xml.etree.ElementTree import fromstring as _fromstring
+        root = _fromstring(xml_text)
+    except Exception:
+        return out
+
+    def _localname(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+    def _as_bool(v: Optional[str]) -> Optional[bool]:
+        if v is None:
+            return None
+        return v.strip().lower() in ("true", "1")
+
+    if _localname(root.tag) in ("EntityDescriptor", "EntitiesDescriptor"):
+        out["entity_id"] = root.attrib.get("entityID", "") or out["entity_id"]
+    for el in root.iter():
+        ln = _localname(el.tag)
+        if ln == "EntityDescriptor" and not out["entity_id"]:
+            out["entity_id"] = el.attrib.get("entityID", "")
+        if ln == "SPSSODescriptor":
+            b = _as_bool(el.attrib.get("WantAssertionsSigned"))
+            if b is not None:
+                out["want_assertions_signed"] = b
+            b2 = _as_bool(el.attrib.get("AuthnRequestsSigned"))
+            if b2 is not None:
+                out["authn_requests_signed"] = b2
+    return out
+
+
+async def _audit_saml(session: "aiohttp.ClientSession", url: str) -> list[dict]:
+    """Discover SAML SSO endpoints and audit their published signing posture, plus
+    a conservative RelayState open-redirect reflection check.
+
+    Everything is unauthenticated and read-only. The signing-posture finding is
+    proved directly from the service's own published metadata; the RelayState
+    check only fires on an actual off-site redirect reflection (same discipline as
+    the OAuth open-redirect probe), so it does not manufacture false positives on
+    servers that simply ignore the parameter."""
+    findings: list[dict] = []
+    base = urllib.parse.urlparse(url)
+    base_url = f"{base.scheme}://{base.netloc}"
+    max_meta = 512 * 1024  # cap metadata read
+
+    for path in _SAML_METADATA_PATHS:
+        meta_url = base_url + path
+        try:
+            async with session.get(meta_url, allow_redirects=False,
+                                   timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status != 200:
+                    continue
+                ctype = resp.headers.get("Content-Type", "").lower()
+                body = await resp.content.read(max_meta)
+                text = body.decode("utf-8", "ignore")
+                if "EntityDescriptor" not in text and "urn:oasis:names:tc:SAML" not in text:
+                    continue
+                if "xml" not in ctype and "EntityDescriptor" not in text:
+                    continue
+        except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+            continue
+
+        parsed = _parse_saml_metadata(text)
+        findings.append(_make_finding(
+            meta_url, "saml_endpoint_exposed", "info",
+            "SAML SSO metadata exposed",
+            "A SAML federation metadata document is publicly reachable, disclosing "
+            "the SSO/ACS endpoints and signing configuration of the identity "
+            "integration. Useful reconnaissance for an SSO attack.",
+            confidence=0.9,
+            evidence={"entity_id": parsed.get("entity_id", ""), "url": meta_url},
+        ))
+        if parsed.get("want_assertions_signed") is False:
+            findings.append(_make_finding(
+                meta_url, "saml_unsigned_assertions", "high",
+                "SAML SP does not require signed assertions",
+                "The service provider's metadata advertises WantAssertionsSigned="
+                "\"false\". An attacker who can inject or wrap an assertion (XML "
+                "signature wrapping / forged assertion) may authenticate as an "
+                "arbitrary user, since the SP will accept an unsigned assertion.",
+                confidence=0.8,
+                evidence={"entity_id": parsed.get("entity_id", ""),
+                          "want_assertions_signed": False},
+            ))
+        if parsed.get("authn_requests_signed") is False:
+            findings.append(_make_finding(
+                meta_url, "saml_unsigned_authn_request", "medium",
+                "SAML AuthnRequests are not signed",
+                "The service provider does not sign SAML AuthnRequests "
+                "(AuthnRequestsSigned=\"false\"), which can enable request tampering "
+                "and, combined with a permissive IdP, cross-SP request injection.",
+                confidence=0.6,
+                evidence={"entity_id": parsed.get("entity_id", "")},
+            ))
+        break  # one metadata document is enough to characterize the integration
+
+    # RelayState open-redirect reflection — conservative, only on a real off-site
+    # redirect (mirrors the OAuth open-redirect discipline).
+    evil = "https://evil.attacker.example.com/saml"
+    for path in _SAML_SSO_PATHS:
+        sso_url = base_url + path
+        test_url = f"{sso_url}?RelayState={urllib.parse.quote(evil)}"
+        try:
+            async with session.get(test_url, allow_redirects=False,
+                                   timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("Location", "")
+                    if "evil.attacker" in location:
+                        findings.append(_make_finding(
+                            sso_url, "saml_relaystate_redirect", "medium",
+                            "SAML RelayState open redirect",
+                            f"The SSO endpoint reflected an attacker-controlled "
+                            f"RelayState into a redirect to {location}. RelayState "
+                            f"open redirects are used to steal SAML responses or "
+                            f"phish post-authentication.",
+                            confidence=0.85,
+                            evidence={"location": location, "evil_uri": evil},
+                        ))
+                        break
+        except Exception:
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+            continue
+
+    return findings
+
+
 # ── Security headers audit ──────────────────────────────────────────────────────
 
 async def _audit_security_headers(session: "aiohttp.ClientSession",
@@ -876,6 +1026,7 @@ async def scan_auth(url: str, forms: Optional[list[dict]] = None,
             _audit_session_fixation(session, url, forms),
             _audit_security_headers(session, url),
             _audit_oauth(session, url),
+            _audit_saml(session, url),
             _audit_password_policy(session, url),
             _audit_wstg_surrogates(session, url),
             *(

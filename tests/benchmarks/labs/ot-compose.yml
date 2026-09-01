@@ -1,0 +1,20 @@
+# HEAVEN benchmark: OT / ICS lab
+#
+# A real, unauthenticated Modbus/TCP server (pymodbus) on the standard ICS port
+# 502. Modbus is the most widely deployed industrial control protocol and has no
+# authentication by design, so an exposed Modbus endpoint is a genuine OT finding.
+# HEAVEN's OT scanner performs a protocol-correct Read-Device-Identification
+# handshake (probe_modbus) and reports "Modbus TCP ICS service reachable"
+# (critical, CWE-306) mapped to IEC 62443 / MITRE ATT&CK for ICS.
+#
+# SECURITY: binds to loopback ONLY (127.0.0.1). The OT scanner reaches it via
+# 127.0.0.1:502.
+
+services:
+  modbus:
+    build: ./modbus
+    image: heaven-lab-modbus:latest
+    container_name: heaven-lab-ot-modbus
+    ports:
+      - "127.0.0.1:502:502"
+    restart: "no"

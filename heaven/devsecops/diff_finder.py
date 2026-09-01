@@ -193,14 +193,14 @@ def compute_diff(
     curr_scan = _scan_meta(engagement_store, current_scan_id)
     if not base_scan or not curr_scan:
         raise ValueError(
-            f"Scan not found — baseline={base_scan is not None}, "
+            f"Scan not found: baseline={base_scan is not None}, "
             f"current={curr_scan is not None}"
         )
 
     base_completed = base_scan.get("completed_at") or base_scan.get("started_at")
     curr_started = curr_scan.get("started_at") or curr_scan.get("completed_at")
     if not base_completed or not curr_started:
-        raise ValueError("Scans missing started_at/completed_at — can't diff")
+        raise ValueError("Scans missing started_at/completed_at, can't diff")
 
     all_findings = _all_findings(engagement_store)
     report = DiffReport(
@@ -254,7 +254,7 @@ def render_diff_markdown(report: DiffReport,
                           *, include_unchanged: bool = False) -> str:
     """Render the diff as a markdown table set, suitable for PR comments."""
     lines: list[str] = []
-    lines.append(f"# Scan diff — {report.current_scan_id[:8]} vs. {report.baseline_scan_id[:8]}\n")
+    lines.append(f"# Scan diff · {report.current_scan_id[:8]} vs. {report.baseline_scan_id[:8]}\n")
     s = report.to_dict()["summary"]
     lines.append("## Summary\n")
     lines.append("| Bucket | Count |")
@@ -272,7 +272,7 @@ def render_diff_markdown(report: DiffReport,
     pct = f" ({rd['pct_change']:+.0f}%)" if rd["pct_change"] is not None else ""
     lines.append("## Risk drift\n")
     lines.append(f"Open-risk index **{rd['baseline']['index']:.0f} {arrow} "
-                 f"{rd['current']['index']:.0f}**{pct} — posture "
+                 f"{rd['current']['index']:.0f}**{pct}, posture "
                  f"**{rd['direction']}**.\n")
     lines.append("| Severity | Baseline open | Current open |")
     lines.append("|---|---:|---:|")
@@ -296,7 +296,7 @@ def render_diff_markdown(report: DiffReport,
                          f"{r.target[:60]} | {r.confidence:.0%} | "
                          f"{(r.title or '')[:60]} |")
         if len(rows) > 50:
-            lines.append(f"\n*(+{len(rows) - 50} more — truncated)*\n")
+            lines.append(f"\n*(+{len(rows) - 50} more, truncated)*\n")
         lines.append("")
 
     _section("🆕 New findings", report.new)

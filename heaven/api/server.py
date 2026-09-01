@@ -139,6 +139,10 @@ class ScanRequest(BaseModel):
     # every host. Off by default — HEAVEN still auto-detects a filtering
     # perimeter and runs a bounded evasion re-probe of the affected hosts.
     evade: bool = False
+    # Active exploitation of discovered services (confirm RCE via the real
+    # exploit path with a benign proof command). Implied when mode == "exploit".
+    # Authorization-gated (requires i_have_authorization); never runs implicitly.
+    active_exploit: bool = False
 
 
 class ScanResponse(BaseModel):
@@ -491,6 +495,111 @@ def _parse_benchmark_metrics(md: str) -> Optional[dict]:
     if precision is None and recall is None and f1 is None:
         return None
     return {"precision": precision, "recall": recall, "f1": f1}
+
+
+# The benchmark tiers, in DISPLAY order. Each is (report filename, source slug,
+# human label, target slug). The two native tiers (web + api) are always-on and
+# regenerated on every test run / re-run; the two live tiers only exist once an
+# operator has run them against a real target, so a fresh checkout simply shows
+# the native pair. Nothing is fabricated — a tier appears only if its report file
+# is present and did not wash out.
+_BENCHMARK_TIER_SPECS = [
+    ("native_benchmark.md", "native-controlled",
+     "Native controlled target — web tier (DVWA-class), Docker-free, always current",
+     "heaven-native-vuln-app"),
+    ("api_benchmark.md", "native-controlled-api",
+     "Native controlled target — API tier (OWASP API Top 10), Docker-free, always current",
+     "heaven-native-vuln-app-api"),
+    ("dvwa_aggregated.md", "live-dvwa",
+     "Live DVWA — Docker, multi-run aggregate (web tier)", "dvwa"),
+    ("msf2_aggregated.md", "live-network",
+     "Live Metasploitable-2 — network / service tier, multi-run aggregate",
+     "metasploitable-2"),
+]
+# Preference order for the single "primary" tier surfaced at the top level (kept
+# for the pre-tiers UI): a valid live run wins, else the always-on native web run.
+_BENCHMARK_PRIMARY_PREF = [
+    "live-dvwa", "live-network", "native-controlled", "native-controlled-api",
+]
+
+# source → (label, target), so a freshly-run native tier can be shaped without
+# re-reading its report file off disk.
+_BENCHMARK_TIER_META = {
+    source: (label, target)
+    for _fname, source, label, target in _BENCHMARK_TIER_SPECS
+}
+
+
+def _benchmark_tier_from_markdown(markdown: str, source: str) -> dict:
+    """Shape a freshly-run benchmark's markdown into a tier dict (no disk read)."""
+    from datetime import datetime, timezone
+
+    label, target = _BENCHMARK_TIER_META.get(source, ("Benchmark", source))
+    return {
+        "source": source,
+        "label": label,
+        "target": target,
+        "markdown": markdown,
+        "metrics": _parse_benchmark_metrics(markdown),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "size_bytes": len(markdown.encode("utf-8")),
+    }
+
+
+def _load_benchmark_report(path: Path, source: str, label: str,
+                           target: str) -> Optional[dict]:
+    """Read one benchmark report into a tier dict, or None if absent / a washout.
+
+    A washout is a run where the target was unreachable, so precision AND recall
+    are both 0% — never surfaced as "the benchmark".
+    """
+    from datetime import datetime, timezone
+
+    if not path.exists():
+        return None
+    md = path.read_text(encoding="utf-8")
+    metrics = _parse_benchmark_metrics(md)
+    if metrics and not metrics.get("precision") and not metrics.get("recall"):
+        return None
+    stat = path.stat()
+    return {
+        "source": source,
+        "label": label,
+        "target": target,
+        "markdown": md,
+        "metrics": metrics,
+        "generated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        "size_bytes": stat.st_size,
+    }
+
+
+def _collect_benchmark_tiers(reports_dir: Path) -> list[dict]:
+    """Every available, non-washout benchmark tier, in display order."""
+    tiers = []
+    for filename, source, label, target in _BENCHMARK_TIER_SPECS:
+        tier = _load_benchmark_report(reports_dir / filename, source, label, target)
+        if tier is not None:
+            tiers.append(tier)
+    return tiers
+
+
+def _benchmark_response(tiers: list[dict]) -> dict:
+    """Shape the tiers into the API response: the full list plus the primary
+    tier's fields spread at the top level (backward-compatible with the pre-tiers
+    single-object UI)."""
+    if not tiers:
+        return {
+            "available": False,
+            "tiers": [],
+            "note": ("No benchmark results yet. Generate the built-in ones with: "
+                     "heaven benchmark --tier all"),
+        }
+    primary = min(
+        tiers,
+        key=lambda t: (_BENCHMARK_PRIMARY_PREF.index(t["source"])
+                       if t["source"] in _BENCHMARK_PRIMARY_PREF else 99),
+    )
+    return {"available": True, "tiers": tiers, **primary}
 
 
 def _engagement_store_factory(name: Optional[str] = None, *, create: bool = True):
@@ -3656,6 +3765,189 @@ def create_app() -> FastAPI:
 
         raise HTTPException(400, f"unknown postex module: {module!r}")
 
+    # ── Active exploitation (admin only — confirms real RCE) ──
+
+    @app.get("/api/exploit/list")
+    async def list_exploit_modules(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Metadata for every registered exploit (id, ports, signatures)."""
+        from heaven.vulnscan.exploit_engine import list_exploits
+        return {"exploits": list_exploits()}
+
+    @app.post("/api/exploit/run")
+    async def run_exploit(
+        request: Request,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """Actively exploit a target and CONFIRM remote code execution.
+
+        Body JSON:
+          {"target": "192.168.0.162", "ports": [21, 445] | "21,445",
+           "proof_command": "id; uname -a", "only": ["vsftpd_234_backdoor"],
+           "i_have_authorization": true}
+
+        Drives the real exploit path and captures live command output from a
+        benign proof command (no persistence). Admin permission AND an explicit
+        i_have_authorization in the body are both required.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        target = str(body.get("target") or "").strip()
+        if not target:
+            raise HTTPException(400, "target is required")
+        if not bool(body.get("i_have_authorization")):
+            raise HTTPException(
+                403, "i_have_authorization must be true — active exploitation "
+                     "requires explicit written authorization for the target")
+        # Ports may arrive as a list or a comma string; None → engine auto-discovers.
+        raw_ports = body.get("ports")
+        ports: Optional[list[int]] = None
+        if isinstance(raw_ports, str):
+            ports = [int(p) for p in raw_ports.split(",") if p.strip().isdigit()]
+        elif isinstance(raw_ports, list):
+            ports = [int(p) for p in raw_ports if str(p).strip().isdigit()]
+        only = body.get("only") or None
+        if isinstance(only, str):
+            only = [o.strip() for o in only.split(",") if o.strip()]
+        proof_command = str(body.get("proof_command") or "id; uname -a")
+        try:
+            from heaven.vulnscan.exploit_engine import run_exploitation
+            return await run_exploitation(
+                authorized=True, target=target, ports=ports or None,
+                proof_command=proof_command, only=only)
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"exploitation failed: {e}")
+
+    # ── Offline artifact analysis (forensics — authorized files only) ──
+
+    @app.post("/api/analyze/decode")
+    async def analyze_decode(
+        request: Request,
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """Decode a base64/hex/base32/rot13 string. Body: {"text": "..."}."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        text = str(body.get("text") or "")
+        if not text:
+            raise HTTPException(400, "text is required")
+        from heaven.forensics.crypto import analyze_crypto
+        return analyze_crypto("", decode_text=text)
+
+    @app.post("/api/analyze/run")
+    async def analyze_upload(
+        request: Request,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """Analyze an offline artifact (pcap/binary/firmware/apk/image/hash file)
+        and return findings. The file arrives base64-encoded in JSON so no extra
+        server dependency is needed; it is written to a private temp path,
+        analyzed, then deleted — nothing is persisted.
+
+        Body JSON:
+          {"filename": "capture.pcap", "content_b64": "<base64>",
+           "kind": ""}   # kind optional — forces the type, else auto-detected
+        """
+        import base64
+        import tempfile
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        b64 = body.get("content_b64") or ""
+        if not b64:
+            raise HTTPException(400, "content_b64 is required")
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except Exception:
+            raise HTTPException(400, "content_b64 is not valid base64")
+        # Bounded so an oversized artifact cannot exhaust memory/disk.
+        max_bytes = 40 * 1024 * 1024
+        if len(data) > max_bytes:
+            raise HTTPException(413, "file too large (limit 40 MB)")
+        kind = str(body.get("kind") or "")
+        filename = str(body.get("filename") or "artifact")
+        from heaven.forensics.dispatch import analyze_artifact, detect_kind
+        safe_suffix = Path(filename).suffix[:12]
+        tmp = tempfile.NamedTemporaryFile(prefix="heaven_analyze_",
+                                          suffix=safe_suffix, delete=False)
+        try:
+            tmp.write(data)
+            tmp.flush()
+            tmp.close()
+            detected = kind or detect_kind(tmp.name)
+            result = analyze_artifact(tmp.name, kind=kind or "")
+            result.setdefault("detected_kind", detected)
+            result["filename"] = filename
+            return result
+        except Exception as e:
+            raise HTTPException(500, f"analysis failed: {e}")
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                logger.debug("temp artifact cleanup failed", exc_info=True)
+
+    # ── Network pivoting (admin only — tunnels into networks behind a foothold) ──
+
+    @app.post("/api/pivot/run")
+    async def run_pivot_endpoint(
+        request: Request,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """Establish an SSH pivot chain and scan hosts behind it.
+
+        Body JSON:
+          {"jumps": [{"host": "...", "port": 22, "username": "...",
+                       "password": "...", "key_path": "..."}],
+           "targets": ["10.1.1.20"], "ports": [22, 445, 3389],
+           "socks": false, "i_have_authorization": true}
+
+        Repeat `jumps` for a double pivot (each tunnels through the previous).
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not bool(body.get("i_have_authorization")):
+            raise HTTPException(
+                403, "i_have_authorization must be true — pivoting tunnels into "
+                     "networks behind the foothold")
+        raw_jumps = body.get("jumps") or []
+        if not isinstance(raw_jumps, list) or not raw_jumps:
+            raise HTTPException(400, "at least one jump host is required")
+        from heaven.postex.pivot import JumpSpec, run_pivot
+        try:
+            jumps = [
+                JumpSpec(host=str(j["host"]), port=int(j.get("port", 22)),
+                         username=str(j.get("username", "")),
+                         password=str(j.get("password", "")),
+                         key_path=str(j.get("key_path", "")))
+                for j in raw_jumps
+            ]
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(400, f"invalid jump spec: {e}")
+        targets = body.get("targets") or None
+        raw_ports = body.get("ports")
+        ports = None
+        if isinstance(raw_ports, list):
+            ports = [int(p) for p in raw_ports if str(p).strip().isdigit()]
+        try:
+            return await run_pivot(
+                authorized=True, jumps=jumps, targets=targets,
+                ports=ports, socks=bool(body.get("socks")))
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"pivot failed: {e}")
+
     # ── Gap 7: Trigger train-priors from the UI ──
 
     @app.post("/api/priors/train")
@@ -3935,64 +4227,32 @@ def create_app() -> FastAPI:
 
     @app.get("/api/benchmark/results")
     async def latest_benchmark(user: User = Depends(require_permission("scan.view"))):
-        """Return the latest benchmark report with parsed headline metrics.
+        """Return every available benchmark tier with parsed headline metrics.
 
-        Prefers a *valid* live Docker-DVWA aggregated run, then falls back to the
-        always-fresh native controlled benchmark (`heaven benchmark`). A washout —
-        a failed run where the target was down, so precision AND recall are both
-        0% — is never surfaced as "the benchmark"; we skip it and fall through.
+        Surfaces all tiers present on disk (always-on native web + API, and the
+        live DVWA / Metasploitable-2 runs once an operator has produced them), in
+        display order, plus the "primary" tier spread at the top level for the
+        pre-tiers UI. A washout — a failed run where the target was down, so
+        precision AND recall are both 0% — is never surfaced.
         """
-        from datetime import datetime, timezone
-
         reports = Path(__file__).parent.parent.parent / "tests" / "benchmarks" / "reports"
-        # (filename, source, label, target) in preference order.
-        candidates = [
-            (reports / "dvwa_aggregated.md", "live-dvwa",
-             "Live DVWA — Docker, multi-run aggregate", "dvwa"),
-            (reports / "native_benchmark.md", "native-controlled",
-             "Native controlled target — Docker-free, always current", "heaven-native-vuln-app"),
-        ]
-        for path, source, label, target in candidates:
-            if not path.exists():
-                continue
-            md = path.read_text(encoding="utf-8")
-            metrics = _parse_benchmark_metrics(md)
-            # Skip a washout: a run that detected nothing (target unreachable).
-            if metrics and not metrics.get("precision") and not metrics.get("recall"):
-                continue
-            stat = path.stat()
-            return {
-                "available": True,
-                "source": source,
-                "label": label,
-                "target": target,
-                "markdown": md,
-                "metrics": metrics,
-                "generated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                "size_bytes": stat.st_size,
-            }
-        return {
-            "available": False,
-            "note": "No benchmark results yet. Generate the built-in one with: heaven benchmark",
-        }
+        return _benchmark_response(_collect_benchmark_tiers(reports))
 
     @app.post("/api/benchmark/run")
     async def run_benchmark(
         user: User = Depends(require_permission("scan.create")),
     ):
-        """Regenerate the native, Docker-free benchmark and return fresh numbers.
+        """Regenerate BOTH native, Docker-free benchmark tiers and return fresh numbers.
 
         Backs the Benchmark page's "Re-run" button so a web-only operator gets
         genuinely current precision / recall / F1 without shelling into the
-        server — it runs the exact in-process reproduction ``heaven benchmark``
-        uses. Needs the benchmark extras (flask / bs4 / pyyaml); if they're
-        missing it returns a clear 503 and the page keeps showing the last
-        cached report. The run is CPU-bound and self-contained (~1–20 s), so it
-        executes off the event loop in a worker thread.
+        server — it runs the exact in-process reproductions ``heaven benchmark``
+        uses for the web and API tiers. Needs the benchmark extras (flask / bs4 /
+        aiohttp / pyyaml); if they're missing it returns a clear 503 and the page
+        keeps showing the last cached reports. The runs are CPU-bound and
+        self-contained (~1–20 s), so they execute off the event loop.
         """
-        from datetime import datetime, timezone
-
-        # The native runner lives under tests/ (shipped with the source tree but
+        # The native runners live under tests/ (shipped with the source tree but
         # not importable unless the repo root is on sys.path). Derive the root
         # from this module so it works regardless of the server's cwd — memory
         # notes `heaven serve` is often launched from outside the repo.
@@ -4000,31 +4260,35 @@ def create_app() -> FastAPI:
         if str(repo_root) not in sys.path:
             sys.path.insert(0, str(repo_root))
         try:
+            from tests.benchmarks.native.api_runner import run_api_benchmark
             from tests.benchmarks.native.runner import run_native_benchmark
         except Exception as e:  # noqa: BLE001 — missing optional benchmark deps
             raise HTTPException(
                 503,
                 "Benchmark runner unavailable — install the benchmark extras "
-                f"(flask/bs4/pyyaml) or run `heaven benchmark` on the server. ({e})",
+                f"(flask/bs4/aiohttp/pyyaml) or run `heaven benchmark` on the server. ({e})",
             )
         try:
-            run = await asyncio.to_thread(run_native_benchmark, write_report=True)
+            web_run = await asyncio.to_thread(run_native_benchmark, write_report=True)
+            api_run = await asyncio.to_thread(run_api_benchmark, write_report=True)
         except Exception as e:  # noqa: BLE001 — surface the failure to the UI
             logger.exception("Native benchmark run failed")
             raise HTTPException(500, f"Benchmark run failed: {e}")
 
-        md = run.markdown
-        logger.info("Native benchmark re-run by %s", user.username)
-        return {
-            "available": True,
-            "source": "native-controlled",
-            "label": "Native controlled target — Docker-free, always current",
-            "target": "heaven-native-vuln-app",
-            "markdown": md,
-            "metrics": _parse_benchmark_metrics(md),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "size_bytes": len(md.encode("utf-8")),
-        }
+        logger.info("Native benchmarks (web + API) re-run by %s", user.username)
+        # Return the two tiers we just ran (fresh markdown, not a stale disk read),
+        # plus any live tiers already present on disk so the page keeps showing them.
+        reports = repo_root / "tests" / "benchmarks" / "reports"
+        live_tiers = [
+            t for t in _collect_benchmark_tiers(reports)
+            if t["source"] in ("live-dvwa", "live-network")
+        ]
+        tiers = [
+            _benchmark_tier_from_markdown(web_run.markdown, "native-controlled"),
+            _benchmark_tier_from_markdown(api_run.markdown, "native-controlled-api"),
+            *live_tiers,
+        ]
+        return _benchmark_response(tiers)
 
     # ══════════════════════════════════════════════════════════════════
     # CLI ↔ API sync — every backend capability has a UI-reachable route
@@ -5199,6 +5463,11 @@ async def _run_scan_background(scan_id: str, req: ScanRequest, *, resume: bool =
         "ports": req.ports,
         "stealth_level": stealth_name,
         "evade": bool(req.evade),
+        # Active exploitation is gated in the orchestrator; the task also fires
+        # when the mode is "exploit". i_have_authorization was already asserted
+        # by the create_scan endpoint before this runner is scheduled.
+        "active_exploit": bool(req.active_exploit)
+        or str(req.mode or req.scan_type or "").lower() == "exploit",
     }
 
     # Engagement store — always open one (defaults to "default" engagement)

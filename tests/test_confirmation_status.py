@@ -46,6 +46,16 @@ from heaven.utils.cvss import (
     ({"vuln_type": "xss", "title": "Possible XSS", "severity": "high", "validated": True}, "Confirmed"),
     ({"vuln_type": "sql_injection", "severity": "critical",
       "evidence": {"result": "confirmed"}}, "Confirmed"),
+    # Active-exploitation engine proof signals → Confirmed. The ``confirmed``
+    # flag lives on the fresh in-memory finding; ``evidence.proof_output`` is the
+    # one that survives the DB round-trip, so a *persisted* RCE still reads as
+    # Confirmed (its top-level flag is gone by then).
+    ({"vuln_type": "samba_usermap_script", "severity": "critical",
+      "cve": "CVE-2007-2447", "confidence": 1.0, "confirmed": True,
+      "evidence": {"proof_output": "uid=0(root) gid=0(root)"}}, "Confirmed"),
+    ({"vuln_type": "samba_usermap_script", "severity": "critical",
+      "cve": "CVE-2007-2447",
+      "evidence": {"proof_output": "uid=0(root) gid=0(root)"}}, "Confirmed"),
 ])
 def test_confirmation_status_classification(finding, expected):
     assert confirmation_status(finding) == expected

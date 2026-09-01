@@ -38,14 +38,20 @@ def cloud() -> None:
               help="Limit to specific providers (default: all).")
 @click.option("--limit", default=60, type=int, show_default=True,
               help="Max candidate bucket names to probe.")
+@click.option("--endpoint", default=None,
+              help="Probe an S3-compatible endpoint (MinIO / Ceph RGW / "
+                   "LocalStack) instead of public AWS/GCS/Azure, e.g. "
+                   "http://127.0.0.1:9000 (or set HEAVEN_S3_ENDPOINT).")
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
 def storage_cmd(target: str, names: tuple[str, ...], providers: tuple[str, ...],
-                limit: int, engagement: Optional[str], output: Optional[str]) -> None:
+                limit: int, endpoint: Optional[str], engagement: Optional[str],
+                output: Optional[str]) -> None:
     """Probe guessable S3/GCS/Azure buckets derived from TARGET for public exposure."""
     from heaven.vulnscan.cloud_scanner import CloudStorageScanner
 
-    scanner = CloudStorageScanner(providers=list(providers) or None)
+    scanner = CloudStorageScanner(providers=list(providers) or None,
+                                  endpoint_url=endpoint)
     _print(f"[cyan]Hunting public storage buckets for[/cyan] {target}")
     result = asyncio.run(scanner.scan(target, extra_names=list(names), limit=limit))
     if not result.success:
@@ -83,10 +89,14 @@ def storage_cmd(target: str, names: tuple[str, ...], providers: tuple[str, ...],
               help="GCP project id (else GOOGLE_CLOUD_PROJECT / ADC project).")
 @click.option("--subscription", default=None,
               help="Azure subscription id (else AZURE_SUBSCRIPTION_ID / first sub).")
+@click.option("--endpoint", default=None,
+              help="AWS-compatible endpoint for STS/IAM (LocalStack / a custom "
+                   "partition), e.g. http://127.0.0.1:4566 (or HEAVEN_AWS_ENDPOINT).")
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
 def iam_cmd(provider: str, profile: Optional[str], region: Optional[str],
             project: Optional[str], subscription: Optional[str],
+            endpoint: Optional[str],
             engagement: Optional[str], output: Optional[str]) -> None:
     """Read-only IAM/RBAC privilege audit of the authenticated cloud identity.
 
@@ -105,7 +115,8 @@ def iam_cmd(provider: str, profile: Optional[str], region: Optional[str],
     }
     _print(f"[cyan]Auditing authenticated {provider.upper()} IAM identity (read-only)…[/cyan]")
     result = audit_cloud_iam(provider=provider, profile=profile, region=region,
-                             project=project, subscription=subscription)
+                             project=project, subscription=subscription,
+                             endpoint_url=endpoint)
     if not result.get("authenticated"):
         _print(f"[yellow]Not authenticated to {provider.upper()}:[/yellow] "
                f"{result.get('skipped_reason', 'no valid credentials')}. "

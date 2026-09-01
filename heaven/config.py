@@ -27,10 +27,31 @@ class ScanMode(str, Enum):
     CONTAINER = "container"
     EMAIL = "email"
     CI = "ci"
+    # Active exploitation of discovered services (recon → confirm RCE via the
+    # real exploit path with a benign proof command). Authorization-gated and
+    # never runs implicitly under FULL — the operator must select this mode or
+    # pass the explicit --exploit flag. See heaven.vulnscan.exploit_engine.
+    EXPLOIT = "exploit"
     # Network-reachable wireless-infrastructure configuration review (exposed
     # AP/router/WLAN-controller management interfaces). NOT RF/monitor-mode
     # scanning — that needs local radio hardware a remote scanner cannot have.
     WIRELESS = "wireless"
+    # DoS/DDoS susceptibility: reflection/amplification reflector detection
+    # (measured amplification factor) + slow-HTTP susceptibility. One benign
+    # probe per vector — never a flood. See heaven.vulnscan.dos_probe.
+    DOS = "dos"
+    # Sniffing / internal MITM susceptibility: LLMNR/NBT-NS/mDNS/WPAD name-service
+    # poisoning + IPv6 RA/DHCPv6 (mitm6) + cleartext-credential exposure. One
+    # benign name query per protocol. See heaven.recon.mitm_probe.
+    SNIFF = "sniff"
+    # Malware / backdoor threat detection: known-backdoor listening ports and
+    # service banners + webshell path/signature sweep on web targets. Read-only.
+    # See heaven.vulnscan.malware_scan.
+    MALWARE = "malware"
+    # NOTE: mobile application security (APK/IPA) is an artifact-driven analysis,
+    # not a network scan mode — it is served by `heaven mobile` / `heaven analyze`
+    # and the Analyze UI page (heaven.forensics.mobile), so it deliberately has no
+    # ScanMode entry.
 
 
 class Platform(str, Enum):

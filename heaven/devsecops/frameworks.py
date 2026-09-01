@@ -187,23 +187,23 @@ def _classify_iot(proto: str, title: str) -> dict[str, str]:
     if "default credential" in title or "accepts default" in title:
         vt, iid, name = ("iot_default_credentials", "I1",
                          "Weak, Guessable, or Hardcoded Passwords")
-        mitre = "T1078.001 — Valid Accounts: Default Accounts"
+        mitre = "T1078.001 · Valid Accounts: Default Accounts"
     elif "web panel" in title or "management panel" in title or "mgmt" in title:
         vt, iid, name = ("iot_exposed_mgmt_interface", "I3",
                          "Insecure Ecosystem Interfaces")
-        mitre = "T1133 — External Remote Services"
+        mitre = "T1133 · External Remote Services"
     elif "snmp" in proto or "community" in title:
         vt, iid, name = ("iot_default_snmp_community", "I9",
                          "Insecure Default Settings")
-        mitre = "T1602 — Data from Configuration Repository"
+        mitre = "T1602 · Data from Configuration Repository"
     elif "coap" in proto or "cleartext" in title or "unencrypted" in title:
         vt, iid, name = ("iot_cleartext_protocol", "I7",
                          "Insecure Data Transfer and Storage")
-        mitre = "T1040 — Network Sniffing"
+        mitre = "T1040 · Network Sniffing"
     else:  # MQTT / RTSP / UPnP-SSDP and other exposed device services
         vt, iid, name = ("iot_insecure_network_service", "I2",
                          "Insecure Network Services")
-        mitre = "T1046 — Network Service Discovery"
+        mitre = "T1046 · Network Service Discovery"
     return {
         "device_class": "iot",
         "vuln_type": vt,

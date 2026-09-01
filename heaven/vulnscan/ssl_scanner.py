@@ -25,6 +25,10 @@ _WEAK_CIPHER_PATTERNS = [
     "3DES", "IDEA", "SEED", "CAMELLIA128",
 ]
 _FORWARD_SECRECY_KEXES = {"ECDHE", "DHE", "ECDH", "EDH"}
+# 64-bit block ciphers whose birthday bound makes long TLS sessions decryptable
+# (SWEET32, CVE-2016-2183). 3DES is the one still commonly negotiated; IDEA is
+# the other classic case. RC2/DES are 64-bit too but already caught as broken.
+_SWEET32_TOKENS = ("3DES", "DES-CBC3", "IDEA")
 
 # ── TLS protocol constants ─────────────────────────────────────────────────────
 _TLS_VERSIONS = {
@@ -125,6 +129,7 @@ class SSLResult:
     drown: bool = False        # SSLv2 enabled
     logjam: bool = False       # DHE <=1024-bit
     freak: bool = False        # EXPORT cipher support
+    sweet32: bool = False       # 64-bit block cipher (3DES/IDEA) = SWEET32
     robot: bool = False        # RSA key exchange timing (heuristic)
     cert: Optional[CertInfo] = None
     hsts: bool = False
@@ -471,6 +476,10 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     result.crime  = False                # compression: Python ssl doesn't expose this easily
     result.freak  = any("EXPORT" in c for c in supported)
     result.logjam = any("DHE" in c and "1024" in c for c in supported)
+    # SWEET32: a 64-bit block cipher (3DES/IDEA) accepted for a TLS ≤1.2 session.
+    # TLS 1.3 dropped these suites entirely, so only the enumerable ≤1.2 set counts.
+    result.sweet32 = any(
+        tok in c.upper() for c in supported for tok in _SWEET32_TOKENS)
 
     # ── 7. Build findings ─────────────────────────────────────────────────────
     F = result.findings
@@ -519,6 +528,17 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             f"Weak Cipher Suites Accepted ({len(result.weak_ciphers)} found)",
             f"Accepted: {', '.join(result.weak_ciphers[:5])}. "
             "These enable downgrade and decryption attacks."))
+    if result.sweet32:
+        _s32 = [c for c in supported
+                if any(t in c.upper() for t in _SWEET32_TOKENS)]
+        F.append(_make_finding(host, port, "sweet32", "medium",
+            "SWEET32 — 64-bit Block Cipher (3DES) Accepted (CVE-2016-2183)",
+            "The server accepts a 64-bit block cipher (e.g. 3DES/IDEA). Its "
+            "birthday bound lets an attacker who can observe a long-lived TLS "
+            "session recover plaintext (e.g. a session cookie) after ~2^32 "
+            f"blocks. Accepted: {', '.join(_s32[:5]) or '3DES'}. Disable 3DES "
+            "and IDEA and offer only AEAD suites (AES-GCM / ChaCha20-Poly1305).",
+            cve="CVE-2016-2183"))
     # Only assert the *absence* of forward secrecy when we actually enumerated at
     # least one TLS ≤1.2 cipher. An empty list means enumeration failed (transient
     # handshake drops), so "no FS" then would be a false positive, not a finding.

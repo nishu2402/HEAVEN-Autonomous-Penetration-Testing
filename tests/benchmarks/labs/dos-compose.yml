@@ -1,0 +1,38 @@
+# HEAVEN benchmark: DoS susceptibility lab
+#
+# Two genuinely-susceptible services HEAVEN's single-shot, no-flood DoS probe
+# confirms:
+#   * A single-threaded HTTP server (python -m http.server) that enforces no
+#     header-read timeout, so it holds an incomplete request header open
+#     indefinitely — the precondition for a Slowloris / slow-read attack.
+#     HEAVEN reports slow_http_dos (medium, CWE-400) after holding one partial
+#     header ~8s without being dropped.
+#   * memcached with the UDP listener ENABLED (-U 11211) — the real
+#     CVE-2018-1000115 condition. HEAVEN sends one benign `stats` datagram and
+#     measures the reflected reply's amplification factor -> dos_amplification.
+#
+# HEAVEN never floods and never takes anything down: one probe per vector. Both
+# ports bind to loopback ONLY.
+
+services:
+  slowhttp:
+    image: python:3.12-slim
+    container_name: heaven-lab-slowhttp
+    # http.server is single-threaded with no request-header timeout: a textbook
+    # Slowloris-susceptible target.
+    command: ["python", "-m", "http.server", "80"]
+    working_dir: /tmp
+    ports:
+      - "127.0.0.1:8091:80"
+    restart: "no"
+
+  memcached:
+    image: memcached:alpine
+    container_name: heaven-lab-memcached
+    # -U 11211 enables the UDP listener (disabled by default since the 2018 CVE),
+    # reproducing the amplification-reflector condition.
+    command: ["memcached", "-m", "64", "-p", "11211", "-U", "11211", "-l", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:11211:11211/tcp"
+      - "127.0.0.1:11211:11211/udp"
+    restart: "no"

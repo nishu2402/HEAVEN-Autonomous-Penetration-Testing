@@ -1637,6 +1637,60 @@ _KB: dict[str, dict[str, Any]] = {
         "remediation": "Sign the zone with DNSSEC and publish DS records at the parent registrar.",
         "references": ["https://www.cloudflare.com/dns/dnssec/how-dnssec-works/"],
     },
+    "dmarc_subdomain_policy_weak": {
+        "title": "DMARC Subdomain Policy Weaker Than Domain",
+        "cwe": "CWE-16",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1566 · Phishing",
+        "typical_cvss": 5.3,
+        "description": (
+            "The DMARC record enforces a strict policy on the apex domain but sets a "
+            "weaker subdomain policy (sp=), so mail can still be spoofed from any "
+            "subdomain even though the apex is protected."
+        ),
+        "impact": "Subdomain-based spoofing / phishing that bypasses the apex policy.",
+        "remediation": (
+            "Set sp= to at least the same enforcement level as p= (quarantine or "
+            "reject), or remove sp= so subdomains inherit the domain policy."
+        ),
+        "references": ["https://datatracker.ietf.org/doc/html/rfc7489#section-6.3"],
+    },
+    "bimi_missing": {
+        "title": "BIMI Not Configured",
+        "cwe": "CWE-16",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1566 · Phishing",
+        "typical_cvss": 2.6,
+        "description": (
+            "DMARC is enforced but no BIMI record is published, so supporting mail "
+            "clients cannot display a verified brand logo — a missed anti-impersonation "
+            "and brand-trust control."
+        ),
+        "impact": "Recipients have a weaker visual signal to distinguish genuine mail.",
+        "remediation": (
+            "Publish a BIMI record (default._bimi TXT) that references an SVG Tiny PS "
+            "logo, ideally backed by a Verified Mark Certificate (VMC)."
+        ),
+        "references": ["https://bimigroup.org/"],
+    },
+    "smtp_user_enumeration": {
+        "title": "SMTP User Enumeration (VRFY/EXPN)",
+        "cwe": "CWE-203",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1087 · Account Discovery",
+        "typical_cvss": 3.7,
+        "description": (
+            "The mail server responds differently to VRFY/EXPN for existing versus "
+            "non-existing mailboxes, so an attacker can enumerate valid usernames "
+            "without authenticating."
+        ),
+        "impact": "Valid accounts are harvested for phishing and password-spray targeting.",
+        "remediation": (
+            "Disable VRFY and EXPN, or configure them to return a uniform response for "
+            "every address regardless of whether the mailbox exists."
+        ),
+        "references": ["https://datatracker.ietf.org/doc/html/rfc5321#section-3.5"],
+    },
     "dns_info": {
         "title": "DNS / Mail Infrastructure Information",
         "cwe": "",
@@ -2410,6 +2464,364 @@ _KB: dict[str, dict[str, Any]] = {
             "https://cwe.mitre.org/data/definitions/1188.html",
         ],
     },
+    "dos_amplification": {
+        "title": "DDoS Amplification / Reflection Reflector Exposed",
+        "cwe": "CWE-406",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1498.002 · Network Denial of Service: Reflection Amplification",
+        "typical_cvss": 7.5,
+        "description": (
+            "A UDP service on this host (e.g. NTP monlist, an open DNS resolver, "
+            "SSDP/UPnP, memcached, CLDAP, chargen, QOTD or RIPv1) reflects a reply "
+            "many times larger than the request that triggered it. Because UDP is "
+            "connectionless, an attacker can spoof a victim's source address and use "
+            "this host to reflect and amplify traffic in a distributed "
+            "denial-of-service attack against that third party. The measured "
+            "bandwidth amplification factor (BAF) is recorded in the evidence."
+        ),
+        "impact": "The host can be conscripted into a spoofed-source reflection DDoS, "
+                  "amplifying an attacker's traffic against a victim and consuming this "
+                  "host's own bandwidth. It also frequently discloses configuration.",
+        "remediation": (
+            "1. If the service is not needed, disable it or firewall the UDP port from "
+            "untrusted networks.\n"
+            "2. NTP: disable monlist (`disable monitor` / upgrade ntpd ≥4.2.7p26).\n"
+            "3. DNS: disable open recursion or restrict it to trusted clients; enable "
+            "response-rate limiting (RRL).\n"
+            "4. memcached: bind to localhost and disable the UDP listener (`-U 0`).\n"
+            "5. SSDP/CLDAP/chargen/QOTD/RIPv1: block the UDP port at the perimeter and "
+            "disable the legacy service.\n"
+            "6. Deploy anti-spoofing (BCP 38 / uRPF) at the network edge."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1498/002/",
+            "https://www.cisa.gov/news-events/alerts/2014/01/17/udp-based-amplification-attacks",
+            "https://cwe.mitre.org/data/definitions/406.html",
+        ],
+    },
+    "slow_http_dos": {
+        "title": "Slow-HTTP (Slowloris) Denial-of-Service Susceptibility",
+        "cwe": "CWE-400",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1499.001 · Endpoint Denial of Service: OS Exhaustion Flood",
+        "typical_cvss": 5.3,
+        "description": (
+            "The web server tolerated an incomplete request header held open for an "
+            "extended period without enforcing a header-read timeout. A Slowloris / "
+            "slow-read attacker can hold many connections open with trickled partial "
+            "requests, exhausting the server's connection pool and denying service to "
+            "legitimate users from a single low-bandwidth host."
+        ),
+        "impact": "A single attacker can exhaust the server's worker/connection pool "
+                  "and take the site offline without high bandwidth.",
+        "remediation": (
+            "1. Apache: enable and tune mod_reqtimeout (RequestReadTimeout) and "
+            "mod_qos; prefer the event MPM.\n"
+            "2. nginx: set client_header_timeout, client_body_timeout and "
+            "limit_conn per client IP.\n"
+            "3. Terminate connections at a reverse proxy / CDN / load balancer that "
+            "buffers full requests before forwarding.\n"
+            "4. Cap concurrent connections per source IP at the firewall."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1499/001/",
+            "https://owasp.org/www-community/attacks/Denial_of_Service",
+        ],
+    },
+    "adcs_esc1": {
+        "title": "AD CS ESC1 · Enrollee-Supplies-Subject Certificate Template",
+        "cwe": "CWE-269",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1649 · Steal or Forge Authentication Certificates",
+        "typical_cvss": 9.8,
+        "description": (
+            "An Active Directory Certificate Services template permits the enrollee "
+            "to supply an arbitrary subject / subjectAltName, publishes a "
+            "client-authentication EKU, requires neither manager approval nor an "
+            "enrolment-agent signature, and is enrollable by low-privileged "
+            "principals. Any domain user can request a certificate for a Domain "
+            "Admin and then authenticate as that account (PKINIT / Schannel)."
+        ),
+        "impact": "Immediate domain-wide privilege escalation to Domain Admin.",
+        "remediation": (
+            "Remove CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT, require manager approval or an "
+            "enrolment-agent signature, and restrict the template's enrolment ACL to "
+            "only the principals that need it. Audit all published templates with a "
+            "tool such as Certipy or the ADCS toolkit."
+        ),
+        "references": [
+            "https://posts.specterops.io/certified-pre-owned-d95910965cd2",
+            "https://attack.mitre.org/techniques/T1649/",
+        ],
+    },
+    "adcs_esc8": {
+        "title": "AD CS ESC8 · NTLM Relay to Certificate Web Enrolment",
+        "cwe": "CWE-269",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1649 · Steal or Forge Authentication Certificates",
+        "typical_cvss": 8.8,
+        "description": (
+            "A Certificate Authority exposes an HTTP(S) web-enrolment endpoint "
+            "(/certsrv) that accepts NTLM authentication. Combined with an "
+            "authentication-coercion vector (PetitPotam / PrinterBug), an attacker "
+            "relays a Domain Controller's machine authentication to the endpoint and "
+            "obtains a certificate that authenticates as the DC."
+        ),
+        "impact": "Relay-to-domain-takeover: full Active Directory compromise.",
+        "remediation": (
+            "Disable HTTP web enrolment or enforce Extended Protection for "
+            "Authentication (EPA) with HTTPS + channel binding, disable NTLM on the "
+            "CA, and remove the coercion surface."
+        ),
+        "references": [
+            "https://posts.specterops.io/certified-pre-owned-d95910965cd2",
+            "https://attack.mitre.org/techniques/T1649/",
+        ],
+    },
+    "ntlm_coercion": {
+        "title": "NTLM Authentication Coercion Surface Exposed",
+        "cwe": "CWE-306",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1187 · Forced Authentication",
+        "typical_cvss": 8.1,
+        "description": (
+            "The host exposes an RPC interface that can be abused to coerce it into "
+            "authenticating to an attacker-controlled machine: MS-RPRN "
+            "(PrinterBug), MS-EFSR (PetitPotam) or MS-DFSNM (DFSCoerce). When SMB or "
+            "LDAP signing is not enforced, the coerced authentication can be relayed "
+            "to LDAP or to an AD CS web-enrolment endpoint (ESC8) for privilege "
+            "escalation. HEAVEN confirmed the interface is reachable by binding to "
+            "it; it never issued the coercion call."
+        ),
+        "impact": "Enables NTLM relay chains leading up to full domain compromise.",
+        "remediation": (
+            "Enforce SMB and LDAP signing + channel binding, disable the Print "
+            "Spooler on servers that do not need it, apply the PetitPotam / "
+            "DFSCoerce patches, and restrict RPC with an RPC filter / firewall."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1187/",
+            "https://learn.microsoft.com/security-updates/",
+        ],
+    },
+    "saml_unsigned_assertions": {
+        "title": "SAML Service Provider Does Not Require Signed Assertions",
+        "cwe": "CWE-347",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1606.002 · Forge Web Credentials: SAML Tokens",
+        "typical_cvss": 8.2,
+        "description": (
+            "The SAML service provider's published metadata advertises "
+            "WantAssertionsSigned=\"false\". An attacker who can inject or wrap an "
+            "assertion (XML signature wrapping, or a forged assertion) may "
+            "authenticate as an arbitrary user because the SP accepts an unsigned "
+            "assertion."
+        ),
+        "impact": "Authentication bypass / impersonation of any federated user.",
+        "remediation": (
+            "Require signed assertions (WantAssertionsSigned=\"true\"), validate the "
+            "signature against a pinned IdP certificate, and reject assertions that "
+            "are unsigned or wrapped."
+        ),
+        "references": [
+            "https://owasp.org/www-project-web-security-testing-guide/",
+            "https://attack.mitre.org/techniques/T1606/002/",
+        ],
+    },
+    "edge_appliance_kev": {
+        "title": "Internet-Facing Edge / VPN Appliance with Known-Exploited CVEs",
+        "cwe": "CWE-1104",
+        "owasp": "A03:2025 Software Supply Chain Failures",
+        "mitre": "T1190 · Exploit Public-Facing Application",
+        "typical_cvss": 9.8,
+        "description": (
+            "An internet-facing remote-access / edge appliance (Citrix NetScaler, "
+            "Ivanti Connect Secure, FortiOS SSL-VPN, Palo Alto GlobalProtect, "
+            "Microsoft Exchange, F5 BIG-IP) was fingerprinted at the perimeter. Each "
+            "of these families has vulnerabilities on CISA's Known-Exploited-"
+            "Vulnerabilities catalog and is a leading initial-access vector; an "
+            "unpatched instance is a likely breach path."
+        ),
+        "impact": "Unauthenticated remote code execution / initial access into the "
+                  "internal network if unpatched.",
+        "remediation": (
+            "Confirm the appliance's patch level against the vendor's advisories, "
+            "upgrade to a fixed release, rotate credentials and sessions where the "
+            "relevant CVE leaks them, and restrict management interfaces from the "
+            "internet."
+        ),
+        "references": [
+            "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+            "https://attack.mitre.org/techniques/T1190/",
+        ],
+    },
+    "nbtns_poisoning": {
+        "title": "NBT-NS Name Poisoning Susceptibility",
+        "cwe": "CWE-290",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1557.001 · Adversary-in-the-Middle: LLMNR/NBT-NS Poisoning and SMB Relay",
+        "typical_cvss": 8.1,
+        "description": (
+            "The host participates in NetBIOS Name Service (UDP 137) broadcast name "
+            "resolution. When a name fails to resolve, hosts broadcast an NBT-NS "
+            "request that any machine on the segment can answer. An attacker running "
+            "Responder/Inveigh spoofs the answer, coercing the victim to authenticate "
+            "and capturing its NetNTLM hash for offline cracking or SMB relay."
+        ),
+        "impact": "NetNTLM hash capture and SMB/LDAP relay leading to credential "
+                  "compromise and lateral movement across the internal network.",
+        "remediation": (
+            "1. Disable NetBIOS over TCP/IP on all interfaces (DHCP option 001 / "
+            "adapter settings), preferring DNS-only resolution.\n"
+            "2. Enforce SMB signing on every host to break the relay path.\n"
+            "3. Segment and monitor for NBT-NS/LLMNR spoofing.\n"
+            "4. Use the Local Administrator Password Solution (LAPS) so a captured "
+            "hash cannot be reused elsewhere."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1557/001/",
+            "https://cwe.mitre.org/data/definitions/290.html",
+        ],
+    },
+    "llmnr_poisoning": {
+        "title": "LLMNR Name Poisoning Susceptibility",
+        "cwe": "CWE-290",
+        "owasp": "A07:2025 Authentication Failures",
+        "mitre": "T1557.001 · Adversary-in-the-Middle: LLMNR/NBT-NS Poisoning and SMB Relay",
+        "typical_cvss": 8.1,
+        "description": (
+            "Link-Local Multicast Name Resolution (UDP 5355) is enabled on the host. "
+            "When DNS resolution fails, hosts multicast an LLMNR query that any "
+            "machine on the segment can answer. An attacker race-answers with "
+            "Responder/Inveigh to capture NetNTLM credentials or relay them to "
+            "another host."
+        ),
+        "impact": "NetNTLM credential capture and relay, a very common initial "
+                  "foothold on internal Windows networks.",
+        "remediation": (
+            "1. Disable LLMNR via Group Policy: Computer Configuration → "
+            "Administrative Templates → Network → DNS Client → "
+            "'Turn off multicast name resolution' = Enabled.\n"
+            "2. Disable NetBIOS over TCP/IP as well (they are usually abused "
+            "together).\n"
+            "3. Enforce SMB signing to break the relay path.\n"
+            "4. Deploy LAPS so captured credentials are not reusable."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1557/001/",
+            "https://cwe.mitre.org/data/definitions/290.html",
+        ],
+    },
+    "mdns_exposure": {
+        "title": "mDNS / Bonjour Exposure & Spoofing Susceptibility",
+        "cwe": "CWE-290",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1557 · Adversary-in-the-Middle",
+        "typical_cvss": 5.3,
+        "description": (
+            "The host answers multicast-DNS (UDP 5353) queries, disclosing "
+            "advertised services and host details. An on-segment attacker can spoof "
+            "mDNS responses to redirect '.local' name resolution and stage a "
+            "man-in-the-middle."
+        ),
+        "impact": "Service/host disclosure and '.local' name-resolution hijacking on "
+                  "the local segment.",
+        "remediation": (
+            "1. Disable mDNS/Bonjour/Avahi where it is not required, or restrict it "
+            "to trusted segments.\n"
+            "2. Block UDP 5353 across VLAN/segment boundaries.\n"
+            "3. Prefer authenticated service discovery."
+        ),
+        "references": ["https://attack.mitre.org/techniques/T1557/"],
+    },
+    "ipv6_mitm6": {
+        "title": "IPv6 mitm6 Susceptibility (Dual-Stack)",
+        "cwe": "CWE-300",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1557 · Adversary-in-the-Middle",
+        "typical_cvss": 6.5,
+        "description": (
+            "The host is dual-stack (reachable/advertised over IPv6) in an "
+            "environment administered over IPv4. Windows prefers IPv6 and requests a "
+            "DHCPv6 lease, so an attacker running mitm6 can answer as a rogue DHCPv6 "
+            "server, install itself as the host's IPv6 DNS, and man-in-the-middle "
+            "traffic (commonly relayed to LDAP/SMB with ntlmrelayx)."
+        ),
+        "impact": "IPv6 DNS takeover and credential relay, a widely-used internal "
+                  "attack path against Active Directory environments.",
+        "remediation": (
+            "1. If IPv6 is unused, disable it on hosts and block it at the switch.\n"
+            "2. If IPv6 is used, enforce RA-Guard and DHCPv6-Guard on the switch "
+            "fabric to reject rogue router advertisements and DHCPv6 servers.\n"
+            "3. Enforce LDAP channel binding + signing and SMB signing to defeat the "
+            "relay that mitm6 chains into."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1557/",
+            "https://cwe.mitre.org/data/definitions/300.html",
+        ],
+    },
+    "backdoor_service": {
+        "title": "Backdoor / Trojaned Service Detected",
+        "cwe": "CWE-506",
+        "owasp": "A08:2025 Software or Data Integrity Failures",
+        "mitre": "T1505.003 · Server Software Component: Web Shell / T1205 · Traffic Signaling",
+        "typical_cvss": 9.8,
+        "description": (
+            "A backdoor indicator was found on the host: either a listener bound to "
+            "a well-known backdoor/RAT port (e.g. Ingreslock, NetBus, Back Orifice, "
+            "SubSeven), an unauthenticated interactive shell answering on a port, or "
+            "a service whose version shipped a supply-chain backdoor (vsftpd 2.3.4, "
+            "UnrealIRCd 3.2.8.1, ProFTPD 1.3.3c). Each grants remote control of the "
+            "host with no legitimate authentication."
+        ),
+        "impact": "Immediate, unauthenticated remote control of the host; strong "
+                  "evidence the system is already compromised.",
+        "remediation": (
+            "1. Treat the host as compromised: isolate it from the network and begin "
+            "incident response / forensic imaging before remediating in place.\n"
+            "2. Identify and remove the backdoor listener; reinstall any trojaned "
+            "package (vsftpd/UnrealIRCd/ProFTPD) from a verified trusted source.\n"
+            "3. Rotate every credential and key that was exposed on the host.\n"
+            "4. Rebuild from known-good media if integrity cannot be assured.\n"
+            "5. Hunt for persistence (cron, systemd units, startup scripts, SSH keys) "
+            "and lateral movement from this host."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1505/003/",
+            "https://cwe.mitre.org/data/definitions/506.html",
+        ],
+    },
+    "webshell_detected": {
+        "title": "Live Webshell Detected",
+        "cwe": "CWE-506",
+        "owasp": "A08:2025 Software or Data Integrity Failures",
+        "mitre": "T1505.003 · Server Software Component: Web Shell",
+        "typical_cvss": 9.8,
+        "description": (
+            "A response matching a known webshell fingerprint (c99/r57/b374k/WSO/"
+            "'FilesMan') was served by the web server. A webshell is an attacker's "
+            "remote-control interface for running commands and managing files, and "
+            "is direct evidence the web application is already compromised."
+        ),
+        "impact": "Full remote command execution and file access through the web "
+                  "server; the application is compromised.",
+        "remediation": (
+            "1. Treat the web server as compromised and begin incident response.\n"
+            "2. Remove the webshell file and audit the webroot for other planted "
+            "files (compare against a known-good deployment).\n"
+            "3. Find and fix the upload/RCE flaw that allowed the webshell to be "
+            "planted.\n"
+            "4. Rotate application, database and system credentials reachable from "
+            "the server.\n"
+            "5. Review web/access logs for the attacker's activity and rebuild from "
+            "trusted media if integrity is uncertain."
+        ),
+        "references": [
+            "https://attack.mitre.org/techniques/T1505/003/",
+            "https://owasp.org/www-community/attacks/Web_Shell",
+        ],
+    },
     "cisco_smart_install": {
         "title": "Cisco Smart Install (SMI) Exposed",
         "cwe": "CWE-284",
@@ -2460,7 +2872,7 @@ _KB: dict[str, dict[str, Any]] = {
         "description": (
             "A network port answers with an interactive command shell that "
             "requires no authentication. Any client that can reach the port gets "
-            "direct command execution on the host, typically as root — the "
+            "direct command execution on the host, typically as root, the "
             "hallmark of a bind-shell backdoor (e.g. Metasploitable's TCP 1524 "
             "'root shell')."
         ),
@@ -2482,7 +2894,7 @@ _KB: dict[str, dict[str, Any]] = {
         "typical_cvss": 9.0,
         "description": (
             "A service that runs attacker-supplied code or commands by design is "
-            "reachable with no authentication — for example distributed Ruby "
+            "reachable with no authentication, for example distributed Ruby "
             "(dRuby), a Java RMI registry (remote class loading / deserialization) "
             "or a distcc daemon. Their mere exposure to an untrusted network is the "
             "vulnerability."
@@ -2504,8 +2916,8 @@ _KB: dict[str, dict[str, Any]] = {
         "typical_cvss": 9.1,
         "description": (
             "An NFS server exports a filesystem to any host (share list '*'). Any "
-            "unauthenticated client on the network can mount it and read — and, "
-            "where the export is read-write, modify — its contents. When the "
+            "unauthenticated client on the network can mount it and read its "
+            "contents; where the export is read-write, they can modify them too. When the "
             "exported path is the root, home or system filesystem this is a direct "
             "path to credential theft and full host compromise."
         ),
@@ -2595,7 +3007,7 @@ _KB: dict[str, dict[str, Any]] = {
         "impact": "Full interactive takeover of the graphical console session with a "
                   "guessable password.",
         "remediation": (
-            "1. Set a strong, unique VNC password (VNC's own auth is 8 chars max — "
+            "1. Set a strong, unique VNC password (VNC's own auth is 8 chars max; "
             "prefer an SSH/VPN tunnel instead).\n"
             "2. Bind VNC to localhost and tunnel it; restrict to a management network."
         ),
@@ -2800,7 +3212,7 @@ _KB: dict[str, dict[str, Any]] = {
         "description": (
             "The service can be driven into resource exhaustion or a crash by a "
             "crafted request or traffic pattern, making it unavailable to legitimate "
-            "users. A denial of service affects AVAILABILITY only — on its own it "
+            "users. A denial of service affects AVAILABILITY only; on its own it "
             "does not disclose or modify data."
         ),
         "impact": "Loss of availability for the affected service or host.",
@@ -2959,9 +3371,13 @@ _ALIASES: dict[str, str] = {
     "dnssec_not_enabled": "dnssec_missing",
     "dnssec_disabled": "dnssec_missing",
     "dmarc_analysis": "dmarc_missing",
+    "dmarc_policy_weak_subdomain": "dmarc_subdomain_policy_weak",
     "dkim_not_found": "dkim_missing",
     "dkim_weak_key": "dkim_missing",
+    "dkim_legacy_key": "dkim_missing",
     "smtp_starttls_missing": "smtp_no_starttls",
+    "smtp_vrfy_enabled": "smtp_user_enumeration",
+    "smtp_expn_enabled": "smtp_user_enumeration",
     # Informational DNS / mail recon
     "mx_enumeration": "dns_info",
     "mx_records": "dns_info",
@@ -3082,6 +3498,7 @@ _ALIASES: dict[str, str] = {
     # Positive posture confirmations → informational "posture_ok" entry
     "dnssec_enabled": "posture_ok",
     "mta_sts_enabled": "posture_ok",
+    "bimi_configured": "posture_ok",
     "tls_rpt_enabled": "posture_ok",
     "account_lockout_detected": "posture_ok",
     "lockout_inconclusive": "posture_ok",
@@ -3215,6 +3632,8 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "federation_sts_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     # Authenticated AWS IAM audit (cloud_iam.py) — privilege + hygiene posture.
     "cloud_iam_overprivileged": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H",
+    "cloud_iam_privilege_escalation": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+    "api_bfla": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
     "cloud_iam_root_access_keys": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H",
     "cloud_iam_no_mfa": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "cloud_iam_stale_access_key": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
@@ -3383,6 +3802,8 @@ _CVSS4_VECTOR_BY_KEY: dict[str, str] = {
     "adfs_idp_signon_enabled": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
     "federation_sts_exposed": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
     "cloud_iam_overprivileged": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+    "cloud_iam_privilege_escalation": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+    "api_bfla": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",
     "cloud_iam_root_access_keys": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
     "cloud_iam_no_mfa": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
     "cloud_iam_stale_access_key": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
@@ -3499,6 +3920,28 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
      ("CWE-284", "A01:2025 Broken Access Control", "T1078, Valid Accounts")),
     (("anonymous_ldap", "domain_information"),
      ("CWE-200", "A02:2025 Security Misconfiguration", "T1087, Account Discovery")),
+    # AD Certificate Services (ESC1-8) — vulnerable certificate templates / CA that
+    # let a low-privileged principal enrol a certificate authenticating as anyone.
+    (("adcs_esc", "adcs_ca", "certificate_template", "esc1", "esc2", "esc3",
+      "esc4", "esc8", "adcs"),
+     ("CWE-269", "A07:2025 Authentication Failures",
+      "T1649, Steal or Forge Authentication Certificates")),
+    # NTLM authentication coercion surface (PetitPotam / PrinterBug / DFSCoerce).
+    (("ntlm_coercion", "coercion", "petitpotam", "printerbug", "dfscoerce"),
+     ("CWE-306", "A07:2025 Authentication Failures", "T1187, Forced Authentication")),
+    # Kerberos pre-auth username enumeration.
+    (("kerberos_user_enum", "kerberos_enum"),
+     ("CWE-204", "A02:2025 Security Misconfiguration", "T1087.002, Account Discovery")),
+    # SAML SSO misconfiguration (unsigned assertions, RelayState open redirect).
+    (("saml_unsigned", "saml_relaystate", "saml_endpoint", "saml_signature",
+      "saml_"),
+     ("CWE-347", "A07:2025 Authentication Failures",
+      "T1606.002, Forge Web Credentials: SAML Tokens")),
+    # Internet-facing edge/VPN appliance with actively-exploited (CISA KEV) CVEs.
+    (("edge_citrix", "edge_ivanti", "edge_fortinet", "edge_paloalto",
+      "edge_microsoft_exchange", "edge_f5", "edge_appliance", "kev_appliance"),
+     ("CWE-1104", "A03:2025 Software Supply Chain Failures",
+      "T1190, Exploit Public-Facing Application")),
     (("azure_ad_tenant", "cloud_tenant", "tenant_disclosure", "federation_realm",
       "m365_tenant"),
      ("CWE-200", "A02:2025 Security Misconfiguration",
@@ -3518,6 +3961,9 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
     (("cloud_iam_overprivileged", "iam_overprivileged", "admin_equivalent",
       "cloud_iam_root_access_key", "root_access_key"),
      ("CWE-269", "A01:2025 Broken Access Control", "T1078, Valid Accounts")),
+    (("cloud_iam_privilege_escalation", "iam_privilege_escalation", "iam_privesc",
+      "privesc_technique"),
+     ("CWE-269", "A01:2025 Broken Access Control", "T1548, Abuse Elevation Control Mechanism")),
     (("cloud_iam_public_access", "iam_public", "allusers", "public_binding"),
      ("CWE-732", "A01:2025 Broken Access Control", "T1078, Valid Accounts")),
     (("cloud_iam_no_mfa", "without_mfa", "no_mfa"),
@@ -3545,6 +3991,8 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
      ("CWE-352", "A01:2025 Broken Access Control", "T1189, Drive-by Compromise")),
     (("idor", "insecure_direct", "bola", "object_reference"),
      ("CWE-639", "A01:2025 Broken Access Control", "T1190, Exploit Public-Facing Application")),
+    (("api_bfla", "bfla", "broken_function_level", "function_level_authorization"),
+     ("CWE-285", "A01:2025 Broken Access Control", "T1190, Exploit Public-Facing Application")),
     (("access_control", "authz", "authorization", "forced_brows", "priv_esc",
       "privilege_esc", "unauthenticated", "missing_auth"),
      ("CWE-284", "A01:2025 Broken Access Control", "T1190, Exploit Public-Facing Application")),

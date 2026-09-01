@@ -1,0 +1,114 @@
+# Ground truth for the native, Docker-free API benchmark target
+# (tests/benchmarks/native/api_app.py). This is a controlled, reproducible
+# functional benchmark for HEAVEN's API scanner (heaven/vulnscan/api_scanner.py),
+# scored through the SAME precision/recall/F1 metrics layer the web and network
+# benchmarks use. It is NOT a claim about any live third-party API.
+#
+# tier: api  → matching is by (API route, OWASP-API category); the harness serves
+# the app on an ephemeral loopback port, so the host/port are irrelevant and the
+# route lives in each entry's `endpoint`. Every entry is a genuine sink the real
+# scanner observes over HTTP; nothing here is asserted without a live detection.
+tier: api
+target_app: heaven-native-vuln-app-api
+version: "1.0"
+base_url: "http://127.0.0.1:5000"
+
+vulnerabilities:
+  # ── OWASP API1: Broken Object Level Authorization (BOLA / IDOR) ───────────
+  - id: bola_users_object
+    endpoint: "/api/users/"
+    category: bola
+    owasp: "API1:2023 Broken Object Level Authorization"
+    cwe: CWE-639
+    severity: high
+    detection_required: true
+    notes: "GET /api/users/<id> serves distinct records for sequential IDs with no auth."
+
+  # ── OWASP API2: Broken Authentication (unauth access to a protected set) ──
+  - id: broken_auth_users_collection
+    endpoint: "/api/users"
+    category: api_broken_auth
+    owasp: "API2:2023 Broken Authentication"
+    cwe: CWE-306
+    severity: high
+    detection_required: true
+    notes: "GET /api/users returns the full user collection with no credentials."
+
+  # ── OWASP API3/API6: Mass Assignment ─────────────────────────────────────
+  - id: mass_assignment_users_me
+    endpoint: "/api/users/me"
+    method: PUT
+    category: mass_assignment
+    owasp: "API6:2023 Unrestricted Access to Sensitive Business Flows"
+    cwe: CWE-915
+    severity: high
+    detection_required: true
+    notes: "PUT /api/users/me accepts and reflects an injected privileged field (role=admin)."
+
+  # ── OWASP API3: a real secret leaked in a response body ──────────────────
+  - id: secret_leak_config
+    endpoint: "/api/config"
+    category: api_secret_leak
+    owasp: "API3:2023 Broken Object Property Level Authorization"
+    cwe: CWE-200
+    severity: critical
+    detection_required: true
+    notes: "GET /api/config leaks an AWS-key-shaped credential (AKIA...) in the body."
+
+  # ── OWASP API4: no rate limiting on authentication ───────────────────────
+  - id: no_rate_limit_login
+    endpoint: "/api/login"
+    method: POST
+    category: weak_auth
+    owasp: "API4:2023 Unrestricted Resource Consumption"
+    cwe: CWE-770
+    severity: medium
+    detection_required: true
+    notes: "50 rapid POSTs to /api/login are all processed with no 429."
+
+  # ── OWASP API9: Improper Inventory Management (docs reachable unauth) ─────
+  - id: openapi_exposed
+    endpoint: "/openapi.json"
+    category: api_docs_exposed
+    owasp: "API9:2023 Improper Inventory Management"
+    cwe: CWE-200
+    severity: medium
+    detection_required: true
+    notes: "OpenAPI spec reachable at /openapi.json with no authentication."
+
+  # ── GraphQL: introspection (API3) ────────────────────────────────────────
+  - id: graphql_introspection
+    endpoint: "/graphql"
+    method: POST
+    category: graphql_introspection
+    owasp: "API3:2023 Broken Object Property Level Authorization"
+    cwe: CWE-200
+    severity: medium
+    detection_required: true
+    notes: "POST /graphql answers a full __schema introspection query."
+
+  # ── GraphQL: unbounded batching (API4) ───────────────────────────────────
+  - id: graphql_batching
+    endpoint: "/graphql"
+    method: POST
+    category: graphql_batching
+    owasp: "API4:2023 Unrestricted Resource Consumption"
+    cwe: CWE-400
+    severity: medium
+    detection_required: true
+    notes: "POST /graphql processes a 100-query batch with no limit."
+
+  # ── GraphQL: no query cost/depth limit (API4) — supporting, not required ──
+  # The deep-query detector is confidence 0.55 / needs-verification by design, so
+  # it is a genuine supporting finding (counts for precision) rather than a floor
+  # the recall bar depends on. The server does process the deep query with no cost
+  # rejection, so the detection is honest.
+  - id: graphql_no_depth_limit
+    endpoint: "/graphql"
+    method: POST
+    category: graphql_dos
+    owasp: "API4:2023 Unrestricted Resource Consumption"
+    cwe: CWE-400
+    severity: medium
+    detection_required: false
+    notes: "POST /graphql accepts a deeply-nested query with no depth/cost limit error."

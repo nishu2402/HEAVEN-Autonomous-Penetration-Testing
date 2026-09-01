@@ -260,12 +260,25 @@ async def scan_web_tech(
     comps_by_host: dict[str, list[dict]] = {}
     ports_by_host: dict[str, list[dict]] = {}
     flat_components: list[dict] = []
+    edge_findings: list[dict] = []
+    seen_edge: set[tuple[str, str]] = set()
 
     try:
         for (host, port, _scheme), url in origins.items():
             headers = await fetch(url)
             if not headers:
                 continue
+            # Zero-extra-request edge/VPN appliance KEV fingerprint from the root
+            # response's headers/cookies (Citrix, Ivanti, FortiOS, PAN, Exchange, F5).
+            try:
+                from heaven.vulnscan.edge_kev import match_edge_kev_headers
+                for ef in match_edge_kev_headers(headers, target=host):
+                    fam = ef.get("evidence", {}).get("family", ef.get("vuln_type"))
+                    if (host, fam) not in seen_edge:
+                        seen_edge.add((host, fam))
+                        edge_findings.append(ef)
+            except Exception:
+                logger.debug("edge-KEV header match failed", exc_info=True)
             comps = extract_web_components(headers, url=url)
             for c in comps:
                 comps_by_host.setdefault(host, []).append(c)
@@ -281,8 +294,10 @@ async def scan_web_tech(
             await session.close()
 
     if not flat_components:
-        return {"findings": [], "vulnerabilities": [], "web_components": [],
-                "hosts": [], "total": 0}
+        # No versioned component, but an edge appliance may still have been
+        # fingerprinted from its cookies/headers — keep those.
+        return {"findings": edge_findings, "vulnerabilities": [],
+                "web_components": [], "hosts": [], "total": len(edge_findings)}
 
     # Detection host records (WITH synthetic ports) drive EOL + CVE; they are
     # *not* returned under "hosts" so the orchestrator's separate CVE-mapping
@@ -328,6 +343,7 @@ async def scan_web_tech(
                 "across %d host(s)", len(flat_components), len(findings),
                 len(vulnerabilities), len(comps_by_host))
 
+    findings = edge_findings + findings
     return {
         "findings": findings,
         "vulnerabilities": vulnerabilities,

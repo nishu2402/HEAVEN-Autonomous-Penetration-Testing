@@ -126,35 +126,46 @@ def test_benchmark_metrics_parser_and_washout():
 
 
 def test_benchmark_run_regenerates_and_returns_fresh(api_client, monkeypatch):
-    """POST /api/benchmark/run re-runs the native benchmark and returns fresh
-    numbers in the same shape as /results. ``run_native_benchmark`` is mocked so
-    the test is fast and independent of the in-process vuln-app fixture."""
+    """POST /api/benchmark/run re-runs BOTH native benchmark tiers (web + API) and
+    returns their fresh numbers in the tiers array. Both native runners are mocked
+    so the test is fast and independent of the in-process vuln-app fixtures."""
     import types
 
-    fake_md = (
-        "# Benchmark: HEAVEN v9.9.9 vs. heaven-native-vuln-app v1.0\n\n"
-        "| Precision (TP / TP+FP)    | 100.0% |\n"
-        "| Recall (required GT only) | 100.0% |\n"
-        "| F1                        | 100.0% |\n"
-    )
-    fake_run = types.SimpleNamespace(markdown=fake_md)
+    def _md(target: str) -> str:
+        return (
+            f"# Benchmark: HEAVEN v9.9.9 vs. {target} v1.0\n\n"
+            "| Precision (TP / TP+FP)    | 100.0% |\n"
+            "| Recall (required GT only) | 100.0% |\n"
+            "| F1                        | 100.0% |\n"
+        )
 
+    import tests.benchmarks.native.api_runner as api_runner_mod
     import tests.benchmarks.native.runner as runner_mod
     monkeypatch.setattr(
         runner_mod, "run_native_benchmark",
-        lambda *, write_report=True: fake_run,
+        lambda *, write_report=True: types.SimpleNamespace(markdown=_md("heaven-native-vuln-app")),
+    )
+    monkeypatch.setattr(
+        api_runner_mod, "run_api_benchmark",
+        lambda *, write_report=True: types.SimpleNamespace(markdown=_md("heaven-native-vuln-app-api")),
     )
 
     r = api_client.post("/api/benchmark/run")
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["available"] is True
-    assert body["source"] == "native-controlled"
-    assert body["metrics"] == {"precision": 1.0, "recall": 1.0, "f1": 1.0}
+    # Both always-on native tiers are freshly regenerated and returned. (Live tiers
+    # may also appear if their reports already exist on disk; we don't assert on
+    # those here, only that the two native tiers we just ran are present + fresh.)
+    tiers = {t["source"]: t for t in body["tiers"]}
+    assert "native-controlled" in tiers and "native-controlled-api" in tiers
+    web = tiers["native-controlled"]
+    assert web["metrics"] == {"precision": 1.0, "recall": 1.0, "f1": 1.0}
     # HEAVEN's version is stamped into the header (removes the "which v1.0?"
     # ambiguity — that v1.0 is the target app's, not HEAVEN's).
-    assert body["markdown"].splitlines()[0].startswith("# Benchmark: HEAVEN v")
-    assert body["generated_at"]
+    assert web["markdown"].splitlines()[0].startswith("# Benchmark: HEAVEN v")
+    assert web["generated_at"]
+    assert tiers["native-controlled-api"]["metrics"] == {"precision": 1.0, "recall": 1.0, "f1": 1.0}
 
 
 def test_update_engagement_details_endpoint(api_client, monkeypatch):
@@ -335,9 +346,70 @@ def test_every_new_route_is_registered(api_client):
         "/api/knowledge/stats",
         "/api/knowledge/rank",
         "/api/exploitdb/{cve}",
+        # Active exploitation / offline analysis / pivoting
+        "/api/exploit/list",
+        "/api/exploit/run",
+        "/api/analyze/decode",
+        "/api/analyze/run",
+        "/api/pivot/run",
     }
     missing = expected - paths
     assert not missing, f"new API routes missing from app: {missing}"
+
+
+# ── Active exploitation / analyze / pivot endpoints ─────────────────────
+
+def test_exploit_list_returns_registered_exploits(api_client):
+    r = api_client.get("/api/exploit/list")
+    assert r.status_code == 200
+    ids = {e["exploit_id"] for e in r.json()["exploits"]}
+    assert "vsftpd_234_backdoor" in ids and "samba_usermap_script" in ids
+
+
+def test_exploit_run_requires_target(api_client):
+    r = api_client.post("/api/exploit/run", json={"i_have_authorization": True})
+    assert r.status_code == 400
+
+
+def test_exploit_run_requires_authorization(api_client):
+    r = api_client.post("/api/exploit/run", json={"target": "127.0.0.1"})
+    assert r.status_code == 403
+
+
+def test_analyze_decode_roundtrips_base64(api_client):
+    # "admin:secret" base64 → the decoder must recover it.
+    r = api_client.post("/api/analyze/decode", json={"text": "YWRtaW46c2VjcmV0"})
+    assert r.status_code == 200
+    decodings = r.json()["report"]["decodings"]
+    assert any("admin:secret" in d["decoded"] for d in decodings)
+
+
+def test_analyze_run_requires_content(api_client):
+    r = api_client.post("/api/analyze/run", json={"filename": "x.bin"})
+    assert r.status_code == 400
+
+
+def test_analyze_run_analyzes_uploaded_pcap_bytes(api_client):
+    # A tiny non-artifact still round-trips through the dispatcher without a 5xx;
+    # an empty/short blob simply yields an "unknown"/no-findings result.
+    import base64
+    blob = base64.b64encode(b"not-a-real-artifact").decode()
+    r = api_client.post("/api/analyze/run",
+                        json={"filename": "sample.txt", "content_b64": blob})
+    assert r.status_code == 200
+    assert "detected_kind" in r.json()
+
+
+def test_pivot_run_requires_authorization(api_client):
+    r = api_client.post("/api/pivot/run", json={
+        "jumps": [{"host": "10.0.0.5", "username": "u", "password": "p"}]})
+    assert r.status_code == 403
+
+
+def test_pivot_run_requires_a_jump(api_client):
+    r = api_client.post("/api/pivot/run",
+                        json={"i_have_authorization": True, "jumps": []})
+    assert r.status_code == 400
 
 
 # ═══════════════════════════════════════════

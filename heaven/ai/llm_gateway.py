@@ -621,6 +621,19 @@ _OVERLOAD_ERROR_TOKENS = (
     "503", "502", "504", "529",
 )
 
+# Appended to the prompt for the ONE structured-output repair retry. A small
+# local model (Ollama qwen2.5 / llama3, LM Studio, vLLM) often answers a
+# schema request with prose around the JSON, or omits it entirely. When the
+# brace-extractor in `_parse_structured` still can't recover a schema-valid
+# object, re-issuing once with an explicit "JSON only" instruction is by far
+# the most effective single fix — far cheaper than losing the verdict.
+_JSON_REPAIR_NUDGE = (
+    "\n\nIMPORTANT: your previous reply could not be parsed as JSON. "
+    "Respond again with ONLY one valid JSON object matching the requested "
+    "fields. No prose, no explanation, no markdown code fences, nothing "
+    "before or after the object."
+)
+
 
 # ═══════════════════════════════════════════
 # SECRET REDACTION
@@ -951,7 +964,23 @@ class LLMGateway:
                 resp.redactions_applied = redactions
                 self._audit(req, resp)
                 if req.response_schema is not None and resp.text:
-                    resp.structured = self._parse_structured(resp.text, req.response_schema)
+                    parsed = self._parse_structured_with_repair(
+                        resp, prompt, system, req, start, redactions)
+                    if parsed is None:
+                        # Both the direct parse and the single nudged repair
+                        # failed to yield schema-valid JSON. Re-dispatching the
+                        # identical request will not help (the model just can't
+                        # produce the schema right now), so return a clear error
+                        # instead of burning the transient-retry budget.
+                        return LLMResponse(
+                            text=resp.text, provider=self.provider,
+                            model=self.model,
+                            latency_ms=(time.time() - start) * 1000,
+                            redactions_applied=redactions,
+                            error="provider returned no schema-valid JSON "
+                                  "(after one repair retry)",
+                        )
+                    resp = parsed
                 return resp
             except Exception as e:
                 last_error = e
@@ -1013,6 +1042,39 @@ class LLMGateway:
         )
         self._audit(req, err)
         return err
+
+    def _parse_structured_with_repair(
+        self, resp: LLMResponse, prompt: str, system: Optional[str],
+        req: LLMRequest, start: float, redactions: int,
+    ) -> Optional[LLMResponse]:
+        """Parse ``resp.text`` against the schema, with ONE nudged repair.
+
+        Returns the response with ``.structured`` populated, or ``None`` when
+        even the repaired reply is not schema-valid. The repair is a single
+        extra dispatch that re-asks for JSON only (see ``_JSON_REPAIR_NUDGE``);
+        it fires only for local/open models that wrap or malform their JSON
+        past what the brace-extractor can recover. Cloud providers with native
+        structured output almost never reach the repair branch.
+        """
+        try:
+            resp.structured = self._parse_structured(resp.text, req.response_schema)
+            return resp
+        except LLMProviderError as first_err:
+            logger.debug("structured parse failed, attempting one repair: %s", first_err)
+        try:
+            repaired = self._dispatch(prompt + _JSON_REPAIR_NUDGE, system, req)
+            repaired.latency_ms = (time.time() - start) * 1000
+            repaired.redactions_applied = redactions
+            self._audit(req, repaired)
+            if not repaired.text:
+                return None
+            repaired.structured = self._parse_structured(
+                repaired.text, req.response_schema)
+            logger.info("structured repair retry succeeded")
+            return repaired
+        except Exception as e:
+            logger.warning("structured repair retry failed: %s", e)
+            return None
 
     async def acomplete(self, req: LLMRequest) -> LLMResponse:
         """Async wrapper — runs the sync provider call in a thread."""

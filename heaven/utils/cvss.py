@@ -645,7 +645,14 @@ def reconcile_severity(finding: dict[str, Any]) -> dict[str, Any]:
     # the bundled DB) → the label follows the standard number, up or down.
     if _has_published_score(finding):
         if label != score_band:
-            finding["severity"] = score_band
+            # A finding proven present by active exploitation is ground truth: a
+            # published base score may only RAISE its label, never demote it. A
+            # real exploit-to-root outranks a stale/pre-v3 CVSS — e.g. the Samba
+            # usermap RCE (CVE-2007-2447) whose only published score is the CVSS
+            # v2 6.0 (Medium) must not file a captured root shell as Medium.
+            demote = _SEV_RANK.get(score_band, 0) < _SEV_RANK.get(label, 0)
+            if not (demote and _is_actively_validated(finding)):
+                finding["severity"] = score_band
         return finding
 
     # KB-estimate base on a confirmed finding. A finding still carrying a CVE id
@@ -709,10 +716,20 @@ def _is_actively_validated(finding: dict[str, Any]) -> bool:
     ``version_confirmed`` does **not** count: it only means a version string fell
     within a CVE's affected range, which is precisely the unauthenticated
     inference this module treats as Potential.
+
+    The active-exploitation engine sets ``confirmed: True`` and stores the live
+    command output it captured in ``evidence.proof_output`` — it is the only
+    producer of either, and a banner match never carries them, so recognising
+    them here is honest ground truth, not a loosening. ``proof_output`` also
+    survives the DB round-trip (the top-level ``confirmed`` flag does not), so a
+    persisted RCE still reads as Confirmed on the findings list and report.
     """
-    if _finding_flag(finding, ("validated", "exploited", "verified", "proven")):
+    if _finding_flag(finding, ("validated", "exploited", "verified", "proven",
+                               "confirmed")):
         return True
     ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    if ev.get("proof_output"):
+        return True
     result = str(
         finding.get("validation") or ev.get("validation")
         or ev.get("validation_result") or ev.get("result") or ""

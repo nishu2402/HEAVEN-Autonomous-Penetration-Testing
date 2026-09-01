@@ -162,19 +162,23 @@ if HAS_CLICK:
     # Wire up every subcommand module
     from heaven.cli import (
         ai as ai_module,
+        analyze as analyze_module,
         assets as assets_module,
         audit, autonomous, benchmark as benchmark_module, chat as chat_module, cloud, completion,
         config_cmd, coverage, cve as cve_module,
         db, demo as demo_module,
-        diff, dns as dns_module, egress as egress_module, engage, exploitdb, findings, info, init as init_module,
+        diff, dns as dns_module, egress as egress_module, engage,
+        exploit as exploit_module, exploitdb, findings, info, init as init_module,
         install_tools as install_tools_module, knowledge,
-        lateral, methodology, mitre, postex as postex_module,
+        labs as labs_module,
+        lateral, methodology, mitre, pivot as pivot_module, postex as postex_module,
         quickstart as quickstart_module, replay,
         sast, sbom as sbom_module, sca as sca_module, scan, server,
         status as status_module, tickets,
         train, update as update_module, use as use_module, watch,
     )
     ai_module.register(cli)
+    analyze_module.register(cli)
     assets_module.register(cli)
     audit.register(cli)
     autonomous.register(cli)
@@ -191,14 +195,17 @@ if HAS_CLICK:
     dns_module.register(cli)
     egress_module.register(cli)
     engage.register(cli)
+    exploit_module.register(cli)
     exploitdb.register(cli)
     findings.register(cli)
     info.register(cli)
     init_module.register(cli)
     install_tools_module.register(cli)
     knowledge.register(cli)
+    labs_module.register(cli)
     lateral.register(cli)
     methodology.register(cli)
+    pivot_module.register(cli)
     mitre.register(cli)
     postex_module.register(cli)
     quickstart_module.register(cli)

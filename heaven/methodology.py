@@ -138,6 +138,9 @@ VULN_MODULE: dict[str, tuple[str, ...]] = {
     "dmarc_missing": ("dns_recon",),
     "dkim_missing": ("dns_recon",),
     "dnssec_missing": ("dns_recon",),
+    "dmarc_subdomain_policy_weak": ("dns_recon",),
+    "bimi_missing": ("dns_recon",),
+    "smtp_user_enumeration": ("dns_recon",),
     "subdomain_takeover": ("dns_recon",),
     # Anomaly
     "format_string": ("anomaly_probe",),
@@ -159,6 +162,49 @@ VULN_MODULE: dict[str, tuple[str, ...]] = {
     "snmp_default_community": ("network_exposure",),
     "snmp_amplification": ("network_exposure",),
     "ssh_hardening": ("network_exposure",),
+    # ── Denial-of-Service susceptibility (availability) ──────────────────────
+    "dos_amplification": ("dos_probe",),
+    "slow_http_dos": ("dos_probe",),
+    # ── Sniffing / internal MITM name-poisoning susceptibility ───────────────
+    "nbtns_poisoning": ("mitm_probe",),
+    "llmnr_poisoning": ("mitm_probe",),
+    "mdns_exposure": ("mitm_probe",),
+    "ipv6_mitm6": ("mitm_probe",),
+    # ── Malware / backdoor threat detection ──────────────────────────────────
+    "backdoor_service": ("malware_scan",),
+    "webshell_detected": ("malware_scan",),
+    # ── Mobile application security (Android APK / iOS IPA) ──────────────────
+    "apk_hardcoded_secret": ("mobile",),
+    "apk_cleartext_traffic": ("mobile",),
+    "apk_debuggable": ("mobile",),
+    "apk_backup_allowed": ("mobile",),
+    "apk_dangerous_permissions": ("mobile",),
+    "ipa_hardcoded_secret": ("mobile",),
+    "ipa_cleartext_ats_disabled": ("mobile",),
+    "ipa_url_scheme": ("mobile",),
+    "ipa_privacy_permissions": ("mobile",),
+    # ── AD Certificate Services (ESC1-8) ─────────────────────────────────────
+    "adcs_ca_discovered": ("adcs_scanner",),
+    "adcs_esc1": ("adcs_scanner",),
+    "adcs_esc2": ("adcs_scanner",),
+    "adcs_esc3": ("adcs_scanner",),
+    "adcs_esc4": ("adcs_scanner",),
+    "adcs_esc8": ("adcs_scanner",),
+    # ── Kerberos pre-auth enumeration / NTLM coercion ────────────────────────
+    "kerberos_user_enumeration": ("kerberos_probe",),
+    "ntlm_coercion": ("coercion_probe",),
+    # ── SAML single sign-on ──────────────────────────────────────────────────
+    "saml_endpoint_exposed": ("auth_scanner",),
+    "saml_unsigned_assertions": ("auth_scanner",),
+    "saml_unsigned_authn_request": ("auth_scanner",),
+    "saml_relaystate_redirect": ("auth_scanner",),
+    # ── Edge / VPN appliance KEV fingerprint ─────────────────────────────────
+    "edge_citrix_netscaler": ("edge_kev",),
+    "edge_ivanti_pulse": ("edge_kev",),
+    "edge_fortinet_fortios": ("edge_kev",),
+    "edge_paloalto_globalprotect": ("edge_kev",),
+    "edge_microsoft_exchange": ("edge_kev",),
+    "edge_f5_bigip": ("edge_kev",),
     # ── Content & config exposure (secure configuration) ─────────────────────
     "sensitive_file": ("dir_fuzzer", "exposure_scanner"),
     "exposed_secret": ("dir_fuzzer", "exposure_scanner"),

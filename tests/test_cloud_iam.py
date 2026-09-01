@@ -83,7 +83,7 @@ class _FakeSession:
     def __init__(self, sts, iam, **_):
         self._sts, self._iam = sts, iam
 
-    def client(self, svc):
+    def client(self, svc, **_):
         return self._sts if svc == "sts" else self._iam
 
 
@@ -226,3 +226,103 @@ def test_iam_findings_enrich_to_2025_taxonomy(monkeypatch):
     # Privilege issues map to Broken Access Control; credential hygiene to Auth.
     assert "A01:2025" in by_type["cloud_iam_overprivileged"]["owasp"]
     assert "A07:2025" in by_type["cloud_iam_no_mfa"]["owasp"]
+
+
+# ── IAM privilege-escalation primitives (pure detector) ──────────────────────
+
+def test_privesc_detects_single_action_primitives():
+    assert [p.pid for p in ci.detect_iam_privesc({"iam:CreatePolicyVersion"})] \
+        == ["CreatePolicyVersion"]
+    assert [p.pid for p in ci.detect_iam_privesc({"iam:AttachUserPolicy"})] \
+        == ["AttachUserPolicy"]
+    assert [p.pid for p in ci.detect_iam_privesc({"iam:CreateAccessKey"})] \
+        == ["CreateAccessKey"]
+
+
+def test_privesc_requires_all_actions_of_an_and_group():
+    # iam:PassRole alone is NOT escalation — it needs a compute-launch partner.
+    assert ci.detect_iam_privesc({"iam:PassRole"}) == []
+    assert ci.detect_iam_privesc({"ec2:RunInstances"}) == []
+    got = [p.pid for p in ci.detect_iam_privesc({"iam:PassRole", "ec2:RunInstances"})]
+    assert got == ["PassRoleToEC2"]
+
+
+def test_privesc_wildcard_actions_expand():
+    # iam:* covers every iam:* primitive; a service:* covers its partner action.
+    pids = {p.pid for p in ci.detect_iam_privesc({"iam:*", "ec2:*", "lambda:*"})}
+    assert "CreatePolicyVersion" in pids
+    assert "PassRoleToEC2" in pids
+    assert "PassRoleToLambda" in pids
+
+
+def test_privesc_explicit_deny_wins():
+    # An explicit Deny neutralises an otherwise-matching Allow (deny-wins).
+    got = ci.detect_iam_privesc({"iam:*"}, {"iam:CreatePolicyVersion"})
+    assert "CreatePolicyVersion" not in {p.pid for p in got}
+    # But other iam:* primitives still fire.
+    assert "AttachUserPolicy" in {p.pid for p in got}
+
+
+def test_privesc_least_privilege_identity_is_clean():
+    assert ci.detect_iam_privesc({"s3:GetObject", "ec2:DescribeInstances"}) == []
+
+
+class _PrivescIAM:
+    """A non-admin user whose scoped policy nonetheless permits escalation
+    (iam:CreatePolicyVersion on a specific managed policy)."""
+    def list_attached_user_policies(self, UserName):
+        return {"AttachedPolicies": [
+            {"PolicyArn": "arn:aws:iam::123456789012:policy/DevOps",
+             "PolicyName": "DevOps"}]}
+
+    def get_policy(self, PolicyArn):
+        return {"Policy": {"DefaultVersionId": "v3"}}
+
+    def get_policy_version(self, PolicyArn, VersionId):
+        return {"PolicyVersion": {"Document": {"Statement": [
+            {"Effect": "Allow",
+             "Action": ["iam:CreatePolicyVersion", "iam:ListPolicies"],
+             "Resource": "arn:aws:iam::123456789012:policy/DevOps"}]}}}
+
+    def list_user_policies(self, UserName):
+        return {"PolicyNames": []}
+
+    def get_user_policy(self, **k):
+        return {"PolicyDocument": {}}
+
+    def get_login_profile(self, UserName):
+        raise RuntimeError("NoSuchEntity")
+
+    def list_mfa_devices(self, UserName):
+        return {"MFADevices": [{"SerialNumber": "mfa"}]}
+
+    def list_access_keys(self, UserName):
+        return {"AccessKeyMetadata": []}
+
+    def get_account_summary(self):
+        return {"SummaryMap": {"AccountAccessKeysPresent": 0}}
+
+    def get_account_password_policy(self):
+        return {"PasswordPolicy": {"MinimumPasswordLength": 14,
+                                   "RequireSymbols": True, "RequireNumbers": True,
+                                   "RequireUppercaseCharacters": True,
+                                   "RequireLowercaseCharacters": True}}
+
+
+def test_privesc_finding_fires_end_to_end_for_scoped_user(monkeypatch):
+    _patch_session(monkeypatch, _STS("arn:aws:iam::123456789012:user/Carol"),
+                   _PrivescIAM())
+    res = ci.audit_aws_iam()
+    assert res["authenticated"] is True
+    privesc = [f for f in res["findings"]
+               if f["vuln_type"] == "cloud_iam_privilege_escalation"]
+    assert len(privesc) == 1, res["findings"]
+    f = privesc[0]
+    assert f["privesc_technique"] == "CreatePolicyVersion"
+    # It is NOT flagged as a */* administrator (the whole point — scoped privesc).
+    assert not [x for x in res["findings"]
+                if x["vuln_type"] == "cloud_iam_overprivileged"]
+    e = enrich_finding(f)
+    assert e.get("cwe") == "CWE-269"
+    assert "A01:2025" in e.get("owasp", "")
+    assert e.get("mitre_technique")

@@ -336,7 +336,7 @@ def test_os_label_is_honest_about_confidence():
         == "Linux 5.4 (fingerprinted, 98%)"
     assert os_label({"os": "Linux", "os_source": "nmap"}) == "Linux (fingerprinted)"
     assert os_label({"os": "Windows", "os_source": "heuristic"}) \
-        == "Windows (heuristic — unconfirmed)"
+        == "Windows (heuristic, unconfirmed)"
     # no OS at all → empty label, never a fabricated guess
     assert os_label({"os": "", "os_source": ""}) == ""
 
@@ -389,7 +389,7 @@ def test_render_markdown_has_section_and_labels():
          "open_ports": [{"port": 3389, "service": "ms-wbt-server"}]},
     ])
     assert "## Host & Service Inventory" in md
-    assert "heuristic — unconfirmed" in md
+    assert "heuristic, unconfirmed" in md
     assert "3389" in md
 
 

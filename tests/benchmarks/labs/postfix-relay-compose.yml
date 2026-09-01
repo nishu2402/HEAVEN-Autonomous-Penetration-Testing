@@ -1,0 +1,24 @@
+# HEAVEN benchmark: email lab (a deliberately OPEN Postfix mail relay).
+#
+# A genuine Postfix MTA misconfigured as an open relay: mynetworks is 0.0.0.0/0
+# and both relay/recipient restrictions end in "permit", so it accepts MAIL FROM
+# and RCPT TO for two unrelated external domains from any client with no
+# authentication. STARTTLS is turned off, so inbound mail is also cleartext.
+#
+# HEAVEN's non-intrusive SMTP probe runs against the raw endpoint (no MX lookup):
+#   * smtp_open_relay  (critical): the server accepts an external->external
+#     recipient. The probe sends RSET before DATA, so no mail is ever relayed.
+#   * smtp_no_starttls (medium): STARTTLS is not advertised.
+#
+# SECURITY: the port binds to loopback ONLY (127.0.0.1) and is published on 2525
+# so it never collides with a local MTA. Disposable, self-contained, no real
+# mailboxes or data.
+services:
+  postfix-relay:
+    build: ./postfix-relay
+    image: heaven-lab-postfix-relay:latest
+    container_name: heaven-lab-postfix-relay
+    hostname: relay.heaven.local
+    ports:
+      - "127.0.0.1:2525:25"     # SMTP
+    restart: "no"

@@ -220,6 +220,10 @@ filterwarnings = [
     "ignore:tagMap is deprecated:DeprecationWarning",
     "ignore:typeMap is deprecated:DeprecationWarning",
     "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning",
+    # scapy imports cryptography's TLS group primitives at module load; the
+    # offline pcap analyzer uses scapy only for packet parsing, not FFDH.
+    "ignore:Diffie-Hellman over finite fields:UserWarning",
+    "ignore:Diffie-Hellman over finite fields:DeprecationWarning",
 ]
 
 [tool.ruff]

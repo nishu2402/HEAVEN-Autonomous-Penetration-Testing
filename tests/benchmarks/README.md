@@ -11,15 +11,67 @@ tests/benchmarks/
 ├── README.md                     ← this file
 ├── docker-compose.yml            ← brings up DVWA at 127.0.0.1:8080
 ├── conftest.py                   ← pytest fixtures (Docker, ground-truth loader)
-├── metrics.py                    ← scanner-agnostic precision/recall/F1
+├── metrics.py                    ← scanner-agnostic precision/recall/F1 (web + network + api tiers)
+├── owasp_benchmark.py            ← SAST tier: scores HEAVEN vs the OWASP Benchmark (Youden index)
+├── fixtures/owasp_mini/          ← HEAVEN-authored Java fixtures (hermetic scorer test, MIT)
 ├── ground_truth/
-│   └── dvwa.yaml                 ← labeled vulns in DVWA v1.10 (low + medium)
+│   ├── dvwa.yaml                 ← labeled vulns in DVWA v1.10 (low + medium) — live web tier
+│   ├── native.yaml               ← the in-process web reproduction — always-on web tier
+│   ├── api.yaml                  ← the in-process API reproduction — always-on API tier
+│   └── msf2.yaml                 ← Metasploitable-2 — live network / service tier
+├── native/
+│   ├── vuln_app.py + runner.py   ← in-process web target + scored runner (always-on)
+│   └── api_app.py + api_runner.py← in-process API target + scored runner (always-on)
 ├── reporters/
 │   ├── markdown_report.py        ← publication-style markdown
 │   └── comparison_csv.py         ← head-to-head CSV for Burp/ZAP comparison
 ├── test_metrics.py               ← unit tests (run in normal CI, no Docker)
-├── test_dvwa_baseline.py         ← the actual DVWA benchmark
+├── test_native_benchmark.py      ← always-on web benchmark (no Docker, CI floor)
+├── test_api_benchmark.py         ← always-on API benchmark (no Docker, CI floor)
+├── test_dvwa_baseline.py         ← live DVWA benchmark (Docker, gated)
+├── test_msf2_baseline.py         ← live Metasploitable-2 network benchmark (gated)
+├── test_owasp_benchmark.py       ← live SAST benchmark vs OWASP Benchmark (gated)
 └── reports/                      ← per-run outputs (gitignored)
+```
+
+## SAST tier — the OWASP Benchmark
+
+`owasp_benchmark.py` scores HEAVEN's **own** Semgrep-based Java rules (shipped in
+`heaven/vulnscan/sast_rules/java_security.yml`) against the standard
+[OWASP Benchmark](https://owasp.org/www-project-benchmark/) v1.2 — 2 740 real
+Java test cases, each either a genuine vulnerability or a safe look-alike across
+11 CWE classes. It reports the Benchmark's headline metric, the **Youden index**
+`J = TPR − FPR` (0.0 for a tool that flags everything, 1.0 for a perfect tool),
+per category and pooled.
+
+The corpus is **not vendored** — it is GPLv2 and HEAVEN is MIT — so it is fetched
+(a pinned shallow clone, or a checkout you point at) and its `expectedresults`
+ground truth is read from there, never copied in.
+
+```bash
+# Live SAST benchmark (fetches / uses a BenchmarkJava checkout; needs semgrep):
+HEAVEN_RUN_BENCHMARKS=1 pytest tests/benchmarks/test_owasp_benchmark.py -s
+
+# Or point at your own checkout and just print the scorecard:
+HEAVEN_OWASP_BENCHMARK_DIR=/path/to/BenchmarkJava \
+  python tests/benchmarks/owasp_benchmark.py
+```
+
+Live headline at the time of writing (semgrep 1.173): **pooled Youden ≈ 0.51,
+recall ≈ 0.96, precision ≈ 0.70**, with weak-randomness, weak-crypto and
+insecure-cookie at a perfect 1.00. The residual false positives are the
+Benchmark's deliberately adversarial "safe" cases (a tainted value discarded
+behind an always-true ternary, or sanitized through a reflection hop); the
+config-driven hash cases (algorithm read from a `.properties` file at runtime)
+are honest false negatives. The scorer's plumbing and the rules' vuln-vs-safe
+discrimination are also unit-tested Docker-free in
+`tests/test_owasp_benchmark_scorer.py`.
+
+The **always-on native tiers** need no Docker and run in regular CI:
+
+```bash
+# Web + API, Docker-free, ~1 s each (also `heaven benchmark --tier all`):
+pytest tests/benchmarks/test_native_benchmark.py tests/benchmarks/test_api_benchmark.py -s
 ```
 
 ## Run it

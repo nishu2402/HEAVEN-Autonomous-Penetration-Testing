@@ -6,7 +6,9 @@ SPF, DKIM, DMARC analysis, MX enumeration, SMTP relay testing, spoofing risk.
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
+import secrets
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -47,6 +49,9 @@ class EmailSecurityScanner:
     def __init__(self, timeout: float = 10.0):
         self._timeout = timeout
         self._findings: list[EmailFinding] = []
+        # SMTP is always port 25 in production; kept configurable so the
+        # relay / user-enumeration path can be exercised against a local server.
+        self._smtp_port = 25
 
     async def scan_domain(self, domain: str) -> list[EmailFinding]:
         """Run full email security scan for a domain."""
@@ -57,6 +62,7 @@ class EmailSecurityScanner:
         await self.check_spf(domain)
         await self.check_dkim(domain)
         await self.check_dmarc(domain)
+        await self.check_bimi(domain)
         await self.check_dnssec(domain)
         await self.check_mta_sts(domain)
         await self.check_tls_rpt(domain)
@@ -154,6 +160,31 @@ class EmailSecurityScanner:
         except Exception as e:
             logger.debug(f"SPF check failed: {e}")
 
+    @staticmethod
+    def _dkim_key_bits(key_b64: str) -> tuple[Optional[int], str]:
+        """Decode a DKIM public key (base64 DER SubjectPublicKeyInfo) and return
+        ``(key_size_bits, algorithm)``. This reads the *real* modulus size rather
+        than estimating from the base64 length. Returns ``(None, "")`` when the
+        key cannot be parsed (malformed / unsupported)."""
+        key_b64 = (key_b64 or "").strip()
+        if not key_b64:
+            return None, ""
+        try:
+            from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
+            from cryptography.hazmat.primitives.serialization import (
+                load_der_public_key,
+            )
+            raw = base64.b64decode(key_b64 + "=" * (-len(key_b64) % 4))
+            pub = load_der_public_key(raw)
+            if isinstance(pub, rsa.RSAPublicKey):
+                return pub.key_size, "rsa"
+            if isinstance(pub, ed25519.Ed25519PublicKey):
+                return 256, "ed25519"
+            return getattr(pub, "key_size", None), pub.__class__.__name__.lower()
+        except Exception:
+            logger.debug("DKIM key decode failed", exc_info=True)
+            return None, ""
+
     async def check_dkim(self, domain: str) -> None:
         """Check common DKIM selectors."""
         if not HAS_DNS:
@@ -177,19 +208,41 @@ class EmailSecurityScanner:
                         })
                         if "p=" in txt:
                             key_data = txt.split("p=")[1].split(";")[0].strip()
-                            key_bits = len(key_data) * 6  # Approximate
-                            key_length = f"~{key_bits} bits"
+                            bits, algo = self._dkim_key_bits(key_data)
+                            if bits:
+                                key_length = f"{bits}-bit {algo}".strip()
+                            elif key_data:
+                                key_length = "unparseable"
+                            else:
+                                # Empty p= is a revoked selector, not a weak key.
+                                key_length = "revoked"
                             found_selectors[-1]["key_length"] = key_length
-                            # Weak-key check only when an actual key is present.
-                            # key_data == "" means a revoked selector, not a weak key.
-                            if key_data and key_bits < 1024:
+                            found_selectors[-1]["key_bits"] = bits
+                            # Genuinely weak: RSA below 1024 bits is broken.
+                            if algo == "rsa" and bits and bits < 1024:
                                 self._findings.append(EmailFinding(
                                     target=domain, vuln_type="dkim_weak_key",
                                     severity="high",
                                     title=f"DKIM Weak Key: {selector} ({key_length})",
-                                    description=f"DKIM key for selector '{selector}' is too short.",
-                                    confidence=0.80,
-                                    remediation="Use 2048-bit RSA keys minimum for DKIM.",
+                                    description=f"DKIM key for selector '{selector}' is "
+                                                f"{bits}-bit RSA, which is cryptographically "
+                                                f"weak and can be factored.",
+                                    confidence=0.90,
+                                    evidence={"selector": selector, "key_bits": bits},
+                                    remediation="Rotate to a 2048-bit RSA key for DKIM.",
+                                ))
+                            # 1024-bit RSA is deprecated (below the 2048 recommendation).
+                            elif algo == "rsa" and bits == 1024:
+                                self._findings.append(EmailFinding(
+                                    target=domain, vuln_type="dkim_weak_key",
+                                    severity="low",
+                                    title=f"DKIM Legacy Key: {selector} (1024-bit rsa)",
+                                    description=f"DKIM selector '{selector}' uses a 1024-bit "
+                                                f"RSA key, below the current 2048-bit "
+                                                f"recommendation.",
+                                    confidence=0.85,
+                                    evidence={"selector": selector, "key_bits": bits},
+                                    remediation="Rotate to a 2048-bit RSA key for DKIM.",
                                 ))
             except Exception:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -259,13 +312,43 @@ class EmailSecurityScanner:
             if "rua=" not in dmarc_record:
                 issues.append("No aggregate report URI (rua) configured")
 
+            # Alignment modes (relaxed 'r' is the RFC default and not a finding
+            # by itself; recorded in evidence for the assessor).
+            adkim_m = re.search(r"adkim=([rs])", dmarc_record)
+            aspf_m = re.search(r"aspf=([rs])", dmarc_record)
+            adkim = adkim_m.group(1) if adkim_m else "r"
+            aspf = aspf_m.group(1) if aspf_m else "r"
+
+            # Subdomain policy (sp=). If the domain enforces but sp= is weaker,
+            # sub-domains remain spoofable even though the apex is protected.
+            sp_m = re.search(r"sp=(none|quarantine|reject)", dmarc_record)
+            sub_policy = sp_m.group(1) if sp_m else None
+            _rank = {"none": 0, "quarantine": 1, "reject": 2}
+            if (sub_policy and policy in ("quarantine", "reject")
+                    and _rank.get(sub_policy, 0) < _rank.get(policy, 0)):
+                self._findings.append(EmailFinding(
+                    target=domain, vuln_type="dmarc_subdomain_policy_weak",
+                    severity="medium",
+                    title=f"DMARC subdomain policy weaker than domain: sp={sub_policy}",
+                    description=(f"The DMARC record enforces p={policy} for {domain} but "
+                                 f"sets sp={sub_policy} for subdomains, so mail can still "
+                                 f"be spoofed from any subdomain of {domain}."),
+                    confidence=0.90,
+                    evidence={"policy": policy, "subdomain_policy": sub_policy,
+                              "dmarc_record": dmarc_record},
+                    remediation="Set sp= to at least the same enforcement as p= "
+                                "(quarantine or reject).",
+                ))
+
             self._findings.append(EmailFinding(
                 target=domain, vuln_type="dmarc_analysis",
                 severity=severity,
-                title=f"DMARC Policy: {policy} — {domain}",
+                title=f"DMARC Policy {policy} for {domain}",
                 description="; ".join(issues) if issues else f"DMARC properly configured with p={policy}",
                 confidence=0.95,
-                evidence={"dmarc_record": dmarc_record, "policy": policy, "issues": issues},
+                evidence={"dmarc_record": dmarc_record, "policy": policy,
+                          "issues": issues, "adkim": adkim, "aspf": aspf,
+                          "subdomain_policy": sub_policy},
                 remediation="Set p=reject for full protection." if policy != "reject" else "",
             ))
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
@@ -277,6 +360,48 @@ class EmailSecurityScanner:
             ))
         except Exception as e:
             logger.debug(f"DMARC check failed: {e}")
+
+    async def check_bimi(self, domain: str) -> None:
+        """Check for a BIMI record (default._bimi TXT, v=BIMI1).
+
+        BIMI only delivers value once DMARC is enforced, so a *missing* record is
+        only reported when this domain already publishes an enforcing DMARC policy
+        (quarantine/reject). Otherwise it is not yet applicable and stays silent
+        (no noise)."""
+        if not HAS_DNS:
+            return
+        dmarc = next((f for f in self._findings
+                      if f.vuln_type == "dmarc_analysis"), None)
+        policy = dmarc.evidence.get("policy") if dmarc else None
+        try:
+            answers = dns.resolver.resolve(f"default._bimi.{domain}", "TXT")
+            for rdata in answers:
+                if "v=BIMI1" in str(rdata):
+                    self._findings.append(EmailFinding(
+                        target=domain, vuln_type="bimi_configured", severity="info",
+                        title=f"BIMI configured: {domain}",
+                        description="A BIMI record is published, enabling verified "
+                                    "brand logos in supporting mail clients.",
+                        confidence=0.9,
+                        evidence={"record": str(rdata).strip('"')[:200]},
+                    ))
+                    return
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            pass
+        except Exception as e:
+            logger.debug(f"BIMI check failed for {domain}: {e}")
+            return
+        if policy in ("reject", "quarantine"):
+            self._findings.append(EmailFinding(
+                target=domain, vuln_type="bimi_missing", severity="low",
+                title=f"BIMI not configured: {domain}",
+                description="DMARC is enforced but no BIMI record is published, so "
+                            "recipients receive no verified brand logo (a missed "
+                            "anti-impersonation and brand-trust signal).",
+                confidence=0.75,
+                remediation="Publish a BIMI record (default._bimi TXT) referencing an "
+                            "SVG logo, ideally backed by a VMC certificate.",
+            ))
 
     async def check_dnssec(self, domain: str) -> None:
         """Check whether the zone is DNSSEC-signed (DNSKEY present)."""
@@ -357,7 +482,7 @@ class EmailSecurityScanner:
             logger.debug(f"TLS-RPT check failed for {domain}: {e}")
 
     async def check_smtp_relay(self, domain: str) -> None:
-        """Check STARTTLS support and probe for an open relay.
+        """Probe each MX for STARTTLS support, VRFY user-enum and an open relay.
 
         The open-relay probe is NON-INTRUSIVE: it issues MAIL FROM / RCPT TO for
         two external domains and inspects the RCPT response code, then always
@@ -369,66 +494,111 @@ class EmailSecurityScanner:
 
         mx_servers = mx_findings[0].evidence.get("mx_records", [])
         for mx in mx_servers[:3]:
-            server = mx["server"]
-            writer = None
+            await self._probe_smtp_server(mx["server"], self._smtp_port)
+
+    async def scan_smtp_server(self, host: str, port: int = 25) -> list[EmailFinding]:
+        """Probe a raw SMTP endpoint (host:port) DIRECTLY, without an MX lookup.
+
+        This is the entry point used when a network scan finds an open SMTP port
+        on a bare IP / host that has no associated mail domain, and by the
+        open-relay lab. It runs exactly the same non-intrusive checks as the
+        MX-driven path (STARTTLS advertisement, VRFY user-enum differential, and
+        the RSET-before-DATA open-relay probe)."""
+        self._findings = []
+        await self._probe_smtp_server(host, port)
+        return self._findings
+
+    async def _probe_smtp_server(self, server: str, port: int) -> None:
+        """Connect to one SMTP server and run the STARTTLS / VRFY-enum / open-relay
+        checks, appending any findings. Non-intrusive: RSET is always sent before
+        DATA, so no mail is ever relayed."""
+        writer = None
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(server, port),
+                timeout=self._timeout
+            )
+            await asyncio.wait_for(reader.readline(), timeout=5)
+            writer.write(b"EHLO heaven-scanner.example\r\n")
+            await writer.drain()
+            ehlo_resp = await asyncio.wait_for(reader.read(2048), timeout=5)
+            ehlo_text = ehlo_resp.decode(errors="ignore")
+
+            if "STARTTLS" not in ehlo_text.upper():
+                self._findings.append(EmailFinding(
+                    target=server, vuln_type="smtp_no_starttls",
+                    severity="medium",
+                    title=f"SMTP: No STARTTLS on {server}",
+                    description="Mail server does not advertise STARTTLS — inbound "
+                                "mail can be delivered in cleartext.",
+                    confidence=0.85,
+                    remediation="Enable STARTTLS on the mail server.",
+                ))
+
+            # ── Non-intrusive open-relay probe (RSET before DATA) ──
+            async def _cmd(line: bytes) -> str:
+                writer.write(line)  # type: ignore[union-attr]
+                await writer.drain()  # type: ignore[union-attr]
+                data = await asyncio.wait_for(reader.read(512), timeout=5)
+                return data.decode(errors="ignore")
+
+            # ── Non-intrusive SMTP user-enumeration (VRFY differential) ──
+            # Only reported when a plausibly-valid mailbox and a random one
+            # produce DIFFERENT response classes (2xx vs 5xx): that proves the
+            # server discloses which accounts exist. No mail is ever sent.
             try:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(server, 25), timeout=self._timeout
-                )
-                await asyncio.wait_for(reader.readline(), timeout=5)
-                writer.write(b"EHLO heaven-scanner.example\r\n")
-                await writer.drain()
-                ehlo_resp = await asyncio.wait_for(reader.read(2048), timeout=5)
-                ehlo_text = ehlo_resp.decode(errors="ignore")
-
-                if "STARTTLS" not in ehlo_text.upper():
+                valid_resp = await _cmd(b"VRFY postmaster\r\n")
+                junk_resp = await _cmd(
+                    f"VRFY heaven{secrets.token_hex(5)}\r\n".encode())
+                if (valid_resp[:3] in ("250", "251")
+                        and junk_resp[:3] in ("550", "551", "553")):
                     self._findings.append(EmailFinding(
-                        target=server, vuln_type="smtp_no_starttls",
-                        severity="medium",
-                        title=f"SMTP: No STARTTLS on {server}",
-                        description="Mail server does not advertise STARTTLS — inbound "
-                                    "mail can be delivered in cleartext.",
+                        target=server, vuln_type="smtp_user_enumeration",
+                        severity="low",
+                        title=f"SMTP user enumeration via VRFY on {server}",
+                        description="The mail server answers VRFY differently for "
+                                    "existing vs non-existing mailboxes, so valid "
+                                    "usernames can be enumerated for phishing or "
+                                    "password-spray targeting.",
                         confidence=0.85,
-                        remediation="Enable STARTTLS on the mail server.",
+                        evidence={"valid_vrfy": valid_resp.strip()[:120],
+                                  "invalid_vrfy": junk_resp.strip()[:120]},
+                        remediation="Disable VRFY/EXPN or make them return a uniform "
+                                    "response for all addresses.",
                     ))
-
-                # ── Non-intrusive open-relay probe (RSET before DATA) ──
-                async def _cmd(line: bytes) -> str:
-                    writer.write(line)  # type: ignore[union-attr]
-                    await writer.drain()  # type: ignore[union-attr]
-                    data = await asyncio.wait_for(reader.read(512), timeout=5)
-                    return data.decode(errors="ignore")
-
-                mail_resp = await _cmd(b"MAIL FROM:<probe@heaven-scanner.example>\r\n")
-                if mail_resp.startswith("250"):
-                    rcpt_resp = await _cmd(b"RCPT TO:<relay-test@example.net>\r\n")
-                    if rcpt_resp.startswith("250"):
-                        self._findings.append(EmailFinding(
-                            target=server, vuln_type="smtp_open_relay",
-                            severity="critical",
-                            title=f"SMTP open relay on {server}",
-                            description="Server accepted MAIL FROM and RCPT TO for two "
-                                        "external domains (no DATA was sent). An open "
-                                        "relay can be abused to send spoofed mail/spam.",
-                            confidence=0.85,
-                            evidence={"mail_from": mail_resp.strip()[:120],
-                                      "rcpt_to": rcpt_resp.strip()[:120]},
-                            remediation="Restrict relaying to authenticated senders / "
-                                        "trusted networks only.",
-                        ))
-                    await _cmd(b"RSET\r\n")  # abandon the transaction — never DATA
-
-                writer.write(b"QUIT\r\n")
-                await writer.drain()
             except (asyncio.TimeoutError, OSError):
                 pass
-            finally:
-                if writer is not None:
-                    writer.close()
-                    try:
-                        await writer.wait_closed()
-                    except Exception:  # noqa: BLE001
-                        logger.debug("suppressed non-fatal exception", exc_info=True)
+
+            mail_resp = await _cmd(b"MAIL FROM:<probe@heaven-scanner.example>\r\n")
+            if mail_resp.startswith("250"):
+                rcpt_resp = await _cmd(b"RCPT TO:<relay-test@example.net>\r\n")
+                if rcpt_resp.startswith("250"):
+                    self._findings.append(EmailFinding(
+                        target=server, vuln_type="smtp_open_relay",
+                        severity="critical",
+                        title=f"SMTP open relay on {server}",
+                        description="Server accepted MAIL FROM and RCPT TO for two "
+                                    "external domains (no DATA was sent). An open "
+                                    "relay can be abused to send spoofed mail/spam.",
+                        confidence=0.85,
+                        evidence={"mail_from": mail_resp.strip()[:120],
+                                  "rcpt_to": rcpt_resp.strip()[:120]},
+                        remediation="Restrict relaying to authenticated senders / "
+                                    "trusted networks only.",
+                    ))
+                await _cmd(b"RSET\r\n")  # abandon the transaction — never DATA
+
+            writer.write(b"QUIT\r\n")
+            await writer.drain()
+        except (asyncio.TimeoutError, OSError):
+            pass
+        finally:
+            if writer is not None:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:  # noqa: BLE001
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
 
     def summary(self) -> dict:
         sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
@@ -452,3 +622,15 @@ async def scan_email_domains(domains: Optional[list[str]] = None, **kwargs) -> d
         findings = await scanner.scan_domain(domain)
         all_findings.extend(findings)
     return {"total": len(all_findings), "findings": [f.to_dict() for f in all_findings]}
+
+
+async def scan_smtp_endpoint(host: str, port: int = 25) -> dict:
+    """Entry point for a raw SMTP endpoint discovered by the network scanner
+    (a bare IP / host with an open SMTP port and no mail domain to resolve).
+
+    Runs the non-intrusive relay / STARTTLS / VRFY probes directly against
+    ``host:port`` — no MX lookup required — so an open relay on an internal box
+    is caught even when it publishes no MX record."""
+    scanner = EmailSecurityScanner()
+    findings = await scanner.scan_smtp_server(host, port)
+    return {"total": len(findings), "findings": [f.to_dict() for f in findings]}

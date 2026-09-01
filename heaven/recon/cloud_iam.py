@@ -34,6 +34,9 @@ result rather than raising.
 from __future__ import annotations
 
 import datetime
+import fnmatch
+import os
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
@@ -105,6 +108,226 @@ def _policy_doc_is_admin(document: Any) -> bool:
     if not isinstance(stmts, list):
         return False
     return any(_statement_is_admin(s) for s in stmts)
+
+
+# ── IAM privilege-escalation primitives ──────────────────────────────────────
+# A wildcard */* admin grant is caught above. Beyond that, a *scoped* set of IAM
+# actions still lets a non-admin principal climb to administrator. These are the
+# well-documented AWS IAM privilege-escalation methods (the taxonomy Rhino
+# Security Labs' `aws_escalate` and Pacu's `iam__privesc_scan` use). Each
+# primitive lists the action(s) that TOGETHER enable one escalation path; a
+# principal whose own effective Allow set covers every action in any one group
+# can perform it. Detection is READ-ONLY and deterministic — HEAVEN never
+# executes the escalation, it reports only that the identity's policy permits it.
+@dataclass(frozen=True)
+class _PrivescPrimitive:
+    pid: str
+    name: str
+    # Each inner tuple is an AND-group (all actions required); the primitive
+    # fires if ANY group is fully satisfied.
+    action_groups: tuple[tuple[str, ...], ...]
+    severity: str
+    detail: str
+
+
+_PRIVESC_PRIMITIVES: tuple[_PrivescPrimitive, ...] = (
+    _PrivescPrimitive(
+        "CreatePolicyVersion", "Publish a new default version of a managed policy",
+        (("iam:CreatePolicyVersion",),), "high",
+        "iam:CreatePolicyVersion lets the principal set a new *default* version of "
+        "a customer-managed policy it can reach; the new version can Allow */* — "
+        "instant administrator without touching any attachment."),
+    _PrivescPrimitive(
+        "SetDefaultPolicyVersion", "Roll a managed policy back to a permissive version",
+        (("iam:SetDefaultPolicyVersion",),), "high",
+        "iam:SetDefaultPolicyVersion lets the principal activate an older, more "
+        "permissive version already stored on a managed policy."),
+    _PrivescPrimitive(
+        "AttachUserPolicy", "Attach an administrator managed policy to itself",
+        (("iam:AttachUserPolicy",),), "high",
+        "iam:AttachUserPolicy lets the user attach AdministratorAccess (or any "
+        "managed policy) to itself."),
+    _PrivescPrimitive(
+        "AttachGroupPolicy", "Attach an admin policy to a group it belongs to",
+        (("iam:AttachGroupPolicy",),), "high",
+        "iam:AttachGroupPolicy lets the principal attach AdministratorAccess to a "
+        "group it is a member of."),
+    _PrivescPrimitive(
+        "AttachRolePolicy", "Attach an admin policy to an assumable role",
+        (("iam:AttachRolePolicy",),), "high",
+        "iam:AttachRolePolicy lets the principal attach AdministratorAccess to a "
+        "role it (or a service it controls) can assume."),
+    _PrivescPrimitive(
+        "PutUserPolicy", "Add an inline administrator policy to itself",
+        (("iam:PutUserPolicy",),), "high",
+        "iam:PutUserPolicy lets the user write an inline Allow-*/* policy onto "
+        "itself."),
+    _PrivescPrimitive(
+        "PutGroupPolicy", "Add an inline admin policy to its group",
+        (("iam:PutGroupPolicy",),), "high",
+        "iam:PutGroupPolicy lets the principal write an inline Allow-*/* policy "
+        "onto a group it belongs to."),
+    _PrivescPrimitive(
+        "PutRolePolicy", "Add an inline admin policy to an assumable role",
+        (("iam:PutRolePolicy",),), "high",
+        "iam:PutRolePolicy lets the principal write an inline Allow-*/* policy "
+        "onto a role it can assume."),
+    _PrivescPrimitive(
+        "CreateAccessKey", "Mint programmatic keys for another identity",
+        (("iam:CreateAccessKey",),), "high",
+        "iam:CreateAccessKey lets the principal create a second access key for a "
+        "more-privileged user and authenticate as them."),
+    _PrivescPrimitive(
+        "CreateLoginProfile", "Set a console password on another identity",
+        (("iam:CreateLoginProfile",),), "high",
+        "iam:CreateLoginProfile lets the principal set a console password on a "
+        "user that has none, then sign in as that user."),
+    _PrivescPrimitive(
+        "UpdateLoginProfile", "Reset another identity's console password",
+        (("iam:UpdateLoginProfile",),), "high",
+        "iam:UpdateLoginProfile lets the principal reset the console password of a "
+        "more-privileged user."),
+    _PrivescPrimitive(
+        "AddUserToGroup", "Add itself to an administrator group",
+        (("iam:AddUserToGroup",),), "high",
+        "iam:AddUserToGroup lets the user add itself to a group that carries "
+        "administrator privileges."),
+    _PrivescPrimitive(
+        "UpdateAssumeRolePolicy", "Rewrite a role trust policy, then assume it",
+        (("iam:UpdateAssumeRolePolicy", "sts:AssumeRole"),), "high",
+        "iam:UpdateAssumeRolePolicy + sts:AssumeRole lets the principal rewrite a "
+        "privileged role's trust policy to trust itself, then assume it."),
+    _PrivescPrimitive(
+        "PassRoleToEC2", "Pass a privileged role to a new EC2 instance",
+        (("iam:PassRole", "ec2:RunInstances"),), "high",
+        "iam:PassRole + ec2:RunInstances lets the principal launch an instance "
+        "with an administrator instance-profile role and use its credentials."),
+    _PrivescPrimitive(
+        "PassRoleToLambda", "Pass a privileged role to a Lambda and invoke it",
+        (("iam:PassRole", "lambda:CreateFunction", "lambda:InvokeFunction"),
+         ("iam:PassRole", "lambda:CreateFunction", "lambda:CreateEventSourceMapping")),
+        "high",
+        "iam:PassRole + lambda:CreateFunction (+ Invoke / EventSourceMapping) lets "
+        "the principal run arbitrary code under an administrator role."),
+    _PrivescPrimitive(
+        "PassRoleToCloudFormation", "Pass a privileged role to a CloudFormation stack",
+        (("iam:PassRole", "cloudformation:CreateStack"),), "high",
+        "iam:PassRole + cloudformation:CreateStack lets the principal deploy a "
+        "stack that acts with an administrator role."),
+    _PrivescPrimitive(
+        "PassRoleToGlue", "Pass a privileged role to a Glue dev endpoint",
+        (("iam:PassRole", "glue:CreateDevEndpoint"),), "high",
+        "iam:PassRole + glue:CreateDevEndpoint lets the principal open a dev "
+        "endpoint running as an administrator role and SSH into it."),
+    _PrivescPrimitive(
+        "PassRoleToDataPipeline", "Pass a privileged role to a Data Pipeline",
+        (("iam:PassRole", "datapipeline:CreatePipeline",
+          "datapipeline:PutPipelineDefinition"),), "high",
+        "iam:PassRole + datapipeline:CreatePipeline lets the principal run "
+        "commands under an administrator role."),
+    _PrivescPrimitive(
+        "UpdateFunctionCode", "Overwrite the code of a privileged Lambda",
+        (("lambda:UpdateFunctionCode",),), "medium",
+        "lambda:UpdateFunctionCode lets the principal overwrite the code of an "
+        "existing function that already runs with a privileged role."),
+)
+
+
+def _action_matches(pattern: str, action: str) -> bool:
+    """AWS IAM action match: case-insensitive, glob-aware (``*`` / ``iam:*`` /
+    ``iam:Create*`` all match)."""
+    return fnmatch.fnmatchcase(action.lower(), pattern.lower())
+
+
+def _statement_actions(document: Any, effect: str) -> set[str]:
+    """Collect every Action pattern granted with the given Effect (``Allow`` /
+    ``Deny``) across a policy document's statements. NotAction is ignored — its
+    inverse semantics are unsafe to approximate for an escalation claim."""
+    out: set[str] = set()
+    if not isinstance(document, dict):
+        return out
+    stmts = document.get("Statement")
+    if isinstance(stmts, dict):
+        stmts = [stmts]
+    if not isinstance(stmts, list):
+        return out
+    for s in stmts:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("Effect", "")).lower() != effect.lower():
+            continue
+        for a in _as_list(s.get("Action")):
+            out.add(a.strip())
+    return out
+
+
+def _effective_action_sets(documents: list[Any]) -> tuple[set[str], set[str]]:
+    """Union the Allow and Deny action patterns across all of a principal's
+    policy documents. Returns ``(allow_patterns, deny_patterns)``."""
+    allow: set[str] = set()
+    deny: set[str] = set()
+    for doc in documents:
+        allow |= _statement_actions(doc, "Allow")
+        deny |= _statement_actions(doc, "Deny")
+    return allow, deny
+
+
+def _action_allowed(action: str, allow: set[str], deny: set[str]) -> bool:
+    """An action is usable when some Allow pattern matches it and no Deny pattern
+    does (a conservative approximation of IAM's explicit-deny-wins evaluation)."""
+    if any(_action_matches(p, action) for p in deny):
+        return False
+    return any(_action_matches(p, action) for p in allow)
+
+
+def detect_iam_privesc(allow_patterns: set[str],
+                       deny_patterns: Optional[set[str]] = None
+                       ) -> list[_PrivescPrimitive]:
+    """Pure detector: given a principal's effective Allow (and optional Deny)
+    action patterns, return the privilege-escalation primitives its own policy
+    permits. Read-only and deterministic — no AWS calls, no side effects."""
+    deny = deny_patterns or set()
+    matched: list[_PrivescPrimitive] = []
+    for prim in _PRIVESC_PRIMITIVES:
+        for group in prim.action_groups:
+            if all(_action_allowed(a, allow_patterns, deny) for a in group):
+                matched.append(prim)
+                break
+    return matched
+
+
+def _privesc_findings(documents: list[Any], target: str,
+                      principal_desc: str) -> list[dict]:
+    """Turn matched privesc primitives for a principal into HEAVEN findings.
+
+    A pure */* administrator is already reported by the over-privilege check, so
+    this focuses on the *scoped* escalation paths that grant would otherwise
+    mask; we still surface them (they remain true) but the over-privilege finding
+    carries the headline severity."""
+    allow, deny = _effective_action_sets(documents)
+    matched = detect_iam_privesc(allow, deny)
+    if not matched:
+        return []
+    findings: list[dict] = []
+    for prim in matched:
+        findings.append(_finding(
+            "cloud_iam_privilege_escalation", prim.severity,
+            f"IAM privilege-escalation path: {prim.name}", target,
+            f"{principal_desc} is permitted the actions for the "
+            f"'{prim.pid}' privilege-escalation technique. {prim.detail}",
+            impact="A non-administrator identity with this permission can elevate "
+                   "itself to full account administrator without any further "
+                   "grant — a single-step path from limited access to total "
+                   "control.",
+            remediation=(
+                "Remove the escalation-enabling action from this identity, or "
+                "constrain it with a Resource scope and an explicit Deny on the "
+                "sensitive IAM targets (self, admin groups/policies, PassRole to "
+                "privileged roles). Prefer permission boundaries to cap the "
+                "maximum privilege any principal can reach."),
+            privesc_technique=prim.pid,
+            privesc_actions=[a for grp in prim.action_groups for a in grp]))
+    return findings
 
 
 def _finding(vuln_type: str, severity: str, title: str, target: str,
@@ -216,9 +439,46 @@ def _inline_admin_policies(iam: Any, list_fn: Any, get_fn: Any,
     return admin
 
 
+def _collect_principal_policy_docs(iam: Any, kind: str, name: str) -> list[Any]:
+    """Gather every policy document applying to a user/role: attached managed
+    (default version) + inline. Best-effort and read-only — a missing permission
+    just yields fewer documents. ``kind`` is ``'user'`` or ``'role'``."""
+    docs: list[Any] = []
+    if kind == "user":
+        list_attached, list_inline, get_inline = (
+            iam.list_attached_user_policies, iam.list_user_policies,
+            iam.get_user_policy)
+        kw = {"UserName": name}
+    else:
+        list_attached, list_inline, get_inline = (
+            iam.list_attached_role_policies, iam.list_role_policies,
+            iam.get_role_policy)
+        kw = {"RoleName": name}
+    try:
+        for pol in list_attached(**kw).get("AttachedPolicies", []):
+            arn = str(pol.get("PolicyArn", ""))
+            doc = _managed_policy_doc(iam, arn) if arn else None
+            if doc is not None:
+                docs.append(doc)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("collect attached policies failed: %s", e)
+    try:
+        for pname in list_inline(**kw).get("PolicyNames", []):
+            try:
+                doc = get_inline(PolicyName=pname, **kw).get("PolicyDocument")
+            except Exception as e:  # noqa: BLE001
+                logger.debug("get inline policy %s failed: %s", pname, e)
+                continue
+            if doc is not None:
+                docs.append(doc)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("collect inline policies failed: %s", e)
+    return docs
+
+
 def _audit_user_privileges(iam: Any, user: str, account: str,
                            arn: str) -> list[dict]:
-    """Over-privilege (admin) findings for an IAM *user* principal."""
+    """Over-privilege (admin) + privilege-escalation findings for an IAM *user*."""
     findings: list[dict] = []
     target = f"aws:{account}:user/{user}"
 
@@ -249,12 +509,16 @@ def _audit_user_privileges(iam: Any, user: str, account: str,
                 "3. Prefer short-lived role assumption over long-lived user keys "
                 "for administrative tasks."),
             evidence_policies=sorted(set(admin))))
+    # Scoped privilege-escalation paths (present even when there is no */* admin).
+    findings += _privesc_findings(
+        _collect_principal_policy_docs(iam, "user", user), target,
+        f"The authenticated IAM user '{user}' ({arn})")
     return findings
 
 
 def _audit_role_privileges(iam: Any, role: str, account: str,
                            arn: str) -> list[dict]:
-    """Over-privilege (admin) findings for an IAM *role* principal."""
+    """Over-privilege (admin) + privilege-escalation findings for an IAM *role*."""
     findings: list[dict] = []
     target = f"aws:{account}:role/{role}"
 
@@ -282,6 +546,9 @@ def _audit_role_privileges(iam: Any, role: str, account: str,
                 "3. Add an aws:MultiFactorAuthPresent / external-id condition where "
                 "the role is human-assumable."),
             evidence_policies=sorted(set(admin))))
+    findings += _privesc_findings(
+        _collect_principal_policy_docs(iam, "role", role), target,
+        f"The assumed IAM role '{role}' ({arn})")
     return findings
 
 
@@ -408,14 +675,17 @@ def _audit_account(iam: Any, account: str) -> list[dict]:
 
 
 def audit_aws_iam(profile: Optional[str] = None,
-                  region: Optional[str] = None) -> dict[str, Any]:
+                  region: Optional[str] = None,
+                  endpoint_url: Optional[str] = None) -> dict[str, Any]:
     """Read-only IAM privilege audit of the currently-authenticated AWS identity.
 
     Credentials come from the standard AWS chain (env vars / shared profile /
-    instance role); pass ``profile`` to select a named profile. Returns a dict
-    ``{authenticated, account, arn, principal_type, findings, ...}``. Never
-    raises: an absent SDK or absent/invalid credentials yields
-    ``authenticated=False`` with an empty ``findings`` list.
+    instance role); pass ``profile`` to select a named profile. ``endpoint_url``
+    points STS + IAM at an AWS-compatible endpoint (LocalStack / a custom
+    partition) instead of public AWS — useful for a seeded lab or an isolated
+    account. Returns a dict ``{authenticated, account, arn, principal_type,
+    findings, ...}``. Never raises: an absent SDK or absent/invalid credentials
+    yields ``authenticated=False`` with an empty ``findings`` list.
     """
     result: dict[str, Any] = {
         "authenticated": False, "findings": [], "account": "", "arn": "",
@@ -427,10 +697,11 @@ def audit_aws_iam(profile: Optional[str] = None,
         result["skipped_reason"] = "boto3 not installed"
         return result
 
+    endpoint_url = endpoint_url or os.environ.get("HEAVEN_AWS_ENDPOINT") or None
     try:
         session = boto3.session.Session(
             profile_name=profile, region_name=region or "us-east-1")
-        ident = caller_identity(session.client("sts"))
+        ident = caller_identity(session.client("sts", endpoint_url=endpoint_url))
     except Exception as e:  # noqa: BLE001
         logger.debug("AWS session/STS init failed: %s", e)
         result["skipped_reason"] = "no valid AWS credentials"
@@ -455,7 +726,7 @@ def audit_aws_iam(profile: Optional[str] = None,
         impact="", remediation="",
         cloud_account=account, cloud_principal=arn)]
 
-    iam = session.client("iam")
+    iam = session.client("iam", endpoint_url=endpoint_url)
     if ptype == "user" and pname:
         findings += _audit_user_privileges(iam, pname, account, arn)
         findings += _audit_user_hygiene(iam, pname, account)
@@ -775,7 +1046,8 @@ def audit_cloud_iam(provider: str = "aws", **kwargs: Any) -> dict[str, Any]:
     p = (provider or "aws").lower()
     if p == "aws":
         return audit_aws_iam(profile=kwargs.get("profile"),
-                             region=kwargs.get("region"))
+                             region=kwargs.get("region"),
+                             endpoint_url=kwargs.get("endpoint_url"))
     if p == "gcp":
         return audit_gcp_iam(project=kwargs.get("project"))
     if p == "azure":
@@ -791,4 +1063,5 @@ __all__ = [
     "audit_cloud_iam",
     "_policy_doc_is_admin", "_statement_is_admin",
     "_gcp_iam_policy_findings", "_azure_rbac_findings",
+    "detect_iam_privesc", "_effective_action_sets", "_privesc_findings",
 ]

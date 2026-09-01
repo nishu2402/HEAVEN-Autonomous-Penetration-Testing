@@ -19,6 +19,7 @@ from heaven.ai.llm_gateway import (
     LLMProviderError,
     LLMRequest,
     LLMResponse,
+    _JSON_REPAIR_NUDGE,
     _env_fingerprint,
     _local_base_url,
 )
@@ -303,3 +304,54 @@ def test_stream_local_parses_sse_deltas():
     ])
     pieces = list(gw._stream_local("hi", None, LLMRequest(prompt="hi")))
     assert "".join(pieces) == "Hello"
+
+
+# ── one-shot structured-output repair retry (local models wrap/omit JSON) ────
+@pytest.mark.skipif(not _HAS_PYD, reason="pydantic not installed")
+def test_structured_repair_retry_recovers_on_second_reply():
+    """A first prose-only reply triggers exactly ONE nudged re-dispatch that
+    returns clean JSON — the verdict is recovered instead of lost."""
+    gw = _bare()
+    calls = {"n": 0, "prompts": []}
+
+    def fake_dispatch(prompt, system, req):
+        calls["n"] += 1
+        calls["prompts"].append(prompt)
+        return LLMResponse(text='{"keep": true, "note": "ok"}',
+                           provider="ollama", model="m")
+
+    gw._dispatch = fake_dispatch
+    gw._audit = lambda req, resp: None
+
+    first = LLMResponse(text="I cannot answer in JSON, sorry.",
+                        provider="ollama", model="m")
+    req = LLMRequest(prompt="orig", response_schema=_V)
+    out = gw._parse_structured_with_repair(first, "orig", "sys", req, 0.0, 0)
+
+    assert out is not None
+    assert out.structured.keep is True
+    assert calls["n"] == 1                       # exactly one repair dispatch
+    assert _JSON_REPAIR_NUDGE in calls["prompts"][0]  # nudge was appended
+
+
+@pytest.mark.skipif(not _HAS_PYD, reason="pydantic not installed")
+def test_structured_repair_retry_gives_up_after_one_try():
+    """When even the nudged reply is unparseable, the repair returns None
+    (a single attempt, no dispatch loop) so the caller emits a clear error."""
+    gw = _bare()
+    calls = {"n": 0}
+
+    def fake_dispatch(prompt, system, req):
+        calls["n"] += 1
+        return LLMResponse(text="still not json at all",
+                           provider="ollama", model="m")
+
+    gw._dispatch = fake_dispatch
+    gw._audit = lambda req, resp: None
+
+    first = LLMResponse(text="prose only, no object", provider="ollama", model="m")
+    req = LLMRequest(prompt="orig", response_schema=_V)
+    out = gw._parse_structured_with_repair(first, "orig", "sys", req, 0.0, 0)
+
+    assert out is None
+    assert calls["n"] == 1                       # only ONE repair attempt, no loop

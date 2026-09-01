@@ -1,11 +1,16 @@
 # HEAVEN: Benchmark Results
 
-Real, reproducible results from running HEAVEN against **live** targets: the
-standard **[DVWA](https://github.com/digininja/DVWA)** ("Damn Vulnerable Web
-Application") for the web tier, and **Metasploitable-2** for the network /
-service tier. Every number below comes from an actual scan of a running target,
-not a mock or a unit test, and each is scored through the same precision /
-recall / F1 metrics layer.
+Real, reproducible results across three surfaces, all scored through the same
+precision / recall / F1 metrics layer:
+
+- **Live targets:** the standard **[DVWA](https://github.com/digininja/DVWA)**
+  ("Damn Vulnerable Web Application") for the web tier, and **Metasploitable-2**
+  for the network / service tier. Every live number comes from an actual scan of a
+  running target, not a mock.
+- **Always-on native tiers:** the real web scanners and the real API scanner run
+  against faithful, in-process reproductions (Docker-free, no network egress), so
+  the headline web and API numbers are reproducible by anyone in ~1 second and are
+  enforced as a floor in CI.
 
 > **How this was run:** DVWA (official multi-arch `ghcr.io/digininja/dvwa` image
 > with a MariaDB backend, run native so timing checks are not distorted by
@@ -63,6 +68,44 @@ This is a *controlled functional benchmark*, the target is a known, labelled
 surface, so it measures HEAVEN's end-to-end detection **and** attribution
 precisely and repeatably. It is not a claim about any live third-party app; the
 live-DVWA results below are the complement to it.
+
+---
+
+## API tier: OWASP API Security Top 10 (native, Docker-free)
+
+The benchmark above scores the web tier. HEAVEN also has a native **API**
+benchmark that drives the real API scanner (`heaven/vulnscan/api_scanner.py`)
+against a faithful, in-process reproduction of an OWASP-API-Top-10-vulnerable
+service, scored through the same precision / recall / F1 metrics layer. Like the
+web native benchmark it is deterministic, always-on in CI, and Docker-free with no
+network egress, so anyone with the `[dev]` extras can reproduce it:
+
+```bash
+heaven benchmark --tier api
+# or, as the always-on regression test:
+pytest tests/benchmarks/test_api_benchmark.py -s
+```
+
+| Metric | Result |
+|---|---|
+| Precision | **100%**: 9 / 9 reported findings map to a labelled entry (0 false positives) |
+| Recall (required) | **100%**: 8 / 8 required OWASP-API classes detected |
+| F1 | **100%** |
+| Runtime | ~0.1 s, no Docker, no network |
+
+The nine scored findings span the OWASP API Security Top 10 the scanner covers:
+**BOLA / object-level authorization** (API1), **broken authentication** on a
+protected collection (API2), **mass assignment** of a privileged field (API3 / API6),
+a real **secret leaked** in a response body (API3), **no rate limiting** on
+authentication (API4), an **OpenAPI spec exposed** without authentication (API9),
+and the GraphQL classes: **introspection** (API3) plus **unbounded batching** and a
+**deep query accepted with no cost limit** (API4). Each is a genuine sink the
+scanner observes over HTTP; the target only reports what is really there, so the
+scanner's own false-positive guards (a single 200 is not BOLA, a placeholder is not
+a secret, a batching-disabled server is not flagged) are exercised too.
+
+Like the other tiers, every finding comes from a deterministic observation of the
+service's HTTP response, not from an LLM.
 
 ---
 

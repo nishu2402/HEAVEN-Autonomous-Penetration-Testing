@@ -29,6 +29,14 @@ export const SCAN_MODES = [
     desc: "Active Directory & domain" },
   { value: "email",     icon: "✉️", short: "Email",     title: "EMAIL: SPF / DMARC / DKIM posture",
     desc: "SPF / DMARC / DKIM posture" },
+  { value: "dos",       icon: "💥", short: "DoS",       title: "DOS: DoS/DDoS susceptibility (amplification + slow-HTTP)",
+    desc: "Reflection/amplification reflectors + Slowloris susceptibility (no flood)" },
+  { value: "sniff",     icon: "👂", short: "Sniffing",  title: "SNIFF: internal MITM / name-poisoning susceptibility",
+    desc: "LLMNR / NBT-NS / mDNS / WPAD / mitm6 + cleartext-credential exposure" },
+  { value: "malware",   icon: "🦠", short: "Malware",   title: "MALWARE: backdoor & webshell threat detection",
+    desc: "Backdoor listener ports/banners + webshell signature sweep" },
+  { value: "exploit",   icon: "⚔️", short: "Exploit",   title: "EXPLOIT: confirm RCE on discovered services (authorized)",
+    desc: "Active exploitation with a benign proof command" },
 ];
 
 // Static-analysis tools live on their own pages (they persist into the active
@@ -36,9 +44,10 @@ export const SCAN_MODES = [
 // dashboard alongside the active-scan modes so every capability is one click
 // away from the landing page.
 export const ANALYSIS_TOOLS = [
-  { to: "/sast", icon: "🔬", short: "SAST",  desc: "Static source-code analysis (Semgrep)" },
-  { to: "/sca",  icon: "📦", short: "SCA",   desc: "Dependency audit vs. OSV.dev" },
-  { to: "/cve",  icon: "🛡️", short: "CVE",   desc: "Live CVE lookup (NVD + CIRCL)" },
+  { to: "/sast",            icon: "🔬", short: "SAST",   desc: "Static source-code analysis (Semgrep)" },
+  { to: "/sca",             icon: "📦", short: "SCA",    desc: "Dependency audit vs. OSV.dev" },
+  { to: "/cve",             icon: "🛡️", short: "CVE",    desc: "Live CVE lookup (NVD + CIRCL)" },
+  { to: "/analyze?kind=apk", icon: "📱", short: "Mobile", desc: "Mobile app analysis (Android APK / iOS IPA)" },
 ];
 
 // Long-form options for the launcher <select>.

@@ -121,18 +121,18 @@ class WebhookAlerter:
 
         if summary_data.get("first_run"):
             message = (
-                f"🔁 HEAVEN Watch started — monitoring engagement '{eng}'.\n"
+                f"🔁 HEAVEN Watch started · monitoring engagement '{eng}'.\n"
                 f"Alerts fire only when a NEW or REGRESSED finding appears "
                 f"(no spam from unchanged re-scans)."
             )
         elif not (new or regressed):
             message = (
-                f"🔁 HEAVEN Watch heartbeat — engagement '{eng}'{it_label}: "
+                f"🔁 HEAVEN Watch heartbeat · engagement '{eng}'{it_label}: "
                 f"no change this cycle. {tracked} finding(s) tracked."
             )
         else:
             lines = [
-                f"🔁 HEAVEN Watch — change detected in engagement "
+                f"🔁 HEAVEN Watch · change detected in engagement "
                 f"'{eng}'{it_label}",
             ]
             if new:

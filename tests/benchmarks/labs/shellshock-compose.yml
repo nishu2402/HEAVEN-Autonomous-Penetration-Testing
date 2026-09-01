@@ -1,0 +1,24 @@
+# HEAVEN benchmark: Shellshock (CVE-2014-6271) lab.
+#
+# A real, from-source vulnerable target: unpatched bash 4.3 behind a busybox CGI
+# (see ./shellshock/Dockerfile). HEAVEN's exploit_shellshock injects the classic
+# `() { :; };` header payload with a reverse-callback command; the vulnerable
+# bash executes it and connects back to HEAVEN's listener — the only thing that
+# marks success, so a patched server cannot produce a false positive.
+#
+# The container reaches HEAVEN's callback listener on the host via
+# `host.docker.internal` (mapped to the host gateway here so it also works on
+# native-Linux Docker). The test sets HEAVEN_CALLBACK_HOST=host.docker.internal
+# so the injected payload calls back to an address the container can route to.
+#
+# SECURITY: binds to loopback (127.0.0.1) only. Deliberately vulnerable — never
+# publish on 0.0.0.0.
+services:
+  shellshock:
+    build: ./shellshock
+    container_name: heaven-lab-shellshock
+    ports:
+      - "127.0.0.1:8092:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: "no"

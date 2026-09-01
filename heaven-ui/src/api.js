@@ -537,6 +537,29 @@ export const Postex = {
     api(`/postex/cred-reuse/run`, { method: "POST", body: JSON.stringify(body) }),
 };
 
+export const Exploit = {
+  // Registered exploit metadata (id, ports, signatures).
+  list: () => api(`/exploit/list`),
+  // Active exploitation — confirms real RCE with a benign proof command.
+  run: (body) =>
+    api(`/exploit/run`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+export const Analyze = {
+  // Decode a base64/hex/base32/rot13 string (no file).
+  decode: (text) =>
+    api(`/analyze/decode`, { method: "POST", body: JSON.stringify({ text }) }),
+  // Analyze an offline artifact. `content_b64` is the base64 of the file bytes.
+  run: (body) =>
+    api(`/analyze/run`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+export const Pivot = {
+  // Establish an SSH pivot chain and scan hosts behind it.
+  run: (body) =>
+    api(`/pivot/run`, { method: "POST", body: JSON.stringify(body) }),
+};
+
 export const Cloud = {
   // Credential-free cloud misconfiguration checks.
   storage: (body) =>

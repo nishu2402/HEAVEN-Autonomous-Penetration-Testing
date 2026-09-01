@@ -1,0 +1,13 @@
+# test name, category, real vulnerability, cwe, HEAVEN synthetic mini fixture
+Case01,cmdi,true,78
+Case02,cmdi,false,78
+Case03,cmdi,true,78
+Case04,sqli,true,89
+Case05,sqli,false,89
+Case06,xss,true,79
+Case07,xss,false,79
+Case08,weakrand,true,330
+Case09,weakrand,false,330
+Case10,hash,true,328
+Case11,securecookie,true,614
+Case12,pathtraver,true,22

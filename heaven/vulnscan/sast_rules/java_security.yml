@@ -1,0 +1,440 @@
+# HEAVEN — Java security rules
+#
+# A curated, high-signal Java pack that mirrors the vulnerability classes
+# HEAVEN's runtime (DAST) scanner targets, so static and dynamic findings
+# reinforce each other. Two styles:
+#
+#   * Taint rules (mode: taint) for the injection classes — untrusted servlet
+#     request data (getParameter / getHeader / getCookies / getReader, and the
+#     SeparateClassRequest wrappers) reaching a dangerous sink. Generic taint
+#     propagators (collection add/put, StringBuilder append/insert) follow the
+#     data through the intermediates real code uses; category-appropriate
+#     sanitizers (ESAPI encoders, LDAP/DN/XPath encoders) clear it.
+#   * Pattern rules for the insecure-API classes — a broken PRNG, a weak
+#     message digest, a weak cipher/mode, or a cookie sent without the Secure
+#     flag — where the weakness is the API call itself, not a data flow.
+#
+# CWE tags are the canonical matching key (they line up with the OWASP
+# Benchmark categories: CWE-78 cmdi, CWE-89 sqli, CWE-22 pathtraver, CWE-90
+# ldapi, CWE-643 xpathi, CWE-79 xss, CWE-501 trustbound, CWE-330 weakrand,
+# CWE-328 hash, CWE-327 crypto, CWE-614 securecookie).
+
+rules:
+
+  # ── OS command injection (CWE-78) ──────────────────────────────────────
+  - id: heaven.java.cmdi
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      OS command injection: untrusted request data reaches a process launch
+      (Runtime.exec / ProcessBuilder). An attacker can run arbitrary commands.
+      Pass fixed arguments, or validate against a strict allow-list.
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+    pattern-propagators:
+      - pattern: $C.add($FROM)
+        from: $FROM
+        to: $C
+      - pattern: $C.put($K, $FROM)
+        from: $FROM
+        to: $C
+      - pattern: $SB.append($FROM)
+        from: $FROM
+        to: $SB
+      - pattern: $SB.insert($I, $FROM)
+        from: $FROM
+        to: $SB
+    pattern-sources:
+      - pattern: $R.getParameter(...)
+      - pattern: $R.getParameterValues(...)
+      - pattern: $R.getParameterMap()
+      - pattern: $R.getParameterNames()
+      - pattern: $R.getHeader(...)
+      - pattern: $R.getHeaders(...)
+      - pattern: $R.getHeaderNames()
+      - pattern: $R.getQueryString()
+      - pattern: $R.getReader()
+      - pattern: $R.getInputStream()
+      - pattern: $R.getCookies()
+      - pattern: $R.getTheParameter(...)
+      - pattern: $R.getTheCookie(...)
+    pattern-sinks:
+      - pattern: (java.lang.Runtime $RT).exec(...)
+      - pattern: $RT.exec(...)
+      - pattern: new ProcessBuilder(...)
+      - pattern: $PB.command(...)
+
+  # ── SQL injection (CWE-89) ─────────────────────────────────────────────
+  - id: heaven.java.sqli
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      SQL injection: untrusted request data is concatenated into a SQL
+      statement. Use a parameterized PreparedStatement with '?' placeholders
+      and setString/setInt for every user value.
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+    pattern-propagators:
+      - pattern: $C.add($FROM)
+        from: $FROM
+        to: $C
+      - pattern: $C.put($K, $FROM)
+        from: $FROM
+        to: $C
+      - pattern: $SB.append($FROM)
+        from: $FROM
+        to: $SB
+      - pattern: $SB.insert($I, $FROM)
+        from: $FROM
+        to: $SB
+    pattern-sources:
+      - pattern: $R.getParameter(...)
+      - pattern: $R.getParameterValues(...)
+      - pattern: $R.getParameterMap()
+      - pattern: $R.getParameterNames()
+      - pattern: $R.getHeader(...)
+      - pattern: $R.getHeaders(...)
+      - pattern: $R.getHeaderNames()
+      - pattern: $R.getQueryString()
+      - pattern: $R.getReader()
+      - pattern: $R.getInputStream()
+      - pattern: $R.getCookies()
+      - pattern: $R.getTheParameter(...)
+      - pattern: $R.getTheCookie(...)
+    pattern-sinks:
+      - pattern: $ST.execute($SQL, ...)
+      - pattern: $ST.executeQuery($SQL, ...)
+      - pattern: $ST.executeUpdate($SQL, ...)
+      - pattern: $ST.executeLargeUpdate($SQL, ...)
+      - pattern: $ST.addBatch($SQL, ...)
+      - pattern: $C.prepareStatement($SQL, ...)
+      - pattern: $C.prepareCall($SQL, ...)
+      - pattern: $S.createQuery($SQL, ...)
+      - pattern: $S.createNativeQuery($SQL, ...)
+      - pattern: $S.createSQLQuery($SQL, ...)
+      - pattern: $JT.queryForObject($SQL, ...)
+      - pattern: $JT.queryForList($SQL, ...)
+      - pattern: $JT.queryForRowSet($SQL, ...)
+      - pattern: $JT.query($SQL, ...)
+      - pattern: $JT.update($SQL, ...)
+      - pattern: $JT.batchUpdate($SQL, ...)
+
+  # ── Path traversal (CWE-22) ────────────────────────────────────────────
+  - id: heaven.java.path-traversal
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Path traversal: untrusted request data reaches a filesystem path. An
+      attacker can escape the intended directory with '../'. Canonicalize the
+      resolved path and confirm it stays within an allowed base directory.
+    metadata:
+      cwe: "CWE-22"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: MEDIUM
+    pattern-propagators:
+      - pattern: $C.add($FROM)
+        from: $FROM
+        to: $C
+      - pattern: $C.put($K, $FROM)
+        from: $FROM
+        to: $C
+      - pattern: $SB.append($FROM)
+        from: $FROM
+        to: $SB
+      - pattern: $SB.insert($I, $FROM)
+        from: $FROM
+        to: $SB
+    pattern-sources:
+      - pattern: $R.getParameter(...)
+      - pattern: $R.getParameterValues(...)
+      - pattern: $R.getParameterMap()
+      - pattern: $R.getParameterNames()
+      - pattern: $R.getHeader(...)
+      - pattern: $R.getHeaders(...)
+      - pattern: $R.getHeaderNames()
+      - pattern: $R.getQueryString()
+      - pattern: $R.getReader()
+      - pattern: $R.getInputStream()
+      - pattern: $R.getCookies()
+      - pattern: $R.getTheParameter(...)
+      - pattern: $R.getTheCookie(...)
+    pattern-sinks:
+      - pattern: new java.io.File(...)
+      - pattern: new java.io.FileInputStream(...)
+      - pattern: new java.io.FileOutputStream(...)
+      - pattern: new java.io.FileReader(...)
+      - pattern: new java.io.FileWriter(...)
+      - pattern: new java.io.RandomAccessFile(...)
+      - pattern: java.nio.file.Paths.get(...)
+      - pattern: java.nio.file.Files.$M(...)
+
+  # ── LDAP injection (CWE-90) ────────────────────────────────────────────
+  - id: heaven.java.ldap-injection
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      LDAP injection: untrusted request data is concatenated into an LDAP
+      search filter. Encode the value with an LDAP/DN encoder (e.g. ESAPI
+      encodeForLDAP / encodeForDN) before building the filter.
+    metadata:
+      cwe: "CWE-90"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+    pattern-propagators:
+      - pattern: $C.add($FROM)
+        from: $FROM
+        to: $C
+      - pattern: $C.put($K, $FROM)
+        from: $FROM
+        to: $C
+      - pattern: $SB.append($FROM)
+        from: $FROM
+        to: $SB
+      - pattern: $SB.insert($I, $FROM)
+        from: $FROM
+        to: $SB
+    pattern-sanitizers:
+      - pattern: $E.encodeForLDAP(...)
+      - pattern: $E.encodeForDN(...)
+    pattern-sources:
+      - pattern: $R.getParameter(...)
+      - pattern: $R.getParameterValues(...)
+      - pattern: $R.getParameterMap()
+      - pattern: $R.getParameterNames()
+      - pattern: $R.getHeader(...)
+      - pattern: $R.getHeaders(...)
+      - pattern: $R.getHeaderNames()
+      - pattern: $R.getQueryString()
+      - pattern: $R.getReader()
+      - pattern: $R.getInputStream()
+      - pattern: $R.getCookies()
+      - pattern: $R.getTheParameter(...)
+      - pattern: $R.getTheCookie(...)
+    pattern-sinks:
+      - pattern: $CTX.search($BASE, $FILTER, ...)
+      - pattern: $CTX.search($FILTER)
+
+  # ── XPath injection (CWE-643) ──────────────────────────────────────────
+  - id: heaven.java.xpath-injection
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      XPath injection: untrusted request data is concatenated into an XPath
+      expression. Use a variable-resolver / parameterized XPath, or encode the
+      value with an XPath encoder before building the expression.
+    metadata:
+      cwe: "CWE-643"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+    pattern-propagators:
+      - pattern: $C.add($FROM)
+        from: $FROM
+        to: $C
+      - pattern: $C.put($K, $FROM)
+        from: $FROM
+        to: $C
+      - pattern: $SB.append($FROM)
+        from: $FROM
+        to: $SB
+      - pattern: $SB.insert($I, $FROM)
+        from: $FROM
+        to: $SB
+    pattern-sanitizers:
+      - pattern: $E.encodeForXPath(...)
+    pattern-sources:
+      - pattern: $R.getParameter(...)
+      - pattern: $R.getParameterValues(...)
+      - pattern: $R.getParameterMap()
+      - pattern: $R.getParameterNames()
+      - pattern: $R.getHeader(...)
+      - pattern: $R.getHeaders(...)
+      - pattern: $R.getHeaderNames()
+      - pattern: $R.getQueryString()
+      - pattern: $R.getReader()
+      - pattern: $R.getInputStream()
+      - pattern: $R.getCookies()
+      - pattern: $R.getTheParameter(...)
+      - pattern: $R.getTheCookie(...)
+    pattern-sinks:
+      - pattern: $XP.evaluate(...)
+      - pattern: $XP.compile(...)
+
+  # ── Cross-site scripting (CWE-79) ──────────────────────────────────────
+  - id: heaven.java.xss
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Cross-site scripting: untrusted request data is written to the HTTP
+      response without output encoding. HTML-encode the value (e.g. ESAPI
+      encodeForHTML) for the context it is rendered in.
+    metadata:
+      cwe: "CWE-79"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+    pattern-propagators:
+      - pattern: $C.add($FROM)
+        from: $FROM
+        to: $C
+      - pattern: $C.put($K, $FROM)
+        from: $FROM
+        to: $C
+      - pattern: $SB.append($FROM)
+        from: $FROM
+        to: $SB
+      - pattern: $SB.insert($I, $FROM)
+        from: $FROM
+        to: $SB
+    pattern-sanitizers:
+      - pattern: $E.encodeForHTML(...)
+      - pattern: $E.encodeForHTMLAttribute(...)
+      - pattern: $E.encodeForJavaScript(...)
+      - pattern: $E.encodeForURL(...)
+      - pattern: org.owasp.esapi.ESAPI.encoder().$M(...)
+    pattern-sources:
+      - pattern: $R.getParameter(...)
+      - pattern: $R.getParameterValues(...)
+      - pattern: $R.getParameterMap()
+      - pattern: $R.getParameterNames()
+      - pattern: $R.getHeader(...)
+      - pattern: $R.getHeaders(...)
+      - pattern: $R.getHeaderNames()
+      - pattern: $R.getQueryString()
+      - pattern: $R.getReader()
+      - pattern: $R.getInputStream()
+      - pattern: $R.getCookies()
+      - pattern: $R.getTheParameter(...)
+      - pattern: $R.getTheCookie(...)
+    pattern-sinks:
+      - pattern: $W.print(...)
+      - pattern: $W.println(...)
+      - pattern: $W.write(...)
+      - pattern: $W.format(...)
+      - pattern: $W.append(...)
+      - pattern: $W.printf(...)
+
+  # ── Trust boundary violation (CWE-501) ─────────────────────────────────
+  - id: heaven.java.trust-boundary
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Trust boundary violation: untrusted request data is stored directly in
+      the HTTP session. Validate and canonicalize the value before crossing the
+      trust boundary into session state.
+    metadata:
+      cwe: "CWE-501"
+      owasp: "A04:2021 - Insecure Design"
+      confidence: MEDIUM
+    pattern-propagators:
+      - pattern: $C.add($FROM)
+        from: $FROM
+        to: $C
+      - pattern: $C.put($K, $FROM)
+        from: $FROM
+        to: $C
+      - pattern: $SB.append($FROM)
+        from: $FROM
+        to: $SB
+      - pattern: $SB.insert($I, $FROM)
+        from: $FROM
+        to: $SB
+    pattern-sources:
+      - pattern: $R.getParameter(...)
+      - pattern: $R.getParameterValues(...)
+      - pattern: $R.getParameterMap()
+      - pattern: $R.getParameterNames()
+      - pattern: $R.getHeader(...)
+      - pattern: $R.getHeaders(...)
+      - pattern: $R.getHeaderNames()
+      - pattern: $R.getQueryString()
+      - pattern: $R.getReader()
+      - pattern: $R.getInputStream()
+      - pattern: $R.getCookies()
+      - pattern: $R.getTheParameter(...)
+      - pattern: $R.getTheCookie(...)
+    pattern-sinks:
+      - pattern: $S.setAttribute(...)
+      - pattern: $S.putValue(...)
+
+  # ── Weak randomness (CWE-330) ──────────────────────────────────────────
+  - id: heaven.java.weak-random
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Weak randomness: java.util.Random / Math.random is a predictable PRNG and
+      must not be used for security tokens, keys, or nonces. Use
+      java.security.SecureRandom.
+    metadata:
+      cwe: "CWE-330"
+      owasp: "A02:2021 - Cryptographic Failures"
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: new java.util.Random(...)
+          - pattern: java.lang.Math.random()
+          - pattern: Math.random()
+
+  # ── Weak hash (CWE-328) ────────────────────────────────────────────────
+  - id: heaven.java.weak-hash
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Weak hash: a broken message-digest algorithm (MD2/MD4/MD5/SHA-1) is used.
+      Use SHA-256 or stronger; for passwords use a memory-hard KDF (bcrypt,
+      scrypt, Argon2, or PBKDF2).
+    metadata:
+      cwe: "CWE-328"
+      owasp: "A02:2021 - Cryptographic Failures"
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: java.security.MessageDigest.getInstance("=~/(?i)^(md2|md4|md5|sha-?1|sha|ripemd.*)$/", ...)
+          - pattern: $MD.getInstance("=~/(?i)^(md2|md4|md5|sha-?1|sha|ripemd.*)$/", ...)
+          - pattern: org.apache.commons.codec.digest.DigestUtils.md5(...)
+          - pattern: org.apache.commons.codec.digest.DigestUtils.md5Hex(...)
+          - pattern: org.apache.commons.codec.digest.DigestUtils.sha1(...)
+          - pattern: org.apache.commons.codec.digest.DigestUtils.sha1Hex(...)
+          - pattern: org.apache.commons.codec.digest.DigestUtils.getMd5Digest(...)
+          - pattern: org.apache.commons.codec.digest.DigestUtils.getSha1Digest(...)
+
+  # ── Weak cryptography (CWE-327) ────────────────────────────────────────
+  - id: heaven.java.weak-cipher
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Weak cryptography: a broken cipher or an insecure mode (DES/3DES/RC2/RC4/
+      Blowfish, or any ECB mode) is used. Use AES in an authenticated mode
+      (GCM), or another modern AEAD construction.
+    metadata:
+      cwe: "CWE-327"
+      owasp: "A02:2021 - Cryptographic Failures"
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: javax.crypto.Cipher.getInstance("=~/(?i)^(des|desede|3des|tripledes|rc2|rc4|arcfour|blowfish|idea)([\/].*)?$/", ...)
+          - pattern: $C.getInstance("=~/(?i).*(\/ecb\/|^des|desede|rc4|rc2|arcfour|blowfish).*/", ...)
+
+  # ── Insecure cookie (CWE-614) ──────────────────────────────────────────
+  - id: heaven.java.insecure-cookie
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Insecure cookie: a cookie is sent with the Secure flag disabled, so it
+      can be transmitted over plaintext HTTP. Call setSecure(true) (and
+      setHttpOnly(true)) before adding the cookie.
+    metadata:
+      cwe: "CWE-614"
+      owasp: "A05:2021 - Security Misconfiguration"
+      confidence: HIGH
+    patterns:
+      - pattern: $C.setSecure(false)

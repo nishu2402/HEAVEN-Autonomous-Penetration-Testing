@@ -593,7 +593,7 @@ def render_coverage_html(cov: dict[str, Any]) -> str:
     title = cov.get("title", "")
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(title)} — Compliance coverage · {_esc(eng)}</title>
+<title>{_esc(title)} · Compliance coverage · {_esc(eng)}</title>
 <style>
  body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
    color:#1a1f29;background:#f4f6f9;margin:0;line-height:1.55;font-size:14px;}}
@@ -617,7 +617,7 @@ def render_coverage_html(cov: dict[str, Any]) -> str:
 </style></head><body>
  <div class="toolbar no-print"><button class="btn" onclick="window.print()">🖨 Print / Save as PDF</button></div>
  <div class="page">
-  <h1>{_esc(title)} — Compliance coverage</h1>
+  <h1>{_esc(title)} · Compliance coverage</h1>
   <p class="muted">{_esc(cov.get('subtitle', ''))} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng or '—')}</strong>
      &nbsp;·&nbsp; Generated {_esc(_now_utc())}</p>
   <div class="disclaimer"><strong>Coverage view, not an attestation.</strong>

@@ -1,0 +1,37 @@
+# HEAVEN benchmark: container / Docker lab
+#
+# Two genuinely-exposed container services HEAVEN's real probes confirm:
+#   * An isolated Docker-in-Docker daemon with TLS disabled, listening on the
+#     remote API port 2375 (docker:dind, its OWN nested daemon — NOT the host's
+#     docker.sock). HEAVEN's GET /version returns real Docker version JSON ->
+#     "Docker Remote API Exposed" (critical, CWE-306, MITRE T1609).
+#   * An anonymous Docker Registry v2 (registry:2) with no auth on :5000.
+#     HEAVEN's GET /v2/_catalog returns a repositories list ->
+#     "Open Container Registry" (high, CWE-306, MITRE T1525).
+#
+# SECURITY: the exposed daemon is the dind container's OWN nested dockerd,
+# fully isolated from the host Docker daemon, and both ports bind to loopback
+# ONLY (127.0.0.1). Nothing on the host is exposed.
+
+services:
+  # Docker-in-Docker: runs its own dockerd inside the container. DOCKER_TLS_CERTDIR
+  # empty => the nested daemon listens on plain tcp://0.0.0.0:2375 with no TLS,
+  # reproducing the classic "unauthenticated Docker API" exposure — but for the
+  # nested daemon only, isolated from the host.
+  dind:
+    image: docker:27-dind
+    container_name: heaven-lab-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["dockerd", "--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock"]
+    ports:
+      - "127.0.0.1:2375:2375"
+    restart: "no"
+
+  registry:
+    image: registry:2
+    container_name: heaven-lab-registry
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: "no"

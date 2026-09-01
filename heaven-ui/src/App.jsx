@@ -35,6 +35,9 @@ const Compliance     = lazy(() => import("./pages/Compliance.jsx"));
 const AutonomousPage = lazy(() => import("./pages/Autonomous.jsx"));
 const CoveragePage   = lazy(() => import("./pages/Coverage.jsx"));
 const PostexPage     = lazy(() => import("./pages/Postex.jsx"));
+const ExploitPage    = lazy(() => import("./pages/Exploit.jsx"));
+const PivotPage      = lazy(() => import("./pages/Pivot.jsx"));
+const AnalyzePage    = lazy(() => import("./pages/Analyze.jsx"));
 const KnowledgePage  = lazy(() => import("./pages/Knowledge.jsx"));
 const LateralPage    = lazy(() => import("./pages/Lateral.jsx"));
 const DiffPage       = lazy(() => import("./pages/Diff.jsx"));
@@ -144,6 +147,9 @@ function Shell() {
               <Route path="/autonomous" element={<AutonomousPage />} />
               <Route path="/coverage" element={<CoveragePage />} />
               <Route path="/postex" element={<PostexPage />} />
+              <Route path="/exploit" element={<ExploitPage />} />
+              <Route path="/pivot" element={<PivotPage />} />
+              <Route path="/analyze" element={<AnalyzePage />} />
               <Route path="/lateral" element={<LateralPage />} />
               <Route path="/knowledge" element={<KnowledgePage />} />
               <Route path="/ai-plans" element={<AIPlans />} />

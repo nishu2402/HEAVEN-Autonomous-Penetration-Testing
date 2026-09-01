@@ -702,6 +702,20 @@ class ScanOrchestrator:
                     self.add_task(f"Exposed DB {ip}:{port}", _db_check,
                                   phase=ScanPhase.VULN_SCAN, timeout=30)
 
+                elif port == 25 or service == "smtp":
+                    # A bare SMTP box (open port 25, no mail domain to MX-resolve)
+                    # still gets the non-intrusive relay / STARTTLS / VRFY probe,
+                    # so an open relay on an internal host is caught. The probe
+                    # sends RSET before DATA — no mail is ever relayed.
+                    async def _smtp_relay(ip=ip, port=port, **kw):
+                        try:
+                            from heaven.recon.email_scanner import scan_smtp_endpoint
+                            return await scan_smtp_endpoint(ip, port)
+                        except Exception:
+                            return {}
+                    self.add_task(f"SMTP Relay/Posture {ip}:{port}", _smtp_relay,
+                                  phase=ScanPhase.VULN_SCAN, timeout=60)
+
                 # Web service (HTTP/HTTPS on any port) → remember its origin.
                 # Checked for EVERY open port, independently of the elif chain
                 # above, because web ports don't overlap ssh/smb/rdp/db. This is
@@ -727,7 +741,7 @@ class ScanOrchestrator:
 
         injected = [t for t in self.tasks.values() if t.id.startswith("dynamic_") or
                     any(x in t.name for x in ("SSH", "SMB", "RDP", "Exposed DB",
-                                              "Web Crawling (discovered"))]
+                                              "SMTP Relay", "Web Crawling (discovered"))]
         if injected:
             logger.info(f"Dynamic injection: {len(injected)} service-specific tasks added")
 
@@ -1317,7 +1331,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # just NETWORK. That is what populates the Host & Service Inventory; without
     # WEB/API here, a web/api scan produced an empty inventory. CLOUD and EMAIL
     # (no network host to port-scan) and the code-analysis modes are excluded.
-    NET_MODES = frozenset({M.NETWORK, M.WEB, M.API, M.AD, M.IOT, M.OT, M.CONTAINER})
+    NET_MODES = frozenset({M.NETWORK, M.WEB, M.API, M.AD, M.IOT, M.OT,
+                           M.CONTAINER, M.EXPLOIT, M.DOS, M.SNIFF, M.MALWARE})
     WEB_MODES = frozenset({M.WEB})
     WEBAPI_MODES = frozenset({M.WEB, M.API})
     WEBNET_MODES = frozenset({M.WEB, M.NETWORK, M.API})
@@ -2170,6 +2185,84 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="network", timeout=300,
     )
 
+    # ═══ Phase: DoS / DDoS SUSCEPTIBILITY ═══
+    # Reflection/amplification reflector detection (NTP monlist, open DNS
+    # resolver, SSDP, memcached, CLDAP, chargen, QOTD, RIPv1, NetBIOS) with a
+    # measured amplification factor, plus a single-connection slow-HTTP
+    # (Slowloris) susceptibility check on discovered web endpoints. Every probe
+    # is ONE benign, read-only packet/connection — never a flood. Answers the
+    # CEH/CPENT "Denial-of-Service" domain honestly (susceptibility, not attack).
+    async def _dos_scan(**kw):
+        try:
+            from heaven.vulnscan.dos_probe import scan_dos_targets
+        except ImportError:
+            return {}
+        net_res = orch.results.get(orch.net_task_id or "")
+        net_payload = net_res.data if (net_res and isinstance(net_res.data, dict)) else {}
+        return await scan_dos_targets(
+            net_data=net_payload,
+            urls=targets.get("urls", []),
+            targets=targets.get("ips", []),
+        )
+
+    orch.add_task(
+        "DoS / DDoS Susceptibility", _dos_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id],
+        modes=frozenset({M.DOS}),
+        concurrency_group="network", timeout=300,
+    )
+
+    # ═══ Phase: SNIFFING / INTERNAL MITM SUSCEPTIBILITY ═══
+    # Name-poisoning attack surface for an internal engagement: NBT-NS (137),
+    # LLMNR (5355) and mDNS (5353) responders that Responder/Inveigh abuse to
+    # capture NetNTLM hashes, plus a mitm6 (dual-stack IPv6) posture flag. Each
+    # check is ONE benign name-resolution query — nothing is poisoned or relayed.
+    async def _mitm_scan(**kw):
+        try:
+            from heaven.recon.mitm_probe import scan_mitm_targets
+        except ImportError:
+            return {}
+        net_res = orch.results.get(orch.net_task_id or "")
+        net_payload = net_res.data if (net_res and isinstance(net_res.data, dict)) else {}
+        return await scan_mitm_targets(
+            net_data=net_payload,
+            targets=targets.get("ips", []),
+        )
+
+    orch.add_task(
+        "Sniffing / MITM Susceptibility", _mitm_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id],
+        modes=frozenset({M.SNIFF}),
+        concurrency_group="network", timeout=300,
+    )
+
+    # ═══ Phase: MALWARE / BACKDOOR THREAT DETECTION ═══
+    # Indicators of an already-compromised or deliberately-backdoored host:
+    # known backdoor/RAT listener ports (Ingreslock, NetBus, Back Orifice…),
+    # unauthenticated shell banners, trojaned service versions (vsftpd 2.3.4,
+    # UnrealIRCd 3.2.8.1, ProFTPD 1.3.3c), and a webshell signature sweep on web
+    # targets. Read-only banner reads + GETs — no payload is run, no command is
+    # sent to a discovered shell.
+    async def _malware_scan(**kw):
+        try:
+            from heaven.vulnscan.malware_scan import scan_malware_targets
+        except ImportError:
+            return {}
+        net_res = orch.results.get(orch.net_task_id or "")
+        net_payload = net_res.data if (net_res and isinstance(net_res.data, dict)) else {}
+        return await scan_malware_targets(
+            net_data=net_payload,
+            urls=targets.get("urls", []),
+            targets=targets.get("ips", []),
+        )
+
+    orch.add_task(
+        "Malware / Backdoor Detection", _malware_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[net_id],
+        modes=frozenset({M.MALWARE}),
+        concurrency_group="network", timeout=300,
+    )
+
     # ═══ Phase: UNSUPPORTED / END-OF-LIFE SOFTWARE ═══
     # Turn the discovered product/version/OS inventory into CWE-1104 findings for
     # software past its vendor end-of-life date. Deterministic and version-gated —
@@ -2287,6 +2380,33 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "Web Technology Fingerprint (EOL + CVE)", _web_tech,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
         modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=120,
+    )
+
+    async def _edge_kev(**kw):
+        """Active edge/VPN appliance KEV fingerprint (Citrix, Ivanti, FortiOS, PAN,
+        Exchange, F5). Read-only login-surface probes; the #1 external entry point."""
+        try:
+            from heaven.vulnscan.edge_kev import scan_edge_appliances
+        except ImportError:
+            return {}
+        urls = list(targets.get("urls", []))
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                if ep_url and ep_url not in urls:
+                    urls.append(ep_url)
+        if not urls:
+            return {"skipped": True, "reason": "no URLs to fingerprint"}
+        return await scan_edge_appliances(urls)
+
+    edge_kev_id = orch.add_task(
+        "Edge / VPN Appliance KEV Fingerprint", _edge_kev,
+        phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        modes=WEBNET_MODES,
         concurrency_group="web", timeout=120,
     )
 
@@ -2694,7 +2814,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     val_id = orch.add_task(
         "PoC Validation", _validate_findings,
         phase=ScanPhase.VALIDATION,
-        depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, web_tech_id, inject_id, dir_fuzz_id, idor_id, dns_id, cve_map_id],
+        depends_on=[vuln_id, zday_id, adv_id, nuclei_id, ssl_id, auth_id, fuzz_id, web_tech_id, edge_kev_id, inject_id, dir_fuzz_id, idor_id, dns_id, cve_map_id],
     )
 
     # ═══ Phase: ACTIVE VERIFICATION (Potential → Confirmed) ═══
@@ -2885,6 +3005,73 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "Exploit Proof", _auto_exploit_proof,
         phase=ScanPhase.EXPLOIT_PROOF, depends_on=[val_id],
         timeout=900,
+    )
+
+    # ═══ Phase: ACTIVE EXPLOITATION (gated — `-m exploit` or `--exploit`) ═══
+    # Turns the discovered service inventory into CONFIRMED remote-compromise
+    # findings by driving the real exploit path (heaven.vulnscan.exploit_engine)
+    # against each host and capturing live command output from a benign proof
+    # command (`id; uname -a`). Doubly gated so it NEVER fires implicitly under
+    # FULL: the task body runs only when the operator picked the EXPLOIT mode or
+    # passed --exploit (targets["active_exploit"]), and the engine itself requires
+    # authorized=True. Safe by default — read-only proof, no persistence.
+    async def _active_exploit(**kw):
+        if not (targets.get("active_exploit")
+                or orch.active_mode is ScanMode.EXPLOIT):
+            return {"skipped": True,
+                    "reason": "active exploitation not requested "
+                              "(select the Exploit mode or pass --exploit)"}
+        try:
+            from heaven.vulnscan.exploit_engine import run_exploitation
+        except Exception as e:  # noqa: BLE001
+            return {"skipped": True, "reason": f"exploit_engine unimportable: {e}"}
+
+        net_res = orch.results.get(orch.net_task_id or "")
+        hosts = []
+        if net_res and net_res.data and isinstance(net_res.data, dict):
+            hosts = net_res.data.get("hosts", []) or []
+        if not hosts:
+            return {"skipped": True, "reason": "no hosts from network recon"}
+
+        proof_cmd = str(targets.get("exploit_proof_command") or "id; uname -a")
+        all_findings: list[dict] = []
+        all_outcomes: list[dict] = []
+        attempted = proved = 0
+        for host in hosts:
+            hostname = host.get("ip") or host.get("host") or host.get("hostname")
+            if not hostname:
+                continue
+            services = [
+                {"port": p.get("port"),
+                 "banner": (p.get("banner") or p.get("service_version")
+                            or p.get("product") or p.get("service") or "")}
+                for p in host.get("open_ports", []) if p.get("port")
+            ]
+            if not services:
+                continue
+            try:
+                res = await run_exploitation(
+                    authorized=True, target=str(hostname),
+                    services=services, proof_command=proof_cmd)
+            except PermissionError:
+                return {"skipped": True, "reason": "engine authorization gate"}
+            except Exception as e:  # noqa: BLE001
+                logger.warning("active exploitation failed on %s: %s", hostname, e)
+                continue
+            all_findings.extend(res.get("findings", []))
+            all_outcomes.extend(res.get("outcomes", []))
+            attempted += int(res.get("attempted", 0))
+            proved += int(res.get("proved", 0))
+        logger.info("Active exploitation: %d attempt(s), %d confirmed RCE across "
+                    "%d host(s)", attempted, proved, len(hosts))
+        return {"findings": all_findings, "outcomes": all_outcomes,
+                "attempted": attempted, "proved": proved}
+
+    orch.add_task(
+        "Active Exploitation", _active_exploit,
+        phase=ScanPhase.EXPLOIT_PROOF, depends_on=[val_id],
+        modes=frozenset({M.EXPLOIT}),
+        concurrency_group="network", timeout=1200,
     )
 
     # ═══ Phase: POST-EXPLOITATION CHAIN (Gap 5 — auto-chain after initial access) ═══

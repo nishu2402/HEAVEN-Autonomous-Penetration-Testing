@@ -249,6 +249,9 @@ def parse_windows_enumeration(
     # 4. Autologon plaintext credential in the registry.
     vectors.extend(_parse_autologon(outputs.get("autologon", "")))
 
+    # 4b. Cached domain logons (DCC2) — parsed from the same Winlogon dump.
+    vectors.extend(_parse_cached_logons(outputs.get("autologon", "")))
+
     # 5. UAC disabled.
     vectors.extend(_parse_uac(outputs.get("uac", "")))
 
@@ -435,6 +438,33 @@ def _parse_autologon(text: str) -> list[dict[str, Any]]:
             abuse="Read the plaintext DefaultPassword for the autologon account",
             signals=["autologon_password"], techniques=[mitre.T_CREDS_IN_REGISTRY])]
     return []
+
+
+def _parse_cached_logons(text: str) -> list[dict[str, Any]]:
+    """Cached interactive domain logons (CachedLogonsCount in the Winlogon key).
+
+    A non-zero count means the host stores MS-CACHEv2 (DCC2) verifiers for the
+    last N domain users. With local admin/SYSTEM these are readable from the
+    SECURITY hive and crack offline, so a domain account can be recovered from a
+    workstation that the DC never sees again. Reads the same Winlogon dump the
+    autologon check already collected — no extra command. Count 0 = best; the
+    Windows default is 10 (25 on some server SKUs).
+    """
+    m = re.search(r"CachedLogonsCount\s+REG_SZ\s+(\d+)", text)
+    if not m:
+        return []
+    count = int(m.group(1))
+    if count <= 0:
+        return []
+    return [_vector(
+        f"Cached domain credentials enabled (CachedLogonsCount = {count})",
+        "medium", 0.8,
+        detail=f"HKLM ...\\Winlogon CachedLogonsCount = {count}. The last "
+               f"{count} domain logon(s) are cached as MS-CACHEv2 (DCC2) hashes.",
+        abuse="With SYSTEM, dump the cached DCC2 hashes (e.g. lsadump::cache) "
+              "and crack them offline to recover a domain credential",
+        signals=["cached_domain_logons"], needs_manual_confirm=True,
+        techniques=[mitre.T_CREDS_IN_REGISTRY])]
 
 
 def _parse_uac(text: str) -> list[dict[str, Any]]:

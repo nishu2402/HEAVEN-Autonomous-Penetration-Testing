@@ -82,4 +82,4 @@ def test_sync_poster_matches_real_poster_markup():
         assert ">41</text>" in bumped
         assert "4242 tests, 43 CLI commands, 41 API routes" in bumped
         # Hand-set figures survive the rewrite untouched.
-        assert "25 UI pages, 13 scan modes" in bumped
+        assert "25 UI pages, 16 scan modes" in bumped

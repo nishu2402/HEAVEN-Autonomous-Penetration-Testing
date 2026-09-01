@@ -43,6 +43,14 @@ CANONICAL_CATEGORIES = {
     # distinct service-tier weaknesses so each scores on its own line.
     "vulnerable_service", "backdoor", "cleartext_service", "eol_software",
     "exposed_service", "smb_signing", "smb_null_session", "anonymous_access",
+    # ── API tier (OWASP API Security Top 10, the api_scanner benchmark) ─────
+    # These score API endpoints, not host:port. Each OWASP-API class scores on
+    # its own line: object-level auth (BOLA/API1), broken function/endpoint auth
+    # (API2), mass assignment (API3/API6), a leaked secret in a response (API3),
+    # exposed docs / management surfaces (API9), and the GraphQL resource classes.
+    "bola", "mass_assignment", "api_secret_leak", "api_docs_exposed",
+    "api_actuator_exposed", "api_broken_auth",
+    "graphql_introspection", "graphql_dos", "graphql_batching",
 }
 
 _TYPE_TO_CATEGORY: dict[str, str] = {
@@ -172,6 +180,26 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     "tomcat_manager_default_creds": "weak_auth",
     # SMB host/domain banner is information disclosure.
     "domain_information": "info_disclosure", "smb_host_information": "info_disclosure",
+    # ── API tier (heaven/vulnscan/api_scanner.py vuln_types) ────────────────
+    # OWASP API1 Broken Object Level Authorization (BOLA/IDOR at the object).
+    "bola": "bola",
+    # OWASP API3/API6 Mass Assignment (an injected privileged field round-trips).
+    "mass_assignment": "mass_assignment",
+    # OWASP API3 — a real third-party secret returned in a response body.
+    "api_key_leakage": "api_secret_leak",
+    # OWASP API9 Improper Inventory Management — publicly reachable docs / mgmt.
+    "api_docs_exposed": "api_docs_exposed",
+    "api_actuator_exposed": "api_actuator_exposed",
+    # OWASP API2 Broken Authentication — a protected collection served with no creds.
+    "api_broken_auth": "api_broken_auth",
+    # GraphQL: schema exposed via introspection (API3) and the two resource-
+    # consumption classes (API4) — a deep query with no cost limit / a timeout,
+    # and unbounded query batching.
+    "graphql_introspection": "graphql_introspection",
+    "graphql_complexity": "graphql_dos", "graphql_dos": "graphql_dos",
+    "graphql_batching": "graphql_batching",
+    # (no_rate_limit is already mapped to weak_auth above — the API "no rate
+    # limit on /api/login" finding scores on the weak_auth line.)
 }
 
 
@@ -227,6 +255,10 @@ class Finding:
     # Service port for network-tier findings (parsed from a host:port target).
     # None for host-level facts and for web URLs (the web matcher ignores it).
     port: Optional[int] = None
+    # The specific API route an API-tier finding is about (``/api/users/{id}``,
+    # ``/graphql``, ``/openapi.json``). API findings all share one base ``target``,
+    # so the route lives in the finding's ``endpoint`` field, not in ``url``.
+    endpoint: str = ""
 
     @property
     def category(self) -> str:
@@ -249,6 +281,7 @@ class Finding:
             confidence=float(d.get("confidence", 0) or 0),
             severity=d.get("severity", ""),
             port=parse_service_port(target),
+            endpoint=d.get("endpoint", "") or "",
         )
 
 
@@ -274,6 +307,10 @@ class GroundTruthEntry:
     # category alone against a finding that likewise carries no port.
     tier: str = "web"
     port: Optional[int] = None
+    # tier="api" → match by (API route, category). ``endpoint`` is treated as a
+    # substring of the finding's endpoint/url (so a GT route ``/api/users/`` matches
+    # a finding on ``/api/users/{id}``); an empty ``endpoint`` matches on category
+    # alone.
 
 
 @dataclass
@@ -361,6 +398,10 @@ def matches(finding: Finding, gt: GroundTruthEntry) -> bool:
          null (a host-level fact — SMB signing, host banner), the finding must
          likewise be host-level (carry no port), so a port-specific finding on
          the same host cannot spuriously satisfy it.
+
+    API tier (``gt.tier == "api"``) — API findings share one base target and carry
+    the route in ``endpoint``, so match on category plus the GT route appearing in
+    the finding's endpoint/url (an empty GT route matches on category alone).
     """
     if gt.tier == "network":
         if finding.category != gt.category:
@@ -368,6 +409,18 @@ def matches(finding: Finding, gt: GroundTruthEntry) -> bool:
         if gt.port is None:
             return finding.port is None
         return finding.port == gt.port
+
+    if gt.tier == "api":
+        # API findings share one base target; the route is in ``endpoint``. Match
+        # on category, and on the GT route appearing in the finding's endpoint (or
+        # url, since some detectors put the full route there). An empty GT route
+        # matches on category alone (a host-wide API fact).
+        if finding.category != gt.category:
+            return False
+        if not gt.endpoint:
+            return True
+        haystack = f"{finding.endpoint or ''} {finding.url or ''}"
+        return gt.endpoint in haystack
 
     if not gt.endpoint or gt.endpoint not in (finding.url or ""):
         return False

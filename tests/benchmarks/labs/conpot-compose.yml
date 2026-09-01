@@ -1,0 +1,23 @@
+# HEAVEN benchmark: IoT/OT multi-protocol lab (Conpot ICS honeypot).
+#
+# Conpot is a real, widely-used ICS/SCADA honeypot that speaks genuine
+# industrial protocols. It broadens HEAVEN's IoT/OT proof beyond the Modbus +
+# MQTT pair (already GREEN in the domain labs) to a live S7comm (Siemens S7-300)
+# endpoint and an SNMP agent, exercising the real probe_s7comm / probe_snmp /
+# probe_modbus code paths against a service that answers the actual protocol.
+#
+# SECURITY: binds to loopback (127.0.0.1) only. Conpot is a honeypot — it holds
+# no real device or data.
+services:
+  conpot:
+    image: honeynet/conpot:latest
+    container_name: heaven-lab-conpot
+    # Uses the image's default CMD (conpot --template default). Conpot's default
+    # template listens internally on non-standard ports (Modbus 5020, S7comm
+    # 10201); we publish them on the STANDARD ICS ports on loopback so HEAVEN's
+    # OT scanner (which maps 502->Modbus, 102->S7comm) probes them as it would a
+    # real PLC.
+    ports:
+      - "127.0.0.1:502:5020"     # Modbus/TCP  (standard 502)
+      - "127.0.0.1:102:10201"    # S7comm      (standard 102)
+    restart: "no"

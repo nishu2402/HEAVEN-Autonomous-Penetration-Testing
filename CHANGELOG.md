@@ -11,6 +11,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Java SAST rules + OWASP Benchmark scoring (devsecops/ci now GREEN).** HEAVEN's
+  static-analysis engine gains a real Java rule pack
+  (`heaven/vulnscan/sast_rules/java_security.yml`) covering 11 CWE classes:
+  taint-tracked command / SQL / LDAP / XPath injection, path traversal, XSS and
+  trust-boundary violations (with generic collection/StringBuilder propagators and
+  ESAPI/parameterization sanitizers), plus pattern rules for weak randomness, weak
+  hashes, weak ciphers and insecure cookies. A new scorer
+  (`tests/benchmarks/owasp_benchmark.py`) runs the shipped engine against the
+  standard OWASP Benchmark v1.2 (2740 real Java test cases) and computes the
+  Benchmark's Youden index (TPR minus FPR) per category and pooled. Live headline:
+  pooled Youden about 0.51, recall about 0.96, precision about 0.70, with
+  weak-randomness, weak-crypto and insecure-cookie at a perfect 1.00. The corpus is
+  GPLv2 so it is fetched (a pinned shallow clone, or `HEAVEN_OWASP_BENCHMARK_DIR`)
+  rather than vendored into this MIT tree; ground truth is read from the checkout.
+  A gated live test (`tests/benchmarks/test_owasp_benchmark.py`) enforces an honest
+  floor, and a Docker-free hermetic test proves the rules separate a genuine vuln
+  from a safe look-alike. This takes the `devsecops` and `ci` scan modes to a GREEN
+  lab-matrix status (green modes 11 to 13).
+
+- **AWS IAM privilege-escalation path detection.** The authenticated cloud IAM
+  audit now flags the scoped escalation primitives a non-admin identity can abuse
+  to reach administrator (the Rhino Security / Pacu taxonomy: CreatePolicyVersion,
+  AttachUserPolicy, PutUserPolicy, CreateAccessKey, PassRole+RunInstances,
+  PassRole+Lambda, UpdateAssumeRolePolicy and more), not only a wildcard `*`/`*`
+  grant. Evaluation is deny-wins over the identity's effective actions and is
+  read-only. Proven live against a real IAM (LocalStack) via the new
+  `--endpoint` / `HEAVEN_AWS_ENDPOINT` override on `heaven cloud iam`.
+
+- **Spec-driven API testing (`heaven scan --api-spec`).** Ingests an OpenAPI /
+  Swagger (v2 + v3), Postman collection, or GraphQL introspection document and
+  tests every operation it declares, expanding path templates to concrete
+  same-origin URLs the crawler could never reach. Includes an authorization-matrix
+  planner and analyser (role x operation) that flags broken function-level
+  authorization (BFLA) and missing authentication from the observed status codes.
+
+- **YARA-backed malware/webshell signature engine.** A curated ruleset of real
+  webshell, backdoor and obfuscated-loader indicators (named shells, eval-from-
+  superglobal, China Chopper, JSP/ASPX shells, packed loaders) runs during the
+  malware scan's webshell sweep. It uses yara-python when installed and an
+  always-on builtin matcher otherwise, so detection is never gated on the native
+  library, and every match names which engine produced it.
+
+- **Shellshock (CVE-2014-6271) proven live as the eighth exploit.** A new in-repo
+  lab compiles unpatched bash 4.3 from source behind a busybox CGI; HEAVEN's
+  exploit engine proves a genuine reverse-callback RCE (root output) against it,
+  taking the exploit corpus to 8 of 8 live and the `exploit` scan mode to a GREEN
+  lab status. A new `HEAVEN_CALLBACK_HOST` override lets the callback target a
+  NAT/redirector/host-gateway address, and the callback listener now reads the
+  full command output instead of only the first packet.
+
+- **Live OT breadth (Siemens S7comm).** A Conpot ICS-honeypot lab proves the
+  `probe_s7comm` ISO-COTP handshake and Modbus live on their standard ICS ports,
+  extending the OT proof beyond Modbus alone.
+
+- **Live Kubernetes lab (real k3s) for CONTAINER mode.** A new in-repo lab boots
+  a genuine k3s control plane (real kube-apiserver / etcd / scheduler) started
+  with anonymous auth enabled and cluster-admin bound to `system:anonymous` (both
+  real, common misconfigurations). HEAVEN's `check_api_server` reads the live
+  apiserver on :6443 with no credentials, proving the `k8s_anon_auth` and
+  `k8s_secrets_exposed` detectors against a real cluster rather than a unit-test
+  double, and taking CONTAINER mode to a second GREEN lab beyond the Docker-API /
+  registry one.
+
+- **Reproducible open-relay mail lab (real Postfix) for EMAIL mode.** A new
+  in-repo lab boots a genuine Postfix MTA misconfigured as an open relay (a single
+  over-broad `mynetworks = 0.0.0.0/0`, so `permit_mynetworks` matches every client
+  before any reject, exactly how real open relays happen). HEAVEN's non-intrusive
+  SMTP probe detects `smtp_open_relay` live on the raw endpoint (it sends RSET
+  before DATA, so no mail is ever relayed) plus `smtp_no_starttls` on the same
+  cleartext box, taking EMAIL mode to a GREEN lab status. To make this reachable
+  outside the lab, the email scanner gained a direct `scan_smtp_server` /
+  `scan_smtp_endpoint` entry point (no MX lookup required) and the orchestrator now
+  injects the relay/posture probe whenever a scan finds an open SMTP port on a bare
+  host, so an open relay on an internal box is caught even with no MX record.
+
+- **Reproducible Active Directory lab (Samba AD DC) for AD mode.** A new in-repo
+  lab provisions a real Samba Active Directory Domain Controller from scratch and
+  proves two AD probes live against it: credential-free Kerberos account
+  enumeration (`kerberos_user_enumeration`) and MS-RPRN/MS-DFSNM coercion-surface
+  detection (`ntlm_coercion`, bind only). It also live-guards the AS-REP-roasting
+  false-positive fix (protected accounts are not reported roastable against
+  Samba's KDC). This replaces the previous manual, non-reproducible AD validation
+  and takes AD mode to a GREEN lab status.
+
+- **Active Directory Certificate Services (AD CS) abuse detection.** The AD scan
+  now enumerates the Certificate Authorities and published certificate templates
+  over the same read-only LDAP session and classifies them against the ESC abuse
+  categories: ESC1 (enrollee-supplies-subject with a client-auth EKU), ESC2
+  (Any-Purpose / SubCA), ESC3 (enrolment agent), ESC4 (a low-privileged principal
+  can rewrite the template), and ESC8 (an NTLM-accepting web-enrolment endpoint,
+  the relay-to-domain-takeover path). Enrolment rights are read from the template
+  security descriptor; when the descriptor cannot be parsed the finding is reported
+  as a lower-confidence "potential" rather than overclaimed. Read-only throughout:
+  it never requests or forges a certificate.
+
+- **Kerberos pre-authentication probe (credential-free).** A new probe validates
+  usernames against a Domain Controller with no credentials (the AS-REQ-without-
+  pre-auth technique, which cannot lock accounts out) and catches AS-REP-roastable
+  accounts, capturing the crackable `$krb5asrep$` hash. This complements the
+  existing LDAP-based AS-REP check for a DC reachable only on 88/tcp.
+
+- **NTLM authentication-coercion surface detection.** HEAVEN already flags the two
+  ends of a relay chain (SMB signing not required, and AD CS web enrolment); it now
+  detects the middle, binding to the MS-RPRN (PrinterBug), MS-EFSR (PetitPotam) and
+  MS-DFSNM (DFSCoerce) RPC interfaces to confirm they are reachable. It binds only
+  and never issues the coercion call, so no authentication is ever coerced.
+
+- **SAML single sign-on testing.** Alongside the existing OAuth 2.0 checks, the
+  authentication scan now discovers SAML/federation metadata and audits its signing
+  posture (a service provider that advertises `WantAssertionsSigned="false"` or
+  unsigned AuthnRequests), plus a conservative RelayState open-redirect check that
+  fires only on a real off-site reflection.
+
+- **Internet-facing edge / VPN appliance KEV fingerprint.** A new pass fingerprints
+  Citrix NetScaler/Gateway, Ivanti Connect Secure, FortiOS SSL-VPN, Palo Alto
+  GlobalProtect, Microsoft Exchange/OWA and F5 BIG-IP from their distinctive
+  cookies, server strings and login paths, and surfaces the actively-exploited
+  (CISA KEV) CVEs for each family so a perimeter scan flags the exposure and the
+  exact patches to verify. It is framed as an exposure to verify unless a concrete
+  vulnerable version is observed, and only ever GETs the login surface.
+
 - **Dual-version CVSS: every finding now carries both CVSS v4.0 and v3.1.** HEAVEN
   scores each finding with CVSS v4.0, the current standard, and shows its CVSS v3.1
   score and vector alongside it (the calibrated score that still drives the severity
@@ -107,6 +228,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path. A live end-to-end scan dropped from about 240 seconds to 116.
 
 ### Fixed
+
+- **Kerberos pre-auth probe no longer reports a false AS-REP roasting finding for
+  every account.** impacket's `sendReceive` does not raise on
+  `KDC_ERR_PREAUTH_REQUIRED`; it returns the raw KRB-ERROR bytes (that error is the
+  expected first step of a normal TGT exchange). The probe read "no exception" as
+  "a roastable AS-REP came back", so every pre-auth-required account was flagged
+  AS-REP roastable (high). Confirmed live against a real KDC. The probe now decodes
+  the reply and only reports roasting for a genuine AS-REP, mirroring impacket
+  `GetNPUsers`. The captured hash also now covers AES128/AES256 (etype 17/18) in the
+  hashcat layout, not only RC4, so a genuinely roastable AES-only account yields a
+  usable hash instead of an empty one.
+
+- **Local-model structured output (Ollama / LM Studio / vLLM) recovers from a
+  malformed reply instead of losing the verdict.** When a small local model wraps or
+  malforms its JSON past what the brace-extractor can recover, the gateway now
+  re-issues the request once with an explicit "return only the JSON object" nudge
+  before giving up, rather than treating the parse failure as a hard error. This
+  restores the FP-review verdict (and every other structured local call) on models
+  that do not reliably emit clean JSON on the first try.
 
 - **A generic Denial-of-Service finding is now scored with an availability vector.**
   A bare `denial_of_service` / `dos` / `ddos` finding resolved to a generic high-severity

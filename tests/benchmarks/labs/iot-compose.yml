@@ -1,0 +1,30 @@
+# HEAVEN benchmark: IoT device lab
+#
+# Two genuinely-insecure IoT services HEAVEN's real protocol probes confirm:
+#   * Mosquitto with anonymous access enabled (MQTT :1883) — probe_mqtt gets a
+#     CONNACK return code 0 (anonymous accepted) -> critical CWE-306.
+#   * A real pymodbus server with no authentication (Modbus/TCP :502) —
+#     probe_modbus gets a valid Read-Device-Identification reply -> critical.
+#
+# SECURITY: every port binds to loopback ONLY (127.0.0.1). These services are
+# deliberately unauthenticated; publishing on 0.0.0.0 would expose them to the
+# LAN. The scanner only ever reaches them via 127.0.0.1.
+
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: heaven-lab-iot-mqtt
+    command: ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "127.0.0.1:1883:1883"
+    restart: "no"
+
+  modbus:
+    build: ./modbus
+    image: heaven-lab-modbus:latest
+    container_name: heaven-lab-iot-modbus
+    ports:
+      - "127.0.0.1:502:502"
+    restart: "no"

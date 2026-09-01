@@ -675,13 +675,51 @@ def _is_fp_reviewed(f: dict) -> bool:
         or "signal_count" in f
 
 
+_MERGE_SEV_RANK = {"info": 0, "none": 0, "low": 1, "medium": 2, "moderate": 2,
+                   "high": 3, "critical": 4}
+
+
+def _sev_rank(f: dict) -> int:
+    """Severity ordering for the merge tiebreak (unknown labels sort lowest)."""
+    return _MERGE_SEV_RANK.get(str(f.get("severity") or "").strip().lower(), 0)
+
+
 def _richer_finding(a: dict, b: dict) -> dict:
     """
     When two findings dedup to the same identity, keep the one carrying more
-    signal: an FP-reviewed verdict is authoritative and wins outright; otherwise
-    higher confidence wins; ties break toward the larger evidence blob (a
-    validated/scored finding is richer than a raw candidate).
+    signal. The evidence hierarchy, strongest first:
+
+      1. Active proof (the exploitation engine's captured live command output, or
+         a validator's "confirmed") outranks everything. A finding proven present
+         is never dropped for a weaker banner/version copy of the same identity —
+         not even an FP-reviewed one. This is the fix for a confirmed critical RCE
+         (e.g. Samba usermap on host:139:CVE-2007-2447) that deduped against the
+         version-based ``vulnerable_service`` match and was silently persisted
+         with the banner copy's lower severity AND its Potential status. Among two
+         proven copies the worse impact wins (higher severity, then confidence),
+         so a proven Critical never hides behind a version match's lower band.
+      2. Otherwise an FP-reviewed verdict is authoritative and wins outright, so a
+         suppressor's confidence *downgrade* of an unproven candidate is not
+         silently reverted.
+      3. Otherwise higher confidence wins; ties break toward the larger evidence
+         blob (a validated/scored finding is richer than a raw candidate).
     """
+    from heaven.utils.cvss import _is_actively_validated
+    a_val, b_val = _is_actively_validated(a), _is_actively_validated(b)
+    if a_val != b_val:
+        # Proof beats non-proof, regardless of FP-review status or confidence.
+        return a if a_val else b
+    if a_val and b_val:
+        # Both proven: the worse impact wins, then higher confidence, then richer
+        # evidence — FP-review status must never drop a proven finding.
+        ra, rb = _sev_rank(a), _sev_rank(b)
+        if ra != rb:
+            return a if ra > rb else b
+        ca = float(a.get("confidence", 0.0) or 0.0)
+        cb = float(b.get("confidence", 0.0) or 0.0)
+        if ca != cb:
+            return a if ca > cb else b
+        return b if len(str(b.get("evidence", ""))) >= len(str(a.get("evidence", ""))) else a
     a_rev, b_rev = _is_fp_reviewed(a), _is_fp_reviewed(b)
     if a_rev != b_rev:
         # The adjudicated copy wins even if the raw candidate's number is higher,
@@ -1602,12 +1640,42 @@ class EngagementStore:
                 # Dedup — refresh last_seen_at + seen_count + the (re-computed) risk
                 # score and reconciled severity (a re-scan may resolve a better
                 # score), but preserve human-set fields (status, notes).
-                c.execute(
-                    "UPDATE findings SET last_seen_at = ?, seen_count = seen_count + 1, "
-                    "scan_id = ?, evidence_json = ?, risk_score = ?, severity = ? "
-                    "WHERE id = ?",
-                    (now, scan_id, evidence_json, risk_score, severity, fid),
-                )
+                #
+                # Apply the SAME merge policy the in-memory dedup uses so the store
+                # can't drift from it: a finding the store already holds as PROVEN
+                # (its stored evidence carries live proof output) must not be
+                # silently demoted by a later, weaker, unproven banner/version
+                # match of the same identity — e.g. re-scanning without exploit
+                # mode after an exploit scan must not turn a confirmed Critical RCE
+                # back into a Medium. Only when the incoming copy is the stronger
+                # evidence does it overwrite the stored severity/evidence.
+                existing_ev = {}
+                with suppress(Exception):
+                    existing_ev = json.loads(existing["evidence_json"] or "{}") or {}
+                stored_finding = {
+                    "target": existing["target"], "vuln_type": existing["vuln_type"],
+                    "title": existing["title"], "severity": existing["severity"],
+                    "confidence": existing["confidence"], "cve_id": existing["cve_id"],
+                    "evidence": existing_ev,
+                }
+                incoming_finding = {**finding, "severity": severity,
+                                    "confidence": confidence, "evidence": evidence}
+                keep_stored = _richer_finding(stored_finding, incoming_finding) is stored_finding
+                if keep_stored:
+                    # Stored copy is the stronger evidence: keep its severity +
+                    # evidence, only refresh recency and the seen counter.
+                    c.execute(
+                        "UPDATE findings SET last_seen_at = ?, "
+                        "seen_count = seen_count + 1, scan_id = ? WHERE id = ?",
+                        (now, scan_id, fid),
+                    )
+                else:
+                    c.execute(
+                        "UPDATE findings SET last_seen_at = ?, seen_count = seen_count + 1, "
+                        "scan_id = ?, evidence_json = ?, risk_score = ?, severity = ? "
+                        "WHERE id = ?",
+                        (now, scan_id, evidence_json, risk_score, severity, fid),
+                    )
             else:
                 c.execute(
                     "INSERT INTO findings ("

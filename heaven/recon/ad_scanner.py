@@ -60,6 +60,7 @@ class ADAttackType(str, Enum):
     # can determine without domain credentials.
     SMB_SIGNING_DISABLED = "smb_signing_not_required"
     SMBV1_ENABLED = "smbv1_enabled"
+    NTLMV1_SUPPORTED = "ntlmv1_supported"
     NULL_SESSION = "smb_null_session"
     ANON_LDAP = "anonymous_ldap_bind"
     ANON_LDAP_ENUM = "anonymous_ldap_enumeration"
@@ -109,6 +110,7 @@ class ADDomainInfo:
     """Enumerated domain information."""
     domain: str = ""
     domain_dn: str = ""
+    config_nc: str = ""
     forest: str = ""
     dc_hostname: str = ""
     functional_level: str = ""
@@ -173,6 +175,10 @@ class ADScanner:
         self._conn: Optional[Any] = None
         self._domain_info = ADDomainInfo(domain=domain, dc_hostname=dc_host, domain_dn=self.domain_dn)
         self._findings: list[ADFinding] = []
+        # Pre-shaped finding dicts from helper modules (AD CS, Kerberos pre-auth)
+        # that already speak the standard HEAVEN finding schema and so are merged
+        # into the summary alongside the ADFinding objects.
+        self._extra_findings: list[dict] = []
         self._graph: dict[str, set[str]] = defaultdict(set)  # Attack path graph
 
     async def connect(self) -> bool:
@@ -212,6 +218,7 @@ class ADScanner:
             conn = Connection(server, auto_bind=True, receive_timeout=6)
             anon = not (self.username and self.password)
             attrs = ["defaultNamingContext", "rootDomainNamingContext",
+                     "configurationNamingContext",
                      "dnsHostName", "domainFunctionality", "forestFunctionality",
                      "ldapServiceName", "serverName"]
             conn.search("", "(objectClass=*)", search_scope=BASE, attributes=attrs)
@@ -233,6 +240,11 @@ class ADScanner:
                     if not self.domain:
                         self.domain = derive_domain_from_dn(dnc)
                         self._domain_info.domain = self.domain
+                cnc = info.get("configurationNamingContext", "")
+                if not cnc and dnc:
+                    cnc = f"CN=Configuration,{dnc}"
+                if cnc:
+                    self._domain_info.config_nc = cnc
                 if info.get("dnsHostName"):
                     self._domain_info.dc_hostname = info["dnsHostName"]
                 fl = info.get("domainFunctionality", "")
@@ -407,6 +419,7 @@ class ADScanner:
             except Exception:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
         out["smbv1"] = self._detect_smbv1(host)
+        out["ntlmv1"] = self._detect_ntlmv1(host)
         return out
 
     @staticmethod
@@ -430,6 +443,61 @@ class ADScanner:
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _detect_ntlmv1(host: str) -> Optional[bool]:
+        """True if the host negotiates NTLMv1 (no extended session security).
+
+        Reads the *server's* NTLM type-2 CHALLENGE flags during a session setup.
+        impacket itself downgrades to NTLMv1 when the server clears
+        ``NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY`` in its challenge (ntlm.py:
+        getNTLMSSPType3), so that bit is the authoritative wire signal — a server
+        that supports only NTLMv1/LM session security clears it, one that enforces
+        NTLM2/NTLMv2 sets it. We drive an ordinary (deliberately failing) login
+        and capture the real challenge impacket parses off the wire — no guessing,
+        no fabrication. ``None`` when the challenge could not be read (non-NTLM
+        target, connection error) so no finding is emitted on an unknown.
+        """
+        try:
+            from impacket.smbconnection import SMBConnection
+            from impacket import ntlm as _ntlm
+        except Exception:
+            return None
+        captured: dict[str, int] = {}
+        real_challenge = _ntlm.NTLMAuthChallenge
+
+        def _capture(*a, **kw):
+            obj = real_challenge(*a, **kw)
+            try:
+                captured["flags"] = int(obj["flags"])
+            except Exception:
+                pass
+            return obj
+
+        try:
+            _ntlm.NTLMAuthChallenge = _capture   # observe the server's type-2
+            conn = SMBConnection(host, host, sess_port=445, timeout=8)
+            try:
+                # Bogus credentials: the type-2 CHALLENGE arrives (and is captured)
+                # before the type-3 the server rejects — LOGON_FAILURE is expected
+                # and harmless, we only need the negotiated challenge flags.
+                conn.login("heaven-ntlm-probe", "\x01invalid\x01", "")
+            except Exception:
+                pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
+        except Exception:
+            return None
+        finally:
+            _ntlm.NTLMAuthChallenge = real_challenge
+        flags = captured.get("flags")
+        if flags is None:
+            return None
+        ess = _ntlm.NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY
+        return (flags & ess) == 0
 
     def _smb_findings(self, smb: dict) -> None:
         if not smb:
@@ -489,6 +557,31 @@ class ADScanner:
                 mitre_technique="T1210",
                 evidence={"smbv1_enabled": True},
             ))
+        # NTLMv1 / LM session security negotiated (no extended session security).
+        if smb.get("ntlmv1") is True:
+            self._findings.append(ADFinding(
+                target=target, attack_type=ADAttackType.NTLMV1_SUPPORTED,
+                severity="high",
+                title="NTLMv1 Authentication Negotiated (No Extended Session Security)",
+                description=(
+                    "The host cleared NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY "
+                    "in its NTLM challenge, so it negotiates NTLMv1/LM session "
+                    "security. NTLMv1 responses are DES-based and can be cracked "
+                    "offline (e.g. crack.sh) to recover the NT hash, and coerced "
+                    "NTLMv1 authentication can be relayed. This was read from the "
+                    "server's own challenge on the wire, not inferred from a version."
+                ),
+                confidence=0.85,
+                remediation=(
+                    "Set 'Network security: LAN Manager authentication level' to "
+                    "'Send NTLMv2 response only. Refuse LM & NTLM' (LmCompatibility"
+                    "Level = 5) via GPO on all hosts, and enable 'Network security: "
+                    "Restrict NTLM' auditing to find remaining NTLMv1 users."
+                ),
+                mitre_technique="T1557.001",
+                evidence={"extended_session_security": False,
+                          "note": "server NTLM challenge cleared ESS flag"},
+            ))
         # Null session that can list shares → anonymous enumeration.
         if smb.get("null_session") and smb.get("shares"):
             self._findings.append(ADFinding(
@@ -523,6 +616,11 @@ class ADScanner:
         await self.discover_via_rootdse()
         await self.enumerate_anonymous()
         await self.enumerate_smb()
+        # Kerberos pre-auth enumeration / AS-REP roasting works with no credentials,
+        # so run it in the pre-auth layer once the domain is known from RootDSE.
+        await self.check_kerberos_preauth()
+        # NTLM coercion surface (bind-only) — complements the SMB-signing relay finding.
+        await self.check_coercion()
 
         if not self._conn:
             connected = await self.connect()
@@ -539,6 +637,7 @@ class ADScanner:
         await self.check_password_policy()
         await self.check_ntlm_relay()
         await self.check_acl_abuse()
+        await self.check_adcs()
         await self.build_attack_paths()
 
         return self.summary()
@@ -1110,12 +1209,137 @@ class ADScanner:
 
         return paths
 
+    async def check_adcs(self) -> list[dict]:
+        """Enumerate AD Certificate Services and classify vulnerable certificate
+        templates (ESC1-ESC4, ESC8). Read-only: LDAP reads of the Configuration
+        naming context plus a single web-enrolment reachability probe per CA. Never
+        requests or forges a certificate."""
+        if not self._conn:
+            return []
+        config_nc = self._domain_info.config_nc or (
+            f"CN=Configuration,{self.domain_dn}" if self.domain_dn else "")
+        if not config_nc:
+            return []
+        try:
+            from heaven.recon.adcs_scanner import enumerate_adcs
+        except Exception:
+            logger.debug("adcs_scanner import failed", exc_info=True)
+            return []
+        logger.info("Checking AD Certificate Services (ESC1-8)...")
+        try:
+            # First pass discovers CA hostnames so ESC8 can probe web enrolment.
+            web_map = await self._probe_ca_web_enrollment(config_nc)
+            adcs_findings = enumerate_adcs(self._conn, config_nc, web_map)
+        except Exception:
+            logger.debug("AD CS enumeration failed", exc_info=True)
+            return []
+        if adcs_findings:
+            crit = sum(1 for f in adcs_findings if f.get("severity") == "critical")
+            logger.info("AD CS: %d finding(s) (%d critical ESC path(s))",
+                        len(adcs_findings), crit)
+        self._extra_findings.extend(adcs_findings)
+        return adcs_findings
+
+    async def _probe_ca_web_enrollment(self, config_nc: str) -> dict[str, list[str]]:
+        """Return {ca_dns_host: [reachable /certsrv URLs]} for ESC8. A single HEAD
+        per scheme with a short timeout; no credentials are ever sent."""
+        web_map: dict[str, list[str]] = {}
+        try:
+            ca_base = (f"CN=Enrollment Services,CN=Public Key Services,"
+                       f"CN=Services,{config_nc}")
+            self._conn.search(ca_base, "(objectClass=pKIEnrollmentService)",
+                              attributes=["dNSHostName"])
+            hosts = []
+            for entry in getattr(self._conn, "entries", []):
+                h = getattr(entry, "dNSHostName", None)
+                h = h.value if hasattr(h, "value") else h
+                if h:
+                    hosts.append(str(h))
+        except Exception:
+            return web_map
+        if not hosts:
+            return web_map
+        try:
+            import aiohttp
+        except Exception:
+            return web_map
+        timeout = aiohttp.ClientTimeout(total=6)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for host in hosts:
+                    reachable: list[str] = []
+                    for scheme in ("http", "https"):
+                        url = f"{scheme}://{host}/certsrv/"
+                        try:
+                            async with session.get(url, ssl=False,
+                                                   allow_redirects=False) as resp:
+                                # certsrv answers 401 (NTLM challenge) or 200 — either
+                                # means the relay-able endpoint is present.
+                                if resp.status in (200, 401, 403):
+                                    reachable.append(url)
+                        except Exception:
+                            continue
+                    if reachable:
+                        web_map[host] = reachable
+        except Exception:
+            logger.debug("CA web-enrolment probe failed", exc_info=True)
+        return web_map
+
+    async def check_coercion(self) -> list[dict]:
+        """Detect reachable NTLM authentication-coercion RPC interfaces
+        (PetitPotam / PrinterBug / DFSCoerce) on the DC. Bind-only, read-only —
+        never triggers coercion. Pairs with the SMB-signing relay finding."""
+        if not self.dc_host:
+            return []
+        try:
+            from heaven.recon.coercion_probe import coercion_surface_probe
+        except Exception:
+            logger.debug("coercion_probe import failed", exc_info=True)
+            return []
+        try:
+            findings = await coercion_surface_probe(
+                self.dc_host, self.username, self.password, self.domain)
+        except Exception:
+            logger.debug("coercion probe failed", exc_info=True)
+            return []
+        if findings:
+            logger.info("NTLM coercion surface: %d finding(s)", len(findings))
+        self._extra_findings.extend(findings)
+        return findings
+
+    async def check_kerberos_preauth(self) -> list[dict]:
+        """Pre-auth Kerberos user enumeration + AS-REP roasting (no credentials
+        needed — only reachability of the KDC on 88/tcp). Complements the
+        LDAP-based AS-REP check for when no authenticated bind is available."""
+        if not self.domain:
+            return []
+        try:
+            from heaven.recon.kerberos_probe import kerberos_preauth_probe
+        except Exception:
+            logger.debug("kerberos_probe import failed", exc_info=True)
+            return []
+        # Seed the candidate list with any usernames already enumerated over LDAP.
+        seed_users = [a.get("username", "") for a in self._domain_info.spn_accounts
+                      if a.get("username")]
+        seed_users += [a.get("username", "") for a in self._domain_info.asrep_accounts
+                       if a.get("username")]
+        try:
+            findings = await kerberos_preauth_probe(
+                self.domain, self.dc_host, extra_users=[u for u in seed_users if u])
+        except Exception:
+            logger.debug("Kerberos pre-auth probe failed", exc_info=True)
+            return []
+        if findings:
+            logger.info("Kerberos pre-auth: %d finding(s)", len(findings))
+        self._extra_findings.extend(findings)
+        return findings
+
     def _offline_summary(self) -> dict:
         """Summary when no authenticated LDAP bind was obtained. The pre-auth
         network layer (RootDSE + SMB) may already have produced real findings, so
         we keep them; only note the missing authenticated depth when nothing at
         all was found."""
-        if not self._findings:
+        if not self._findings and not self._extra_findings:
             logger.warning("AD scan: no authenticated access and no pre-auth signal")
             self._findings.append(ADFinding(
                 target=self.domain or self.dc_host,
@@ -1139,9 +1363,12 @@ class ADScanner:
         return self.summary()
 
     def summary(self) -> dict:
+        # Merge the ADFinding objects with pre-shaped helper dicts (AD CS, Kerberos).
+        finding_dicts = [f.to_dict() for f in self._findings] + list(self._extra_findings)
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-        for f in self._findings:
-            severity_counts[f.severity] = severity_counts.get(f.severity, 0) + 1
+        for f in finding_dicts:
+            sev = f.get("severity", "info")
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
         return {
             "domain": self.domain,
@@ -1156,9 +1383,9 @@ class ADScanner:
                 "groups": self._domain_info.total_groups,
                 "password_policy": self._domain_info.password_policy,
             },
-            "total_findings": len(self._findings),
+            "total_findings": len(finding_dicts),
             "severity_breakdown": severity_counts,
-            "findings": [f.to_dict() for f in self._findings],
+            "findings": finding_dicts,
             "attack_paths": len([f for f in self._findings if f.attack_path]),
             "kerberoastable_accounts": len(self._domain_info.spn_accounts),
             "asrep_accounts": len(self._domain_info.asrep_accounts),

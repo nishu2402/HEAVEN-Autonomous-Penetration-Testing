@@ -66,6 +66,52 @@ def test_api_mode_runs_api_scanner_not_ad():
     assert "Active Directory Scan" not in names
 
 
+def _find_task(orch, name):
+    return next((t for t in orch.tasks.values() if t.name == name), None)
+
+
+def _build(mode, extra=None):
+    tgt = {"ips": ["127.0.0.1"], "urls": [], "repositories": [],
+           "cloud_providers": []}
+    tgt.update(extra or {})
+    return build_full_scan(tgt, scan_mode=mode)
+
+
+def test_exploit_mode_registers_active_exploitation_and_recon():
+    names = _task_names(ScanMode.EXPLOIT)
+    assert "Active Exploitation" in names
+    assert "Network Reconnaissance" in names  # recon feeds the exploit engine
+    # A focused exploit run must not drag in the web/cloud/AD scanners.
+    for n in ("Web Application Fuzzing", "Cloud Asset Enumeration",
+              "Active Directory Scan", "Email Security Scan"):
+        assert n not in names, f"EXPLOIT mode should not include {n}"
+
+
+def test_active_exploitation_absent_from_non_exploit_focused_modes():
+    for mode in (ScanMode.WEB, ScanMode.NETWORK, ScanMode.CLOUD, ScanMode.EMAIL):
+        assert "Active Exploitation" not in _task_names(mode)
+
+
+def test_active_exploitation_gated_off_by_default_under_full():
+    # FULL registers the task (FULL runs everything) but the body must refuse to
+    # exploit unless explicitly requested — no implicit RCE during a normal scan.
+    orch = _build(ScanMode.FULL)
+    task = _find_task(orch, "Active Exploitation")
+    assert task is not None
+    out = asyncio.run(task.coro_factory(**task.kwargs))
+    assert out.get("skipped") and "not requested" in out["reason"]
+
+
+def test_active_exploitation_gate_passes_when_requested():
+    # With active_exploit set, the gate opens; recon has no data in this unit
+    # test, so it falls through to "no hosts" — proving the gate was passed, not
+    # that it fabricated a compromise.
+    orch = _build(ScanMode.FULL, {"active_exploit": True})
+    task = _find_task(orch, "Active Exploitation")
+    out = asyncio.run(task.coro_factory(**task.kwargs))
+    assert out.get("skipped") and "no hosts" in out["reason"]
+
+
 def test_ot_mode_is_distinct_from_iot():
     ot = _task_names(ScanMode.OT)
     iot = _task_names(ScanMode.IOT)

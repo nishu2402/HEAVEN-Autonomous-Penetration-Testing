@@ -21,6 +21,7 @@ const GROUPS = [
       { to: "/sast",        label: "SAST",         icon: "🔬" },
       { to: "/sca",         label: "SCA · Deps",   icon: "📦" },
       { to: "/cve",         label: "CVE Lookup",   icon: "🧾" },
+      { to: "/analyze",     label: "Analyze",      icon: "🔎" },
     ],
   },
   {
@@ -39,6 +40,8 @@ const GROUPS = [
       { to: "/engagement",  label: "Engagement",   icon: "◈" },
       { to: "/knowledge",   label: "Knowledge",    icon: "🧠" },
       { to: "/lateral",     label: "Lateral",      icon: "↔" },
+      { to: "/exploit",     label: "Exploit",      icon: "⚔" },
+      { to: "/pivot",       label: "Pivot",        icon: "🕳" },
       { to: "/postex",      label: "Post-Ex",      icon: "☣" },
     ],
   },

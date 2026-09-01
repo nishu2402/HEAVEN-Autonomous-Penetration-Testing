@@ -1,0 +1,24 @@
+# Deliberate misconfiguration: grant ANONYMOUS (unauthenticated) API callers
+# cluster-admin. This is a real, frequently-seen production mistake, e.g.
+#   kubectl create clusterrolebinding anon-admin \
+#       --clusterrole=cluster-admin --user=system:anonymous
+# k3s auto-applies any manifest dropped into
+# /var/lib/rancher/k3s/server/manifests, so the cluster boots already
+# misconfigured. HEAVEN's KubernetesScanner.check_api_server should then reach
+# GET /api/v1/namespaces anonymously (k8s_anon_auth) and GET /api/v1/secrets
+# anonymously (k8s_secrets_exposed) against the real kube-apiserver.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: heaven-anonymous-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: system:anonymous
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:unauthenticated

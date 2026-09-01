@@ -43,6 +43,55 @@ def test_smb_findings_from_synthetic_enum():
     assert ADAttackType.SMB_SIGNING_DISABLED not in {f.attack_type for f in s2._findings}
 
 
+def test_ntlmv1_finding_only_on_positive_signal():
+    # ntlmv1=True (server cleared extended session security) → finding.
+    s = ADScanner(domain="lab.local", dc_host="10.0.0.10")
+    s._smb_findings({"ntlmv1": True})
+    ntlm = [f for f in s._findings if f.attack_type == ADAttackType.NTLMV1_SUPPORTED]
+    assert len(ntlm) == 1
+    assert ntlm[0].severity == "high"
+    assert ntlm[0].evidence.get("extended_session_security") is False
+
+    # ntlmv1 False (ESS enforced) or None (undetermined) → NO finding, no FP.
+    for val in (False, None):
+        s2 = ADScanner(domain="lab.local", dc_host="10.0.0.11")
+        s2._smb_findings({"ntlmv1": val})
+        assert ADAttackType.NTLMV1_SUPPORTED not in {f.attack_type for f in s2._findings}
+
+
+def test_detect_ntlmv1_reads_server_challenge_ess_bit(monkeypatch):
+    # Prove the ESS-bit interpretation against a captured challenge, without a
+    # live host: patch impacket so login() drives NTLMAuthChallenge with a
+    # server challenge whose ESS flag is cleared (→ NTLMv1 negotiated).
+    from impacket import ntlm as _ntlm
+
+    class _FakeConn:
+        def __init__(self, *a, **k):
+            pass
+
+        def login(self, *a, **k):
+            # Impacket parses the server's type-2 here; emulate that call.
+            _ntlm.NTLMAuthChallenge()  # goes through whatever is currently bound
+            raise RuntimeError("STATUS_LOGON_FAILURE (expected)")
+
+        def close(self):
+            pass
+
+    import heaven.recon.ad_scanner as adm
+    monkeypatch.setattr("impacket.smbconnection.SMBConnection", _FakeConn)
+
+    # ESS cleared → NTLMv1.
+    def _mk(flags):
+        def _factory(*a, **k):
+            return {"flags": flags}
+        monkeypatch.setattr(_ntlm, "NTLMAuthChallenge", _factory)
+        return adm.ADScanner._detect_ntlmv1("10.0.0.10")
+
+    ess = _ntlm.NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY
+    assert _mk(0x00008201) is True            # ESS bit not set → NTLMv1
+    assert _mk(0x00008201 | ess) is False     # ESS enforced → not NTLMv1
+
+
 def test_ad_finding_dict_mirrors_vuln_type_and_enriches():
     s = ADScanner(domain="lab.local", dc_host="10.0.0.10")
     s._smb_findings({"signing_required": False})

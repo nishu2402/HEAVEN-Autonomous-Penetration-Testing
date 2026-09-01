@@ -1,0 +1,47 @@
+# HEAVEN benchmark: container / Kubernetes lab (real k3s cluster).
+#
+# The container-compose.yml lab proves the Docker-API + registry probes; this
+# stack broadens the CONTAINER mode to a genuine Kubernetes control plane. k3s
+# runs a full, real kube-apiserver / controller-manager / scheduler / etcd
+# inside one container. Two deliberate misconfigurations stack up: the apiserver
+# is started with anonymous-auth enabled (recent k3s disables it by default),
+# and an auto-deployed manifest binds cluster-admin to system:anonymous. Both
+# are real, common production mistakes; together they let an UNAUTHENTICATED
+# caller read the cluster:
+#   * GET /api/v1/namespaces (anonymous) -> "k8s_anon_auth"      (critical)
+#   * GET /api/v1/secrets    (anonymous) -> "k8s_secrets_exposed" (critical)
+# HEAVEN's KubernetesScanner.check_api_server confirms both against the live
+# apiserver on :6443 with no credentials.
+#
+# SECURITY: the apiserver binds to loopback ONLY (127.0.0.1:6443). k3s is a
+# self-contained, throwaway cluster with no real workloads or data. The
+# anonymous binding lives only inside this disposable cluster.
+services:
+  k3s:
+    # Pinned to a real, multi-arch (amd64 + arm64) k3s release so the lab is
+    # reproducible and runs natively on Apple Silicon (no qemu).
+    image: rancher/k3s:v1.31.5-k3s1
+    container_name: heaven-lab-k3s
+    command:
+      - server
+      - --tls-san=127.0.0.1
+      # Deliberate misconfig #1: re-enable anonymous authentication on the
+      # apiserver (recent k3s sets anonymous-auth=false by default).
+      - --kube-apiserver-arg=anonymous-auth=true
+      - --disable=traefik
+      - --disable=servicelb
+      - --disable=metrics-server
+      - --disable-network-policy
+      - --disable-helm-controller
+    privileged: true
+    environment:
+      K3S_KUBECONFIG_MODE: "666"
+    ports:
+      - "127.0.0.1:6443:6443"
+    volumes:
+      # k3s auto-applies any manifest placed here at startup.
+      - ./k3s/anon-cluster-admin.yaml:/var/lib/rancher/k3s/server/manifests/heaven-anon.yaml:ro
+    tmpfs:
+      - /run
+      - /var/run
+    restart: "no"

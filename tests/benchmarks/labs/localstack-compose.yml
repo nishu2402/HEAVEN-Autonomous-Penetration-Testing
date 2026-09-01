@@ -1,0 +1,22 @@
+# HEAVEN benchmark: cloud IAM privilege-escalation lab (LocalStack).
+#
+# LocalStack serves a real, AWS-compatible IAM + STS API. The test seeds a
+# non-admin IAM user whose scoped policy nonetheless permits a privilege-
+# escalation primitive (iam:CreatePolicyVersion), then runs HEAVEN's authenticated
+# IAM audit against the LocalStack endpoint and asserts the escalation path is
+# detected live — validating the detector against a real IAM implementation, not
+# a hand-built fake.
+#
+# SECURITY: binds to loopback (127.0.0.1) only; LocalStack is an in-memory mock
+# account, nothing touches a real cloud.
+services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: heaven-lab-localstack
+    environment:
+      SERVICES: "iam,sts"
+      EAGER_SERVICE_LOADING: "1"
+      DEBUG: "0"
+    ports:
+      - "127.0.0.1:4566:4566"
+    restart: "no"

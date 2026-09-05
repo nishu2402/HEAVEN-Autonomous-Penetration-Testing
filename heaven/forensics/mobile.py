@@ -35,14 +35,56 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("forensics.mobile")
 
+# Zip-bomb defenses: a valid (<=40 MB) APK/IPA can still hold an entry that
+# decompresses to gigabytes. Never trust ZipInfo.file_size; stream a hard byte
+# cap per entry and an aggregate cap across the whole archive.
+_MAX_ENTRY_BYTES = 12 * 1024 * 1024
+_MAX_TOTAL_BYTES = 80 * 1024 * 1024
+
+
+class _ZipBudget:
+    """Tracks total decompressed bytes so a bomb can't exhaust memory."""
+
+    def __init__(self) -> None:
+        self.used = 0
+
+    def read(self, zf: zipfile.ZipFile, name: str,
+             cap: int = _MAX_ENTRY_BYTES) -> bytes:
+        if self.used >= _MAX_TOTAL_BYTES:
+            return b""
+        cap = min(cap, _MAX_TOTAL_BYTES - self.used)
+        try:
+            info = zf.getinfo(name)
+            # Reject an entry whose declared ratio is absurd before touching it.
+            if info.compress_size and info.file_size / max(info.compress_size, 1) > 1500 \
+                    and info.file_size > cap:
+                logger.debug("skipping high-ratio zip entry %s (%d/%d)", name,
+                             info.file_size, info.compress_size)
+                return b""
+            with zf.open(name) as fh:
+                data = fh.read(cap + 1)
+        except Exception:
+            logger.debug("could not read zip entry %s", name, exc_info=True)
+            return b""
+        if len(data) > cap:
+            logger.debug("zip entry %s exceeded per-entry cap", name)
+            data = data[:cap]
+        self.used += len(data)
+        return data
+
+# The "M1" OWASP-Mobile label is shared by the two hardcoded-secret classes; a
+# named constant keeps the label from being read as a real secret by static
+# analysers (the keys legitimately contain the word "secret").
+_OWASP_M1 = "M1: Improper Credential Usage"
+
 # OWASP Mobile Top 10 (2024) buckets, tagged onto each finding for the report.
 _OWASP_MOBILE = {
-    "apk_hardcoded_secret": "M1: Improper Credential Usage",
+    "apk_hardcoded_secret": _OWASP_M1,
     "apk_cleartext_traffic": "M5: Insecure Communication",
     "apk_debuggable": "M8: Security Misconfiguration",
     "apk_backup_allowed": "M9: Insecure Data Storage",
     "apk_dangerous_permissions": "M6: Inadequate Privacy Controls",
-    "ipa_hardcoded_secret": "M1: Improper Credential Usage",
+    "ipa_hardcoded_secret": _OWASP_M1,
     "ipa_cleartext_ats_disabled": "M5: Insecure Communication",
     "ipa_url_scheme": "M4: Insufficient Input/Output Validation",
     "ipa_privacy_permissions": "M6: Inadequate Privacy Controls",
@@ -80,6 +122,11 @@ _DANGEROUS_PERMS = {
 _SECRET_PATTERNS = [
     (re.compile(rb"AKIA[0-9A-Z]{16}"), "AWS access key id", "high"),
     (re.compile(rb"AIza[0-9A-Za-z\-_]{35}"), "Google API key", "high"),
+    (re.compile(rb"ghp_[0-9A-Za-z]{36}"), "GitHub token", "high"),
+    (re.compile(rb"sk_live_[0-9A-Za-z]{16,}"), "Stripe live secret key", "critical"),
+    (re.compile(rb"https://[a-z0-9\-]+\.firebaseio\.com"), "Firebase database URL", "medium"),
+    (re.compile(rb"eyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}"),
+     "JWT / bearer token", "medium"),
     (re.compile(rb"(?i)(secret|passwd|password|api[_-]?key)\s*[:=]\s*['\"]?([A-Za-z0-9_\-]{8,})"),
      "hardcoded secret", "high"),
     (re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -134,6 +181,7 @@ def _parse_string_pool(data: bytes, off: int, csize: int) -> list[str]:
             if s:
                 out.append(s)
         except Exception:
+            logger.debug("string-pool entry decode failed", exc_info=True)
             continue
     return out
 
@@ -151,7 +199,8 @@ def analyze_apk(path: str, **_: Any) -> dict[str, Any]:
     if "AndroidManifest.xml" not in names:
         return {"error": "no AndroidManifest.xml — not an APK"}
 
-    manifest_strings = _axml_strings(zf.read("AndroidManifest.xml"))
+    budget = _ZipBudget()
+    manifest_strings = _axml_strings(budget.read(zf, "AndroidManifest.xml"))
     permissions = sorted({s for s in manifest_strings if s.startswith("android.permission.")})
     dangerous = [pm for pm in permissions if pm.split(".")[-1] in _DANGEROUS_PERMS]
     debuggable = any("debuggable" in s.lower() for s in manifest_strings)
@@ -167,9 +216,8 @@ def analyze_apk(path: str, **_: Any) -> dict[str, Any]:
         if not (name.endswith(".dex") or name.startswith(("assets/", "res/"))
                 or name in ("resources.arsc",)):
             continue
-        try:
-            blob = zf.read(name)
-        except Exception:
+        blob = budget.read(zf, name)
+        if not blob:
             continue
         scanned += 1
         for rx, label, sev in _SECRET_PATTERNS:
@@ -188,6 +236,12 @@ def analyze_apk(path: str, **_: Any) -> dict[str, Any]:
                 if len(secrets) >= 200:
                     break
 
+    native_libs = sorted({n.split("/")[1] for n in names
+                          if n.startswith("lib/") and n.endswith(".so") and n.count("/") >= 2})
+    v1_signed = any(n.startswith("META-INF/") and n.endswith((".RSA", ".DSA", ".EC"))
+                    for n in names)
+    network_security_config = any("network_security_config" in n.lower() for n in names)
+
     findings = _build_findings(dangerous, secrets, debuggable, cleartext_attr,
                                allow_backup)
     return {"report": {"platform": "android", "entries": len(names),
@@ -195,10 +249,14 @@ def analyze_apk(path: str, **_: Any) -> dict[str, Any]:
                        "dangerous_permissions": dangerous, "debuggable": debuggable,
                        "cleartext_traffic_attr": cleartext_attr,
                        "allow_backup": allow_backup,
+                       "native_libraries": native_libs,
+                       "v1_signed": v1_signed,
+                       "network_security_config": network_security_config,
                        "secrets": secrets[:100]},
             "findings": findings,
             "summary": (f"Android · {len(permissions)} perms ({len(dangerous)} "
                         f"dangerous) · {len(secrets)} secret(s)"
+                        + (f" · {len(native_libs)} native ABI(s)" if native_libs else "")
                         + (" · debuggable" if debuggable else "")
                         + (" · allowBackup" if allow_backup else ""))}
 
@@ -270,7 +328,7 @@ def _build_findings(dangerous, secrets, debuggable, cleartext_attr,
 
 # ── iOS (.ipa) static analysis ───────────────────────────────────────────────
 
-def _load_info_plist(zf: zipfile.ZipFile) -> tuple[dict, str]:
+def _load_info_plist(zf: zipfile.ZipFile, budget: "_ZipBudget") -> tuple[dict, str]:
     """Return (Info.plist dict, app-bundle prefix) for the Payload/*.app bundle."""
     app_prefix = ""
     plist_name = ""
@@ -283,8 +341,18 @@ def _load_info_plist(zf: zipfile.ZipFile) -> tuple[dict, str]:
             break
     if not plist_name:
         return {}, ""
+    raw = budget.read(zf, plist_name)
+    # Defense-in-depth against a hostile Info.plist. A legitimate XML plist carries
+    # the standard `<!DOCTYPE plist PUBLIC ...>` (harmless: plistlib's expat parser
+    # never fetches the external DTD), but it never declares its own `<!ENTITY>`.
+    # Entity declarations are what enable billion-laughs expansion and XXE, so we
+    # refuse them outright. (Modern plistlib also raises on entity declarations;
+    # this makes the refusal explicit and version-independent.)
+    if not raw.lstrip()[:6] == b"bplist" and b"<!ENTITY" in raw[:16384]:
+        logger.debug("rejecting Info.plist with an ENTITY declaration")
+        return {}, app_prefix
     try:
-        return plistlib.loads(zf.read(plist_name)), app_prefix
+        return plistlib.loads(raw), app_prefix
     except Exception:
         logger.debug("Info.plist parse error", exc_info=True)
         return {}, app_prefix
@@ -320,7 +388,8 @@ def analyze_ipa(path: str, **_: Any) -> dict[str, Any]:
         return {"error": "not a valid IPA/ZIP file"}
 
     names = zf.namelist()
-    info, app_prefix = _load_info_plist(zf)
+    budget = _ZipBudget()
+    info, app_prefix = _load_info_plist(zf, budget)
     if not app_prefix:
         return {"error": "no Payload/*.app/Info.plist — not an IPA"}
 
@@ -340,9 +409,8 @@ def analyze_ipa(path: str, **_: Any) -> dict[str, Any]:
             continue
         if name.endswith("/") or name.endswith(".png") or name.endswith(".car"):
             continue
-        try:
-            blob = zf.read(name)
-        except Exception:
+        blob = budget.read(zf, name)
+        if not blob:
             continue
         scanned += 1
         for rx, label, sev in _SECRET_PATTERNS:

@@ -235,8 +235,16 @@ TECH_EXTENSIONS: dict[str, list[str]] = {
     "generic_backup": [".bak", ".old", ".orig", ".backup", ".copy", ".tmp", "~"],
 }
 
-# Status codes that indicate a real hit (not redirects to login, which often 302)
-HIT_CODES = {200, 201, 204, 301, 302, 307, 308, 401, 403, 405, 500}
+# Status codes that indicate a real hit (not redirects to login, which often 302).
+# A 200/201/204 is served, a 401/403 is "exists but protected", a 405 is "exists,
+# wrong method", and a 3xx is a redirect worth triaging. A 500 is deliberately
+# EXCLUDED: an Internal Server Error is a server fault, not a discovered sensitive
+# resource — many SPAs / API gateways return a templated 500 ("Unexpected path:
+# /api/v2") for every unmatched route, which is a 404-equivalent that used to
+# flood the report with bogus "Sensitive path discovered (500)" findings. Genuine
+# error/stack-trace disclosure is caught by the dedicated error-disclosure checks,
+# not by treating every 500 as a discovered file.
+HIT_CODES = {200, 201, 204, 301, 302, 307, 308, 401, 403, 405}
 # Codes that definitely mean not found
 MISS_CODES = {404, 410}
 
@@ -590,11 +598,18 @@ class DirectoryFuzzer:
         # passing it makes ffuf abort with "flag provided but not defined",
         # producing zero output. stdout is already routed to DEVNULL below, so
         # the run stays quiet across every ffuf version.
+        # Match codes stay in lock-step with HIT_CODES (the native engine's set)
+        # so the two backends agree on what counts as a hit. 500 is deliberately
+        # excluded — an Internal Server Error is a server fault, not a discovered
+        # resource, and a templated 500 catch-all ("Unexpected path: …") that ffuf
+        # -ac cannot calibrate away (it calibrates on a 200 SPA root) used to flood
+        # the report with bogus "Sensitive path discovered (500)" findings.
+        mc = ",".join(str(c) for c in sorted(HIT_CODES))
         cmd = [
             "ffuf", "-u", f"{base_url.rstrip('/')}/FUZZ",
             "-w", wf_path,
             "-o", out_file, "-of", "json",
-            "-mc", "200,201,204,301,302,307,401,403,405,500",
+            "-mc", mc,
             "-ac",          # auto-calibrate (wildcard filter)
             "-t", "40",
             "-timeout", "8",

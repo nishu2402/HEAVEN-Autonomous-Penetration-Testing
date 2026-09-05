@@ -346,7 +346,7 @@ export default function Settings() {
                       id={s.key}
                       value={touched ? draft[s.key] : (s.value || "")}
                       onChange={(e) => setVal(s.key, e.target.value)}
-                      style={inputStyle}
+                      style={selectStyle}
                     >
                       {s.choices.map((c) => (
                         <option key={c} value={c}>{c === "" ? "(auto-detect)" : c}</option>
@@ -553,11 +553,18 @@ export default function Settings() {
   );
 }
 
+// backgroundColor (not the `background` shorthand): selectStyle relies on the
+// custom-chevron background-image from index.css, and a `background` shorthand
+// would reset it. var(--bg-1) matches every other field in the app.
 const inputStyle = {
-  padding: "9px 12px", background: "rgba(255,255,255,0.02)",
+  padding: "9px 12px", backgroundColor: "var(--bg-1)",
   border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
   color: "var(--text-0)", fontSize: 13, fontFamily: "var(--font-ui)", outline: "none",
 };
+// Selects reserve room on the right so the painted chevron never overlaps the
+// option text (the inline padding above would otherwise beat the stylesheet's
+// padding-right:36px, since inline styles win).
+const selectStyle = { ...inputStyle, paddingRight: 34, cursor: "pointer" };
 const smallBtn = {
   padding: "8px 12px", background: "rgba(255,255,255,0.03)",
   border: "1px solid var(--border)", borderRadius: "var(--radius-md)",

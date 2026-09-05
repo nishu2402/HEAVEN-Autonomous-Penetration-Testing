@@ -1,0 +1,10 @@
+{
+  "name": "heaven-sca-benchmark-patched",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Inert manifest of patched npm pins — the precision / negative control for HEAVEN's SCA benchmark.",
+  "dependencies": {
+    "lodash": "4.17.21",
+    "minimist": "1.2.8"
+  }
+}

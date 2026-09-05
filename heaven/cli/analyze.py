@@ -30,8 +30,11 @@ _KINDS = ["binary", "firmware", "pcap", "stego", "apk", "ipa", "crypto"]
               help="Decode a base64/hex/base32/rot13 string and exit (no file).")
 @click.option("--output", "-o", type=click.Path(), default=None,
               help="Write the full JSON result to this path.")
+@click.option("--report", "report_fmt", type=click.Choice(["md", "html", "json", "pdf"]),
+              default=None, help="Write a formatted report (Markdown/HTML/JSON/PDF).")
 def analyze(path: Optional[str], kind: Optional[str], wordlist: Optional[str],
-            decode: Optional[str], output: Optional[str]) -> None:
+            decode: Optional[str], output: Optional[str],
+            report_fmt: Optional[str]) -> None:
     """Analyze an offline artifact PATH and report findings.
 
     Examples:
@@ -91,6 +94,21 @@ def analyze(path: Optional[str], kind: Optional[str], wordlist: Optional[str],
     if output:
         Path(output).write_text(json.dumps(result, indent=2, default=str))
         _print(f"\n[green]JSON written:[/green] {output}")
+
+    if report_fmt:
+        result.setdefault("kind", detected)
+        result.setdefault("filename", Path(path).name)
+        out_path = Path(path).with_suffix("").name
+        if report_fmt == "pdf":
+            from heaven.forensics.report import render_pdf
+            report_path = f"heaven-{detected}-{out_path}.pdf"
+            Path(report_path).write_bytes(render_pdf(result))
+        else:
+            from heaven.forensics.report import render_report
+            content, _mt, ext = render_report(result, report_fmt)
+            report_path = f"heaven-{detected}-{out_path}.{ext}"
+            Path(report_path).write_text(content)
+        _print(f"[green]Report written:[/green] {report_path}")
 
 
 @click.command(name="mobile")

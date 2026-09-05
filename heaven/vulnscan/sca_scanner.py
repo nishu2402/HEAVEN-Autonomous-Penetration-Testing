@@ -252,24 +252,164 @@ def _parse_pom_xml(text: str) -> list[tuple[str, str]]:
     return out
 
 
+def _concrete_version(spec: str) -> str:
+    """Best-effort concrete version from a version spec/range.
+
+    OSV matches a *specific* version against an advisory's affected ranges, so a
+    lockfile pin is ideal. For a manifest that only carries a range (``^4.17.0``,
+    ``>=1.2,<2``) we take the first concrete version token — typically the lowest
+    satisfying / installed version — which OSV then range-matches precisely. An
+    unparseable / URL / git spec yields "" and is skipped.
+    """
+    m = re.search(r"(\d+(?:\.\d+){0,3}(?:[.\-][0-9A-Za-z]+)?)", spec or "")
+    return m.group(1) if m else ""
+
+
+def _parse_pyproject_toml(text: str) -> list[tuple[str, str]]:
+    """pyproject.toml — PEP 621 ``[project]`` deps and Poetry dep tables."""
+    out: list[tuple[str, str]] = []
+    try:
+        data = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError):
+        return out
+    proj = data.get("project", {}) or {}
+    specs: list[str] = list(proj.get("dependencies", []) or [])
+    for group in (proj.get("optional-dependencies", {}) or {}).values():
+        specs += list(group or [])
+    for s in specs:
+        if not isinstance(s, str):
+            continue
+        m = re.match(r"^([A-Za-z0-9_.\-]+)", s.strip())
+        if m:
+            ver = _concrete_version(s[m.end():])
+            if ver:
+                out.append((m.group(1), ver))
+    poetry = (data.get("tool", {}) or {}).get("poetry", {}) or {}
+    dep_tables = [poetry.get("dependencies", {}) or {}]
+    for g in (poetry.get("group", {}) or {}).values():
+        if isinstance(g, dict):
+            dep_tables.append(g.get("dependencies", {}) or {})
+    for table in dep_tables:
+        for name, val in table.items():
+            if name.lower() == "python":
+                continue
+            spec = val if isinstance(val, str) else (
+                val.get("version", "") if isinstance(val, dict) else "")
+            ver = _concrete_version(str(spec))
+            if ver:
+                out.append((name, ver))
+    return out
+
+
+def _parse_pipfile(text: str) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    try:
+        data = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError):
+        return out
+    for section in ("packages", "dev-packages"):
+        for name, val in (data.get(section) or {}).items():
+            spec = val if isinstance(val, str) else (
+                val.get("version", "") if isinstance(val, dict) else "")
+            ver = _concrete_version(str(spec))
+            if ver:
+                out.append((name, ver))
+    return out
+
+
+def _parse_package_json(text: str) -> list[tuple[str, str]]:
+    """package.json — dependency ranges reduced to a concrete version for OSV."""
+    out: list[tuple[str, str]] = []
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return out
+    for section in ("dependencies", "devDependencies",
+                    "optionalDependencies", "peerDependencies"):
+        for name, spec in (data.get(section) or {}).items():
+            if not isinstance(spec, str):
+                continue
+            ver = _concrete_version(spec)
+            if ver:
+                out.append((name, ver))
+    return out
+
+
+def _parse_go_mod(text: str) -> list[tuple[str, str]]:
+    """go.mod — direct ``require`` module versions (single-line and block form)."""
+    out: list[tuple[str, str]] = []
+    in_block = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("require ("):
+            in_block = True
+            continue
+        if in_block and line == ")":
+            in_block = False
+            continue
+        if line.startswith("require "):
+            line = line[len("require "):].strip()
+        elif not in_block:
+            continue
+        line = line.split("//")[0].strip()
+        m = re.match(r"^(\S+)\s+v([0-9][^\s/]*)", line)
+        if m:
+            out.append((m.group(1), m.group(2)))
+    return out
+
+
+def _parse_gradle(text: str) -> list[tuple[str, str]]:
+    """build.gradle / .kts — ``group:artifact:version`` coordinates."""
+    out: list[tuple[str, str]] = []
+    for m in re.finditer(
+            r"""['"]([A-Za-z0-9_.\-]+):([A-Za-z0-9_.\-]+):([0-9][A-Za-z0-9_.\-]*)['"]""",
+            text):
+        out.append((f"{m.group(1)}:{m.group(2)}", m.group(3)))
+    return out
+
+
+def _parse_csproj(text: str) -> list[tuple[str, str]]:
+    """*.csproj — ``<PackageReference Include=".." Version=".." />``."""
+    out: list[tuple[str, str]] = []
+    for m in re.finditer(r'<PackageReference\s+[^>]*?Include="([^"]+)"[^>]*?Version="([^"]+)"', text):
+        out.append((m.group(1), m.group(2)))
+    for m in re.finditer(
+            r'<PackageReference\s+Include="([^"]+)"\s*>\s*<Version>([^<]+)</Version>', text):
+        out.append((m.group(1), m.group(2)))
+    return out
+
+
 _MANIFEST_PARSERS = {
     "requirements.txt": (_parse_requirements_txt, "PyPI"),
     "pipfile.lock": (_parse_pipfile_lock, "PyPI"),
+    "pipfile": (_parse_pipfile, "PyPI"),
     "poetry.lock": (_parse_poetry_lock, "PyPI"),
+    "pyproject.toml": (_parse_pyproject_toml, "PyPI"),
     "package-lock.json": (_parse_package_lock, "npm"),
+    "package.json": (_parse_package_json, "npm"),
     "yarn.lock": (_parse_yarn_lock, "npm"),
     "composer.lock": (_parse_composer_lock, "Packagist"),
     "gemfile.lock": (_parse_gemfile_lock, "RubyGems"),
     "go.sum": (_parse_go_sum, "Go"),
+    "go.mod": (_parse_go_mod, "Go"),
     "cargo.lock": (_parse_cargo_lock, "crates.io"),
     "pom.xml": (_parse_pom_xml, "Maven"),
+    "build.gradle": (_parse_gradle, "Maven"),
+    "build.gradle.kts": (_parse_gradle, "Maven"),
     "packages.lock.json": (_parse_nuget_lock, "NuGet"),
+}
+
+# Parsers keyed by file *suffix* (for names that vary, e.g. MyApp.csproj).
+_SUFFIX_PARSERS: dict[str, tuple[Callable[[str], list[tuple[str, str]]], str]] = {
+    ".csproj": (_parse_csproj, "NuGet"),
 }
 
 
 def parse_manifest(filename: str, text: str) -> list[Package]:
     """Parse a single manifest's text into resolved :class:`Package` objects."""
     entry = _MANIFEST_PARSERS.get(Path(filename).name.lower())
+    if not entry:
+        entry = _SUFFIX_PARSERS.get(Path(filename).suffix.lower())
     if not entry:
         return []
     parser, ecosystem = entry
@@ -291,7 +431,8 @@ def parse_manifest(filename: str, text: str) -> list[Package]:
 
 
 def is_supported_manifest(filename: str) -> bool:
-    return Path(filename).name.lower() in _MANIFEST_PARSERS
+    return (Path(filename).name.lower() in _MANIFEST_PARSERS
+            or Path(filename).suffix.lower() in _SUFFIX_PARSERS)
 
 
 # Public list of manifest filenames HEAVEN can parse — used by the orchestrator
@@ -388,6 +529,65 @@ async def scan_packages(packages: list[Package], *,
     return findings
 
 
+async def _apply_kev_epss(findings: list[dict[str, Any]]) -> None:
+    """Stamp CISA-KEV membership and FIRST.org EPSS onto SCA findings in place.
+
+    Only stamps when the KEV catalog genuinely came back (the shared helper's
+    ``online`` flag), so an offline run never fabricates a "not exploited /
+    EPSS 0" claim. A KEV-listed dependency is bumped a step in urgency.
+    """
+    cves = sorted({f.get("cve_id") for f in findings if f.get("cve_id")})
+    if not cves:
+        return
+    try:
+        from heaven.vulnscan.exploit_engine import _fetch_kev_epss
+        kev, epss, online = await _fetch_kev_epss(list(cves))  # type: ignore[arg-type]
+    except Exception:                          # noqa: BLE001
+        logger.debug("SCA KEV/EPSS enrichment failed", exc_info=True)
+        return
+    if not online:
+        return
+    for f in findings:
+        cve = f.get("cve_id")
+        if not cve:
+            continue
+        ev = f.setdefault("evidence", {})
+        if cve in kev:
+            f["in_kev"] = True
+            ev["in_kev"] = True
+            ev.setdefault("signals", []).append("cisa_kev")
+            if f.get("severity") in ("medium", "low"):
+                f["severity"] = "high"   # actively-exploited → escalate urgency
+        score = epss.get(cve)
+        if score is not None:
+            f["epss"] = round(float(score), 5)
+            ev["epss"] = round(float(score), 5)
+
+
+def _summarize(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """A remediation rollup: counts by ecosystem/severity and the safe upgrades."""
+    by_eco: dict[str, int] = {}
+    by_sev: dict[str, int] = {}
+    kev = 0
+    upgrades: dict[tuple[str, str], str] = {}
+    for f in findings:
+        ev = f.get("evidence", {}) or {}
+        by_eco[ev.get("ecosystem", "?")] = by_eco.get(ev.get("ecosystem", "?"), 0) + 1
+        by_sev[f.get("severity", "info")] = by_sev.get(f.get("severity", "info"), 0) + 1
+        if f.get("in_kev"):
+            kev += 1
+        fx = ev.get("fixed_version")
+        if fx and ev.get("package"):
+            upgrades[(ev["package"], ev.get("installed_version", ""))] = fx
+    return {
+        "by_ecosystem": by_eco,
+        "by_severity": by_sev,
+        "kev_count": kev,
+        "safe_upgrades": [{"package": k[0], "from": k[1], "to": v}
+                          for k, v in list(upgrades.items())[:100]],
+    }
+
+
 async def scan_manifest_text(filename: str, text: str, *,
                              target: str = "",
                              client: Optional[OSVClient] = None) -> list[dict[str, Any]]:
@@ -407,10 +607,13 @@ async def scan_manifest_text(filename: str, text: str, *,
 
 
 async def scan_path(root: str, *, max_files: int = 200,
-                    client: Optional[OSVClient] = None) -> dict[str, Any]:
+                    client: Optional[OSVClient] = None,
+                    enrich_intel: bool = True) -> dict[str, Any]:
     """Walk a local codebase, parse every supported manifest, and audit it.
 
-    Returns ``{"packages": int, "manifests": [...], "findings": [...]}``.
+    Returns ``{"packages", "manifests", "findings", "summary"}``. When
+    ``enrich_intel`` is set (default), vulnerable-dependency findings are
+    stamped with live CISA-KEV / EPSS intel (best-effort, offline-safe).
     """
     base = Path(root).expanduser().resolve()
     if not base.exists():
@@ -450,8 +653,11 @@ async def scan_path(root: str, *, max_files: int = 200,
             all_packages.extend(pkgs)
 
     findings = await scan_packages(all_packages, client=client)
+    if enrich_intel:
+        await _apply_kev_epss(findings)
     return {
         "packages": len(all_packages),
         "manifests": manifests,
         "findings": findings,
+        "summary": _summarize(findings),
     }

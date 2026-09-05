@@ -35,6 +35,11 @@ export default function Scans() {
   // common 1–1024 range, "custom" takes an explicit nmap-style spec.
   const [portScope, setPortScope] = useState("full");
   const [customPorts, setCustomPorts] = useState("");
+  // UDP service scanning (opt-in). TCP-only by default because a UDP sweep is
+  // slower; when on, real UDP services (DNS/NTP/SNMP/NetBIOS/IKE/SIP/…) that the
+  // TCP sweep can never see are probed. Optional UDP port spec ("" = common set).
+  const [scanUdp, setScanUdp] = useState(false);
+  const [udpPorts, setUdpPorts] = useState("");
   // Which engagement the scan's findings will be saved into. A picker of the
   // engagements on disk (+ "new") replaces the old free-text field so a scan
   // can never silently pile into a surprise/sticky engagement — the operator
@@ -141,6 +146,7 @@ export default function Scans() {
         targets: rawTargets,
         mode,
         ports,
+        ...(scanUdp && { scan_udp: true, ...(udpPorts.trim() && { udp_ports: udpPorts.trim() }) }),
         stealth_level: parseInt(stealth, 10),
         ...(evade && { evade: true }),
         engagement: destEngagement || undefined,
@@ -253,6 +259,35 @@ export default function Scans() {
               <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
                 Thorough, a full-port sweep of one host can take several minutes.
               </span>
+            )}
+          </label>
+
+          <label className="form-group">
+            <span className="form-label">
+              Protocols
+              <HelpTip text="TCP only by default. Enable UDP to also probe UDP services (DNS, NTP, SNMP, NetBIOS, RPC, IKE, SIP, mDNS, SSDP, syslog, RADIUS …) that a TCP sweep can never see. HEAVEN uses nmap -sU when it has the privileges, and its own pure-Python service probes otherwise, so a responsive UDP service is caught even without root. UDP is slower, silent ports each cost a probe timeout." />
+            </span>
+            <select
+              className="form-select"
+              value={scanUdp ? "tcp_udp" : "tcp"}
+              onChange={e => setScanUdp(e.target.value === "tcp_udp")}
+            >
+              <option value="tcp">TCP only (default)</option>
+              <option value="tcp_udp">TCP + UDP services</option>
+            </select>
+            {scanUdp && (
+              <>
+                <input
+                  className="form-input"
+                  style={{ marginTop: 8 }}
+                  value={udpPorts}
+                  onChange={e => setUdpPorts(e.target.value)}
+                  placeholder="UDP ports, e.g. 53,161,500  ·  blank = common UDP set"
+                />
+                <span className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                  UDP adds a second, slower pass. Leave blank to probe the curated common-UDP services.
+                </span>
+              </>
             )}
           </label>
 

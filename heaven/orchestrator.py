@@ -913,13 +913,25 @@ class ScanOrchestrator:
         if not leads:
             return
 
-        # 1. URL leads → shared targets list (dedup by exact URL).
+        # 1. URL leads → shared targets list (dedup by CANONICAL URL, not exact
+        # string). A crawler emits the root as ``http://h:5001/`` while the
+        # operator supplied ``http://h:5001`` — an exact-string dedup treats those
+        # as different and re-adds the root, so every web/api scanner runs twice on
+        # the same origin and every finding duplicates (``:5001`` vs ``:5001/``).
+        # Canonicalising (case + redundant slashes) collapses the variant while a
+        # genuinely new deep path still differs and is still added.
+        from heaven.engagement import _canon_url_path as _canon
         targets = self.scan_targets if isinstance(self.scan_targets, dict) else None
         new_urls = [lead.value for lead in leads if lead.kind == URL]
         if targets is not None and new_urls:
             url_list = targets.setdefault("urls", [])
-            have = {u for u in url_list if isinstance(u, str)}
-            added = [u for u in new_urls if u not in have]
+            have = {_canon(u) for u in url_list if isinstance(u, str)}
+            added = []
+            for u in new_urls:
+                k = _canon(u) if isinstance(u, str) else ""
+                if k and k not in have:
+                    have.add(k)
+                    added.append(u)
             if added:
                 url_list.extend(added)
                 logger.info(
@@ -1321,6 +1333,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # bounded evasion re-probe on the affected hosts — this flag applies evasion
     # to every host from the first packet.
     evade = bool(targets.get("evade", False))
+    # UDP service scanning opt-in (CLI --udp / web launcher protocol control).
+    # Off by default because a UDP sweep is slow (silent ports cost a full
+    # timeout each) — but when on, real UDP services (DNS/NTP/SNMP/NetBIOS/IKE/
+    # SIP/…) that the TCP sweep can never see are probed and reported.
+    scan_udp = bool(targets.get("scan_udp", False))
+    udp_ports = targets.get("udp_ports") or None
 
     # ── Scan-mode task groups ─────────────────────────────────────────────
     # Each add_task is tagged with the set of modes it belongs to. `None`
@@ -1428,6 +1446,27 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     _port_count = _port_breadth(targets.get("ports", "1-65535"))
     _port_budget = 180.0 + min(1.0, _port_count / 65535.0) * 540.0
 
+    # A UDP scan adds a second, slower pass: silent UDP ports each cost a full
+    # probe timeout, so budget for it explicitly when it's on. Without this the
+    # UDP pass would be cancelled by the same deadline sized for TCP only, and the
+    # host's UDP services would be silently dropped. Scaled by the UDP port count.
+    if scan_udp:
+        try:
+            from heaven.recon.udp_scanner import resolve_udp_ports
+            _udp_count = len(resolve_udp_ports(udp_ports))
+        except Exception:
+            _udp_count = 64
+        _port_budget += 120.0 + min(1.0, _udp_count / 1024.0) * 600.0
+
+    # When the operator explicitly asks for the FULL 65 535-port range, a slow or
+    # heavily-filtered real-world host legitimately needs longer than a common-port
+    # sweep — and a full scan is precisely where a truncated deadline produced the
+    # "toggled full but only got a few ports" symptom (the deep scan was cancelled
+    # and only the curated preflight ports survived). A full scan is a deliberate
+    # "take the time you need" choice, so give it real head-room: mark it so the
+    # cap below lifts to 60 min even at normal stealth.
+    _is_full_range = _port_count >= 60000
+
     # Scale the deadline to the STEALTH level too. A quieter profile sends far
     # fewer packets/sec by design (paranoid -T1, stealth -T2), so the very same
     # host+port sweep legitimately takes several times longer. Without this a
@@ -1441,8 +1480,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "aggressive": 0.8, "loud": 0.7,
     }.get(str(stealth).strip().lower(), 1.0)
     # Slow profiles may exceed the standard 30-min cap on a wide range — the
-    # operator explicitly chose "very slow", so allow up to 60 min for them.
-    _net_cap = 3600.0 if _stealth_factor > 1.0 else 1800.0
+    # operator explicitly chose "very slow", so allow up to 60 min for them. An
+    # explicit full-range scan (and any UDP scan, which is inherently slow) is
+    # likewise a "take the time you need" choice, so it gets the 60-min ceiling too
+    # — this is what lets a full sweep of a slow real host actually FINISH instead
+    # of being cut short and reporting only a handful of ports.
+    _net_cap = 3600.0 if (_stealth_factor > 1.0 or _is_full_range or scan_udp) else 1800.0
     _net_timeout = float(min(
         _net_cap, max(300, (90 + _host_estimate * 2 + _port_budget) * _stealth_factor)))
     # Leave generous headroom below the hard task timeout for the deep scan's
@@ -1459,6 +1502,8 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         timeout=_net_timeout,
         targets=_net_targets,
         port_range=targets.get("ports", "1-65535"),
+        include_udp=scan_udp,
+        udp_ports=udp_ports,
         stealth_level=stealth,
         time_budget=_net_budget,
         evade=evade,
@@ -1943,14 +1988,31 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             findings = []
             # Build scan_data from completed recon results so JWT + race tests fire
             scan_data: dict = {"jwt_tokens": [], "critical_endpoints": []}
+
+            def _endpoint_url(ep: Any) -> str:
+                # Recon emits endpoints in several shapes: a bare URL string, a
+                # crawler dict ({"url": ...}) or a form dict ({"action": ...}).
+                # The race tester needs a URL string; coerce here so a dict can
+                # never reach ``.lower()`` and crash the whole ADVANCED phase.
+                if isinstance(ep, str):
+                    return ep.strip()
+                if isinstance(ep, dict):
+                    return str(ep.get("url") or ep.get("action") or "").strip()
+                return ""
+
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
                     continue
                 data = res.data if isinstance(res.data, dict) else {}
                 scan_data["jwt_tokens"].extend(data.get("jwt_tokens", []))
-                scan_data["critical_endpoints"].extend(data.get("endpoints", []))
+                for ep in data.get("endpoints", []):
+                    u = _endpoint_url(ep)
+                    if u:
+                        scan_data["critical_endpoints"].append(u)
                 for ep in data.get("forms", []):
-                    scan_data["critical_endpoints"].append(ep.get("action", ""))
+                    u = _endpoint_url(ep)
+                    if u:
+                        scan_data["critical_endpoints"].append(u)
             async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):

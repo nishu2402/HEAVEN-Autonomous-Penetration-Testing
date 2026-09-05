@@ -225,8 +225,11 @@ export async function logout() {
 }
 
 async function api(path, opts = {}) {
+  // For a FormData body the browser must set Content-Type itself (it carries the
+  // multipart boundary), so we do not force application/json in that case.
+  const isForm = typeof FormData !== "undefined" && opts.body instanceof FormData;
   const headers = {
-    "Content-Type": "application/json",
+    ...(isForm ? {} : { "Content-Type": "application/json" }),
     ...(opts.headers || {}),
   };
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
@@ -550,8 +553,21 @@ export const Analyze = {
   decode: (text) =>
     api(`/analyze/decode`, { method: "POST", body: JSON.stringify({ text }) }),
   // Analyze an offline artifact. `content_b64` is the base64 of the file bytes.
+  // Kept for scripts; the UI uploads via runUpload (streamed multipart).
   run: (body) =>
     api(`/analyze/run`, { method: "POST", body: JSON.stringify(body) }),
+  // Analyze an artifact by streaming the raw file as multipart/form-data — no
+  // base64 in memory, so large real-world captures/firmware upload cleanly.
+  runUpload: (file, kind) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    if (kind) fd.append("kind", kind);
+    // No explicit Content-Type: the browser sets the multipart boundary itself.
+    return api(`/analyze/run`, { method: "POST", body: fd, headers: {} });
+  },
+  // Render an analysis result to a downloadable report (md/html/json/pdf).
+  report: (result, format) =>
+    api(`/analyze/report`, { method: "POST", body: JSON.stringify({ result, format }) }),
 };
 
 export const Pivot = {

@@ -296,7 +296,13 @@ async def validate_ssrf(session: aiohttp.ClientSession, url: str, param: str,
         "gopher://localhost:6379/_INFO",                        # Gopher (Redis)
     ]
 
-    all_urls = base_urls + cloud_urls
+    # Cloud-metadata and scheme (file://, gopher, dict) probes are the
+    # highest-impact SSRF outcomes and must be tested FIRST: the localhost
+    # obfuscation variants alone number 12 and used to fill the entire probe
+    # budget, so a metadata/credential-exfil SSRF was never actually exercised
+    # (a false negative on the most severe SSRF class). Put the high-signal
+    # probes ahead of the localhost variants and widen the budget to cover them.
+    all_urls = cloud_urls + base_urls
     indicators = [
         "ami-id", "instance-id", "meta-data", "iam", "security-credentials",
         "root:x:0", "/bin/bash", "daemon:x:",
@@ -304,7 +310,7 @@ async def validate_ssrf(session: aiohttp.ClientSession, url: str, param: str,
         "STAT items", "+OK", "-ERR",  # Memcached / Redis
     ]
 
-    for probe_url in all_urls[:12]:
+    for probe_url in all_urls[:16]:
         status, body, _ = await _evasive_request(
             session, method, url, params={param: probe_url} if method == "GET" else None,
             data={param: probe_url} if method != "GET" else None, timeout=timeout)

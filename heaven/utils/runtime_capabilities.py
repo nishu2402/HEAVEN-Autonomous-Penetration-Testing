@@ -26,7 +26,9 @@ asyncio loop).
 
 from __future__ import annotations
 
+import gc
 import glob
+import logging
 import os
 import threading
 import time
@@ -35,6 +37,51 @@ from typing import Optional
 from heaven.utils.logger import get_logger
 
 logger = get_logger("utils.runtime_capabilities")
+
+
+class _PlaywrightTeardownFilter(logging.Filter):
+    """Suppress Playwright's benign driver-teardown chatter on the asyncio logger.
+
+    Probing the browser (``chromium.executable_path``) and the headless-browser
+    DAST provers spin up Playwright's async driver connection. Stopping that
+    connection leaves an ``init()`` future that ends in a harmless
+    ``TargetClosedError``; asyncio logs it at garbage-collection time as
+    "Task was destroyed but it is pending!" / "Future exception was never
+    retrieved". The useful result is already in hand, so these are pure stderr
+    noise. This filter drops *only* those two exact records when they are
+    attributable to Playwright (by the connection path in the message, or a
+    Playwright exception in ``exc_info``); every other asyncio error passes
+    through untouched.
+    """
+
+    _MARKERS = ("Task was destroyed but it is pending",
+                "Future exception was never retrieved")
+
+    def filter(self, record: logging.LogRecord) -> bool:  # True == keep
+        try:
+            msg = record.getMessage()
+        except Exception:  # noqa: BLE001 — never let the filter itself raise
+            return True
+        if not any(m in msg for m in self._MARKERS):
+            return True
+        if "playwright" in msg.lower():
+            return False
+        exc = record.exc_info[1] if record.exc_info else None
+        if exc is not None and type(exc).__module__.split(".", 1)[0] == "playwright":
+            return False
+        return True
+
+
+_teardown_filter_installed = False
+
+
+def _install_playwright_teardown_filter() -> None:
+    """Attach :class:`_PlaywrightTeardownFilter` to the asyncio logger once."""
+    global _teardown_filter_installed
+    if _teardown_filter_installed:
+        return
+    logging.getLogger("asyncio").addFilter(_PlaywrightTeardownFilter())
+    _teardown_filter_installed = True
 
 # Cache the (present, detail) result briefly so repeated doctor/health calls
 # don't re-spawn the Playwright driver, while still noticing a mid-session
@@ -65,6 +112,11 @@ def _chromium_via_api() -> Optional[tuple[bool, str]]:
                 box["ok"] = bool(ep and os.path.exists(ep))
         except Exception as e:  # noqa: BLE001 — any failure → inconclusive
             box["err"] = repr(e)
+        finally:
+            # Flush Playwright's driver-teardown futures now, while the
+            # suppression filter is active, so their del-time asyncio noise is
+            # dropped here instead of surfacing later on an unrelated GC pass.
+            gc.collect()
 
     t = threading.Thread(target=_worker, name="pw-chromium-probe", daemon=True)
     t.start()
@@ -113,6 +165,9 @@ def _chromium_status() -> tuple[bool, str]:
         import playwright  # noqa: F401
     except Exception:  # noqa: BLE001
         return False, "playwright package not installed"
+    # Silence Playwright's benign driver-teardown chatter before the probe (and
+    # any later headless-browser proof) can emit it to stderr.
+    _install_playwright_teardown_filter()
     api = _chromium_via_api()
     if api is not None:
         return api

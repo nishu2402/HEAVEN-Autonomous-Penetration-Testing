@@ -22,7 +22,7 @@ import binascii
 import codecs
 import hashlib
 import re
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from heaven.utils.logger import get_logger
 
@@ -39,31 +39,62 @@ _BUILTIN_WORDLIST = [
 ]
 
 
+# Prefixed hash formats keyed by their leading marker → (label, hashcat mode).
+_PREFIX_FORMATS: list[tuple[str, str, Optional[int]]] = [
+    ("$2a$", "bcrypt", 3200), ("$2b$", "bcrypt", 3200), ("$2y$", "bcrypt", 3200),
+    ("$2x$", "bcrypt", 3200),
+    ("$6$", "sha512crypt (Unix)", 1800), ("$5$", "sha256crypt (Unix)", 7400),
+    ("$1$", "md5crypt (Unix)", 500), ("$apr1$", "Apache apr1-md5", 1600),
+    ("$y$", "yescrypt (Unix)", None), ("$7$", "scrypt (Unix)", None),
+    ("$argon2i$", "Argon2i", None), ("$argon2id$", "Argon2id", None),
+    ("$argon2d$", "Argon2d", None),
+    ("$pbkdf2-sha256$", "PBKDF2-HMAC-SHA256", 10900),
+    ("$pbkdf2-sha512$", "PBKDF2-HMAC-SHA512", None),
+    ("pbkdf2_sha256$", "Django PBKDF2-SHA256", 10000),
+    ("sha1$", "Django SHA1", 124), ("md5$", "Django salted-MD5", None),
+    ("$P$", "phpass (WordPress/phpBB)", 400), ("$H$", "phpass (WordPress)", 400),
+    ("$S$", "Drupal7 (SHA-512)", 7900),
+    ("{SSHA}", "LDAP salted-SHA1", 111), ("{SHA}", "LDAP SHA1", 101),
+    ("{SSHA256}", "LDAP salted-SHA256", 1411), ("{SMD5}", "LDAP salted-MD5", None),
+    ("$krb5tgs$", "Kerberos 5 TGS-REP (kerberoast)", 13100),
+    ("$krb5asrep$", "Kerberos 5 AS-REP (asreproast)", 18200),
+    ("$krb5pa$", "Kerberos 5 AS-REQ Pre-Auth", 7500),
+    ("$NT$", "NTLM", 1000), ("$DCC2$", "Domain Cached Credentials 2 (mscash2)", 2100),
+    ("0x0100", "MSSQL(2000)", 131), ("0x0200", "MSSQL(2012+)", 1731),
+    ("$sha1$", "atlassian/pbkdf2-sha1", None), ("$ml$", "macOS PBKDF2-SHA512", 7100),
+    ("$9$", "Juniper $9$ (reversible)", None), ("$8$", "Cisco IOS type 8 (PBKDF2)", 9200),
+]
+
+
 def identify_hash(h: str) -> list[str]:
     """Return candidate algorithm names for a hash string."""
     s = h.strip()
-    if s.startswith("$2a$") or s.startswith("$2b$") or s.startswith("$2y$"):
-        return ["bcrypt"]
-    if s.startswith("$6$"):
-        return ["sha512crypt (Unix)"]
-    if s.startswith("$5$"):
-        return ["sha256crypt (Unix)"]
-    if s.startswith("$1$"):
-        return ["md5crypt (Unix)"]
-    if s.startswith("$y$") or s.startswith("$7$"):
-        return ["yescrypt/scrypt (Unix)"]
+    for prefix, label, _mode in _PREFIX_FORMATS:
+        if s.startswith(prefix):
+            return [label]
+    # NetNTLMv1/v2 captured hashes (user::domain:...:...).
+    if re.match(r"^[^:]*::[^:]*:[0-9a-fA-F]{16,}:", s):
+        if s.count(":") >= 5 and re.search(r":[0-9a-fA-F]{48,}$", s):
+            return ["NetNTLMv2 (hashcat -m 5600)"]
+        return ["NetNTLMv1 (hashcat -m 5500)"]
+    if s.startswith("*") and re.fullmatch(r"\*[0-9A-Fa-f]{40}", s):
+        return ["MySQL 4.1+ (SHA1(SHA1(pw)))"]
+    if re.fullmatch(r"[0-9a-fA-F]{16}", s):
+        return ["MySQL323 (old)", "LM-half", "CRC/DES"]
     if re.fullmatch(r"[0-9a-fA-F]{32}", s):
-        return ["MD5", "NTLM", "MD4", "LM-half"]
+        return ["MD5", "NTLM", "MD4", "LM", "MD2"]
     if re.fullmatch(r"[0-9a-fA-F]{40}", s):
-        return ["SHA1", "MySQL4.1+ (*hex)" if s.startswith("*") else "SHA1"]
+        return ["SHA1", "RIPEMD-160"]
     if re.fullmatch(r"[0-9a-fA-F]{56}", s):
-        return ["SHA224"]
+        return ["SHA224", "SHA3-224"]
     if re.fullmatch(r"[0-9a-fA-F]{64}", s):
-        return ["SHA256"]
+        return ["SHA256", "SHA3-256", "BLAKE2s", "Keccak-256"]
     if re.fullmatch(r"[0-9a-fA-F]{96}", s):
-        return ["SHA384"]
+        return ["SHA384", "SHA3-384"]
     if re.fullmatch(r"[0-9a-fA-F]{128}", s):
-        return ["SHA512"]
+        return ["SHA512", "SHA3-512", "BLAKE2b", "Whirlpool"]
+    if re.fullmatch(r"[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*", s):
+        return ["JWT (JSON Web Token)"]
     if re.fullmatch(r"[A-Za-z0-9+/]{20,}={0,2}", s):
         return ["base64-encoded (not a raw hash)"]
     return ["unknown"]
@@ -112,15 +143,19 @@ def _md4(data: bytes) -> bytes:
 def _ntlm(password: str) -> str:
     raw = password.encode("utf-16le")
     try:
-        return hashlib.new("md4", raw).hexdigest()
+        # usedforsecurity=False: this hashes candidate passwords to CRACK a
+        # captured NTLM (MD4) hash — modelling the attacker, not protecting data.
+        return hashlib.new("md4", raw, usedforsecurity=False).hexdigest()
     except (ValueError, Exception):  # noqa: BLE001 — md4 often missing
         return _md4(raw).hex()
 
 
+# usedforsecurity=False on every hasher: this table exists to RECOVER weak
+# password hashes captured from a target, not to secure anything HEAVEN stores.
 _RAW_HASHERS = {
-    32: [("md5", lambda p: hashlib.md5(p.encode()).hexdigest()),  # noqa: S324
+    32: [("md5", lambda p: hashlib.md5(p.encode(), usedforsecurity=False).hexdigest()),
          ("ntlm", _ntlm)],
-    40: [("sha1", lambda p: hashlib.sha1(p.encode()).hexdigest())],  # noqa: S324
+    40: [("sha1", lambda p: hashlib.sha1(p.encode(), usedforsecurity=False).hexdigest())],
     64: [("sha256", lambda p: hashlib.sha256(p.encode()).hexdigest())],
     128: [("sha512", lambda p: hashlib.sha512(p.encode()).hexdigest())],
 }
@@ -155,6 +190,7 @@ def crack_hash(h: str, wordlist: list[str]) -> Optional[dict]:
                 if fn(w).lower() == low:
                     return {"plaintext": w, "algorithm": algo}
             except Exception:
+                logger.debug("hasher %s failed on a candidate word", algo, exc_info=True)
                 continue
     return None
 
@@ -217,8 +253,24 @@ def analyze_crypto(path: str, *, wordlist_path: Optional[str] = None,
                    decode_text: Optional[str] = None, **_: Any) -> dict[str, Any]:
     """Analyze a hash file (or decode a string). Returns report + findings."""
     if decode_text is not None:
-        return {"report": {"input": decode_text, "decodings": _decode_variants(decode_text)},
-                "findings": [], "summary": "decoded string"}
+        from heaven.forensics.decoder import smart_decode
+        res = smart_decode(decode_text)
+        report: dict[str, Any] = {"input": res["input"], "decodings": res["decodings"]}
+        if res.get("jwt"):
+            report["jwt"] = res["jwt"]
+        if res.get("best"):
+            report["best"] = res["best"]
+        n = len(res["decodings"])
+        best = res.get("best")
+        jwt = res.get("jwt")
+        if jwt and n == 0:
+            summary = f"JWT decoded · alg: {jwt.get('alg') or 'unknown'}"
+        else:
+            summary = (f"{n} decoding(s)"
+                       + (f" · best: {best['scheme']} ({int(best['confidence'] * 100)}%)"
+                          if best else " · no confident decoding")
+                       + (" · JWT" if jwt else ""))
+        return {"report": report, "findings": res["findings"], "summary": summary}
 
     from pathlib import Path
     p = Path(path)
@@ -249,7 +301,7 @@ def analyze_crypto(path: str, *, wordlist_path: Optional[str] = None,
     findings = []
     cracked_list = [r for r in results if r["cracked"]]
     if cracked_list:
-        sample = ", ".join(f"{r['user'] or '?'}:{r['cracked']['plaintext']}"
+        sample = ", ".join(f"{r['user'] or '?'}:{cast(dict, r['cracked'])['plaintext']}"
                            for r in cracked_list[:5])
         findings.append({
             "vuln_type": "weak_password_cracked", "severity": "high",

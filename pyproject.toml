@@ -32,6 +32,7 @@ dependencies = [
     "fastapi>=0.110.0",
     "starlette>=1.3.1",  # security floor: fastapi allows <1.3.1 which has 6 advisories
     "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.9",   # streamed multipart uploads (offline-artifact analysis)
     "websockets>=12.0",
     "slowapi>=0.1.9",
     # ML / Data — the CVSS risk model is a scikit-learn ExtraTreesRegressor loaded
@@ -253,3 +254,13 @@ select = ["E4", "E7", "E9", "F"]
 #   B608: table names in SQL strings come from class-level constants, not user
 #         input. All user-supplied values use SQLAlchemy bound params (:name).
 skips = ["B104", "B108", "B608"]
+
+[tool.mypy]
+# Mirror the CI type-check job (`mypy --ignore-missing-imports
+# --no-strict-optional heaven/`) so a bare `mypy heaven/` locally reproduces
+# exactly what CI runs — same reproducibility rationale as the pinned ruff rule
+# set above. The type-check job is advisory (continue-on-error), so this keeps
+# it green by catching drift on the dev host before a push, not by hiding it.
+python_version = "3.12"
+ignore_missing_imports = true
+strict_optional = false

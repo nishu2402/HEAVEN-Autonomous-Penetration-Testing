@@ -1,0 +1,21 @@
+# HEAVEN benchmark: SMTP VRFY user-enumeration lab.
+#
+# The Postfix open-relay lab proves smtp_open_relay + smtp_no_starttls, but
+# Postfix answers VRFY with 252 (no disclosure), so the VRFY user-enumeration
+# differential correctly stays silent there (a true negative). This lab completes
+# the EMAIL surface: a real aiosmtpd SMTP server with VRFY left ENABLED answers
+# 250 for a user that exists in its real local-user set and 550 for one that does
+# not — the classic sendmail-style account-enumeration misconfiguration. HEAVEN's
+# non-intrusive probe (VRFY postmaster vs VRFY <random>) detects
+# smtp_user_enumeration live.
+#
+# The differential is driven purely by real user existence; the server never
+# inspects HEAVEN's probe. Published to loopback only.
+services:
+  smtp-vrfy:
+    build: ./smtp-vrfy
+    image: heaven-lab-smtp-vrfy:latest
+    container_name: heaven-lab-smtp-vrfy
+    ports:
+      - "127.0.0.1:2526:25"
+    restart: "no"

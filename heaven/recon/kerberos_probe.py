@@ -157,7 +157,8 @@ def _probe_one(username: str, domain_upper: str, kdc_host: str) -> dict:
     try:
         decoder.decode(reply, asn1Spec=KRB_ERROR())[0]
     except Exception:
-        pass  # not a KRB-ERROR → it really is an AS-REP (fall through)
+        # not a KRB-ERROR → it really is an AS-REP (fall through)
+        logger.debug("reply did not decode as KRB-ERROR; treating as AS-REP", exc_info=True)
     else:
         return {"state": "exists"}  # swallowed PREAUTH_REQUIRED → account is protected
     # A genuine AS-REP came back → the account does not require pre-auth.

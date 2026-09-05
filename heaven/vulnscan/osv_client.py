@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -117,17 +118,69 @@ def _parse_severity(record: dict) -> tuple[str, float, str]:
     return vector, score, label
 
 
-def _extract_fixed_version(record: dict, ecosystem: str, name: str) -> str:
-    """Best-effort 'fixed in' version from the affected ranges."""
+_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _version_key(v: str) -> tuple:
+    """A tolerant, cross-ecosystem sort key for a release version string.
+
+    Splits on non-alphanumeric separators and compares numerically where the
+    part is a number (so 1.26.18 > 1.9.0 correctly), falling back to a string
+    compare for pre-release/qualifier parts. Good enough to order the handful of
+    fixed versions in one advisory; never raises.
+    """
+    parts: list[tuple] = []
+    for tok in re.split(r"[.\-+_~]", str(v).strip()):
+        if tok.isdigit():
+            parts.append((1, int(tok), ""))
+        elif tok:
+            parts.append((0, 0, tok.lower()))  # qualifiers sort before numbers
+    return tuple(parts)
+
+
+def _extract_fixed_version(record: dict, ecosystem: str, name: str,
+                           installed: str = "") -> str:
+    """Best-effort 'fixed in' version from the affected ranges.
+
+    OSV ranges carry a ``type``: ``ECOSYSTEM``/``SEMVER`` events are real release
+    versions, but ``GIT`` events are *commit hashes*. Some advisories (e.g.
+    urllib3 PYSEC-2023-192) list a GIT range first, so blindly taking the first
+    ``fixed`` event surfaced a 40-char commit SHA as the "fixed version" — which
+    then produced nonsense remediation ("Upgrade to 644124e… or later"). Only
+    accept a version-bearing range, and reject anything that looks like a commit
+    SHA as a final backstop.
+
+    When an advisory patches several branches (e.g. urllib3 1.26.18 *and* 2.0.7),
+    recommend the *nearest* safe upgrade — the smallest fixed version strictly
+    greater than the installed one — so a 1.24.1 install is told to go to 1.26.18,
+    not jumped to a new major. Falls back to the first ecosystem version.
+    """
+    candidates: list[str] = []
     for aff in record.get("affected", []) or []:
         pkg = aff.get("package", {}) or {}
         if pkg.get("name", "").lower() != name.lower():
             continue
         for rng in aff.get("ranges", []) or []:
+            rtype = str(rng.get("type", "")).upper()
+            if rtype == "GIT":
+                continue  # commit hashes, not release versions
             for ev in rng.get("events", []) or []:
-                if ev.get("fixed"):
-                    return str(ev["fixed"])
-    return ""
+                fixed = str(ev.get("fixed") or "")
+                if fixed and not _GIT_SHA_RE.match(fixed):
+                    candidates.append(fixed)
+    if not candidates:
+        return ""
+    if installed:
+        try:
+            ik = _version_key(installed)
+            above = sorted({c for c in candidates if _version_key(c) > ik},
+                           key=_version_key)
+            if above:
+                return above[0]  # nearest safe upgrade
+        except Exception:  # noqa: BLE001 — never let ordering break extraction
+            logger.debug("nearest-fix ordering failed for installed=%s", installed,
+                         exc_info=True)
+    return candidates[0]
 
 
 def _extract_cwes(record: dict) -> list[str]:
@@ -287,7 +340,7 @@ class OSVClient:
                             severity=label,
                             cwe_ids=_extract_cwes(record),
                             fixed_version=_extract_fixed_version(
-                                record, pkg.ecosystem, pkg.name),
+                                record, pkg.ecosystem, pkg.name, pkg.version),
                             references=refs[:8],
                             source=pkg.source,
                         ))

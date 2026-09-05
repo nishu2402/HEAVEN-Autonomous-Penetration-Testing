@@ -3,6 +3,20 @@ import { Engagement as Eng } from "../api";
 import { EmptyState } from "../components/Skeleton.jsx";
 import { useToast } from "../components/Toast.jsx";
 
+// The stored created_at is a raw ISO string with microseconds
+// (2026-08-19T09:36:46.689771+00:00) — machine output, not something to show an
+// operator verbatim. Render it as a readable local date, and fall back to the
+// raw value only if it will not parse.
+function fmtWhen(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString([], {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
 export default function EngagementPage() {
   const toast = useToast();
   const [data, setData] = useState(null);
@@ -169,7 +183,7 @@ heaven scope add https://app.acme.example --kind url`}</pre>
             <EditableRow label="Client" field="client" value={engagement.client} />
             <EditableRow label="Statement of work" field="statement_of_work" value={engagement.statement_of_work} />
             <EditableRow label="Tester" field="tester" value={engagement.tester} />
-            <tr><td>Created</td><td className="dim">{engagement.created_at || "—"}</td></tr>
+            <tr><td>Created</td><td className="dim">{fmtWhen(engagement.created_at)}</td></tr>
             <tr><td>Targets in scope</td><td>{stats.scope_targets}</td></tr>
             <tr><td>Scans run</td><td>{stats.scans_run}</td></tr>
             <tr><td>Total findings</td><td>{stats.total_findings}</td></tr>

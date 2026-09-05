@@ -11,23 +11,261 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Real UDP service scanning — privileged and unprivileged.** UDP was previously
+  dead: no code path ever enabled it, the probe table was never used, and the only
+  route (nmap `-sU`) needs raw sockets most operators do not have, so real UDP
+  services (DNS, DHCP, TFTP, NTP, SNMP, NetBIOS, RPC/portmap, IKE, SIP, mDNS, SSDP,
+  syslog, RADIUS …) were never caught. A new `heaven.recon.udp_scanner` probes each
+  UDP port with a genuine, service-specific payload and reports a port open **only
+  when a service actually answers** — so a responsive UDP service is found at any
+  privilege level with no invented "open" from silence. The scanner uses nmap `-sU`
+  (authoritative state + `-sV` version) when it has raw sockets and the pure-Python
+  probes otherwise. It is wired end to end: a `--udp` / `--udp-ports` CLI flag, a
+  `scan_udp` / `udp_ports` API field, and a Protocols control in the web launcher,
+  all flowing through the orchestrator into the network scan. The privileged nmap
+  `-sU` path is verified live as root against a real UDP responder — it correctly
+  reports a responsive port open, keeps the protocol, and never invents an open
+  port from silence. Two robustness guarantees back it: if the privileged UDP scan
+  runs out of its per-host time on a slow or heavily-filtered target, it now falls
+  back to (and merges with) the bounded pure-Python probes instead of silently
+  reporting zero UDP ports; and a hard wall-clock bound terminates a wedged nmap so
+  a UDP scan can never hang the run.
+
+- **SAST rule pack gained PHP coverage, Python string-concatenation SQLi + TLS-
+  verification-disabled, and Java unsafe deserialization.** With Semgrep installed,
+  the curated pack had *no* PHP rules and missed those Python/Java classes — so a
+  user who installed Semgrep actually got *less* coverage than HEAVEN's built-in
+  offline engine, which already caught them. The semgrep pack now has parity: a
+  new `php_security.yml` (command injection, file inclusion, unsafe deserialization,
+  SQLi, reflected-XSS-echo and eval on request superglobals), a `+`-concatenation
+  form for the Python SQLi rule, a Python `verify=False` (CWE-295) rule, and a Java
+  `ObjectInputStream.readObject()` deserialization rule (CWE-502). Every rule was
+  verified to fire on vulnerable fixtures and stay silent on safe code
+  (`tests/test_scanmode_fp_audit2_fixes.py`).
+
+- **Offline artifact analysis now recognises and analyses X.509 certificates and
+  key files.** A DER/PEM certificate (`.der` / `.pem` / `.crt` / `.cer`) or an
+  exported key previously came back as "could not determine artifact type". A new
+  `heaven.forensics.certificate` analyzer parses them offline with the bundled
+  `cryptography` library and reports the posture that matters — expired / not-yet-
+  valid, a weak public key (RSA < 2048), a weak signature algorithm (MD5 / SHA-1),
+  a self-signed certificate, and a file that is actually private key material
+  (CWE-312) — with no network access and graceful handling of unparseable ASN.1.
+
+- **Hardened / firewalled Windows hosts are now identified instead of read as
+  "down, 0 open ports".** Reproduced live against a Windows 7 box behind Windows
+  Firewall (135/139/445/3389 all silently *filtered*, ICMP blocked): a real,
+  vulnerable machine that the scanner previously reported as an empty, OS-unknown
+  host. Three things fix it, all evidence-based and never fabricated. First, the
+  Windows / Active-Directory management surface that survives on such a host — 
+  5357 (WSDAPI Function Discovery), 5985/5986/47001 (WinRM), 2869 (UPnP), the
+  Kerberos / Global-Catalog ports — is now in the always-probe and liveness sets
+  and probed common-first by a fast preflight, so the host's one open high port
+  is captured in seconds rather than lost to (or cut short before) the slow full
+  sweep. Second, a pure-Python **NetBIOS node-status (NBSTAT, UDP/137) enricher**
+  recovers the computer name, workgroup/domain and MAC and confirms the OS is
+  Windows — the honest unprivileged win, since NBSTAT answers on the LAN even when
+  every TCP port is filtered — and surfaces them as findings (name/workgroup/MAC
+  disclosure, a domain-controller pointer, and an explicit "Windows host, exact
+  version undetermined — re-scan privileged for `-O` or from a segment where SMB
+  is reachable" observation so the operator understands why there is no OS-version
+  / EOL finding and how to get one). Third, a state-aware connect probe now tells
+  *filtered* (silent drop) apart from *closed* (RST), so the packet-filtering
+  firewall is still classified even when nmap timed out before emitting its own
+  port-state tallies. Windows 2000 / NT 4.0 joins the OS end-of-life table, and
+  the SMBv1 (EternalBlue / MS17-010, CVE-2017-0144) and RDP-NLA (BlueKeep,
+  CVE-2019-0708) findings now name their CVE (`tests/test_windows_host_recon.py`).
+
+- **Firewall / IDS evasion is a real technique ladder, not a single flag.** The
+  authorized re-probe of a filtered host now escalates through independent packet
+  signatures — standard nmap evasion (fragmentation + trusted source-port 53 +
+  padding + a decoy cloud), then a pure-Python connect scan (a different,
+  OS-stack signature that slips past filters targeting nmap's raw fingerprint),
+  then, only when the cheaper rungs found nothing and the scan can run privileged,
+  an aggressive pass (smaller-MTU fragmentation, heavier randomised padding, a
+  larger decoy cloud). The ACK / FIN / NULL / Xmas firewall-mapping techniques
+  are wired as first-class options for a privileged operator. Every rung is
+  bounded and best-effort, and the evasion the scanner tried is reported honestly
+  alongside the perimeter verdict.
+
+- **Authenticated scans can seed extra session cookies alongside a form login.**
+  The `--auth` spec gained an optional `cookies=` key (`name=value` pairs
+  separated by `;`, since the comma is the spec delimiter) whose cookies are
+  attached to every request the scan makes, on top of the ones the login sets.
+  Some apps gate their behaviour on a non-auth cookie the login never issues:
+  DVWA reads `security=low|medium|high|impossible` to pick the vulnerability
+  level, so without it an authenticated scan runs against the hardened
+  `impossible` level and finds nothing exploitable. Now a single
+  `--auth "url=…/login.php,user=admin,pass=password,cookies=security=low"` logs
+  in and drops into low-security mode in one step. The seeded cookies go on only
+  after the login succeeds, so a mode cookie can never mask a failed login.
+  (`tests/test_form_login_mirror.py`).
+
+- **Every scan mode proven against a real, reproducible lab (honest "10/10").**
+  A push to make each mode's accuracy claim something a live run demonstrates,
+  never a hard-coded number. New in-repo labs, each brought up with
+  `docker compose` and validated live by `tests/benchmarks/test_domain_labs.py`
+  (gated behind `HEAVEN_RUN_BENCHMARKS=1`): a **webshell lab** (an nginx webroot
+  of inert, signature-bearing decoys) takes MALWARE mode from partial to proven,
+  detecting every dropped shell through both the named-signature and the generic
+  YARA path; a **multi-ecosystem SCA corpus** (seven real vulnerable PyPI and npm
+  pins plus a patched control) scores dependency auditing live against OSV.dev at
+  100% recall on a curated set of permanent CVEs, with the patched half proving
+  HEAVEN never flags a fixed release; the **IoT lab** adds a real MediaMTX RTSP
+  server and the **OT lab** a real asyncua OPC-UA server, so those modes now
+  prove three real protocols live each; a **cloud metadata-SSRF lab** (a
+  vulnerable app on the link-local subnet with a fake IMDS pinned to
+  169.254.169.254) confirms instance-metadata SSRF end to end; the **k3s lab**
+  now also proves the Kubernetes RBAC over-privilege analysis live; a **wireless
+  posture-review lab** proves the network-reachable half of WIRELESS mode (an
+  exposed MikroTik RouterOS panel, vendor-fingerprinted), with RF capture kept
+  honestly hardware-gated; and an **SMTP VRFY lab** (a real aiosmtpd MTA with
+  VRFY enabled against a genuine user set) proves email user-enumeration, which
+  Postfix correctly cannot demonstrate. The lab-matrix ledger (`heaven/labs.py`)
+  and its honesty test are updated so a hardware/agent-gated mode may prove its
+  reachable subset while its gate stays visible and is never simulated.
+
+- **Network end-of-life detection now covers the exposed AJP (Apache JServ)
+  connector.** An exposed AJP connector is a real, version-independent finding
+  (it must never be network-reachable, and it is the Ghostcat / CVE-2020-1938
+  attack surface); a version-less, false-positive-safe rule flags it without ever
+  re-triggering the old "Apache httpd 2.2" mismatch, taking the Metasploitable-2
+  `eol_software` recall to a full five of five.
+
+- **Offline Artifact Analysis: document and archive forensics, plus a
+  per-file baseline on every upload.** Two new analyzers close the biggest
+  real-world gaps. A pure-Python **document analyzer**
+  (`heaven/forensics/document.py`) triages PDF, OOXML (docx/xlsx/pptx and the
+  macro-enabled variants), legacy OLE compound files (doc/xls/ppt) and RTF: it
+  flags PDF JavaScript that runs on open, Launch actions and embedded files
+  (inflating FlateDecode streams so script hidden in a compressed object is
+  still seen); VBA macros, reading the OLE2/CFB container and decompressing the
+  MS-OVBA module source to triage AutoOpen / Shell / PowerShell calls;
+  remote-template and DDE injection (the CVE-2017-0199 class); and
+  Equation-Editor exploit markers (CVE-2017-11882). A generic **archive
+  analyzer** (`heaven/forensics/archive.py`) reads zip / tar / gz / bz2 / xz /
+  7z / rar / iso metadata without extracting and reports zip-slip paths,
+  decompression bombs, dropped executables and deceptive double extensions, and
+  secrets inside members. Every uploaded artifact, whatever its type, now also
+  carries a shared `file_overview` (SHA-256/1, MD5, entropy, magic/MIME, a
+  similarity fingerprint) and a YARA / signature sweep. The web Analyze page and
+  the Markdown/HTML/PDF report renderers learn the new sections; detection,
+  routing and streaming upload all flow through the existing
+  `POST /api/analyze/run`. Verified end to end against real crafted PDFs, a
+  hand-built OLE compound file with an MS-OVBA-compressed macro, malicious OOXML,
+  RTF, and zip/tar/gz archives.
+
+- **Deeper static binary analysis.** `heaven/forensics/binary.py` now parses the
+  PE section table (per-section entropy, writable+executable sections, known
+  packer section names) and the import directory (imported DLLs), extracts ELF
+  `DT_NEEDED` libraries and flags insecure relative / world-writable
+  `RPATH`/`RUNPATH` (library-hijack risk), and reads Mach-O load commands for
+  linked dylibs, `LC_RPATH` and code-signature presence. New findings cover
+  library-hijack RPATH, RWX sections and packer/high-entropy sections.
+
+- **SCA breadth and live exploit intel.** The dependency scanner
+  (`heaven/vulnscan/sca_scanner.py`) parses six more manifest formats -
+  `pyproject.toml` (PEP 621 and Poetry), `package.json`, `go.mod`,
+  `build.gradle(.kts)`, `*.csproj` and `Pipfile` - and every vulnerable
+  dependency is now enriched with live **CISA-KEV** membership and **FIRST.org
+  EPSS** exploitation probability (best-effort and offline-safe: it never
+  fabricates a "not exploited" claim it could not confirm). A KEV-listed
+  dependency is escalated in urgency, and results carry a remediation rollup of
+  safe upgrades per package. Proven live against OSV.dev.
+
+- **Native, dependency-free SAST engine.** A new
+  `heaven/vulnscan/native_sast.py` gives `heaven sast` a zero-external-tool
+  fallback so it always produces findings when Semgrep is absent, and an
+  always-on secret scanner (pattern plus Shannon-entropy, with placeholder
+  suppression) that layers on top of Semgrep. It covers Python, JavaScript/
+  TypeScript, Java, PHP, Go, Ruby and C/C++ for injection, command execution,
+  insecure deserialization, weak crypto/RNG, disabled TLS verification, XXE and
+  hardcoded secrets, each with file/line, a code excerpt, CWE and OWASP mapping.
+  New `--native` and `--no-secrets` flags on `heaven sast scan`.
+
+- **Offline Artifact Analysis: downloadable PDF reports, large real-world
+  uploads, and hardening against hostile files.** The analysis section
+  (pcap / binary / firmware / APK / IPA / image / hashes) gains a client-ready
+  **PDF** export alongside the existing Markdown, HTML and JSON, rendered with
+  reportlab (a base dependency) via a new `heaven/forensics/report.py::render_pdf`
+  and wired through `POST /api/analyze/report`, the `heaven analyze --report pdf`
+  CLI, and a PDF button in the web UI. Uploads now stream to disk as
+  `multipart/form-data` instead of base64 in memory, so the size ceiling rises
+  from 40 MB to a configurable **512 MB** (`HEAVEN_ANALYZE_MAX_MB`) and large
+  captures and firmware images upload cleanly; the JSON base64 path stays for
+  scripts. Security review of the upload surface added real defenses: an image
+  decompression-bomb guard (Pillow pixel ceiling plus a per-image pixel budget,
+  so a few-KB file claiming enormous dimensions can never force a giant
+  allocation), an entity-declaration guard on iOS `Info.plist` parsing
+  (refuses billion-laughs / XXE), a bounded read on the image byte-level pass,
+  and a body cap on the string decoder endpoint. New adversarial regression
+  tests (`tests/test_forensics_security.py`) prove pixel bombs, plist entity
+  bombs, zip bombs, oversize uploads, path-traversal filenames and truncated
+  captures are all handled without unbounded memory use or a crash.
+
+- **Spec-driven API discovery + excessive-data-exposure detector, proven against
+  a real third-party API (VAmPI).** The REST scanner
+  (`heaven/vulnscan/api_scanner.py`) no longer relies only on conventional
+  `/api/*` path guesses: when a target publishes an OpenAPI/Swagger contract at a
+  well-known location, HEAVEN now reads it and probes the endpoints the API
+  itself declares. A new high-confidence detector flags `excessive_data_exposure`
+  (API3:2023, CWE-359) when a response serialises a populated credential field
+  (`password`/`secret`/`private_key`) beside an identity key — an unambiguous
+  leak, guarded against placeholder/sample values, config toggles like
+  `password_required`, and identity-less config secrets. Broken-authentication
+  detection is extended to the spec-discovered collection paths too. A new
+  reproducible lab (`tests/benchmarks/labs/vampi-compose.yml`) brings up the real
+  OWASP-API-Top-10 target VAmPI; a gated live test
+  (`test_vampi_lab_detects_api_flaws`) confirms HEAVEN finds VAmPI's
+  `/users/v1/_debug` password leak, its unauthenticated `/users/v1` collection,
+  and its public spec — all through genuine contract-driven discovery, nothing
+  mocked. This proves the `api` mode against an app HEAVEN did not author,
+  complementing the always-on native API fixture. Docker-free unit tests
+  (`tests/test_api_excessive_data.py`) lock the precision guards into normal CI.
+
+- **OWASP Juice Shop DOM-XSS lab: client-side XSS proven live in a headless
+  browser.** A new reproducible web lab (`tests/benchmarks/labs/juiceshop-compose.yml`)
+  brings up the real OWASP Juice Shop Angular SPA, whose search route renders the
+  `q` parameter into an `innerHTML` sink through Angular's `bypassSecurityTrustHtml`.
+  HEAVEN's shipped XSS execution prover (`exploit_proof.prove_finding`, the
+  orchestrator's exploit-proof entry) loads the injected route in headless
+  Chromium and proves the DOM XSS by observing a dialog carrying a unique per-run
+  token — real client-side JavaScript execution, which a mere reflection cannot
+  fake. This complements the DVWA lab (server-reflected/stored XSS): DVWA cannot
+  exercise a client-side DOM sink, Juice Shop can, so the `web` mode's proof now
+  spans both. The prover also gains an `iframe` `javascript:` payload for
+  innerHTML sinks where `<script>` never runs. A gated live test
+  (`test_juiceshop_lab_proves_dom_xss`) machine-checks the proof; it skips
+  cleanly when the Playwright Chromium bundle is absent. The SPA's toolbar-hidden
+  search box is supplied as the known injection point (the JS crawler maps the
+  app's routes but does not auto-reveal that input), so the lab asserts the proof
+  — JavaScript actually running — not unassisted input discovery.
+
 - **Java SAST rules + OWASP Benchmark scoring (devsecops/ci now GREEN).** HEAVEN's
   static-analysis engine gains a real Java rule pack
   (`heaven/vulnscan/sast_rules/java_security.yml`) covering 11 CWE classes:
   taint-tracked command / SQL / LDAP / XPath injection, path traversal, XSS and
-  trust-boundary violations (with generic collection/StringBuilder propagators and
-  ESAPI/parameterization sanitizers), plus pattern rules for weak randomness, weak
-  hashes, weak ciphers and insecure cookies. A new scorer
-  (`tests/benchmarks/owasp_benchmark.py`) runs the shipped engine against the
-  standard OWASP Benchmark v1.2 (2740 real Java test cases) and computes the
-  Benchmark's Youden index (TPR minus FPR) per category and pooled. Live headline:
-  pooled Youden about 0.51, recall about 0.96, precision about 0.70, with
-  weak-randomness, weak-crypto and insecure-cookie at a perfect 1.00. The corpus is
-  GPLv2 so it is fetched (a pinned shallow clone, or `HEAVEN_OWASP_BENCHMARK_DIR`)
-  rather than vendored into this MIT tree; ground truth is read from the checkout.
-  A gated live test (`tests/benchmarks/test_owasp_benchmark.py`) enforces an honest
-  floor, and a Docker-free hermetic test proves the rules separate a genuine vuln
-  from a safe look-alike. This takes the `devsecops` and `ci` scan modes to a GREEN
+  trust-boundary violations (with servlet, cookie-value and enumeration/iterator
+  taint sources, generic collection/StringBuilder propagators, the Spring
+  JdbcTemplate query family as SQL sinks, and ESAPI/parameterization sanitizers),
+  plus pattern rules for weak randomness, weak hashes, weak ciphers and insecure
+  cookies. A new scorer (`tests/benchmarks/owasp_benchmark.py`) runs the shipped
+  engine against the standard OWASP Benchmark v1.2 (2740 real Java test cases) and
+  computes the Benchmark's Youden index (TPR minus FPR) per category and pooled.
+  Live headline: pooled Youden about 0.52, recall about 0.97, precision about 0.70,
+  with weak-randomness, weak-crypto and insecure-cookie at a perfect 1.00 and every
+  injection class detecting all of its real vulnerabilities. The remaining gap is
+  structural rather than a rules deficiency: the false positives are the
+  Benchmark's synthetic dead-code obfuscations (always-true arithmetic ternaries,
+  switch-on-constant, key-insensitive collection overwrites) that a rule engine
+  cannot constant-fold, and the false negatives are the config-driven hash cases
+  (weak algorithm named in a runtime `.properties` file); closing either would mean
+  matching the Benchmark's own constructs, which we do not do. The corpus is GPLv2
+  so it is fetched (a pinned shallow clone, or `HEAVEN_OWASP_BENCHMARK_DIR`) rather
+  than vendored into this MIT tree; ground truth is read from the checkout. A gated
+  live test (`tests/benchmarks/test_owasp_benchmark.py`) enforces an honest floor,
+  and a Docker-free hermetic test proves the rules separate a genuine vuln from a
+  safe look-alike. This takes the `devsecops` and `ci` scan modes to a GREEN
   lab-matrix status (green modes 11 to 13).
 
 - **AWS IAM privilege-escalation path detection.** The authenticated cloud IAM
@@ -194,6 +432,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **OWASP Benchmark corpus is now fetched once into a persistent cache instead of
+  re-cloned every run.** The live SAST benchmark's GPLv2 corpus is still never
+  vendored into this (MIT) tree, but `get_or_fetch_corpus()` now keeps a
+  commit-pinned checkout under `$XDG_CACHE_HOME/heaven/owasp-benchmark` (override
+  with `HEAVEN_OWASP_BENCHMARK_CACHE`), so the roughly 300 MB tree is pulled at
+  most once per machine rather than shallow-cloned into a throwaway temp dir on
+  every invocation; `HEAVEN_OWASP_BENCHMARK_DIR` still wins when an operator
+  points at their own checkout. The cache is keyed to the pinned commit, so a pin
+  bump transparently invalidates the old checkout, and the clone is staged then
+  atomically moved into place so an aborted run never leaves a half-written cache.
+  A cached run scores the full v1.2 corpus in about 18 seconds (unchanged
+  headline: pooled Youden about 0.52, recall about 0.97, precision about 0.70).
+
 - **CVSS model retrained under the current scikit-learn, with honest reproducible
   metrics.** The vector model was re-pickled under scikit-learn 1.9.0, which clears
   the 1.8.0 to 1.9.0 version-skew warning (and the risk of silently invalid results
@@ -228,6 +479,165 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path. A live end-to-end scan dropped from about 240 seconds to 116.
 
 ### Fixed
+
+- **A full-port scan of a slow or heavily-filtered host no longer silently
+  returns only a handful of ports.** When the deep-scan deadline fired with hosts
+  still in flight, their partial port lists were returned as if final — the "I
+  toggled a full-port scan but only got a few ports" symptom. Two fixes: an
+  explicit full-range scan (and any UDP scan) now gets a much larger deadline —
+  up to 60 minutes even at normal stealth — because it is a deliberate "take the
+  time you need" choice; and when a scan *is* cut short, it now emits an honest
+  informational finding naming how many hosts were not fully enumerated and how to
+  get a complete run, so a partial result can never masquerade as a final one.
+  Port customization (fast / full / custom nmap-style spec) was verified end to
+  end against a real host and genuinely honoured — a fast sweep and a full sweep
+  return different port sets, and a custom high port outside the common range is
+  found only when in scope.
+
+- **Web / API / cloud scan-mode false-positive and crash sweep, from live
+  full-pipeline runs against real vulnerable labs.** Each issue below was
+  reproduced by running the actual orchestrated scan against a genuinely
+  vulnerable target (VAmPI, OWASP Juice Shop, MinIO, a Modbus/OPC-UA stack, an
+  IMDS-SSRF app), root-caused, fixed, and re-verified live — never by weakening a
+  detector to hide output.
+  - **An exploitation-phase crash no longer silently skips Nuclei and PoC
+    validation.** The advanced-attacks task passed recon *endpoint dicts*
+    straight into the race-condition tester, which called `.lower()` on them and
+    raised `'dict' object has no attribute 'lower'`; because Nuclei and PoC
+    validation depend on that task, the whole tail of the scan was skipped. The
+    endpoints are now coerced to URL strings in both the orchestrator and the
+    tester, so a dict can never abort the phase.
+  - **`integer_overflow` no longer fires on a single, unreproduced 500.** A lone
+    server error on one boundary payload (seen against a stateful DB-seed route
+    that ignores the parameter) was treated as proof. It now requires the 500 to
+    recur on a re-send *and* the healthy baseline to stay under 500.
+  - **`ldap_injection` no longer fires on a bare length differential.** A wildcard
+    (`*`) vs impossible-value size gap is now only a signal when both probes
+    return the *same* successful (2xx) status and both differ from the baseline,
+    so a 200-vs-405 routing artifact can no longer read as blind LDAP injection.
+  - **Directory discovery no longer reports HTTP 500 error pages as "sensitive
+    paths".** SPAs and API gateways answer every unmatched route with a templated
+    500 ("Unexpected path: …"); 500 is removed from the hit set (native engine and
+    the ffuf match-codes, now kept in lock-step), so those error pages stop
+    flooding the report while a real 200 exposure (e.g. an open `/metrics`) is
+    still reported.
+  - **`web_cache_deception` no longer fires on non-cacheable responses or a SPA
+    catch-all.** A `public, max-age=0` response revalidates every time and is not
+    served stale, so it is no longer treated as cacheable; and the static-extension
+    URL must serve the *same* page as the base while an unrelated control static
+    path does not, which rules out a catch-all that returns one page for
+    everything.
+  - **Security-header findings are no longer derived from a 5xx error page.** The
+    authenticated header audit now skips a server-error response (a framework debug
+    page is not a representative view of the app's header posture), matching the
+    sibling misconfiguration check.
+  - **Cloud storage scanning no longer fabricates "bucket exists (private)"
+    findings.** MinIO and account-level-deny S3 endpoints answer *every* unknown
+    name with `403 AccessDenied`, so a bare 403 was reported as an existing private
+    bucket for dozens of generated permutations. A calibration probe of a random,
+    definitely-absent name now detects such blanket-deny endpoints and, for them,
+    reports only buckets proven listable — while genuine private buckets on an
+    endpoint that returns 404 for absent names are still reported.
+  - **Findings are no longer duplicated per URL-slash variant.** The same endpoint
+    reached as `http://h:5001` and `http://h:5001/` (and the mid-path `//` a
+    scanner produces by joining onto a slash-terminated base) now collapses to one
+    finding: the feedback loop dedupes URL leads by canonical form instead of exact
+    string, and the finding identity canonicalises redundant path slashes.
+  - **A finding's "proof of issue" no longer shows a response that contradicts its
+    own status.** Evidence enrichment will not attach a captured transaction (e.g.
+    a later 405 from a race probe to the same URL) whose status differs from the
+    finding's recorded status.
+  - **Findings never render with a blank title.** A detector that stored only a
+    description now has its heading backfilled from the knowledge base (or a
+    humanised type) at enrichment time, so the UI list and reports always show a
+    title.
+
+- **Devsecops / AD / container / email scan-mode accuracy sweep, from live
+  full-pipeline runs against real labs.** The second-tier companion to the web /
+  API / cloud sweep above: each issue was reproduced against a genuine target
+  (a live Samba AD DC, an exposed Docker-in-Docker + registry stack, a
+  known-vulnerable dependency corpus audited against live OSV.dev, real strongly-
+  configured mail domains), root-caused, fixed, and re-verified — never by
+  weakening a detector.
+  - **SCA no longer prints a git commit SHA as the "fixed version".** Some OSV
+    advisories carry a `GIT`-type range whose `fixed` event is a 40-char commit
+    hash (e.g. urllib3 PYSEC-2023-192); taking the first `fixed` event surfaced
+    that hash and produced nonsense remediation ("Upgrade to 644124e… or later").
+    The extractor now only accepts version-bearing (`ECOSYSTEM`/`SEMVER`) ranges,
+    rejects anything SHA-shaped, and — when an advisory patches several branches —
+    recommends the *nearest* safe upgrade above the installed version (so a 1.24.1
+    install is told to go to 1.26.17, not jumped to a new major).
+  - **The git-secrets scanner no longer flags every UUID as a Heroku key.** The
+    "Heroku API" rule was a bare UUID regex mapped to `generic_secret`, so any
+    UUID in a codebase (request / trace / resource IDs) was reported as a secret.
+    It now requires a `heroku` / `api-key` context on the line, so real Heroku
+    keys still hit while ordinary UUIDs do not.
+  - **Anonymous LDAP RootDSE reads are no longer a medium "misconfiguration".**
+    Every LDAP directory — Windows AD included — answers an unauthenticated
+    RootDSE query by design (clients read it to find the naming contexts before
+    binding), so a medium "Anonymous LDAP Bind Permitted" fired on secure-by-
+    default DCs. It is now an info-level pre-auth metadata disclosure; the genuine
+    finding — anonymous access to the *domain* naming context (user enumeration) —
+    keeps its own higher severity and is proven separately.
+  - **Container scanning no longer reports Docker-managed volumes as "dangerous
+    host mounts".** The check flagged any mount whose source began with `/`, which
+    includes named/anonymous volumes under `/var/lib/docker/volumes/…`, so every
+    container with a volume got a bogus high finding. It now flags only *bind*
+    mounts of genuinely sensitive host paths (`/`, the Docker/containerd socket,
+    `/etc`, `/root`, `/proc`, `/var/run`, …), never Docker-managed volumes or
+    application-data binds.
+  - **Email-posture severities no longer over-claim near-universal defaults.**
+    An SPF `~all` softfail (the recommended choice for large senders, and moot
+    where DMARC enforces) dropped from medium to a low hardening note; a failed
+    DKIM-selector guess dropped from a medium "DKIM missing" to a low, honestly-
+    *inconclusive* finding (DKIM has no DNS discovery mechanism, so a wordlist miss
+    is not proof of absence); and DNSSEC-not-enabled dropped from medium to low, in
+    line with the sibling BIMI / MTA-STS hardening notes.
+
+- **A scan orphaned by a killed process no longer shows as a phantom "running"
+  task until the next restart.** A scan persists `running` at start and only
+  flips to a terminal state from inside its own in-process task, so a process
+  that is killed, crashes, or is closed mid-scan strands the row `running`
+  forever and the header badge shows a scan that nothing is driving. A startup
+  pass already reconciled these, but a row orphaned while the server keeps
+  running — or one in an engagement DB that happened to be locked when the
+  startup pass ran — would linger. Listing scans now self-heals on read: any
+  `running`/`pending` row that no live task in this process is driving (its id is
+  in neither the in-memory active-scan map nor the live-task registry) is flipped
+  to `interrupted`, so the badge clears on the very next poll without a restart.
+  Checkpoints are preserved, so the scan stays resumable. A genuinely in-flight
+  scan is always registered as a live task and is never touched
+  (`tests/test_scan_lifecycle_api.py`).
+
+- **SSRF validation now actually probes the cloud-metadata endpoints.** The
+  localhost-obfuscation variants numbered exactly twelve and filled the entire
+  probe budget, so `validate_ssrf` never sent the AWS/GCP/Azure metadata or
+  file/scheme payloads, a silent false negative on the most severe SSRF outcome
+  (instance-credential exfiltration). The high-signal metadata and scheme probes
+  now run first and the budget covers them. Found and guarded by the live cloud
+  metadata-SSRF lab plus an offline regression (`tests/test_ssrf_metadata_probe.py`).
+
+- **Kubernetes RBAC analysis now catches cluster-admin granted to anonymous or
+  all-authenticated principals.** The old analyzer only counted ServiceAccount
+  cluster-admins above a threshold, so binding `cluster-admin` to
+  `system:anonymous` or `system:unauthenticated` (a User or Group, and one of the
+  most dangerous real-world misconfigurations) was missed entirely. It now flags
+  any over-broad principal as critical while never tripping on the legitimate
+  break-glass `system:masters` group. Proven live against the k3s lab and locked
+  by `tests/test_k8s_rbac_assessment.py`.
+
+- **Playwright's benign driver-teardown chatter no longer prints to stderr.**
+  Probing the Chromium capability (`runtime_capabilities._chromium_status`, surfaced
+  by `heaven doctor` and the web System-Health panel) and the headless-browser XSS
+  proof both spin up Playwright's async driver connection; stopping it leaves an
+  `init()` future that ends in a harmless `TargetClosedError`, which asyncio logged
+  at garbage-collection time as "Task was destroyed but it is pending!" and "Future
+  exception was never retrieved" even on a fully successful check. A surgical logging
+  filter now drops only those two exact records when they are attributable to
+  Playwright (by the connection path in the message or a Playwright exception in
+  `exc_info`), leaving every other asyncio error untouched; the probe forces the
+  collection inside that window so the noise is dropped at its source. The working
+  prover itself is unchanged.
 
 - **Kerberos pre-auth probe no longer reports a false AS-REP roasting finding for
   every account.** impacket's `sendReceive` does not raise on

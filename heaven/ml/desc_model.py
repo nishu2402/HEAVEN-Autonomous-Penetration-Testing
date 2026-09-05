@@ -235,7 +235,7 @@ class DescriptionRiskModel:
             from heaven.ml.risk_model import default_model_dir
             dirs.append(default_model_dir())
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("risk_model default dir unavailable", exc_info=True)
         return dirs
 
     @property

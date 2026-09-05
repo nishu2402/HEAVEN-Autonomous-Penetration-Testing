@@ -225,6 +225,7 @@ def _parse_enroll_and_write(sd_bytes: bytes) -> tuple[Optional[bool], Optional[b
         try:
             sid = body["Sid"].formatCanonical()
         except Exception:
+            logger.debug("could not format ACE SID", exc_info=True)
             continue
         if not _sid_is_low_priv(sid):
             continue

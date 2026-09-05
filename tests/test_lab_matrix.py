@@ -46,15 +46,22 @@ def test_green_modes_point_at_a_real_lab():
             assert anchored, f"{mode.value}: GREEN lab has no artifact or target"
 
 
-def test_hardware_and_agent_gated_modes_never_claim_proven():
-    """Wireless (needs an RF radio) and Sniff (needs an on-segment agent) must
-    stay honestly gated — the label promises only the reachable subset."""
-    assert labs.mode_status(ScanMode.WIRELESS) == labs.NEEDS_HARDWARE
+def test_hardware_and_agent_gated_modes_keep_their_gate():
+    """Wireless (needs an RF radio) and Sniff (needs an on-segment agent) may
+    prove their network-reachable subset live, but the gate must never be hidden:
+    each must retain an explicit NEEDS_HARDWARE / NEEDS_AGENT entry naming the
+    part it genuinely cannot reach. The RF / active-capture result is never
+    simulated to manufacture a green."""
+    assert any(lab.status == labs.NEEDS_HARDWARE
+               for lab in labs.mode_labs(ScanMode.WIRELESS)), \
+        "WIRELESS must keep its RF (needs-hardware) gate visible"
+    assert any(lab.status == labs.NEEDS_AGENT
+               for lab in labs.mode_labs(ScanMode.SNIFF)), \
+        "SNIFF must keep its on-segment-agent gate visible"
+    # SNIFF's active capture genuinely cannot be reached from a network scanner
+    # (and its LLMNR/NBT-NS multicast is UDP, which Docker Desktop for Mac's NAT
+    # drops), so it stays gated overall.
     assert labs.mode_status(ScanMode.SNIFF) == labs.NEEDS_AGENT
-    for mode in (ScanMode.WIRELESS, ScanMode.SNIFF):
-        for lab in labs.mode_labs(mode):
-            assert lab.status not in (labs.GREEN, labs.PARTIAL), \
-                f"{mode.value} must not claim a proven status"
 
 
 def test_every_corpus_exploit_has_a_proving_lab():

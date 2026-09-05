@@ -270,7 +270,7 @@ def _yara_excerpt(match) -> str:  # noqa: ANN001 — yara.Match
                 return (data.decode("utf-8", "ignore") if isinstance(data, bytes)
                         else str(data))[:80]
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug("could not extract YARA match string", exc_info=True)
     return ""
 
 

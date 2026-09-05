@@ -55,6 +55,9 @@ if not _benchmarks_enabled():
     # The live OWASP Benchmark SAST scorer scans a 2 740-case Java corpus that is
     # fetched (not vendored); keep it out of the default collection too.
     collect_ignore.append("test_owasp_benchmark.py")
+    # The live SCA benchmark audits a vulnerable-dependency corpus against
+    # OSV.dev over the network; keep it out of the default (offline) collection.
+    collect_ignore.append("test_sca_benchmark.py")
 
 
 def _compose_cmd(*args: str) -> list[str]:

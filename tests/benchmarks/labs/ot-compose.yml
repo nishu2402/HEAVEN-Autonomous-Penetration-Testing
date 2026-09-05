@@ -1,14 +1,19 @@
 # HEAVEN benchmark: OT / ICS lab
 #
-# A real, unauthenticated Modbus/TCP server (pymodbus) on the standard ICS port
-# 502. Modbus is the most widely deployed industrial control protocol and has no
-# authentication by design, so an exposed Modbus endpoint is a genuine OT finding.
-# HEAVEN's OT scanner performs a protocol-correct Read-Device-Identification
-# handshake (probe_modbus) and reports "Modbus TCP ICS service reachable"
-# (critical, CWE-306) mapped to IEC 62443 / MITRE ATT&CK for ICS.
+# Two real, unauthenticated industrial-control services:
+#   * A pymodbus Modbus/TCP server on the standard ICS port 502. Modbus is the
+#     most widely deployed ICS protocol and has no authentication by design;
+#     probe_modbus performs a Read-Device-Identification handshake -> "Modbus
+#     TCP ICS service reachable" (critical, CWE-306).
+#   * A real asyncua OPC-UA server (OPC-UA :4840, anonymous / no security
+#     policy). OPC-UA is the modern ICS interoperability standard; probe_opcua
+#     completes the OPC-UA Connection Protocol HEL -> ACK handshake -> "OPC-UA
+#     ICS service reachable". This broadens the live OT proof beyond Modbus +
+#     S7comm (Conpot) to a third real protocol, from a genuine OPC-UA stack.
+# Both map to IEC 62443 / MITRE ATT&CK for ICS.
 #
-# SECURITY: binds to loopback ONLY (127.0.0.1). The OT scanner reaches it via
-# 127.0.0.1:502.
+# SECURITY: binds to loopback ONLY (127.0.0.1). The OT scanner reaches them via
+# 127.0.0.1.
 
 services:
   modbus:
@@ -17,4 +22,12 @@ services:
     container_name: heaven-lab-ot-modbus
     ports:
       - "127.0.0.1:502:502"
+    restart: "no"
+
+  opcua:
+    build: ./opcua
+    image: heaven-lab-opcua:latest
+    container_name: heaven-lab-ot-opcua
+    ports:
+      - "127.0.0.1:4840:4840"
     restart: "no"

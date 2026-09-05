@@ -106,7 +106,7 @@ def download_model_cmd(tag: str, url: str | None, dest: str | None,
     model aren't bundled in the wheel or git, so this pulls them once from the
     GitHub Release and stores them where HEAVEN's loader looks. Verified by
     SHA-256. HEAVEN runs without them (CVSS falls back to each finding's base
-    score) — this just enables the ML-predicted scores.
+    score). This just enables the ML-predicted scores.
     """
     from heaven.ml.risk_model import default_model_dir
 
@@ -121,7 +121,7 @@ def download_model_cmd(tag: str, url: str | None, dest: str | None,
             _print(f"[green]✓ Model already present[/green] → {target} "
                    f"[dim](use --force to re-download)[/dim]")
             return
-        _print("[yellow]Existing model failed verification — re-downloading.[/yellow]")
+        _print("[yellow]Existing model failed verification · re-downloading.[/yellow]")
 
     src = url or _default_model_url(tag)
     _print(f"[cyan]Downloading NVD model[/cyan] (~{_MODEL_SIZE_BYTES // (1 << 20)} MB) "
@@ -157,7 +157,7 @@ def download_model_cmd(tag: str, url: str | None, dest: str | None,
                             desc_target.parent / _DESC_META_ASSET, None)
             _print(f"[green]✓ Description model installed[/green] → {desc_target}")
         except Exception:  # noqa: BLE001 — optional asset; hybrid works without it
-            _print("[dim]Description model not on this release — the hybrid will use "
+            _print("[dim]Description model not on this release · the hybrid will use "
                    "the vector model for every finding (train it with "
                    "`heaven train-model --csv <NVD_Cybersecurity_Dataset.csv>`).[/dim]")
 
@@ -198,7 +198,7 @@ def train_model_cmd(data_dir: str, model_dir: str, csv: str | None) -> None:
                f"within-one-band={desc.get('deploy_band_within1')} "
                f"[dim](the metric that reflects real use)[/dim]")
     else:
-        _print("[dim]Description model skipped (no CSV) — hybrid uses the vector "
+        _print("[dim]Description model skipped (no CSV) · hybrid uses the vector "
                "model for every finding.[/dim]")
 
 

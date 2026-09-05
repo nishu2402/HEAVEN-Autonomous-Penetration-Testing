@@ -70,7 +70,7 @@ def rank(os: str, web_tech: str, ad_domain: str, cloud: str,
     rankings = get_knowledge_graph().rank_techniques(profile, top_n=top)
     _print(f"[cyan]Profile fingerprint:[/cyan] {profile.fingerprint()}")
     if not rankings:
-        _print("[yellow]No knowledge graph entries yet — run more scans first.[/yellow]")
+        _print("[yellow]No knowledge graph entries yet · run more scans first.[/yellow]")
         return
     _print("\n[bold]Technique rankings (Beta-smoothed posterior):[/bold]")
     for r in rankings:

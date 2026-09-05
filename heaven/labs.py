@@ -392,7 +392,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             EXTERNAL, GREEN,
             "Dependency SCA is now corpus-scored, live: the in-repo corpus "
             "tests/benchmarks/labs/sca-corpus/ pins seven real known-vulnerable "
-            "PyPI + npm releases, and HEAVEN's scan_path audits them against "
+            "PyPI + npm releases, and HEAVEN's SCA scanner audits them against "
             "OSV.dev. Recall over a curated set of permanent CVE advisories is "
             "100% (11/11), and a precision control passes — the patched half of "
             "the corpus (the versions that FIXED each CVE) reports none of those "

@@ -228,7 +228,7 @@ def full_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
         for step in ai.get("recommended_next_steps", [])[:5]:
             _print(f"    → {step}")
     elif not no_ai:
-        _print("\n[dim]AI prioritisation skipped (no LLM key configured — set "
+        _print("\n[dim]AI prioritisation skipped (no LLM key configured · set "
                "GEMINI_API_KEY to enable).[/dim]")
 
     stored = _persist_findings(engagement, report.findings)

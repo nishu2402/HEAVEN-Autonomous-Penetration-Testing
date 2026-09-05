@@ -57,7 +57,7 @@ def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
         heaven install-tools sqlmap ffuf     # just these two
         heaven install-tools --dry-run       # preview the commands
 
-    Each tool has an in-house fallback, so HEAVEN works without them — but with
+    Each tool has an in-house fallback, so HEAVEN works without them, but with
     them installed you get real SQLi proof, content fuzzing, Exploit-DB lookup,
     SAST and template checks. Uses your package manager (brew / apt / dnf /
     pacman) or pip / go as appropriate.
@@ -95,7 +95,7 @@ def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
 
     # Preview the plan.
     if not as_json:
-        _print("[bold]HEAVEN — external tool install[/bold]")
+        _print("[bold]HEAVEN · external tool install[/bold]")
         _print("")
         for s in pending:
             cmd = build_install_command(s)
@@ -112,7 +112,7 @@ def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
     # Confirm unless --yes (or --json, which is non-interactive by contract).
     if not yes and not as_json:
         if not click.confirm(f"Install {len(pending)} tool(s) now?", default=True):
-            _print("[dim]Aborted — nothing was installed.[/dim]")
+            _print("[dim]Aborted · nothing was installed.[/dim]")
             return
 
     def _line(text: str) -> None:
@@ -149,7 +149,7 @@ def _emit_results(results: list[InstallResult], as_json: bool, *, dry_run: bool)
         _print(f"  {mark} {r.name:13} {word}{extra}")
     if any(r.status == "manual" for r in results):
         _print("")
-        _print("[yellow]Some tools need a manual install[/yellow] — see the recipe above.")
+        _print("[yellow]Some tools need a manual install[/yellow] · see the recipe above.")
     if any(r.status == "failed" for r in results):
         _print("")
         _print("[yellow]Some installs failed.[/yellow] Re-run with the recipe shown, "

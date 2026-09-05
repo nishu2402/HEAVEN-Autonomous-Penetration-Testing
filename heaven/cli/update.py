@@ -536,7 +536,7 @@ def _render_check(c: UpdateCheck) -> None:
                f"v{c.current_version or '?'} → v{c.latest_version or '?'} "
                f"({c.behind} commit(s) behind {c.upstream})")
         if c.dirty:
-            _print(f"  [yellow]Note:[/yellow] {len(c.dirty_files)} uncommitted change(s) — "
+            _print(f"  [yellow]Note:[/yellow] {len(c.dirty_files)} uncommitted change(s) ·  "
                    "`heaven update` will hold back unless you pass --force.")
         _print("  Run [bold]heaven update[/bold] to apply.")
     else:
@@ -550,7 +550,7 @@ def _self_update(summary: UpdateSummary, *, force: bool, skip_ui: bool) -> None:
     summary.code_checked = True
     root = find_repo_root()
     if root is None:
-        _print("  [yellow]⚠ Code:[/yellow] not an editable git checkout — can't self-update in place.")
+        _print("  [yellow]⚠ Code:[/yellow] not an editable git checkout · can't self-update in place.")
         _print(_non_git_message(indent="    "))
         summary.code_note = "not an updatable git checkout"
         summary.errors.append("code: not an updatable git checkout")
@@ -565,7 +565,7 @@ def _self_update(summary: UpdateSummary, *, force: bool, skip_ui: bool) -> None:
         summary.errors.append(f"code: {c.reason}")
         return
     if not c.remote_reachable:
-        _print(f"  [yellow]⚠ Code:[/yellow] couldn't reach the remote ({c.error}) — skipping self-update.")
+        _print(f"  [yellow]⚠ Code:[/yellow] couldn't reach the remote ({c.error}) · skipping self-update.")
         summary.code_note = f"remote unreachable: {c.error}"
         summary.errors.append(f"code: {c.error}")
         return
@@ -673,7 +673,7 @@ def _refresh_detection_data(summary: UpdateSummary, skip_nuclei: bool,
 def update_cmd(check_only: bool, code_only: bool, data_only: bool, force: bool,
                skip_ui: bool, skip_nuclei: bool, skip_nvd: bool, skip_exploitdb: bool,
                output: Optional[str]) -> None:
-    """Update HEAVEN — its own code (git self-update) and its detection data.
+    """Update HEAVEN: its own code (git self-update) and its detection data.
 
     Examples:
 
@@ -688,10 +688,10 @@ def update_cmd(check_only: bool, code_only: bool, data_only: bool, force: bool,
 
     # ── --check: dry-run, report availability, change nothing ──────────────
     if check_only:
-        _print("[bold cyan]🔄 HEAVEN update — checking for a newer version[/bold cyan]")
+        _print("[bold cyan]🔄 HEAVEN update · checking for a newer version[/bold cyan]")
         root = find_repo_root()
         if root is None:
-            _print("  [yellow]Not an editable git checkout — can't self-update in place.[/yellow]")
+            _print("  [yellow]Not an editable git checkout · can't self-update in place.[/yellow]")
             _print(_non_git_message())
             return
         c = check_for_update(root)
@@ -719,10 +719,10 @@ def update_cmd(check_only: bool, code_only: bool, data_only: bool, force: bool,
     summary.duration_s = time.time() - t0
     _print(f"\n[bold]Update complete[/bold] in {summary.duration_s:.1f}s")
     if summary.code_updated:
-        _print(f"  [green]HEAVEN is now v{summary.to_version or '?'}[/green] — "
+        _print(f"  [green]HEAVEN is now v{summary.to_version or '?'}[/green] ·  "
                "active on your next `heaven` command.")
     if summary.errors:
-        _print(f"  [yellow]{len(summary.errors)} step(s) had issues — see above[/yellow]")
+        _print(f"  [yellow]{len(summary.errors)} step(s) had issues · see above[/yellow]")
 
     if output:
         Path(output).write_text(json.dumps(summary.to_dict(), indent=2))

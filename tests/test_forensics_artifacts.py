@@ -195,3 +195,38 @@ def test_dispatch_unknown_is_error(tmp_path):
     p.write_bytes(b"\x11\x22\x33 just some bytes that match nothing specific")
     r = analyze_artifact(str(p))
     assert r.get("kind") == "unknown" and "error" in r
+
+
+def _mp4_bytes(extra: bytes = b"") -> bytes:
+    # A minimal but real ISO base media header (an 'ftyp' box), plus optional
+    # trailing bytes to simulate metadata atoms.
+    import struct
+    return (struct.pack(">I", 32) + b"ftypisom" + struct.pack(">I", 0x200)
+            + b"isomiso2avc1mp41" + extra)
+
+
+def test_detect_kind_media_by_magic_and_ext(tmp_path):
+    # Content-based (ftyp) detection, even with a misleading extension.
+    m = tmp_path / "clip.bin"
+    m.write_bytes(_mp4_bytes())
+    assert detect_kind(str(m)) == "media"
+    # Extension-based detection for formats without a checked magic.
+    for name in ("song.mp3", "clip.mov", "movie.mkv", "audio.wav"):
+        f = tmp_path / name
+        f.write_bytes(b"\x00" * 32)
+        assert detect_kind(str(f)) == "media", name
+
+
+def test_media_upload_has_no_webshell_false_positive(tmp_path):
+    # The reported bug: a video whose bytes happen to contain a webshell brand
+    # token was flagged as a critical PHP webshell. It must now be recognized as
+    # media, carry no error, and raise no critical/high finding.
+    p = tmp_path / "abhi utha hu nind se.MP4"
+    p.write_bytes(_mp4_bytes(b"\x00moov\xa9toolWSO 2 handler\x00FilesMan\x00"
+                             + b"\x00" * 256))
+    r = analyze_artifact(str(p))
+    assert r.get("kind") == "media"
+    assert "error" not in r
+    bad = [f for f in r.get("findings", [])
+           if f.get("severity") in ("critical", "high")]
+    assert bad == [], bad

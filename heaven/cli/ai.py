@@ -38,7 +38,7 @@ def ai_status() -> None:
         _print(f"  [green]✓[/green] provider [bold]{gw.provider}[/bold] · model [bold]{gw.model}[/bold]")
     else:
         reason = gw._init_error or "not configured"
-        _print(f"  [yellow]·[/yellow] not ready — {reason}")
+        _print(f"  [yellow]·[/yellow] not ready · {reason}")
     if gw.fallback_provider:
         _print(f"  [dim]fallback provider: {gw.fallback_provider}[/dim]")
 
@@ -144,7 +144,7 @@ def ai_test() -> None:
     resp = gw.complete(LLMRequest(prompt="Reply with exactly the word: OK",
                                   max_tokens=16, temperature=0))
     if resp.ok():
-        _print(f"[green]✓ Ready[/green] — live reply in {resp.latency_ms:.0f}ms "
+        _print(f"[green]✓ Ready[/green] · live reply in {resp.latency_ms:.0f}ms "
                f"([bold]{gw.provider}[/bold] / {gw.model})")
     else:
         _print(f"[red]✗ Configured but the call failed:[/red] {resp.error}")
@@ -245,7 +245,7 @@ def _live_test() -> None:
     resp = gw.complete(LLMRequest(prompt="Reply with exactly the word: OK",
                                   max_tokens=16, temperature=0))
     if resp.ok():
-        _print(f"[green]✓ Local AI is live[/green] — reply in {resp.latency_ms:.0f}ms. "
+        _print(f"[green]✓ Local AI is live[/green] · reply in {resp.latency_ms:.0f}ms. "
                "Try [cyan]heaven chat[/cyan].")
     else:
         _print(f"[yellow]Saved, but the test call failed:[/yellow] {resp.error}")

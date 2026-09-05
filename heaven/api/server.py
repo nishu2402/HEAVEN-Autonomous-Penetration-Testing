@@ -3635,7 +3635,7 @@ def create_app() -> FastAPI:
                         gw_ok = False
                     reason = ("no_llm" if not gw_ok else "unavailable")
                     return {"skipped": True, "reason": reason,
-                            "message": ("No AI provider is configured — add a provider "
+                            "message": ("No AI provider is configured. Add a provider "
                                         "key in Settings to enable a second-opinion "
                                         "verdict." if reason == "no_llm" else
                                         "The LLM review layer is unavailable on this "

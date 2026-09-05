@@ -82,12 +82,26 @@ def _ci(pattern: str) -> re.Pattern:
     return re.compile(pattern, re.I | re.S)
 
 
+# A server-side-script context marker (PHP/JSP/ASP tags, an HTTP superglobal, or
+# a code-execution sink). The named-webshell tokens below are only meaningful
+# inside real PHP/JSP/ASPX source, so a match requires one of these to be present
+# too. Without it, a brand token like "FilesMan" or "WSO 2" matches ASCII bytes
+# that occur by chance inside binary media (an MP4 atom, a codec tag) or benign
+# text that merely names a product (for example the "WSO2" software vendor),
+# which is a false positive. A genuine webshell (including a media/PHP polyglot)
+# always carries this context, so requiring it costs no real detection.
+_SCRIPT_CTX = _ci(
+    r"<\?php|<\?=|<%|\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b"
+    r"|\b(?:eval|assert|system|shell_exec|passthru|proc_open|popen|exec|"
+    r"base64_decode|gzinflate|str_rot13)\s*\(|Runtime\.getRuntime\s*\(")
+
+
 _RULES: tuple[_Rule, ...] = (
     _Rule("PHP_Webshell_Named", "critical",
           "Content matches a named PHP webshell (c99/r57/b374k/WSO/alfa/IndoXploit).",
-          any_of=(_ci(r"c99shell"), _ci(r"r57shell"), _ci(r"b374k"),
-                  _ci(r"WSO\s*\d"), _ci(r"FilesMan"), _ci(r"IndoXploit"),
-                  _ci(r"alfa\s*team|AlfaShell"))),
+          all_of=(_ci(r"c99shell|r57shell|b374k|WSO\s+\d|FilesMan|IndoXploit"
+                      r"|alfa\s*team|AlfaShell"),
+                  _SCRIPT_CTX)),
     _Rule("PHP_Webshell_Eval_Superglobal", "critical",
           "Obfuscated PHP command execution: an exec/eval sink fed directly from "
           "an HTTP superglobal — the core of a generic webshell.",
@@ -152,10 +166,18 @@ rule PHP_Webshell_Named {
         $c99 = "c99shell" nocase
         $r57 = "r57shell" nocase
         $b374k = "b374k" nocase
-        $wso = "WSO " nocase
+        $wso = /WSO\s+\d/ nocase
         $fm = "FilesMan" nocase
         $indo = "IndoXploit" nocase
-    condition: any of them
+        $alfa = /alfa\s*team|AlfaShell/ nocase
+        // A named shell is server-side source, so require a script context too;
+        // this stops a brand token matching stray bytes in binary media / text.
+        $ctx_tag = /<\?php|<\?=|<%/ nocase
+        $ctx_sg = /\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)/ nocase
+        $ctx_sink = /(eval|assert|system|shell_exec|passthru|proc_open|popen)\s*\(/ nocase
+    condition:
+        any of ($c99, $r57, $b374k, $wso, $fm, $indo, $alfa) and
+        any of ($ctx_tag, $ctx_sg, $ctx_sink)
 }
 rule PHP_Webshell_Eval_Superglobal {
     strings:

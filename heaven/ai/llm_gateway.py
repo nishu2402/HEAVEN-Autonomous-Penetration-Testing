@@ -73,25 +73,25 @@ PROVIDER_DEFAULT_MODELS = {
 KNOWN_MODELS: dict[str, tuple[dict[str, str], ...]] = {
     "anthropic": (
         {"id": "claude-opus-5", "label": "Claude Opus 5", "note": "Most capable"},
-        {"id": "claude-sonnet-5", "label": "Claude Sonnet 5", "note": "Balanced — recommended"},
+        {"id": "claude-sonnet-5", "label": "Claude Sonnet 5", "note": "Balanced, recommended"},
         {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "note": "Fast & economical"},
     ),
     "openai": (
-        {"id": "gpt-4o", "label": "GPT-4o", "note": "Balanced — recommended"},
+        {"id": "gpt-4o", "label": "GPT-4o", "note": "Balanced, recommended"},
         {"id": "gpt-4o-mini", "label": "GPT-4o mini", "note": "Fast & economical"},
         {"id": "o3-mini", "label": "o3-mini", "note": "Reasoning, economical"},
     ),
     "gemini": (
         {"id": "gemini-flash-latest", "label": "Gemini Flash (latest)",
-         "note": "Fast rolling alias — recommended"},
+         "note": "Fast rolling alias, recommended"},
         {"id": "gemini-pro-latest", "label": "Gemini Pro (latest)", "note": "Deeper reasoning"},
     ),
     "deepseek": (
-        {"id": "deepseek-chat", "label": "DeepSeek Chat (V3)", "note": "Balanced — recommended"},
+        {"id": "deepseek-chat", "label": "DeepSeek Chat (V3)", "note": "Balanced, recommended"},
         {"id": "deepseek-reasoner", "label": "DeepSeek Reasoner (R1)", "note": "Deeper reasoning"},
     ),
     "ollama": (
-        {"id": "qwen2.5:7b", "label": "Qwen2.5 7B", "note": "Recommended — clean JSON"},
+        {"id": "qwen2.5:7b", "label": "Qwen2.5 7B", "note": "Recommended, clean JSON"},
         {"id": "llama3.1:8b", "label": "Llama 3.1 8B", "note": "General purpose"},
         {"id": "qwen2.5:14b", "label": "Qwen2.5 14B", "note": "Higher quality, slower"},
         {"id": "mistral:7b", "label": "Mistral 7B", "note": "Compact"},

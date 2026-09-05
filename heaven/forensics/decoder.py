@@ -557,8 +557,8 @@ def _content_findings(decodings: list[dict], findings: list[dict]) -> None:
                 "scanner": "decoder", "confidence": 0.75,
                 "title": "Decoded string is a credential pair (user:password)",
                 "description": (f"The input decoded (via {d['scheme']}) to what looks "
-                                "like a 'user:password' credential — e.g. an HTTP "
-                                "Basic-auth token."),
+                                "like a 'user:password' credential (for example an "
+                                "HTTP Basic-auth token)."),
                 "cwe": "CWE-319", "evidence": {"scheme": d["scheme"]}})
             break
         if "-----BEGIN" in dec and "PRIVATE KEY" in dec:

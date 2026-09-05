@@ -25,11 +25,17 @@ _DOC_EXTS = {".pdf", ".doc", ".docx", ".docm", ".dotm", ".xls", ".xlsx", ".xlsm"
 _ARCHIVE_EXTS = {".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".iso",
                  ".jar", ".war"}
 _CERT_EXTS = {".pem", ".crt", ".cer", ".der", ".key", ".pub", ".p7b", ".csr"}
+# Audio / video / container formats. These are not security artifacts, but they
+# must be recognized so a legitimate media upload is not misclassified as an
+# unidentifiable blob (which would then be swept as raw bytes).
+_MEDIA_EXTS = {".mp4", ".m4v", ".m4a", ".mov", ".avi", ".wav", ".mkv", ".webm",
+               ".ogg", ".ogv", ".oga", ".mp3", ".flac", ".aac", ".3gp", ".3g2",
+               ".wmv", ".asf", ".flv", ".mpg", ".mpeg", ".mid", ".midi", ".opus"}
 
 
 def detect_kind(path: str) -> str:
     """Return the artifact kind: binary | firmware | pcap | stego | apk | ipa |
-    crypto | document | archive | unknown."""
+    crypto | document | archive | media | unknown."""
     p = Path(path)
     ext = p.suffix.lower()
     try:
@@ -51,6 +57,8 @@ def detect_kind(path: str) -> str:
         return "document"
     if ext in _ARCHIVE_EXTS:
         return "archive"
+    if ext in _MEDIA_EXTS:
+        return "media"
 
     # Magic-byte detection.
     if head[:5] == b"%PDF-" or head[:8] == _CFB_MAGIC or head[:5] == b"{\\rtf":
@@ -63,6 +71,15 @@ def detect_kind(path: str) -> str:
         return "pcap"
     if any(head.startswith(m) for m in _IMAGE_MAGICS):
         return "stego"
+    # Audio / video containers (content-based, so an extensionless or
+    # mislabeled media file is still recognized rather than swept as raw bytes).
+    if head[4:8] == b"ftyp":                       # ISO-BMFF: MP4/MOV/M4A/3GP
+        return "media"
+    if (head[:4] in (b"OggS", b"fLaC", b"\x1aE\xdf\xa3") or head[:3] == b"ID3"
+            or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\xff\xfa")
+            or (head[:4] == b"RIFF" and head[8:12] in (b"AVI ", b"WAVE"))
+            or head[:3] == b"FWS" or head[:3] == b"CWS"):  # Ogg/FLAC/MKV/MP3/AVI/WAV/SWF
+        return "media"
     if head[:4] == b"PK\x03\x04":
         # ZIP family: APK / IPA / OOXML office document / generic archive.
         try:
@@ -145,6 +162,9 @@ def _loader(kind: str) -> Callable[..., dict]:
     if kind == "archive":
         from heaven.forensics.archive import analyze_archive
         return analyze_archive
+    if kind == "media":
+        from heaven.forensics.media import analyze_media
+        return analyze_media
     raise ValueError(f"no analyzer for kind={kind}")
 
 

@@ -32,6 +32,14 @@ CORPUS_DIR = _HERE / "labs" / "sca-corpus"
 GROUND_TRUTH = _HERE / "ground_truth" / "sca.yaml"
 REPORT = _HERE / "reports" / "sca_benchmark.md"
 
+# The corpus manifests are stored on disk with this suffix (e.g.
+# ``requirements.txt.fixture``) so GitHub's dependency graph never mistakes these
+# intentionally-vulnerable pins for real project dependencies and files Dependabot
+# alerts against the repo. The benchmark reads each fixture and parses it under its
+# logical manifest name, so the audit is byte-for-byte identical to scanning the
+# real file — only the on-disk filename differs.
+_FIXTURE_SUFFIX = ".fixture"
+
 
 class OSVUnavailable(RuntimeError):
     """OSV.dev could not be reached, so the live SCA benchmark cannot run."""
@@ -107,12 +115,20 @@ def _cves_of(findings: list[dict[str, Any]]) -> set[str]:
 
 
 async def _audit(path: Path) -> list[dict[str, Any]]:
-    from heaven.vulnscan.sca_scanner import scan_path
+    from heaven.vulnscan.sca_scanner import scan_manifest_text
 
-    res = await scan_path(str(path), enrich_intel=False)
-    if res.get("error"):
-        raise OSVUnavailable(res["error"])
-    return res.get("findings", [])
+    # Manifests live under `<name>.fixture` (see `_FIXTURE_SUFFIX`); read each and
+    # parse it under its logical name so the real scanner audits it unchanged.
+    fixtures = sorted(path.glob(f"*{_FIXTURE_SUFFIX}"))
+    if not fixtures:
+        raise OSVUnavailable(
+            f"no manifest fixtures (*{_FIXTURE_SUFFIX}) found under {path}")
+    findings: list[dict[str, Any]] = []
+    for fx in fixtures:
+        logical_name = fx.name[: -len(_FIXTURE_SUFFIX)]  # requirements.txt / package.json
+        text = fx.read_text(encoding="utf-8", errors="ignore")
+        findings.extend(await scan_manifest_text(logical_name, text))
+    return findings
 
 
 def run(corpus_dir: Path = CORPUS_DIR) -> SCAScore:

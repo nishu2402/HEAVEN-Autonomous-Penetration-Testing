@@ -254,7 +254,7 @@ def build_netbios_findings(net_data: dict) -> list[dict]:
                 "The host answered an unauthenticated NetBIOS node-status query "
                 f"(UDP/137) with {leaked}. Any peer on the local network can "
                 "enumerate this over UDP/137 (the classic `nbtstat -A <ip>` step) "
-                "even when the host's TCP ports are firewalled — it hands an "
+                "even when the host's TCP ports are firewalled. It hands an "
                 "attacker the machine name, domain/workgroup membership and "
                 "hardware address for free, seeding lateral-movement and social-"
                 "engineering. Disable NetBIOS over TCP/IP on interfaces that do "
@@ -283,7 +283,7 @@ def build_netbios_findings(net_data: dict) -> list[dict]:
                 "description": (
                     f"The host advertises a domain-controller / domain-master "
                     f"NetBIOS role for domain '{workgroup or 'unknown'}'. It is an "
-                    "Active Directory DC — the highest-value internal target. Run "
+                    "Active Directory DC, the highest-value internal target. Run "
                     "HEAVEN's AD assessment against it (Kerberos AS-REP/roasting, "
                     "SMB signing/null-session, ADCS, coercion) from an in-scope "
                     "segment with the SMB/LDAP/Kerberos ports reachable."
@@ -307,7 +307,7 @@ def build_netbios_findings(net_data: dict) -> list[dict]:
                 "target": ip,
                 "vuln_type": "os_version_undetermined",
                 "severity": "info",
-                "title": "Windows Host — Exact Version Undetermined (privileged re-scan advised)",
+                "title": "Windows Host: Exact Version Undetermined (privileged re-scan advised)",
                 "description": (
                     "The host is confirmed Windows (NetBIOS/SMB stack) but its "
                     "exact release could not be determined, so no OS end-of-life "

@@ -45,7 +45,7 @@ def scan(path: str, engagement: Optional[str],
     """Run Semgrep against a source path.
 
     Findings are normalised to HEAVEN's finding shape and (if --engagement is
-    supplied) persisted alongside runtime DAST findings — so the SAST + DAST
+    supplied) persisted alongside runtime DAST findings, so the SAST + DAST
     sides of the same vulnerability cluster in one report.
 
     Examples:
@@ -59,7 +59,7 @@ def scan(path: str, engagement: Optional[str],
             --extra-config p/owasp-top-ten \\
             --extra-config p/python
 
-        # Just look — don't persist
+        # Just look, don't persist
         heaven sast scan ./src --output sast.json
     """
     from heaven.vulnscan.sast_runner import has_semgrep, run_sast, persist_findings
@@ -68,7 +68,7 @@ def scan(path: str, engagement: Optional[str],
     if native and has_semgrep():
         _print("[dim]Using HEAVEN's native SAST engine (--native).[/dim]")
     elif not has_semgrep():
-        _print("[yellow]semgrep not installed — falling back to HEAVEN's native "
+        _print("[yellow]semgrep not installed · falling back to HEAVEN's native "
                "SAST engine.[/yellow] [dim](pip install semgrep for deeper "
                "dataflow analysis.)[/dim]")
 
@@ -108,7 +108,7 @@ def scan(path: str, engagement: Optional[str],
         _print(f"  [{sev_color}]{f.severity[:4].upper():4}[/{sev_color}] "
                f"{f.file_path}:{f.line:<5}  {f.rule_id}")
     if len(result.findings) > 25:
-        _print(f"  [dim]… and {len(result.findings) - 25} more — pass --output for full JSON[/dim]")
+        _print(f"  [dim]… and {len(result.findings) - 25} more · pass --output for full JSON[/dim]")
 
     if engagement:
         from heaven.engagement import EngagementStore

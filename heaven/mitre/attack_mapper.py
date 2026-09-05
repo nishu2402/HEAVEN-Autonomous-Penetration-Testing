@@ -344,7 +344,7 @@ class MITREAttackMapper:
             "name": name,
             "versions": {"attack": "14", "navigator": "4.9.1", "layer": "4.5"},
             "domain": "enterprise-attack",
-            "description": f"HEAVEN scan results — {len(self._mappings)} findings mapped",
+            "description": f"HEAVEN scan results: {len(self._mappings)} findings mapped",
             "techniques": techniques,
             "gradient": {
                 "colors": ["#66ff66", "#ffff00", "#ff6600", "#ff0000"],

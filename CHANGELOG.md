@@ -480,6 +480,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Offline artifact analysis no longer flags a media file as a critical PHP
+  webshell (false positive).** Uploading a video (an `.MP4`, reproduced end to
+  end) came back as a critical "PHP Webshell Named" match. The named-webshell
+  signature fired on any of its brand tokens (`c99shell`, `b374k`, `WSO 2`,
+  `FilesMan`, `IndoXploit`, `alfa team`) appearing as plain ASCII anywhere in the
+  bytes, with no server-side-script context required — so a codec tag or metadata
+  atom inside a binary tripped it, and even the "WSO2" software vendor name in
+  benign text would. A named webshell is PHP/JSP/ASP source, so the rule (builtin
+  and YARA backends both) now requires a real script context (a `<?php` / `<?=` /
+  `<%` tag, an HTTP superglobal, or a code-execution sink) alongside the brand
+  token, and the loose `WSO` token now requires a digit after whitespace so it
+  cannot match the vendor string. A genuine webshell, including a media/PHP
+  polyglot, still detects because it always carries that context. Regression tests
+  lock in both the no-false-positive and the still-detected cases.
+
+- **Media files (MP4, MOV, MKV, WebM, AVI, WAV, MP3, FLAC, Ogg) are recognised
+  instead of coming back as "could not determine artifact type".** A legitimate
+  audio/video upload fell through to the unknown path, where its raw bytes were
+  swept as if they were source text (the root of the webshell false positive
+  above). `detect_kind` now identifies these by content (`ftyp`, Matroska, Ogg,
+  RIFF, FLAC, ID3, MPEG-audio) and extension, and a new `heaven.forensics.media`
+  analyzer returns an honest result: the file is fingerprinted and swept for known
+  malware, with a clear note that codec-level decoding is not performed.
+
 - **A full-port scan of a slow or heavily-filtered host no longer silently
   returns only a handful of ports.** When the deep-scan deadline fired with hosts
   still in flight, their partial port lists were returned as if final — the "I

@@ -32,7 +32,11 @@ dependencies = [
     "fastapi>=0.110.0",
     "starlette>=1.3.1",  # security floor: fastapi allows <1.3.1 which has 6 advisories
     "uvicorn[standard]>=0.27.0",
-    "python-multipart>=0.0.9",   # streamed multipart uploads (offline-artifact analysis)
+    "python-multipart>=0.0.32",  # streamed multipart uploads (offline-artifact analysis);
+                                 # floor patched: DoS via deformed boundary / quadratic
+                                 # querystring / unbounded headers / preamble + arbitrary
+                                 # file write + parameter smuggling (CVE-2024-53981,
+                                 # CVE-2026-24486/40347/42561/53537-40, OSV)
     "websockets>=12.0",
     "slowapi>=0.1.9",
     # ML / Data — the CVSS risk model is a scikit-learn ExtraTreesRegressor loaded
@@ -79,7 +83,9 @@ dependencies = [
     "reportlab>=4.0.0",           # PDF reports (reports)
     "tabulate>=0.9.0",            # table rendering (reports/CLI)
     "impacket>=0.11.0",           # SMB/Kerberos lateral movement (lateral)
-    "asyncssh>=2.14.2",           # SSH credential testing (lateral); floor patched (OSV)
+    "asyncssh>=2.24.0",           # SSH credential testing (lateral); floor patched: SCP
+                                  # path-traversal arbitrary write + AuthorizedKeysFile %u
+                                  # directory escape (CVE-2026-54590/54591, OSV)
     "ldap3>=2.9.1",               # LDAP/AD enumeration (lateral)
     "pywinrm>=0.4.3",             # WinRM credential validation (lateral)
     "docker>=7.0.0",              # container recon (deploy)
@@ -132,8 +138,10 @@ dev = [
     # which reads the generated PDF back to assert its sections are present.
     # TEST-ONLY: no runtime code imports pypdf (reportlab does the writing), so it
     # belongs here, not in requirements.txt. Floor pinned past the parser-DoS
-    # advisories CVE-2026-71852 / CVE-2026-71870 (fixed 6.15.0), GHSA-jm82-fx9c-mx94.
-    "pypdf>=6.15.0",
+    # advisories: long-runtime/large-memory on outline + XForm retrieval and an
+    # infinite loop in TreeObject.insert_child (CVE-2026-84309/84310/84311, fixed
+    # 6.16.1) on top of the earlier CVE-2026-71852 / CVE-2026-71870 fixes.
+    "pypdf>=6.17.0",
 ]
 # Heavyweight cloud-provider SDKs (opt-in). Each extra carries both the resource
 # SDKs (compute/storage recon) and the identity/IAM SDKs the authenticated
@@ -167,7 +175,7 @@ llm = ["google-genai>=1.0.0", "anthropic>=0.39.0", "openai>=1.40.0"]
 # left are dev tooling, the alternate LLM providers, and the heavy GCP/Azure SDKs.
 recon = ["dnspython>=2.6.1", "scapy>=2.7.0"]
 reports = ["jinja2>=3.1.6", "reportlab>=4.0.0", "tabulate>=0.9.0"]
-lateral = ["impacket>=0.11.0", "asyncssh>=2.14.2", "ldap3>=2.9.1", "pywinrm>=0.4.3"]
+lateral = ["impacket>=0.11.0", "asyncssh>=2.24.0", "ldap3>=2.9.1", "pywinrm>=0.4.3"]
 # MITRE ATT&CK mapping ships a bundled dataset and talks TAXII over plain HTTP,
 # so it needs no extra pip packages — hence there is no `mitre` extra.
 deploy = ["docker>=7.0.0", "kubernetes>=29.0.0"]
@@ -180,7 +188,7 @@ cloud-aws = ["boto3>=1.34.0"]
 all = [
     "dnspython>=2.6.1", "scapy>=2.7.0",
     "jinja2>=3.1.6", "reportlab>=4.0.0", "tabulate>=0.9.0",
-    "impacket>=0.11.0", "asyncssh>=2.14.2", "ldap3>=2.9.1", "pywinrm>=0.4.3",
+    "impacket>=0.11.0", "asyncssh>=2.24.0", "ldap3>=2.9.1", "pywinrm>=0.4.3",
     "docker>=7.0.0", "kubernetes>=29.0.0",
     "apscheduler>=3.10.0", "alembic>=1.13.0",
     "playwright>=1.40.0",

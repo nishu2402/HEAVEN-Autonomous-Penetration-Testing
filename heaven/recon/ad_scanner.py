@@ -254,23 +254,37 @@ class ADScanner:
                 if rdnc:
                     self._domain_info.forest = derive_domain_from_dn(rdnc)
                 if anon:
+                    # RootDSE is anonymously readable on *every* LDAP directory —
+                    # Windows AD included — by the LDAP spec itself: clients read
+                    # it to discover the naming contexts before they bind. So a
+                    # RootDSE read alone is NOT a misconfiguration; reporting it as
+                    # a medium "anonymous bind permitted" over-claims a universal
+                    # default. Keep it as an info-level pre-auth metadata
+                    # disclosure. The material finding — anonymous access to the
+                    # *domain* naming context (user/attribute enumeration) — is
+                    # proven separately by :meth:`enumerate_anonymous` and carries
+                    # its own, higher severity.
                     self._findings.append(ADFinding(
                         target=self.dc_host,
                         attack_type=ADAttackType.ANON_LDAP,
-                        severity="medium",
-                        title="Anonymous LDAP Bind Permitted on Domain Controller",
+                        severity="info",
+                        title="RootDSE readable via anonymous LDAP bind",
                         description=(
                             "The Domain Controller answered an unauthenticated LDAP "
-                            "query and exposed its RootDSE (domain, forest, DC name, "
-                            "functional level). Anonymous LDAP eases pre-auth "
-                            "reconnaissance and, if the naming contexts allow it, "
-                            "user/attribute enumeration."
+                            "query for its RootDSE, exposing domain, forest, DC name "
+                            "and functional level pre-auth. This is standard LDAP "
+                            "behaviour (RootDSE is designed to be read before "
+                            "binding), not a misconfiguration on its own — it only "
+                            "leaks directory metadata. The real risk is present only "
+                            "if anonymous access also reaches the domain naming "
+                            "context, which is tested and reported separately."
                         ),
                         confidence=0.9,
                         remediation=(
-                            "Restrict anonymous LDAP: set dsHeuristics so "
-                            "anonymous operations are disabled, and require "
-                            "authentication for directory reads."
+                            "No action is required for the RootDSE read itself. To "
+                            "minimise pre-auth metadata exposure, restrict anonymous "
+                            "LDAP operations via dsHeuristics and ensure anonymous "
+                            "access cannot read the domain naming context."
                         ),
                         mitre_technique="T1087.002",
                         evidence={k: v for k, v in info.items() if v},
@@ -471,7 +485,7 @@ class ADScanner:
             try:
                 captured["flags"] = int(obj["flags"])
             except Exception:
-                pass
+                logger.debug("could not read NTLM challenge flags", exc_info=True)
             return obj
 
         try:
@@ -483,7 +497,8 @@ class ADScanner:
                 # and harmless, we only need the negotiated challenge flags.
                 conn.login("heaven-ntlm-probe", "\x01invalid\x01", "")
             except Exception:
-                pass
+                logger.debug("expected NTLM type-3 rejection during challenge capture",
+                             exc_info=True)
             finally:
                 try:
                     conn.close()
@@ -555,7 +570,8 @@ class ADScanner:
                     "patch MS17-010."
                 ),
                 mitre_technique="T1210",
-                evidence={"smbv1_enabled": True},
+                evidence={"smbv1_enabled": True,
+                          "related_cve": "CVE-2017-0144 (EternalBlue / MS17-010)"},
             ))
         # NTLMv1 / LM session security negotiated (no extended session security).
         if smb.get("ntlmv1") is True:
@@ -1278,6 +1294,7 @@ class ADScanner:
                                 if resp.status in (200, 401, 403):
                                     reachable.append(url)
                         except Exception:
+                            logger.debug("certsrv probe of %s failed", url, exc_info=True)
                             continue
                     if reachable:
                         web_map[host] = reachable

@@ -37,7 +37,11 @@ SECRET_PATTERNS: list[tuple[str, str, str]] = [
     ("Password Assignment", r"""(?:password|passwd|pwd)['":\s=]+['"]([^'"]{8,})['"]""", "password"),
     ("Twilio Key", r"SK[0-9a-fA-F]{32}", "generic_secret"),
     ("SendGrid Key", r"SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}", "generic_secret"),
-    ("Heroku API", r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "generic_secret"),
+    # Heroku API keys are UUIDs, but a bare UUID is a public identifier
+    # (request/trace/resource IDs) — matching it standalone flags every UUID in a
+    # codebase. Require a heroku/api-key context on the line so real keys still
+    # hit while ordinary UUIDs do not.
+    ("Heroku API", r"(?:heroku|api[_-]?key)[^\n]{0,40}[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "generic_secret"),
 ]
 
 IGNORE_EXTENSIONS = {".jpg", ".png", ".gif", ".ico", ".svg", ".woff", ".ttf", ".eot", ".mp4", ".zip", ".tar", ".gz", ".pdf", ".exe", ".dll", ".so", ".pyc", ".class"}
@@ -166,10 +170,14 @@ async def scan_repository(repo_path: str, include_history: bool = True) -> list[
         if is_remote:
             temp_dir = tempfile.mkdtemp(prefix="heaven_repo_")
             path = Path(temp_dir)
-            result = await loop.run_in_executor(None, lambda: subprocess.run(  # nosec B603 B607
-                ["git", "clone", "--depth=50", repo_path, str(path)],
-                capture_output=True, text=True, timeout=120,
-            ))
+
+            def _clone():
+                return subprocess.run(  # nosec B603 B607 -- fixed argv on PATH, no shell
+                    ["git", "clone", "--depth=50", repo_path, str(path)],
+                    capture_output=True, text=True, timeout=120,
+                )
+
+            result = await loop.run_in_executor(None, _clone)
             if result.returncode != 0:
                 logger.error(f"Failed to clone {repo_path}: {result.stderr}")
                 return []

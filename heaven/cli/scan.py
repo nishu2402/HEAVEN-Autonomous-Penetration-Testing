@@ -39,7 +39,9 @@ def _read_spec_source(src: str) -> str:
     if src.lower().startswith(("http://", "https://")):
         import urllib.request
         req = urllib.request.Request(src, headers={"User-Agent": "HEAVEN"})
-        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 — operator-supplied
+        # Scheme is validated to http/https just above; the URL is operator-supplied
+        # (an --api-spec argument), never attacker-influenced.
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310  # nosec B310
             return resp.read().decode("utf-8", errors="replace")
     # Treat the argument itself as inline spec text (JSON/YAML).
     return src
@@ -122,7 +124,13 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
 @click.option("--repo", "-r", multiple=True, help="Git repositories to scan")
 @click.option("--cloud", "-c", multiple=True, help="Cloud providers (aws, gcp, azure)")
 @click.option("--mode", "-m", type=click.Choice([m.value for m in ScanMode]), default="full")
-@click.option("--ports", "-p", default="1-65535", help="Port range for network scan (default: all ports)")
+@click.option("--ports", "-p", default="1-65535", help="TCP port range for network scan (default: all ports)")
+@click.option("--udp/--no-udp", "scan_udp", default=False,
+              help="Also scan UDP services (DNS/NTP/SNMP/NetBIOS/IKE/SIP/…). Uses nmap "
+                   "-sU when privileged, pure-Python service probes otherwise. Slower.")
+@click.option("--udp-ports", default="",
+              help="UDP port spec (e.g. 53,161,500 or 1-1024). Empty / 'top' = the "
+                   "curated common-UDP set. Only used with --udp.")
 @click.option("--stealth", "-s", type=click.Choice(["aggressive", "normal", "stealth", "paranoid"]), default="normal")
 @click.option("--output", "-o", type=click.Choice(["json", "sarif", "html", "pdf", "markdown"]), default="json")
 @click.option("--output-file", type=click.Path(), help="Output file path")
@@ -194,7 +202,7 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
 def scan(
     target: tuple[str, ...], url: tuple[str, ...],
     repo: tuple[str, ...], cloud: tuple[str, ...],
-    mode: str, ports: str, stealth: str,
+    mode: str, ports: str, scan_udp: bool, udp_ports: str, stealth: str,
     output: str, output_file: Optional[str],
     ad_domain: str, ad_dc: str,
     iot: bool, api_scan: bool, container: bool, mitre_map: bool,
@@ -281,7 +289,8 @@ def scan(
     targets: dict[str, Any] = {
         "ips": list(target), "urls": list(url),
         "repositories": list(repo), "cloud_providers": list(cloud),
-        "ports": ports, "stealth_level": stealth,
+        "ports": ports, "scan_udp": scan_udp, "udp_ports": udp_ports,
+        "stealth_level": stealth,
         "ad_domain": ad_domain, "ad_dc": ad_dc,
         "enable_iot": iot, "enable_api_scan": api_scan,
         "enable_container": container, "enable_mitre": mitre_map,
@@ -300,13 +309,13 @@ def scan(
             from heaven.vulnscan.api_spec import load_api_spec
             spec_text = _read_spec_source(api_spec_src)
             base = api_base_url or _first_origin(list(url))
-            spec = load_api_spec(spec_text, base_url=base)
-            spec_urls = spec.to_urls(base_url=base)
+            api_spec_obj = load_api_spec(spec_text, base_url=base)
+            spec_urls = api_spec_obj.to_urls(base_url=base)
             new_urls = [u for u in spec_urls if u and u not in targets["urls"]]
             targets["urls"].extend(new_urls)
             targets["enable_api_scan"] = True
-            _print(f"[cyan]API spec:[/cyan] {spec.fmt or 'spec'} "
-                   f"'{spec.title or api_spec_src}' → {len(spec.operations)} "
+            _print(f"[cyan]API spec:[/cyan] {api_spec_obj.fmt or 'spec'} "
+                   f"'{api_spec_obj.title or api_spec_src}' → {len(api_spec_obj.operations)} "
                    f"operation(s), {len(new_urls)} new endpoint(s) added.")
             if not base and any(u.startswith("/") for u in spec_urls):
                 _print("[yellow]  Spec paths are relative and no base URL was "

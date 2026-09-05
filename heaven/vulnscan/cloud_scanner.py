@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import secrets
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -384,6 +385,31 @@ class CloudStorageScanner:
         buckets: list[BucketResult] = []
         timeout = aiohttp.ClientTimeout(total=self.timeout)
 
+        # Providers whose endpoint answers a KNOWN-NONEXISTENT name with a bare
+        # 403 "AccessDenied" — i.e. a blanket deny that cannot distinguish an
+        # existing-private bucket from an absent one. MinIO and some S3-compatible
+        # / account-level-deny endpoints do this, so a 403-only "exists" there is
+        # a false "bucket exists (private)". For such a provider we report ONLY
+        # what we can prove (a listable/open bucket), never a speculative "exists".
+        blanket_deny: set[str] = set()
+
+        async def calibrate(session: Any, provider: str, url: str) -> None:
+            async with sem:
+                try:
+                    async with session.get(url, allow_redirects=True) as resp:
+                        text = await resp.text(errors="replace")
+                        state, _ = classify_bucket_response(
+                            provider, resp.status, text[:20000])
+                    if state == "exists":
+                        # A random, definitely-absent name came back "exists" →
+                        # the endpoint denies everything; 403 is not a hit here.
+                        blanket_deny.add(provider)
+                        logger.debug("cloud calibrate: %s treats a nonexistent "
+                                     "bucket as 'exists' — suppressing 403-only "
+                                     "existence findings", provider)
+                except Exception as e:
+                    logger.debug("bucket calibrate %s failed: %s", url, e)
+
         async def probe(session: Any, provider: str, bucket: str, url: str) -> None:
             async with sem:
                 try:
@@ -394,10 +420,25 @@ class CloudStorageScanner:
                 except Exception as e:
                     state, detail = "error", f"{type(e).__name__}"
                     logger.debug("bucket probe %s failed: %s", url, e)
-            if state in ("open", "exists"):
+            # A listable bucket is always reported (its state is PROVEN by the XML
+            # root, not inferred from status). A private "exists" is reported only
+            # when the endpoint actually distinguishes existence — never on a
+            # blanket-deny endpoint, where it would be a fabricated discovery.
+            if state == "open":
+                buckets.append(BucketResult(provider, bucket, url, state, detail))
+            elif state == "exists" and provider not in blanket_deny:
                 buckets.append(BucketResult(provider, bucket, url, state, detail))
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            # Calibrate every provider first (one random absent name each), so the
+            # main probes know which providers' 403s are trustworthy.
+            ctrl_name = f"heaven-absent-{secrets.token_hex(8)}"
+            ctrl_urls = self._urls_for(ctrl_name)
+            await asyncio.gather(*[
+                calibrate(session, provider, ctrl_urls[provider])
+                for provider in self.providers if provider in ctrl_urls
+            ], return_exceptions=True)
+
             tasks = [
                 probe(session, provider, bucket, self._urls_for(bucket)[provider])
                 for bucket in candidates

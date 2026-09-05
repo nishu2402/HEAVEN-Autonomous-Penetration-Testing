@@ -6,9 +6,9 @@ rules:
 
   - id: heaven.python.sqli-string-format
     message: |
-      SQL query built with %, .format(), or f-string from a variable.
-      Use parameterised queries (cursor.execute(query, params)) — the
-      DB driver will escape inputs and the same query plan is cached.
+      SQL query built with %, .format(), an f-string, or string concatenation
+      from a variable. Use parameterised queries (cursor.execute(query, params))
+      — the DB driver will escape inputs and the same query plan is cached.
     severity: ERROR
     languages: [python]
     metadata:
@@ -23,6 +23,17 @@ rules:
               $CUR.execute("...".format($X))
           - pattern: |
               $CUR.execute(f"... {$X} ...")
+          # String-concatenation SQLi ("SELECT ... " + user) — as common as the
+          # %/format/f-string forms above and just as exploitable. Matched at
+          # either end so "lit" + var + "lit" is caught too.
+          - pattern: |
+              $CUR.execute("..." + $X)
+          - pattern: |
+              $CUR.execute($X + "...")
+          - pattern: |
+              $CUR.executemany("..." + $X)
+          - pattern: |
+              $CUR.executemany($X + "...")
 
   - id: heaven.python.cmd-injection-shell-true
     message: |
@@ -154,3 +165,24 @@ rules:
           - pattern: requests.get(request.args[...])
           - pattern: requests.get(request.json[...])
           - pattern: httpx.get(request.$X.get(...))
+
+  - id: heaven.python.tls-verification-disabled
+    message: |
+      TLS certificate verification disabled (verify=False). The connection is
+      then vulnerable to a machine-in-the-middle: an attacker who can intercept
+      traffic presents any certificate and reads/alters the data. Remove
+      verify=False (verification is on by default); if a private CA is in use,
+      point `verify` at its CA bundle instead.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: CWE-295
+      owasp: A04:2025 - Cryptographic Failures
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: requests.$M(..., verify=False, ...)
+          - pattern: httpx.$M(..., verify=False, ...)
+          - pattern: httpx.Client(..., verify=False, ...)
+          - pattern: httpx.AsyncClient(..., verify=False, ...)
+          - pattern: $SESSION.request(..., verify=False, ...)

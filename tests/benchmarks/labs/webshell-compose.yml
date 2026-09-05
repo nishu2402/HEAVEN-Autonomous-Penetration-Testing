@@ -1,0 +1,20 @@
+# HEAVEN webshell detection lab.
+#
+# A plain nginx static file server whose webroot holds INERT webshell-signature
+# decoys (webshell-root/README.txt). There is deliberately NO PHP interpreter:
+# every decoy is served verbatim as text, so nothing in this lab can execute —
+# it proves the DETECTOR, not an exploit. HEAVEN's read-only webshell sweep
+# (scan_malware_targets) GETs the known shell paths and flags each hit via both
+# its named-shell signatures and the generic YARA path.
+#
+# Bound to loopback only. Brought up by tests/benchmarks/test_domain_labs.py
+# under HEAVEN_RUN_BENCHMARKS=1.
+services:
+  webshell-host:
+    image: nginx:alpine
+    ports:
+      - "127.0.0.1:8093:80"
+    volumes:
+      - ./webshell-root:/usr/share/nginx/html:ro
+      - ./webshell-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: "no"

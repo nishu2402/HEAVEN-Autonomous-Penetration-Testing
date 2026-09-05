@@ -23,6 +23,37 @@ except ImportError:
     HAS_AIOHTTP = False
 
 
+# Host paths whose bind-mount into a container is a genuine escape / host-tamper
+# vector. A bind mount of application data (e.g. /srv/app) is not dangerous, so
+# the set is the OS-sensitive roots plus the Docker socket — not "any path".
+_SENSITIVE_MOUNT_ROOTS = (
+    "/etc", "/root", "/proc", "/sys", "/boot", "/dev", "/var/run",
+    "/run", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/home",
+    "/var/lib/docker", "/var/lib/kubelet",
+)
+
+
+def _is_dangerous_mount(m: dict) -> bool:
+    """Whether a container mount is a bind mount of a sensitive host path.
+
+    Only ``bind`` mounts touch the host filesystem; Docker-managed ``volume`` and
+    ``tmpfs`` mounts do not, so they are never dangerous. A bind of ``/`` or the
+    Docker socket is a full escape; binds of the OS-sensitive roots are host
+    tamper vectors. Application-data binds (``/srv/app``, ``/data``) are not.
+    """
+    if (m.get("Type") or "").lower() != "bind":
+        return False
+    raw = m.get("Source") or ""
+    if not raw:
+        return False
+    if raw == "/":  # the whole host root filesystem
+        return True
+    src = raw.rstrip("/")
+    if src.endswith("/docker.sock") or src.endswith("/containerd.sock"):
+        return True
+    return any(src == r or src.startswith(r + "/") for r in _SENSITIVE_MOUNT_ROOTS)
+
+
 def _is_local_target(host: str) -> bool:
     """True only when the scan target IS the machine HEAVEN runs on.
 
@@ -143,9 +174,15 @@ class DockerScanner:
                         remediation="Remove --privileged flag. Use specific capabilities.",
                         cwe="CWE-250", mitre="T1611",
                     ))
-                # Check host mounts
+                # Check host mounts. Only *bind* mounts of sensitive host paths are
+                # dangerous (a container escape / host-tamper vector). Docker-managed
+                # named/anonymous volumes (Type=="volume", Source under
+                # /var/lib/docker/volumes/…) and tmpfs are NOT host exposure — the old
+                # check flagged any Source starting with "/", so every container with a
+                # volume got a bogus "dangerous mount" (the remediation even said "use
+                # named volumes", which were exactly what tripped it).
                 mounts = container.attrs.get("Mounts", [])
-                dangerous_mounts = [m for m in mounts if m.get("Source", "").startswith(("/", "/etc", "/var/run"))]
+                dangerous_mounts = [m for m in mounts if _is_dangerous_mount(m)]
                 if dangerous_mounts:
                     mount_paths = [m["Source"] for m in dangerous_mounts[:5]]
                     findings.append(ContainerFinding(
@@ -342,10 +379,46 @@ class KubernetesScanner:
 
         return findings
 
+    # Over-broad built-in principals that must NEVER hold cluster-admin. Binding
+    # cluster-admin to any of these is a critical, unambiguous misconfiguration:
+    #   system:anonymous / system:unauthenticated → unauthenticated callers are
+    #     full cluster admins; system:authenticated → EVERY authenticated user is.
+    # system:masters is deliberately absent: it is the built-in break-glass admin
+    # group that legitimately holds cluster-admin, so flagging it would be a false
+    # positive on every healthy cluster.
+    _DANGEROUS_ADMIN_PRINCIPALS = frozenset({
+        "system:anonymous", "system:unauthenticated", "system:authenticated",
+    })
+
+    @staticmethod
+    def _assess_cluster_admin_bindings(
+        bindings: "list[tuple[str, list[tuple[str, str, str]]]]",
+    ) -> "tuple[list[dict], list[str]]":
+        """Classify cluster-admin bindings from a normalized view.
+
+        ``bindings`` is ``[(binding_name, [(subject_kind, name, namespace), ...])]``
+        for the bindings whose roleRef is ``cluster-admin``. Returns
+        ``(dangerous, sa_admins)`` where *dangerous* names each over-broad
+        principal (anonymous / unauthenticated / all-authenticated) granted
+        cluster-admin, and *sa_admins* is the list of ServiceAccount admins (a
+        separate, lower-severity "sprawl" signal). Pure + client-free so it is
+        unit-testable without a live cluster."""
+        dangerous: list[dict] = []
+        sa_admins: list[str] = []
+        for binding_name, subjects in bindings:
+            for kind, name, namespace in subjects:
+                if (kind in ("User", "Group")
+                        and name in KubernetesScanner._DANGEROUS_ADMIN_PRINCIPALS):
+                    dangerous.append(
+                        {"binding": binding_name, "kind": kind, "principal": name})
+                elif kind == "ServiceAccount":
+                    sa_admins.append(f"{namespace}/{name}")
+        return dangerous, sa_admins
+
     @classmethod
     async def analyze_rbac(cls, kubeconfig_path: Optional[str] = None) -> list[ContainerFinding]:
         """Analyze Kubernetes RBAC for overprivileged accounts."""
-        findings = []
+        findings: list[ContainerFinding] = []
         try:
             from kubernetes import client, config
             if kubeconfig_path:
@@ -354,22 +427,44 @@ class KubernetesScanner:
                 config.load_incluster_config()
 
             rbac_api = client.RbacAuthorizationV1Api()
-            # Check for cluster-admin bindings
             bindings = rbac_api.list_cluster_role_binding()
-            admin_bindings = []
+            normalized: list[tuple[str, list[tuple[str, str, str]]]] = []
             for binding in bindings.items:
-                if binding.role_ref.name == "cluster-admin":
-                    subjects = binding.subjects or []
-                    for sub in subjects:
-                        if sub.kind == "ServiceAccount":
-                            admin_bindings.append(f"{sub.namespace}/{sub.name}")
+                if binding.role_ref.name != "cluster-admin":
+                    continue
+                subs = [(s.kind, s.name, getattr(s, "namespace", "") or "")
+                        for s in (binding.subjects or [])]
+                normalized.append((binding.metadata.name, subs))
 
-            if len(admin_bindings) > 3:
+            dangerous, sa_admins = cls._assess_cluster_admin_bindings(normalized)
+
+            if dangerous:
+                who = ", ".join(f"{d['principal']} (via {d['binding']})"
+                                for d in dangerous)
+                findings.append(ContainerFinding(
+                    target="cluster", vuln_type="k8s_rbac_overprivileged",
+                    severity="critical",
+                    title="K8s RBAC: cluster-admin granted to an "
+                          "unauthenticated / all-users principal",
+                    description=(
+                        "A ClusterRoleBinding grants cluster-admin to an "
+                        f"over-broad built-in principal: {who}. This makes "
+                        "unauthenticated (or every authenticated) caller a full "
+                        "cluster administrator — total cluster compromise."),
+                    confidence=0.95,
+                    remediation="Delete the binding immediately; never bind "
+                                "cluster-admin to system:anonymous, "
+                                "system:unauthenticated or system:authenticated.",
+                    cwe="CWE-269", mitre="T1078",
+                ))
+
+            # Separate, lower-severity signal: cluster-admin ServiceAccount sprawl.
+            if len(sa_admins) > 3:
                 findings.append(ContainerFinding(
                     target="cluster", vuln_type="k8s_rbac_overprivileged",
                     severity="high",
-                    title=f"K8s RBAC: {len(admin_bindings)} cluster-admin service accounts",
-                    description=f"Excessive cluster-admin bindings: {admin_bindings[:10]}",
+                    title=f"K8s RBAC: {len(sa_admins)} cluster-admin service accounts",
+                    description=f"Excessive cluster-admin bindings: {sa_admins[:10]}",
                     confidence=0.85,
                     remediation="Apply least-privilege. Create specific roles instead of cluster-admin.",
                     cwe="CWE-269", mitre="T1078",

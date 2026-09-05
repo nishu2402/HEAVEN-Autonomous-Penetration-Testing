@@ -19,9 +19,15 @@ protocol-correct probe and the service answers as it would in the wild.
 |-----|--------------|----------------------------|-----------------------|
 | **cloud** | `cloud-compose.yml` | MinIO (real S3 API) with a public, listable bucket | `exposed_storage_bucket` (critical) via `<ListBucketResult>` |
 | **container** | `container-compose.yml` | Docker-in-Docker API on :2375 (no TLS) + anonymous Registry v2 on :5000 | `docker_api_exposed` (critical) + `registry_exposed` (high) |
-| **iot** | `iot-compose.yml` | Mosquitto with `allow_anonymous true` + real pymodbus server | anonymous MQTT (critical) + unauthenticated Modbus (critical) |
-| **ot** | `ot-compose.yml` | Real pymodbus server on ICS port 502 | Modbus TCP ICS reachable (critical) |
+| **iot** | `iot-compose.yml` | Mosquitto with `allow_anonymous true` + real pymodbus server + real MediaMTX RTSP server | anonymous MQTT (critical) + unauthenticated Modbus (critical) + exposed RTSP |
+| **ot** | `ot-compose.yml` | Real pymodbus server on ICS port 502 + real asyncua OPC-UA server on 4840 | Modbus TCP ICS reachable (critical) + OPC-UA ICS reachable |
+| **malware (webshell)** | `webshell-compose.yml` | nginx serving inert webshell-signature decoys (no PHP, nothing executes) | `webshell_detected` (critical) for each shell via named signatures + the generic YARA path |
+| **cloud (metadata SSRF)** | `cloud-ssrf-compose.yml` | An SSRF-vulnerable app on the link-local subnet + a fake IMDS pinned to 169.254.169.254 | metadata-SSRF confirmed (`validate_ssrf` reaches `/latest/meta-data/`) |
+| **wireless (posture)** | `wireless-compose.yml` | nginx serving an unauthenticated MikroTik RouterOS webfig panel (inert decoy) | `wireless_mgmt_unauthenticated` (high), vendor-fingerprinted |
+| **email (VRFY)** | `smtp-vrfy-compose.yml` | Real aiosmtpd MTA with VRFY enabled against a genuine local-user set | `smtp_user_enumeration` (250 valid vs 550 unknown) |
 | **dos** | `dos-compose.yml` | Single-threaded `http.server` (no header timeout) + memcached with UDP enabled | `slow_http_dos` (medium); memcached amplification best-effort |
+| **web (DOM XSS)** | `juiceshop-compose.yml` | OWASP Juice Shop (real Angular SPA): search `q` rendered to an innerHTML sink via `bypassSecurityTrustHtml` | `xss_dom_execution` proven live — the payload's JavaScript runs in headless Chromium (token-carrying dialog), a client-side DOM sink an HTTP-only scan cannot see |
+| **api** | `vampi-compose.yml` | VAmPI (real third-party OWASP API Top 10) publishing its own OpenAPI contract | `excessive_data_exposure` (`/users/v1/_debug` leaks passwords), `api_broken_auth` (`/users/v1`), `api_docs_exposed` — all via genuine spec-driven endpoint discovery |
 
 ## Safety
 
@@ -70,6 +76,13 @@ docker compose -f tests/benchmarks/labs/iot-compose.yml down -v
   userspace UDP NAT drops the reflected datagram, so that vector is asserted
   best-effort. The mode's label promises a susceptibility assessment, never a
   flood — and it never floods.
+* **api** proves the REST scanner against a third-party app HEAVEN did not
+  author (the always-on native fixture is HEAVEN's own). HEAVEN reads VAmPI's
+  published OpenAPI contract and probes the endpoints it declares, then confirms
+  the password leak, the unauthenticated user collection and the public spec
+  live. BOLA on VAmPI's string-keyed objects is intentionally not asserted — the
+  numeric-ID BOLA probe honestly does not fire on `{username}`/`{book_title}`
+  keys, and the lab does not pretend otherwise.
 
 See `heaven/labs.py` for the ledger these labs back, and run `heaven labs` to
 print the current status of every mode.

@@ -379,6 +379,121 @@ def test_connect_scan_fallback_is_common_first_and_bails_on_dead_host():
     assert len(seen) == 1 and len(seen[0]) < 2000
 
 
+# ── 4e. focused scan of a named host completes the band even with only an ──────
+#        uncommon port open (the live Windows-7 "0 open ports / 0 findings" bug) ─
+# A hardened host can filter every curated high-value port and answer on ONE
+# uncommon port (e.g. 5357/wsdapi). The common-first bail then reports it as dead.
+# On a FOCUSED scan (a small, explicitly-named target set) the caller already knows
+# the host is up, so `assume_up` skips the bail and the requested band is completed.
+
+def test_connect_scan_fallback_assume_up_completes_band_when_no_common_answers():
+    """With assume_up the fallback sweeps the rest of the requested band even when
+    NO curated high-value port answered, so a live-but-hardened host whose only
+    open port is uncommon is recovered instead of reported as 0 ports."""
+    # 8443 is a curated high-value probe port; 6667/irc is a service-band port
+    # that is deliberately NOT curated (an arbitrary uncommon open port). (5357/
+    # wsdapi used to serve this role but is now a curated Windows survivor.)
+    assert 8443 in ns._ALWAYS_PROBE_PORTS and 6667 not in ns._ALWAYS_PROBE_PORTS
+
+    async def _run(assume_up: bool):
+        seen: list[list[int]] = []
+
+        async def fake_connect(host, ports, **kw):
+            seen.append(list(ports))
+            # Only the uncommon port answers, and only once it is actually probed.
+            return [ns.PortResult(host=host, port=6667, state="open")
+                    for p in [6667] if p in ports]
+
+        orig = ns._python_connect_scan
+        ns._python_connect_scan = fake_connect
+        try:
+            out = await ns._connect_scan_fallback(
+                "10.0.0.1", [8443, 6667], timeout=0.4, assume_up=assume_up)
+        finally:
+            ns._python_connect_scan = orig
+        return [p.port for p in out], seen
+
+    # Default (wide-sweep) behavior: bail after the curated probe finds nothing.
+    off_ports, off_seen = asyncio.run(_run(False))
+    assert off_ports == [] and len(off_seen) == 1
+
+    # Focused behavior: probe the curated port (empty), then sweep the remainder
+    # and recover the uncommon open port.
+    on_ports, on_seen = asyncio.run(_run(True))
+    assert 6667 in on_ports and len(on_seen) == 2
+
+
+def test_scan_host_focused_recovers_uncommon_only_open_port(monkeypatch):
+    """End-to-end at scan_host: a full-range -sV -sC sweep times out with 0 ports
+    and the host's ONLY open port is an uncommon service-band port (6667/irc).
+    focused=True recovers it; focused=False (a wide-sweep member) keeps the cheap
+    dead-host bail."""
+    calls: list[list] = []
+
+    def behavior(argv):
+        calls.append(argv)
+        if len(calls) == 1:
+            return (TIMED_OUT_EMPTY_XML, b"", 0)   # primary times out, 0 ports
+        return (EMPTY_XML, b"", 0)                 # enrichment finds no version
+
+    monkeypatch.setattr(ns.asyncio, "create_subprocess_exec", _fake_exec(behavior))
+
+    async def fake_connect(host, ports, **kw):
+        return [ns.PortResult(host=host, port=6667, state="open")
+                for p in [6667] if p in ports]
+
+    monkeypatch.setattr(ns, "_python_connect_scan", fake_connect)
+    # The curated preflight and the NetBIOS enricher both make real network calls;
+    # neutralise them so this focuses on the nmap-timeout recovery path. The
+    # preflight probes only the curated port (8443, closed here); NBSTAT would hit
+    # UDP/137 on an unreachable host.
+    async def fake_states(host, ports, **kw):
+        return [], 0, 0
+    monkeypatch.setattr(ns, "_connect_probe_states", fake_states)
+
+    async def fake_nbstat(host, *a, **kw):
+        return None
+    monkeypatch.setattr("heaven.recon.netbios.nbstat", fake_nbstat)
+
+    focused = asyncio.run(scan_host("10.0.0.1", [8443, 6667], focused=True))
+    assert [p.port for p in focused.open_ports] == [6667]
+    assert focused.is_alive
+
+    calls.clear()
+    unfocused = asyncio.run(scan_host("10.0.0.1", [8443, 6667], focused=False))
+    assert unfocused.open_ports == [], "a wide-sweep member must keep the dead-host bail"
+
+
+def test_scan_network_marks_small_scan_focused_and_wide_sweep_not(monkeypatch):
+    """scan_network flags a small, explicitly-named target set as FOCUSED (so the
+    degrade-path recovery completes the band) while a wide CIDR sweep is NOT
+    focused (so the fast dead-host bail keeps peak sockets + time bounded)."""
+    captured: list[tuple[str, object]] = []
+
+    async def fake_scan_host(host, ports, **kw):
+        captured.append((host, kw.get("focused")))
+        return ns.HostResult(host=host)
+
+    # Ensure a wide sweep still reaches scan_host (skip the real liveness ping).
+    async def fake_discover(raw, expanded, **kw):
+        return list(expanded)
+
+    monkeypatch.setattr(ns, "scan_host", fake_scan_host)
+    monkeypatch.setattr(ns, "_discover_live_hosts", fake_discover)
+
+    # One named host → focused.
+    asyncio.run(ns.scan_network(["10.0.0.1"], port_range="1-1024",
+                                time_budget=120.0, passive_enrich=False))
+    assert captured and all(f is True for _, f in captured)
+
+    # A /27 (> _FOCUSED_HOST_MAX hosts) → wide sweep, not focused.
+    captured.clear()
+    asyncio.run(ns.scan_network(["10.0.0.0/27"], port_range="1-1024",
+                                time_budget=120.0, passive_enrich=False))
+    assert len(captured) > ns._FOCUSED_HOST_MAX
+    assert all(f is False for _, f in captured)
+
+
 def test_scan_network_bounds_nmap_host_timeout_under_budget(monkeypatch):
     """scan_network must cap nmap's per-host --host-timeout well below the deep-scan
     time_budget, so a stuck full-range nmap can't run until the orchestrator

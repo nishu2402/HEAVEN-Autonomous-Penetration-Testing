@@ -6,14 +6,17 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import click
 
 from heaven.cli._helpers import _print
 
+if TYPE_CHECKING:
+    from heaven.postex.pivot import JumpSpec
 
-def _parse_jump(spec: str, key: Optional[str]) -> "object":
+
+def _parse_jump(spec: str, key: Optional[str]) -> "JumpSpec":
     """Parse user[:pass]@host[:port] into a JumpSpec."""
     from heaven.postex.pivot import JumpSpec
     if "@" not in spec:

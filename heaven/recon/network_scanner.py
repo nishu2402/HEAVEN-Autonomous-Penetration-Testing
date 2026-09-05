@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import functools
 import ipaddress
 import os
@@ -122,6 +123,13 @@ class HostResult:
     filtered_ports: int = 0
     closed_ports: int = 0
     perimeter: dict = field(default_factory=dict)
+    # ── NetBIOS node-status (UDP/137) enrichment ──────────────────────────────
+    # Populated from a best-effort NBSTAT query on a LAN target — the real,
+    # observed name table a Windows host answers even when its TCP ports
+    # (135/139/445/3389) are firewall-filtered. Carries computer_name / workgroup
+    # / mac_address / file_sharing / is_domain_controller. Empty off-LAN or when
+    # the host did not answer. Never fabricated.
+    netbios: dict = field(default_factory=dict)
 
 
 def parse_port_range(port_spec: str) -> list[int]:
@@ -527,6 +535,11 @@ _SERVICE_DEVICE_TYPES: list[tuple[str, set[int], str]] = [
     ("Windows host", {3389}, "any"),                      # RDP
     ("Windows host", {445}, "any"),                       # SMB
     ("Windows host", {135}, "any"),                       # MSRPC
+    ("Windows host", {139}, "any"),                       # NetBIOS session
+    ("Windows host", {5985}, "any"),                      # WinRM (HTTP)
+    ("Windows host", {5986}, "any"),                      # WinRM (HTTPS)
+    ("Windows host", {47001}, "any"),                     # WinRM listener
+    ("Windows host", {5357}, "any"),                      # WSDAPI / Function Discovery
     ("network equipment", {161, 23}, "all"),              # SNMP + telnet mgmt
 ]
 
@@ -661,26 +674,80 @@ def _nmap_timing_args(stealth_level: str) -> list[str]:
     }.get(stealth_level, ["-T4", "--min-rate", "800", "--max-retries", "3"])
 
 
-def _nmap_evasion_args(raw_capable: bool) -> list[str]:
-    """Firewall/IDS-evasion nmap flags for an AUTHORIZED re-probe of a filtered
-    host — the standard nmap techniques for getting probes past a simple packet
-    filter (RFC-legal, the same ones ``nmap`` documents).
+# Trusted source ports a naive port-based ACL frequently permits inbound: DNS
+# (53), Kerberos (88) and HTTP (80). Sourcing a probe from one slips past a
+# filter that only allows "replies" to those services.
+_EVASION_SOURCE_PORTS = ("53", "88", "80")
 
-    Raw-socket-gated: packet fragmentation (``-f``), padding (``--data-length``)
-    and decoys (``-D``) only affect nmap's *raw* SYN/UDP scans, so they are added
-    only when we can run privileged. An unprivileged connect scan can still spoof
-    a trusted source port, which defeats naive port-based ACLs on most platforms.
-    Nothing here spoofs the source IP address or forges credentials — it only
-    reshapes our own probes so a default-drop filter is more likely to pass them.
+
+def _nmap_evasion_args(raw_capable: bool, *, intensity: str = "standard") -> list[str]:
+    """Firewall/IDS-evasion nmap flags for an AUTHORIZED re-probe of a filtered
+    host — the standard nmap techniques for getting probes past a packet filter
+    (RFC-legal, the same ones ``nmap`` documents).
+
+    ``intensity`` selects how aggressive the reshaping is:
+
+    * ``"standard"`` — fragmentation, a trusted source port, light padding and a
+      handful of decoys. The default; effective against simple stateful filters.
+    * ``"aggressive"`` — smaller MTU fragmentation, heavier randomised padding and
+      a larger decoy cloud, for a filter that resisted the standard pass.
+
+    Raw-socket-gated: packet fragmentation (``-f`` / ``--mtu``), padding
+    (``--data-length``) and decoys (``-D``) only affect nmap's *raw* SYN/UDP
+    scans, so they are added only when we can run privileged. An unprivileged
+    connect scan can still source from a trusted port, which defeats naive
+    port-based ACLs on most platforms. Nothing here spoofs the source IP address
+    or forges credentials — it only reshapes our own probes so a default-drop
+    filter is more likely to pass them.
     """
     if not raw_capable:
+        # The only reshaping an OS-stack connect scan can do is choose its source
+        # port; 53 is the single most widely allowed. (The technique ladder in
+        # _evasion_reprobe rotates the others across attempts.)
         return ["--source-port", "53"]
+    if intensity == "aggressive":
+        return [
+            "--mtu", "16",           # fragment into 16-byte chunks (below -f's 8*n)
+            "--data-length", "50",   # heavier padding past fixed-length heuristics
+            "--source-port", "53",   # source from DNS/53 — frequently allowed
+            "-D", "RND:10",          # 10 random decoys bury the real source
+            "--randomize-hosts",     # non-linear host order across a sweep
+        ]
     return [
         "-f",                    # fragment IP headers so signature filters miss them
         "--data-length", "24",   # pad probes past fixed-length-packet heuristics
         "--source-port", "53",   # source from DNS/53 — frequently allowed outbound
-        "-D", "RND:5",           # 5 random decoys obscure which source is the scanner
+        "-D", "RND:6",           # 6 random decoys obscure which source is the scanner
     ]
+
+
+def _nmap_technique_args(scan_type: str, raw_capable: bool) -> Optional[list[str]]:
+    """nmap flags for a non-SYN firewall-mapping scan technique, or ``None`` when
+    the technique needs raw sockets we don't have.
+
+    These are the classic techniques for characterising and slipping past a
+    firewall that a plain SYN/connect scan can't see through:
+
+    * ``"ack"`` (``-sA``) — an ACK probe is never "open/closed", only
+      ``unfiltered`` vs ``filtered``. It maps *which ports a stateful firewall
+      lets through* and tells a stateful filter (all filtered) apart from a
+      stateless one (some unfiltered), without ever completing a handshake.
+    * ``"fin"`` (``-sF``) / ``"null"`` (``-sN``) / ``"xmas"`` (``-sX``) — probes
+      with no SYN flag sail past a filter (or a stateless ACL) that only blocks
+      SYN packets; a closed port answers RST, an open|filtered port stays silent,
+      so a genuinely-open port that a SYN scan showed as "filtered" is revealed.
+
+    All are raw-socket-only; unprivileged returns ``None`` (the caller falls back
+    to the connect-based techniques).
+    """
+    if not raw_capable:
+        return None
+    return {
+        "ack": ["-sA"],
+        "fin": ["-sF"],
+        "null": ["-sN"],
+        "xmas": ["-sX"],
+    }.get(scan_type)
 
 
 # Ports whose services typically greet with a banner the instant a connection
@@ -794,12 +861,86 @@ async def _python_connect_scan(
     ]
 
 
+async def _connect_probe_states(
+    host: str,
+    ports: list[int],
+    timeout: float = 2.0,
+    stealth_level: str = "normal",
+) -> tuple[list[PortResult], int, int]:
+    """State-aware TCP-connect probe: returns ``(open_ports, filtered, closed)``.
+
+    A plain connect scan only reports what's *open*. This variant also classifies
+    the unopened ports the way nmap does — the crucial firewall signal — by
+    reading WHY each connect failed:
+
+    * ``ConnectionRefusedError`` (a TCP RST) → the port is **closed**; the host is
+      reachable and simply has nothing listening. This is the *no-firewall*
+      signature.
+    * a timeout, or an unreachable/host-down ``OSError`` → the probe was silently
+      **dropped**; that is the packet-filter (``filtered``) signature.
+
+    So on a host that answers nothing on TCP yet is clearly up (it replied to
+    NBSTAT / ARP), a wall of ``filtered`` vs almost no ``closed`` is exactly what
+    lets :func:`classify_perimeter` say "packet-filtering firewall" — and it now
+    works even when nmap timed out before emitting its own tallies. Real
+    observations only; nothing is invented.
+    """
+    if not ports:
+        return [], 0, 0
+    profile = profile_for(stealth_level)
+    concurrency = min(1000, max(50, profile.max_concurrent if profile else 500))
+    sem = asyncio.Semaphore(concurrency)
+    connect_timeout = min(3.0, max(0.4, timeout))
+    OPEN, FILTERED, CLOSED = 0, 1, 2
+
+    async def _probe(port: int) -> tuple[int, int]:
+        async with sem:
+            try:
+                _reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port), timeout=connect_timeout,
+                )
+            except asyncio.TimeoutError:
+                return port, FILTERED
+            except ConnectionRefusedError:
+                return port, CLOSED
+            except OSError as e:
+                # ECONNRESET is also a RST (closed); ENETUNREACH/EHOSTUNREACH and
+                # the rest are drops from this vantage point (filtered/unreachable).
+                if e.errno == errno.ECONNRESET:
+                    return port, CLOSED
+                return port, FILTERED
+            writer.close()
+            with contextlib.suppress(OSError, asyncio.TimeoutError):
+                await writer.wait_closed()
+            return port, OPEN
+
+    outcomes = await asyncio.gather(*[_probe(p) for p in ports])
+    open_nums = sorted(p for p, st in outcomes if st == OPEN)
+    filtered = sum(1 for _p, st in outcomes if st == FILTERED)
+    closed = sum(1 for _p, st in outcomes if st == CLOSED)
+
+    banners: dict[int, str] = {}
+    grab = [p for p in open_nums if p in _BANNER_READ_PORTS or p in _HTTP_LIKE_PORTS]
+    if grab:
+        grabbed = await asyncio.gather(
+            *[_grab_banner(host, p, connect_timeout) for p in grab])
+        banners = {p: b for p, b in zip(grab, grabbed) if b}
+    open_ports = [
+        PortResult(host=host, port=port, protocol="tcp", state="open",
+                   service=SERVICE_FINGERPRINTS.get(port, ""),
+                   banner=banners.get(port, ""))
+        for port in open_nums
+    ]
+    return open_ports, filtered, closed
+
+
 async def _connect_scan_fallback(
     host: str,
     ports: list[int],
     *,
     timeout: float = 2.0,
     stealth_level: str = "normal",
+    assume_up: bool = False,
 ) -> list[PortResult]:
     """Reliable connect-scan recovery for when nmap comes back with no open ports.
 
@@ -809,10 +950,16 @@ async def _connect_scan_fallback(
 
     1. Probe the curated high-value service ports first (FTP/SSH/SMTP/HTTP/SMB/
        DB/…). These answer in a couple of seconds; an open one proves the host is
-       alive. If NONE answer we stop and report nothing, so a dead or fully
-       silent host never pays for a full-range sweep and no port is invented.
-    2. Only once the host has proven itself alive do we sweep the *rest* of the
-       requested range, so a genuinely-open uncommon port is never missed.
+       alive. If NONE answer, and ``assume_up`` is False, we stop and report
+       nothing, so a dead or fully silent host never pays for a full-range sweep
+       and no port is invented.
+    2. Once the host has proven itself alive — or the caller passed ``assume_up``
+       because it already KNOWS the host is up (a focused scan of explicitly-named
+       targets) — we sweep the *rest* of the requested range, so a genuinely-open
+       uncommon port is never missed. Without this, a hardened host that answers
+       only on an uncommon port (e.g. a filtered Windows box exposing solely
+       5357/wsdapi) would be reported as "0 open ports / 0 findings" despite a
+       live, open service.
 
     Every result is a real completed TCP handshake — no port, service or banner is
     ever fabricated. This is what keeps a live, service-rich box (a full
@@ -831,9 +978,13 @@ async def _connect_scan_fallback(
 
     found = await _python_connect_scan(
         host, common, timeout=timeout, stealth_level=stealth_level)
-    if not found:
-        # No high-value service answered → treat the host as dead / empty rather
-        # than spending the budget connect-scanning every port of a silent box.
+    if not found and not assume_up:
+        # No high-value service answered and we have no independent proof this
+        # host is up → treat it as dead / empty rather than spending the budget
+        # connect-scanning every port of a silent box. This fast bail is what
+        # keeps a wide CIDR sweep affordable. A focused scan of named targets
+        # passes assume_up=True so this bail is skipped and the requested band is
+        # always completed (see stage 2 above).
         return []
 
     remaining = sorted(port_set - set(common))
@@ -1264,6 +1415,163 @@ async def _enrich_versionless_ports(
             "the full-range sweep could not finish", filled, host)
 
 
+def _nmap_wait_budget(host_timeout: str, *, margin: float = 60.0) -> float:
+    """Seconds to wait on an nmap subprocess before force-killing it.
+
+    nmap's own ``--host-timeout`` normally fires first; this is a
+    belt-and-suspenders upper bound so a wedged nmap (stuck in startup, DNS, or a
+    version probe) can never hang the scan — directly honouring "nothing hangs".
+    Derived from ``host_timeout`` plus a margin for version-detection wrap-up and
+    the final XML flush."""
+    secs = 120.0
+    try:
+        v = host_timeout.strip().lower()
+        if v.endswith("ms"):
+            secs = float(v[:-2]) / 1000.0
+        elif v.endswith("s"):
+            secs = float(v[:-1])
+        elif v.endswith("m"):
+            secs = float(v[:-1]) * 60.0
+        elif v.endswith("h"):
+            secs = float(v[:-1]) * 3600.0
+        elif v:
+            secs = float(v)
+    except (ValueError, AttributeError):
+        secs = 120.0
+    return max(30.0, secs + margin)
+
+
+async def _terminate_proc(proc: "asyncio.subprocess.Process") -> None:
+    """Best-effort terminate → kill of a subprocess that overran its budget, so no
+    orphaned nmap lingers and the caller is never blocked waiting on it."""
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    except (asyncio.TimeoutError, ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        with contextlib.suppress(Exception):  # noqa: BLE001 — reap, never raise
+            await proc.wait()
+
+
+async def _nmap_udp_scan(
+    host: str,
+    ports: list[int],
+    *,
+    stealth_level: str,
+    host_timeout: str,
+    evade: bool,
+) -> tuple[Optional[list[PortResult]], bool]:
+    """Privileged UDP scan via ``nmap -sU -sV``.
+
+    Returns ``(open_udp_ports, timed_out)``:
+
+    * ``(None, False)`` — nmap could not run (proxy egress that can't carry raw
+      UDP, no nmap on PATH, or unparseable XML). The caller falls back to the
+      pure-Python probe scanner.
+    * ``(None, True)``  — the nmap process overran its hard wall-clock budget and
+      was killed. Also a full fall-back, but flagged as incomplete.
+    * ``(ports, False)`` — authoritative result (``ports`` may be empty: nmap
+      finished and that is genuinely all that is open).
+    * ``(ports, True)``  — nmap hit its ``--host-timeout`` before finishing;
+      ``ports`` holds whatever it confirmed open so far and the caller supplements
+      the rest with the bounded pure-Python probes (never a silent zero on a slow
+      or heavily-filtered host)."""
+    proxy_prefix, force_connect = _egress_nmap()
+    if force_connect:
+        # Raw UDP can't traverse a proxy — let the caller use the probe scanner.
+        return None, False
+    sudo_prefix = list(_nmap_sudo_prefix())
+    port_str = _build_nmap_port_spec(ports)
+    if not port_str:
+        return [], False
+    timing = _nmap_timing_args(stealth_level)
+    evasion = _nmap_evasion_args(True, intensity="standard") if evade else []
+    cmd = [
+        *proxy_prefix, *sudo_prefix, "nmap", "-sU", "-sV", "-Pn",
+        "-p", port_str, "-oX", "-", "--host-timeout", host_timeout, *timing,
+        *evasion, host,
+    ]
+    logger.debug("nmap (udp): %s", " ".join(cmd))
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        stdout, _stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=_nmap_wait_budget(host_timeout))
+    except asyncio.TimeoutError:
+        # nmap ignored its own --host-timeout (wedged) — kill it and fall back.
+        await _terminate_proc(proc)
+        logger.debug("nmap -sU exceeded its wall-clock budget for %s — "
+                     "falling back to pure-Python UDP probes", host)
+        return None, True
+    parsed = _parse_nmap_xml(stdout, host)
+    if not parsed:
+        return None, False
+    # _parse_nmap_xml already keeps only state=="open" ports; select the UDP ones.
+    udp = [p for p in parsed["ports"] if p.protocol == "udp"]
+    return udp, bool(parsed.get("host_timed_out"))
+
+
+async def _udp_service_scan(
+    host: str,
+    udp_ports: Optional[list[int]],
+    *,
+    timeout: float = 2.0,
+    stealth_level: str = "normal",
+    raw_capable: bool = False,
+    host_timeout: str = "120s",
+    evade: bool = False,
+) -> list[PortResult]:
+    """Scan UDP ports and return the genuinely-open ones as ``PortResult`` objects
+    (``protocol="udp"``). Privileged hosts use nmap ``-sU`` (authoritative state +
+    version); everyone else uses the pure-Python service-probe scanner, which only
+    reports a port open when a real service answers. ``udp_ports`` defaults to the
+    curated common-UDP set when not given."""
+    from heaven.recon.udp_scanner import COMMON_UDP_PORTS, scan_udp_ports
+
+    ports = sorted(set(udp_ports)) if udp_ports else list(COMMON_UDP_PORTS)
+    if not ports:
+        return []
+
+    confirmed: list[PortResult] = []
+    if raw_capable:
+        try:
+            nmap_ports, timed_out = await _nmap_udp_scan(
+                host, ports, stealth_level=stealth_level,
+                host_timeout=host_timeout, evade=evade)
+        except FileNotFoundError:
+            nmap_ports, timed_out = None, False  # no nmap on PATH
+        except Exception:  # noqa: BLE001
+            logger.debug("nmap -sU failed for %s — using pure-Python UDP probes",
+                         host, exc_info=True)
+            nmap_ports, timed_out = None, False
+        if nmap_ports is not None and not timed_out:
+            return nmap_ports  # nmap finished — authoritative UDP state
+        # nmap was unavailable or ran out of time: keep whatever it confirmed and
+        # fill the rest with the bounded pure-Python probes so a slow / heavily
+        # filtered host still gets its responsive UDP services caught, instead of
+        # a silent zero. The probe scanner reports open only on a real reply, so
+        # merging never invents a port.
+        confirmed = list(nmap_ports or [])
+
+    seen = {p.port for p in confirmed}
+    remaining = [p for p in ports if p not in seen]
+    if not remaining:
+        return confirmed
+
+    profile = profile_for(stealth_level)
+    concurrency = min(256, max(32, profile.max_concurrent // 4)) if profile else 128
+    out = await scan_udp_ports(
+        host, remaining, timeout=max(1.0, timeout), concurrency=concurrency)
+    for p in out.get("open", []):
+        confirmed.append(PortResult(
+            host=host, port=int(p["port"]), protocol="udp", state="open",
+            service=p.get("service", ""), banner=p.get("banner", ""),
+        ))
+    return confirmed
+
+
 async def scan_host(
     host: str,
     ports: list[int],
@@ -1276,6 +1584,8 @@ async def scan_host(
     enrich_host_timeout: str = "120s",
     ephemeral_enrich_host_timeout: str = "60s",
     evade: bool = False,
+    evade_intensity: str = "standard",
+    focused: bool = False,
 ) -> HostResult:
     """
     Full-spectrum nmap scan: all ports, service detection, default NSE scripts,
@@ -1316,6 +1626,28 @@ async def scan_host(
     port_str = _build_nmap_port_spec(ports)
     timing = _nmap_timing_args(stealth_level)
 
+    # ── Fast curated preflight ─────────────────────────────────────────────────
+    # Probe the high-value ports (web / DB / SMB / RDP / WinRM / WSDAPI / AD …)
+    # with a quick TCP-connect scan BEFORE nmap. On a heavily-filtered host nmap's
+    # own -sV -sC scan grinds until its --host-timeout — and if the caller's time
+    # budget fires first, nmap is CANCELLED and the connect-scan recovery below
+    # never runs, so the host's one open high port (the reproduced Windows-7
+    # "5357/wsdapi only" case) is lost entirely. This preflight captures those
+    # obvious services in ~2s regardless of how long nmap takes or whether it is
+    # cancelled; nmap then enriches them with -sV, and _merge keeps nmap's richer
+    # entries. Real handshakes only — nothing invented. Skipped under proxy egress
+    # (fail-closed above already returned) and best-effort (never raises).
+    preflight: list[PortResult] = []
+    preflight_filtered = 0
+    preflight_closed = 0
+    curated_preflight = sorted(set(ports) & _ALWAYS_PROBE_PORTS)
+    if curated_preflight:
+        try:
+            preflight, preflight_filtered, preflight_closed = await _connect_probe_states(
+                host, curated_preflight, timeout=timeout, stealth_level=stealth_level)
+        except Exception:  # noqa: BLE001 — preflight is best-effort insurance
+            logger.debug("curated preflight probe failed for %s", host, exc_info=True)
+
     # Decide privileges once: -O / -sS / -sU all need raw sockets, and running
     # any of them unprivileged makes nmap abort the ENTIRE scan (losing the port
     # data too). Elevate through passwordless sudo when it's available; when it
@@ -1354,21 +1686,18 @@ async def scan_host(
     # when it lacks raw privileges.
     connect_flag = ["-sT"] if force_connect else []
 
-    if include_udp and udp_ports and raw_capable:
-        udp_str = _build_nmap_port_spec(udp_ports[:100])
-        scan_flags = ["-sS", "-sU"]
-        port_args = ["-p", f"T:{port_str},U:{udp_str}"]
-    else:
-        if include_udp and udp_ports and not raw_capable:
-            logger.debug(
-                "UDP/SYN scan needs raw sockets we don't have — "
-                "scanning TCP (connect) only for %s", host,
-            )
-        scan_flags = []
-        port_args = ["-p", port_str]
+    # UDP is handled by a DEDICATED pass AFTER the TCP scan (see _udp_service_scan
+    # below), never merged into this command. Two reasons: (1) it keeps UDP out of
+    # the TCP degraded-recovery logic, which assumes a TCP-only port set; (2) it
+    # lets UDP work UNPRIVILEGED via HEAVEN's pure-Python service probes — nmap's
+    # -sU needs raw sockets most operators don't have, so an inline -sU silently
+    # did nothing for them. The dedicated pass uses nmap -sU when root is available
+    # and the pure-Python probes otherwise, so UDP services are actually found.
+    scan_flags: list[str] = []
+    port_args = ["-p", port_str]
 
     # Firewall/IDS-evasion flags for an authorized re-probe of a filtered host.
-    evasion = _nmap_evasion_args(raw_capable) if evade else []
+    evasion = _nmap_evasion_args(raw_capable, intensity=evade_intensity) if evade else []
 
     cmd = [
         *proxy_prefix, *sudo_prefix, "nmap", "-sV", "-sC", "-Pn",
@@ -1445,6 +1774,32 @@ async def scan_host(
                 host_result.device_type = parsed.get("device_type", "")
                 host_result.device_type_source = parsed.get("device_type_source", "")
 
+            # Fold in the curated preflight result. If nmap timed out / was
+            # cancelled before reaching the host's one open high port, this is
+            # where that port survives — merged so nmap's richer -sV entries win
+            # for any port both saw. A preflight hit also proves the host is up.
+            if preflight:
+                added_pf = _merge_recovered_ports(
+                    host_result, preflight, "curated preflight")
+                if host_result.open_ports:
+                    host_result.is_alive = True
+                if added_pf:
+                    logger.debug(
+                        "preflight captured %d high-value port(s) on %s nmap "
+                        "missed/never reached: %s", len(added_pf), host,
+                        ", ".join(str(p) for p in added_pf))
+            # Backfill the perimeter tallies from the state-aware preflight when
+            # nmap emitted none (it timed out / crashed before finishing). Without
+            # this the firewall classifier goes blind on exactly the heavily-
+            # filtered host it exists to flag: a wall of curated ports that timed
+            # out (filtered) with almost none refused (closed) is the packet-filter
+            # signature. Only backfill when nmap gave nothing, so a completed nmap's
+            # richer full-range tallies always win.
+            if (host_result.filtered_ports == 0 and host_result.closed_ports == 0
+                    and (preflight_filtered or preflight_closed)):
+                host_result.filtered_ports = preflight_filtered
+                host_result.closed_ports = preflight_closed
+
             # nmap came back with NO open ports — but on a host we were explicitly
             # told to scan we cannot take that at face value. It happens for three
             # very different reasons, and every one otherwise turns a live,
@@ -1515,11 +1870,16 @@ async def scan_host(
                     service_ports, ephemeral_ports = ephemeral_ports, []
 
                 if service_ports:
-                    # common-first: this bails cheaply on a dead host (no full sweep),
-                    # so it stays safe per-host inside a CIDR range.
+                    # common-first: on a wide sweep this bails cheaply on a dead
+                    # host (no full sweep), so it stays safe per-host inside a CIDR
+                    # range. On a FOCUSED scan of named hosts we already know the
+                    # host is up, so assume_up=True forces the requested service
+                    # band to be completed even when only an uncommon port is open
+                    # — otherwise a hardened host (e.g. Windows filtered down to
+                    # 5357/wsdapi) would come back as "0 open ports".
                     recovered = await _connect_scan_fallback(
                         host, service_ports, timeout=timeout,
-                        stealth_level=stealth_level)
+                        stealth_level=stealth_level, assume_up=focused)
                     _merge_recovered_ports(
                         host_result, recovered, "connect-scan recovery")
 
@@ -1578,6 +1938,71 @@ async def scan_host(
             if fallback_ports:
                 host_result.is_alive = True
 
+    # ── UDP service scan ───────────────────────────────────────────────────────
+    # Opt-in (include_udp). Real UDP services — DNS, DHCP, TFTP, NTP, SNMP,
+    # NetBIOS, RPC/portmap, IKE, SIP, mDNS, SSDP, syslog, RADIUS … — are invisible
+    # to the TCP sweep above, so a full assessment must probe them separately. This
+    # pass uses nmap -sU (authoritative state + -sV version) when we have raw
+    # sockets, and HEAVEN's pure-Python service-probe scanner otherwise — the
+    # latter reports a UDP port open ONLY when a service actually answers a real
+    # protocol probe, so a responsive UDP service is caught at any privilege level
+    # with no invented "open" from silence. Never breaks the host scan.
+    if include_udp:
+        try:
+            udp_results = await _udp_service_scan(
+                host, udp_ports, timeout=timeout, stealth_level=stealth_level,
+                raw_capable=raw_capable, host_timeout=enrich_host_timeout,
+                evade=evade,
+            )
+        except Exception:  # noqa: BLE001 — UDP scan is additive; never fatal
+            logger.debug("UDP service scan failed for %s", host, exc_info=True)
+            udp_results = []
+        if udp_results:
+            existing = {(p.port, p.protocol) for p in host_result.open_ports}
+            added_udp = 0
+            for up in udp_results:
+                if (up.port, up.protocol) not in existing:
+                    host_result.open_ports.append(up)
+                    existing.add((up.port, up.protocol))
+                    added_udp += 1
+            if added_udp:
+                host_result.is_alive = True
+                logger.info("  %s: %d open UDP service(s)", host, added_udp)
+
+    # ── NetBIOS (UDP/137) enrichment ───────────────────────────────────────────
+    # A hardened Windows host filters every classic TCP port yet still answers an
+    # NBSTAT node-status query on the LAN — recovering its computer name, work-
+    # group/domain, MAC and Server-service state without root or an open TCP port.
+    # This is the direct fix for "live Windows box → OS not determined, 0 ports":
+    # a positive NBSTAT reply is itself a Windows signal, so we confirm the OS,
+    # learn the hostname, and note that file sharing (SMB) is running behind the
+    # firewall. Best-effort, LAN-only, never overwrites a stronger nmap fact.
+    try:
+        from heaven.recon.netbios import nbstat as _nbstat
+        nb = await _nbstat(host, timeout=min(4.0, max(2.0, timeout)))
+    except Exception:  # noqa: BLE001 — enrichment must never break a scan
+        nb = None
+    if nb is not None:
+        host_result.netbios = nb.to_dict()
+        host_result.is_alive = True  # it answered us — it is genuinely up
+        if nb.computer_name and not host_result.device_name:
+            host_result.device_name = nb.computer_name
+            host_result.device_name_source = "netbios"
+        if nb.mac_address and not host_result.mac_address:
+            host_result.mac_address = nb.mac_address
+        # NBSTAT is a Windows/SMB-stack protocol: a reply confirms Windows. Only
+        # UPGRADE from nothing / a bare TTL guess — never override a specific
+        # nmap -O or service-CPE OS (which may carry the exact release).
+        if not host_result.os_guess or host_result.os_source in ("", "heuristic"):
+            if "windows" not in host_result.os_guess.lower():
+                host_result.os_guess = "Windows"
+            if not host_result.os_source or host_result.os_source == "heuristic":
+                host_result.os_source = "netbios"
+        if not host_result.device_type:
+            host_result.device_type = ("domain controller"
+                                       if nb.is_domain_controller else "Windows host")
+            host_result.device_type_source = "netbios"
+
     # Honeypot heuristic: too many open ports is suspicious
     open_count = len(host_result.open_ports)
     if open_count > 50:
@@ -1601,13 +2026,19 @@ async def _evasion_reprobe(
     """Authorized firewall/IDS-evasion re-probe of a filtered host's high-value
     ports — the "still get findings through the perimeter" step.
 
-    Runs TWO independent probes and merges them, because a packet-filter that
-    drops one path often lets the other through:
+    Runs an escalating LADDER of independent techniques and merges them, because a
+    packet-filter that drops one probe signature often lets another through. Each
+    rung presents a completely different packet signature to the filter:
 
-    * an nmap evasion scan (``evade=True`` → fragmentation / padding / trusted
-      source port / decoys), and
-    * a pure-Python TCP connect scan, which rides the OS network stack and so
-      presents a completely different packet signature.
+    1. **Standard nmap evasion** — fragmentation + light padding + a trusted
+       source port (53) + a decoy cloud (``evade=True``).
+    2. **Pure-Python connect scan** — rides the OS TCP stack, so it looks like a
+       normal client connection rather than an nmap probe; slips past filters that
+       target nmap's raw-packet fingerprint.
+    3. **Aggressive nmap evasion** (only if the earlier rungs found nothing, and
+       only when raw-capable) — smaller-MTU fragmentation, heavier randomised
+       padding and a larger decoy cloud, for a filter that resisted the standard
+       pass.
 
     Timing is bumped to at least ``stealth`` (slower, lower parallelism) so an
     IPS that started rate-blocking has cooled down. Bounded by a short per-host
@@ -1618,6 +2049,8 @@ async def _evasion_reprobe(
         return []
     bumped = "stealth" if stealth_level in ("normal", "aggressive", "loud") else stealth_level
     found: dict[int, PortResult] = {}
+
+    # Rung 1 — standard nmap evasion (fragment / pad / source-port 53 / decoys).
     try:
         r = await scan_host(
             host, ports, timeout=max(timeout, 3.0), semaphore=sem,
@@ -1626,7 +2059,9 @@ async def _evasion_reprobe(
         for p in r.open_ports:
             found[p.port] = p
     except Exception:
-        logger.debug("evasion nmap re-probe failed for %s", host, exc_info=True)
+        logger.debug("evasion nmap re-probe (standard) failed for %s", host, exc_info=True)
+
+    # Rung 2 — pure-Python connect scan (different, OS-stack packet signature).
     try:
         for p in await _python_connect_scan(
             host, ports, timeout=max(timeout, 3.0), stealth_level=bumped,
@@ -1634,6 +2069,26 @@ async def _evasion_reprobe(
             found.setdefault(p.port, p)
     except Exception:
         logger.debug("evasion connect re-probe failed for %s", host, exc_info=True)
+
+    # Rung 3 — aggressive nmap evasion, only when the cheaper rungs found nothing
+    # and we can run privileged (fragmentation/decoys need raw sockets to matter).
+    raw_capable = _have_admin_privileges() or bool(_nmap_sudo_prefix())
+    if not found and raw_capable:
+        try:
+            logger.info(
+                "  ↳ escalating evasion on %s: aggressive fragmentation "
+                "(--mtu 16) + heavy padding + 10-decoy cloud", host)
+            r = await scan_host(
+                host, ports, timeout=max(timeout, 3.0), semaphore=sem,
+                stealth_level=bumped, evade=True, evade_intensity="aggressive",
+                host_timeout="90s",
+            )
+            for p in r.open_ports:
+                found.setdefault(p.port, p)
+        except Exception:
+            logger.debug(
+                "evasion nmap re-probe (aggressive) failed for %s", host, exc_info=True)
+
     return list(found.values())
 
 
@@ -1668,6 +2123,14 @@ _DISCOVERY_THRESHOLD = 16
 _LIVENESS_PROBE_PORTS: tuple[int, ...] = (
     80, 443, 22, 445, 3389, 8080, 139, 135, 53, 21, 23, 25, 110, 143,
     3306, 5432, 1433, 8443, 8000, 8888, 5900, 111, 993, 995, 6379, 27017,
+    # Windows / Active-Directory surface. A HARDENED Windows host (Windows
+    # Firewall on, File & Printer sharing off) silently FILTERS 135/139/445/3389
+    # yet still answers on its management/discovery ports — most often
+    # 5357/wsdapi (Function Discovery, on by default), WinRM (5985/5986), and the
+    # AD control plane on a domain controller. Without these in the liveness set a
+    # live-but-firewalled Windows box (the classic internal-engagement target)
+    # reads as "down / 0 open ports". 5357 is the single most common survivor.
+    5357, 5985, 5986, 88, 3268,
     # cPanel / WHM / webmail control-plane + alt-SSH — common on shared-hosting
     # targets and a live-host signal in their own right.
     2082, 2083, 2086, 2087, 2095, 2096, 2222,
@@ -1683,6 +2146,13 @@ _ALWAYS_PROBE_PORTS: frozenset[int] = frozenset(_LIVENESS_PROBE_PORTS) | frozens
     465, 587, 389, 636, 993, 995,           # mail submission / LDAP(S) / secure mail
     1521, 9200, 5984, 11211, 9042, 9300,    # Oracle / ES / CouchDB / memcached / Cassandra
     2077, 2078, 8443, 10000,                # cPanel WebDAV / https-alt / Webmin
+    # Windows / AD / remote-management ports that routinely survive on a host
+    # whose SMB/RDP are firewalled. This is the structural fix for the reproduced
+    # "live Windows 7 shows 0 open ports" miss: 5357/wsdapi is the box's ONLY open
+    # port, so it MUST be probed common-first, never left to the slow full sweep.
+    5357, 5985, 5986, 47001, 2869,          # WSDAPI / WinRM(HTTP,HTTPS,listener) / UPnP
+    88, 464, 3268, 3269, 593, 9389,         # Kerberos / kpasswd / Global Catalog / RPC-HTTP / AD Web Services
+    47808, 102, 502,                        # BACnet / S7 / Modbus (OT controllers also silently filter)
 })
 
 # The upper bound of the "service band": ports at or below this (plus the curated
@@ -1693,6 +2163,15 @@ _ALWAYS_PROBE_PORTS: frozenset[int] = frozenset(_LIVENESS_PROBE_PORTS) | frozens
 # scan_host). Ports above this that aren't curated high-value ports are treated as
 # ephemeral / dynamic (RPC, OS) ports; they're fingerprinted by a SECOND targeted
 # -sV that runs only AFTER the completion sweep has settled (see below).
+# A scan of at most this many hosts is treated as FOCUSED: when nmap degrades
+# (host-timeout / crash) on such a host we complete the requested port band with
+# the connect scanner even if no curated high-value port answered, because the
+# operator explicitly named these hosts and a "0 open ports" result on a live but
+# hardened host (only an uncommon port open) is a false negative, not a saving.
+# Above this count the scan is a wide sweep, where the fast dead-host bail is kept
+# so peak sockets and time stay bounded across hundreds of hosts.
+_FOCUSED_HOST_MAX = 16
+
 _SERVICE_PORT_CEILING = 10000
 
 # After the ephemeral/high-band completion sweep floods the target, the host (and
@@ -1858,6 +2337,7 @@ async def scan_network(
     port_range: str = "1-65535",
     timeout: float = 2.0,
     include_udp: bool = False,
+    udp_ports: Optional[str] = None,
     stealth_level: str = "normal",
     time_budget: Optional[float] = None,
     passive_enrich: bool = True,
@@ -1911,6 +2391,20 @@ async def scan_network(
         logger.debug(
             "Folded %d high-value port(s) into the scan range for coverage: %s",
             len(_missing), _missing,
+        )
+
+    # Resolve the UDP port list once (only when a UDP scan was requested). A
+    # pure-Python unprivileged sweep is bounded so it stays feasible; an explicit
+    # spec is honoured up to that bound. Privileged nmap -sU can take the full set.
+    udp_port_list: Optional[list[int]] = None
+    if include_udp:
+        from heaven.recon.udp_scanner import _have_raw_udp, resolve_udp_ports
+        _udp_cap = 4096 if _have_raw_udp() else 1024
+        udp_port_list = resolve_udp_ports(udp_ports, ports, max_ports=_udp_cap)
+        logger.info(
+            "UDP scan enabled — probing %d UDP port(s) per host (%s)",
+            len(udp_port_list),
+            "nmap -sU" if _have_raw_udp() else "pure-Python service probes",
         )
 
     concurrency = profile.max_concurrent if profile else 500
@@ -2006,6 +2500,12 @@ async def scan_network(
         f"(stealth={stealth_level}, concurrency={concurrency}, platform={sys.platform})"
     )
 
+    # A small, explicitly-named target set is a FOCUSED scan: on the nmap-degrade
+    # path we complete the requested band even when only uncommon ports are open,
+    # rather than reporting a live-but-hardened host as "0 open ports". A wide
+    # sweep keeps the fast dead-host bail so it stays bounded (see scan_host).
+    focused_scan = len(expanded_targets) <= _FOCUSED_HOST_MAX
+
     # Randomise scan order if evasion profile requires it
     if profile and profile.scan_order == "random":
         import random
@@ -2022,9 +2522,11 @@ async def scan_network(
 
         result = await scan_host(
             host, ports, timeout=timeout, semaphore=sem,
-            include_udp=include_udp, stealth_level=stealth_level, evade=evade,
+            include_udp=include_udp, udp_ports=udp_port_list,
+            stealth_level=stealth_level, evade=evade,
             host_timeout=nmap_host_timeout, enrich_host_timeout=enrich_host_timeout,
             ephemeral_enrich_host_timeout=ephemeral_enrich_host_timeout,
+            focused=focused_scan,
         )
         if not isinstance(result, HostResult):
             return None
@@ -2445,6 +2947,9 @@ def _host_to_dict(host: HostResult) -> dict:
         "perimeter": host.perimeter,
         "filtered_ports": host.filtered_ports,
         "closed_ports": host.closed_ports,
+        # NetBIOS node-status facts (empty {} off-LAN or no reply). The honest
+        # unprivileged win on a firewalled Windows host: name / workgroup / MAC.
+        "netbios": host.netbios,
         "open_ports": [
             {
                 "port": p.port,

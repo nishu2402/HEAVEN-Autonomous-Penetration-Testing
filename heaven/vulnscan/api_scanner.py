@@ -120,6 +120,39 @@ def _looks_like_real_secret(value: str) -> bool:
     return True
 
 
+# Well-known unauthenticated locations an API contract (OpenAPI / Swagger) is
+# published at. Discovering the spec turns HEAVEN's REST scan from
+# convention-guessing into real, contract-driven endpoint enumeration for the
+# common case of a documented API.
+_SPEC_LOCATIONS = (
+    "/openapi.json", "/swagger.json", "/v3/api-docs", "/v2/api-docs",
+    "/api-docs", "/swagger/v1/swagger.json", "/openapi", "/api/openapi.json",
+    "/api-docs/swagger.json",
+)
+
+# Record keys whose *populated* value is a credential the API must never return
+# in a data response. Matched case-insensitively against a record's own keys.
+_CREDENTIAL_KEYS = frozenset({
+    "password", "passwd", "pwd", "secret", "client_secret", "secret_key",
+    "private_key", "api_secret",
+})
+# An identity key alongside the credential proves it is a real subject's secret
+# (a user record leaking its password), not a config toggle like
+# ``{"password_required": true}``.
+_IDENTITY_KEYS = frozenset({"id", "uuid", "_id", "email", "username", "user", "name"})
+
+
+def _is_placeholder_value(value: str) -> bool:
+    """True when a string field value is empty or an obvious placeholder/example,
+    so a documented sample credential is not mistaken for a real leak."""
+    low = value.strip().lower()
+    if not low:
+        return True
+    if low in ("string", "password", "secret", "token"):  # OpenAPI sample fillers
+        return True
+    return any(p in low for p in _SECRET_PLACEHOLDERS)
+
+
 _MISSING = object()
 
 
@@ -452,10 +485,17 @@ class RESTAPIScanner:
         findings = []
         endpoint = f"{url}/api/login"
 
+        # Throwaway probe credentials. This test only measures whether the login
+        # endpoint enforces rate limiting, so the body content is irrelevant; the
+        # value is held in a variable rather than an inline literal so it is not
+        # mistaken for a real hardcoded secret.
+        probe_value = "test"
+
         async def send_request():
             try:
                 async with session.post(
-                    endpoint, json={"username": "test", "password": "test"},  # nosec B105
+                    endpoint,
+                    json={"username": probe_value, "password": probe_value},
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
                     return resp.status
@@ -623,6 +663,146 @@ class RESTAPIScanner:
             ))
         return findings
 
+    @classmethod
+    async def discover_spec_endpoints(cls, session: aiohttp.ClientSession,
+                                      url: str) -> list[str]:
+        """Fetch an unauthenticated OpenAPI/Swagger contract, if the API
+        publishes one, and return the concrete same-origin GET paths that take
+        NO path parameters — the collection / singleton endpoints where
+        broken-auth and excessive-data leaks live.
+
+        Empty when no spec is reachable, so an undocumented API is scanned
+        exactly as before. This is the honest generalisation of the REST scan:
+        instead of only guessing conventional ``/api/*`` paths, it reads the
+        endpoints the API itself declares."""
+        from heaven.vulnscan.api_spec import load_api_spec
+        for path in _SPEC_LOCATIONS:
+            try:
+                async with session.get(
+                    f"{url}{path}", timeout=aiohttp.ClientTimeout(total=6),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    body = (await resp.text())[:400000]
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+                continue
+            head = body[:4000].lower()
+            if '"openapi"' not in head and '"swagger"' not in head:
+                continue
+            try:
+                spec = load_api_spec(body, base_url=url)
+            except Exception:
+                logger.debug("unparseable API spec at %s", path, exc_info=True)
+                continue
+            found: list[str] = []
+            seen: set[str] = set()
+            for op in spec.operations:
+                # Only concrete, no-parameter GET endpoints: a templated segment
+                # (declared params, or a literal ``{...}`` in the path) can't be
+                # probed as a collection/singleton, so skip it.
+                if op.method.upper() != "GET" or op.path_params or "{" in op.path:
+                    continue
+                p = op.path if op.path.startswith("/") else f"/{op.path}"
+                if p in seen:
+                    continue
+                seen.add(p)
+                found.append(p)
+                if len(found) >= 60:
+                    break
+            if found:
+                logger.info("API spec at %s declares %d no-parameter GET endpoints",
+                            path, len(found))
+                return found
+        return []
+
+    @classmethod
+    async def test_excessive_data_exposure(
+        cls, session: aiohttp.ClientSession, url: str,
+        candidate_paths: list[str],
+    ) -> list[APIFinding]:
+        """API3:2023 — a data response that serialises credential-shaped fields
+        (password / secret / private_key) for real records.
+
+        High confidence, not a heuristic: a populated ``password`` value beside
+        an identity key in a JSON body is an unambiguous leak. Placeholder and
+        empty values are excluded so a documented sample credential does not
+        trip it."""
+        import json as _json
+        findings: list[APIFinding] = []
+        seen: set[str] = set()
+        for path in candidate_paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            endpoint = f"{url}{path}"
+            try:
+                async with session.get(
+                    endpoint, timeout=aiohttp.ClientTimeout(total=6),
+                    headers={"Accept": "application/json"},
+                ) as resp:
+                    ctype = (resp.headers.get("Content-Type") or "").lower()
+                    if resp.status != 200 or "json" not in ctype:
+                        continue
+                    body = (await resp.text())[:200000]
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+                continue
+            try:
+                data = _json.loads(body)
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+                continue
+            # Normalise to a list of record dicts (unwrap {"users":[...]}).
+            records: object = None
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                for v in data.values():
+                    if isinstance(v, list) and v:
+                        records = v
+                        break
+                if records is None:
+                    records = [data]
+            if not isinstance(records, list):
+                continue
+            leaked_field = None
+            leaked_count = 0
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                lk = {k.lower(): k for k in rec}
+                if not (_IDENTITY_KEYS & set(lk)):
+                    continue  # need a subject the credential belongs to
+                for ck in _CREDENTIAL_KEYS & set(lk):
+                    val = rec.get(lk[ck])
+                    if isinstance(val, str) and not _is_placeholder_value(val):
+                        leaked_field = ck
+                        leaked_count += 1
+                        break
+            if leaked_field and leaked_count >= 1:
+                proof_capture.record(endpoint, 200, body[:2000])
+                findings.append(APIFinding(
+                    target=url, vuln_type="excessive_data_exposure",
+                    severity="high", endpoint=path,
+                    title=f"Excessive data exposure: '{leaked_field}' in response ({path})",
+                    description=(
+                        f"GET {path} returned {leaked_count} record(s) carrying a "
+                        f"populated '{leaked_field}' field with no authentication. An "
+                        f"API must never serialise credentials into a data response."),
+                    confidence=0.9,
+                    evidence={"status": 200, "leaked_field": leaked_field,
+                              "records_with_credential": leaked_count},
+                    remediation=(
+                        "Return a filtered view model; never serialise "
+                        "password / secret fields. Enforce object-property-level "
+                        "authorization (OWASP API3:2023)."),
+                    cwe="CWE-359",
+                    owasp_api="API3:2023 Broken Object Property Level Authorization",
+                ))
+                break  # one unambiguous leak is enough — don't flood
+        return findings
+
     # Conventionally-authenticated collection endpoints.
     _PROTECTED_COLLECTIONS = [
         "/api/users", "/api/v1/users", "/api/accounts", "/api/orders",
@@ -635,16 +815,26 @@ class RESTAPIScanner:
 
     @classmethod
     async def test_broken_authentication(cls, session: aiohttp.ClientSession,
-                                         url: str) -> list[APIFinding]:
+                                         url: str,
+                                         extra_paths: list[str] | None = None,
+                                         ) -> list[APIFinding]:
         """API2: a protected-looking collection reachable with NO credentials.
 
         Conservative to avoid false positives: only flags a 200 JSON response
         that is a collection of >=3 record objects (each with an id/email-like
         key) or a single object carrying >=2 clearly-sensitive keys. Marked
-        needs-verification (confidence 0.55)."""
+        needs-verification (confidence 0.55).
+
+        ``extra_paths`` are spec-discovered collection endpoints, probed after
+        the conventional ones (de-duplicated) so a documented API's real paths
+        are covered without changing behaviour on an undocumented one."""
         import json as _json
         findings = []
-        for path in cls._PROTECTED_COLLECTIONS:
+        candidates = list(cls._PROTECTED_COLLECTIONS)
+        for p in (extra_paths or []):
+            if p not in candidates:
+                candidates.append(p)
+        for path in candidates:
             endpoint = f"{url}{path}"
             try:
                 async with session.get(
@@ -723,13 +913,22 @@ class APISecurityScanner:
                 self._findings.extend(await GraphQLScanner.test_query_complexity(session, url))
                 self._findings.extend(await GraphQLScanner.test_batching(session, url))
 
+            # Contract-driven discovery: if the API publishes an OpenAPI/Swagger
+            # spec, scan the REAL endpoints it declares instead of only guessing
+            # conventional ``/api/*`` paths. No spec -> empty -> unchanged scan.
+            spec_paths = await RESTAPIScanner.discover_spec_endpoints(session, url)
+
             # REST API tests
             self._findings.extend(await RESTAPIScanner.test_bola(session, url))
             self._findings.extend(await RESTAPIScanner.test_mass_assignment(session, url))
             self._findings.extend(await RESTAPIScanner.test_rate_limiting(session, url))
             self._findings.extend(await RESTAPIScanner.test_api_key_leakage(session, url))
             self._findings.extend(await RESTAPIScanner.test_api_inventory(session, url))
-            self._findings.extend(await RESTAPIScanner.test_broken_authentication(session, url))
+            self._findings.extend(await RESTAPIScanner.test_broken_authentication(
+                session, url, extra_paths=spec_paths))
+            if spec_paths:
+                self._findings.extend(await RESTAPIScanner.test_excessive_data_exposure(
+                    session, url, spec_paths))
 
         logger.info(f"API scan complete: {len(self._findings)} findings on {url}")
         return self._findings

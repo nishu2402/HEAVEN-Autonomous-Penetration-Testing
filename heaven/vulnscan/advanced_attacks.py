@@ -765,9 +765,19 @@ async def run_advanced_tests(session: aiohttp.ClientSession, url: str,
             jwt_findings = await JWTAttacker.test_jwt_vulnerabilities(session, url, token)
             all_findings.extend(jwt_findings)
 
-    # Race condition on critical endpoints
+    # Race condition on critical endpoints. Endpoints may arrive as bare URL
+    # strings or as recon dicts ({"url"/"action": ...}); coerce to a URL string
+    # so a dict can never reach ``url.lower()`` and abort the whole ADVANCED
+    # phase (which would also cascade-skip Nuclei + PoC validation downstream).
     if scan_data:
         for endpoint in scan_data.get("critical_endpoints", []):
+            if isinstance(endpoint, dict):
+                endpoint = str(endpoint.get("url") or endpoint.get("action") or "")
+            elif not isinstance(endpoint, str):
+                endpoint = str(endpoint or "")
+            endpoint = endpoint.strip()
+            if not endpoint:
+                continue
             race = await RaceConditionDetector.test_race(session, endpoint)
             if race:
                 all_findings.append(race)

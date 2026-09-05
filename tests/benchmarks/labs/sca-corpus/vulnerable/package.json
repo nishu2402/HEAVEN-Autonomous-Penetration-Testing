@@ -1,0 +1,10 @@
+{
+  "name": "heaven-sca-benchmark-vulnerable",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Inert manifest of known-vulnerable npm pins for HEAVEN's SCA benchmark (nothing is installed).",
+  "dependencies": {
+    "lodash": "4.17.11",
+    "minimist": "1.2.0"
+  }
+}

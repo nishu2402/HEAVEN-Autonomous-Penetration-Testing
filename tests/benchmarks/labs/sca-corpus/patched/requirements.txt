@@ -1,0 +1,13 @@
+# HEAVEN SCA benchmark corpus — PATCHED Python pins (precision / negative control).
+#
+# These are versions that FIXED the specific advisories the vulnerable manifest
+# carries. The scorer asserts that none of the curated must-find CVEs are
+# reported for these versions — proving HEAVEN respects OSV's fixed ranges and
+# never flags a patched dependency for a vulnerability it already resolved. (A
+# patched version may still carry *later, unrelated* advisories; that is correct
+# and is not what this control checks.)
+Django==4.2.16
+urllib3==2.2.3
+requests==2.32.4
+PyYAML==6.0.2
+Jinja2==3.1.5

@@ -474,3 +474,51 @@ def test_resolve_engagement_priority(tmp_path, monkeypatch):
     assert server._resolve_engagement_name("explicit") == "explicit"
     monkeypatch.setenv("HEAVEN_ENGAGEMENT", "envwins")
     assert server._resolve_engagement_name() == "envwins"
+
+
+def test_orphaned_running_scan_self_heals_on_list(client):
+    """A scan left 'running' by a dead process must not tick forever.
+
+    The header badge counts scans whose status is 'running'. A row is only ever
+    flipped to a terminal state from inside its live in-process task, so a killed
+    / crashed / closed process strands the row 'running' and the badge shows a
+    phantom "1 scanning" indefinitely. Listing scans now self-heals any 'running'
+    row that no live task in this process is driving (id absent from both
+    active_scans and _scan_tasks_by_id) → 'interrupted' (resumable), so the badge
+    clears on the next poll without a server restart.
+    """
+    from heaven.api.server import _engagement_store_factory
+    client.post("/api/engagements/active", json={"name": "orphan-eng"})
+    store = _engagement_store_factory("orphan-eng")
+    store.create_engagement(name="orphan-eng")
+    # A running row that nothing is driving (no task registered) — the orphan.
+    store.record_scan_start("zombie1", name="zombie1", mode="web")
+
+    r = client.get("/api/scans?kind=all")
+    assert r.status_code == 200
+    rows = {s.get("scan_id") or s.get("id"): s for s in r.json()["scans"]}
+    assert rows["zombie1"]["status"] == "interrupted"  # healed in the response
+    # …and persisted, so it stays healed across polls / restarts.
+    assert store.get_scan_state("zombie1")["status"] == "interrupted"
+
+
+def test_live_running_scan_is_not_reconciled(client):
+    """A genuinely in-flight scan (its id IS in the live-task registry) must be
+    left alone — the self-heal only touches rows no task is driving."""
+    from heaven.api import server
+    from heaven.api.server import _engagement_store_factory
+    client.post("/api/engagements/active", json={"name": "live-eng"})
+    store = _engagement_store_factory("live-eng")
+    store.create_engagement(name="live-eng")
+    store.record_scan_start("live1", name="live1", mode="web")
+
+    # Register a placeholder task under the scan id — membership is all the
+    # self-heal checks, so a sentinel object is enough to mark it "driven".
+    server._scan_tasks_by_id["live1"] = object()
+    try:
+        r = client.get("/api/scans?kind=all")
+        rows = {s.get("scan_id") or s.get("id"): s for s in r.json()["scans"]}
+        assert rows["live1"]["status"] == "running"  # untouched
+        assert store.get_scan_state("live1")["status"] == "running"
+    finally:
+        server._scan_tasks_by_id.pop("live1", None)

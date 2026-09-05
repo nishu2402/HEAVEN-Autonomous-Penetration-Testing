@@ -380,7 +380,7 @@ async def _slow_http_susceptible(host: str, port: int, use_tls: bool,
             try:
                 writer.close()
             except Exception:
-                pass
+                logger.debug("closing slow-http probe writer failed", exc_info=True)
 
 
 def _slow_http_finding(host: str, port: int, use_tls: bool, held: float) -> dict:
@@ -443,6 +443,7 @@ def _web_targets(net_data: dict, urls: list[str]) -> list[tuple[str, int, bool]]
         try:
             u = urlparse(url if "://" in url else f"http://{url}")
         except Exception:
+            logger.debug("could not parse target URL %r", url, exc_info=True)
             continue
         if not u.hostname:
             continue

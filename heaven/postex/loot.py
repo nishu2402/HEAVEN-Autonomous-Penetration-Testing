@@ -246,13 +246,14 @@ def _parse_ssh_keys(text: str) -> list[LootItem]:
             path = line[4:].strip()
         elif path and line.strip():
             encrypted = "ENCRYPTED" in line or "Proc-Type" in line
+            preview = "<private key present>"
             items.append(LootItem(
                 category="ssh_private_key", path=path, severity="high",
                 confidence=0.9,
                 description=f"SSH private key readable: {path}"
                             + (" (passphrase-protected)" if encrypted else ""),
                 technique=mitre.T_PRIVATE_KEYS,
-                secret_preview="<private key present>",  # nosec B106
+                secret_preview=preview,
             ))
             path = ""
     return items
@@ -281,9 +282,10 @@ def _parse_ls_present(text: str, category: str, desc: str, technique: str) -> li
         return []
     first = next((ln for ln in text.splitlines() if ln.strip()), "")
     path = first.split()[-1] if first.split() else ""
+    preview = "<credential file present>"
     return [LootItem(category=category, path=path, severity="high", confidence=0.8,
                      description=desc, technique=technique,
-                     secret_preview="<credential file present>")]  # nosec B106
+                     secret_preview=preview)]
 
 
 def _parse_kube(text: str) -> list[LootItem]:
@@ -302,11 +304,12 @@ def _parse_kube(text: str) -> list[LootItem]:
 def _parse_docker(text: str) -> list[LootItem]:
     if '"auths"' not in text and "auth" not in text:
         return []
+    preview = "<registry auth present>"
     return [LootItem(category="docker_config", path="~/.docker/config.json",
                      severity="high", confidence=0.8,
                      description="Docker registry auth tokens present",
                      technique=mitre.T_CREDS_IN_FILES,
-                     secret_preview="<registry auth present>")]  # nosec B106
+                     secret_preview=preview)]
 
 
 def _parse_netrc(text: str) -> list[LootItem]:

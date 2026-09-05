@@ -4,6 +4,28 @@
    Inter for UI · JetBrains Mono for data/code · glassmorphism · aurora bg
    ════════════════════════════════════════════════════════════════════ */
 
+/* ── Self-hosted fonts ──────────────────────────────────────────────
+   Bundled, not pulled from Google Fonts. An offensive-security console must
+   render offline / air-gapped and must never phone home to a third-party CDN;
+   loading fonts remotely also produced connection errors on any network-
+   restricted host. These are variable fonts (one file per family, latin subset,
+   every weight the UI uses), OFL-1.1 — see src/fonts/NOTICE.md + OFL.txt.
+   Vite fingerprints the woff2 into dist/assets from these relative URLs. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('./fonts/inter-latin-var.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('./fonts/jetbrains-mono-latin-var.woff2') format('woff2');
+}
+
 :root {
   /* ── Surfaces (deep slate with a cool undertone) ── */
   --bg-0:  #070A12;   /* app background, deepest */
@@ -686,9 +708,14 @@ a:hover { color: var(--accent-2); }
 /* Native <select> draws its own arrow at the right edge, and long option text
    ran underneath it (visible overlap in the Assets scan picker and every other
    dropdown). Drop the native arrow, paint one custom chevron, reserve room for
-   it, and truncate cleanly — one rule fixes every .form-select / filters select
-   app-wide, in both themes. */
-.filters select, .form-select {
+   it, and truncate cleanly. This targets EVERY select — .filters/.form-select,
+   a <select className="form-input">, and a bare <select> — so no dropdown ever
+   falls back to the small, low-contrast native OS control (that was the cramped
+   "Type" box on the Analyze page). `select.form-input` carries higher
+   specificity than the `.form-input { background }` shorthand so the chevron
+   image is not wiped; the bare `select` catch-all only sets the arrow, leaving
+   each control's own background colour intact. One rule, both themes. */
+.filters select, .form-select, select.form-input, select {
   appearance: none; -webkit-appearance: none; -moz-appearance: none;
   padding-right: 36px;
   text-overflow: ellipsis; white-space: nowrap;
@@ -1455,6 +1482,20 @@ kbd {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
   border-radius: 4px;
+}
+/* …but NOT on text fields. Browsers show :focus-visible on inputs/textareas even
+   for a mouse click, and this outline is drawn 2px OUTSIDE the box — a stark
+   emerald line that bled up onto the field's own label/helper text (the "green
+   line hiding the text" on the Analyze decoder). Every field already paints a
+   contained accent border + soft ring on :focus (see the form-control :focus
+   rules above), which is the accessible focus indicator, so here we simply drop
+   the extra bleeding outline. The composite tags-input shows its ring on the
+   wrapper via :focus-within, so its inner field clears the outline too. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+.tags-input-field:focus-visible {
+  outline: none;
 }
 th[role="button"] { outline-offset: -2px; }
 th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text-0); }

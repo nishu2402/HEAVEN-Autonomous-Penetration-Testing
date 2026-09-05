@@ -661,10 +661,10 @@ def _parse_saml_metadata(xml_text: str) -> dict:
     out: dict = {"want_assertions_signed": None, "authn_requests_signed": None,
                  "entity_id": ""}
     try:
-        try:
-            from defusedxml.ElementTree import fromstring as _fromstring
-        except Exception:
-            from xml.etree.ElementTree import fromstring as _fromstring
+        # defusedxml is a hard dependency (see pyproject); parsing this hostile
+        # metadata document through it neutralises XXE / billion-laughs. We never
+        # fall back to the stdlib parser, which would reintroduce those sinks.
+        from defusedxml.ElementTree import fromstring as _fromstring
         root = _fromstring(xml_text)
     except Exception:
         return out
@@ -833,6 +833,17 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
                 return findings
             hdrs = resp.headers
             status = resp.status
+            # A 5xx server-error response (often a framework debug/error page,
+            # e.g. Werkzeug's) is not a representative view of the app's header
+            # posture — deriving "CSP missing" from a broken 500 page is a weak,
+            # misleading finding. Judge headers only on a non-error response (the
+            # sibling misconfig header check applies the same rule); the same URL
+            # is assessed on its normal response elsewhere in the crawl.
+            if status >= 500:
+                logger.debug(
+                    "security headers: %s returned %d — skipping header findings "
+                    "(server-error page is unrepresentative)", url, status)
+                return findings
             # Response headers double as the proof that a header is absent — so
             # carry them (Set-Cookie redacted, we never echo a live token into a
             # report) and the status, so the report shows a real HTTP 200 rather

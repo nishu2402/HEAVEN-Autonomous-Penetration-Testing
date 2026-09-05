@@ -190,13 +190,82 @@ def test_apache_httpd_eol_excludes_tomcat_and_ajp():
     titles = [f["title"] for f in real]
     assert titles == ["Unsupported / End-of-Life Software: Apache HTTP Server 2.2.8"]
 
-    # Tomcat / AJP / Coyote must NOT be flagged as Apache httpd off a protocol ver.
-    for prod, ver, banner in [
-        ("Apache Jserv", "1.3", "Apache Jserv (Protocol v1.3)"),
-        ("Apache Tomcat/Coyote JSP engine", "1.1", "Apache-Coyote/1.1"),
-    ]:
-        out = _product_findings("h:x", prod, ver, banner)
-        assert not any("Apache" in f["title"] for f in out), (prod, out)
+    # Tomcat / AJP / Coyote must NOT be flagged as Apache *httpd* off a protocol
+    # version (the old doubled-version FP). Coyote raises nothing at all; the AJP
+    # connector now raises its OWN exposure finding (never the httpd one) — a
+    # network-reachable AJP port is a real, version-independent finding.
+    coyote = _product_findings("h:x", "Apache Tomcat/Coyote JSP engine", "1.1",
+                               "Apache-Coyote/1.1")
+    assert coyote == [], coyote
+
+    jserv = _product_findings("h:8009", "Apache Jserv", "1.3",
+                              "Apache Jserv (Protocol v1.3)")
+    jtitles = [f["title"] for f in jserv]
+    assert not any("Apache HTTP Server" in t for t in jtitles), jtitles
+    assert jtitles == [
+        "Unsupported / End-of-Life Software: Apache JServ / AJP connector (legacy)"]
+    assert jserv[0]["vuln_type"] == "unsupported_software"
+    # No bogus "1.3" release version leaks into the evidence (it is a protocol ver).
+    assert jserv[0]["evidence"]["detected_version"] == ""
+
+
+def test_apache_httpd_eol_excludes_non_apache_httpd_servers():
+    """Regression (live Windows-7 finding): the Apache-httpd EOL rule matched a
+    bare `httpd`, so a non-Apache server nmap fingerprints as "<vendor> httpd" was
+    mislabeled EOL Apache. The live trigger was a hardened Windows box answering on
+    5357/wsdapi as "Microsoft HTTPAPI httpd 2.0" — flagged HIGH "Apache HTTP Server
+    2.0 EOL", a pure false positive (Windows runs no Apache). busybox httpd hit the
+    same trap. The rule now requires an explicit "apache" token."""
+    from heaven.vulnscan.eol_scanner import _product_findings
+
+    # Microsoft HTTPAPI (Windows wsdapi/UPnP) must raise NOTHING Apache.
+    ms = _product_findings("192.168.0.102:5357", "Microsoft HTTPAPI httpd", "2.0",
+                           "Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)")
+    assert not any("Apache" in f["title"] for f in ms), ms
+
+    # busybox httpd (embedded/IoT, and the shellshock lab) is not Apache either.
+    bb = _product_findings("h:80", "busybox httpd", "1.0", "busybox httpd 1.0")
+    assert not any("Apache HTTP Server" in f["title"] for f in bb), bb
+
+    # …while real Apache (which always carries the "apache" token) still fires.
+    real = _product_findings("h:80", "Apache httpd", "2.2.8", "Apache/2.2.8 (Ubuntu)")
+    assert any("Apache HTTP Server" in f["title"] for f in real), real
+
+
+def test_scan_eol_covers_full_metasploitable2_set():
+    """Honest 80%->100% proof for the NETWORK `eol_software` category without the
+    external MSF2 VM: the five EOL services Metasploitable-2 exposes (MySQL 5.0,
+    PostgreSQL 8.3, ISC BIND 9.4, Apache httpd 2.2, and the AJP/Jserv connector —
+    the one previously missed) all fire through the real scan_eol_from_net path.
+    The benchmark measures the same detector live against the VM; this locks the
+    recall at the unit level so it can never silently regress."""
+    import asyncio
+
+    from heaven.vulnscan.eol_scanner import scan_eol_from_net
+
+    net_data = {"hosts": [{
+        "ip": "10.0.0.5",
+        "open_ports": [
+            {"port": 3306, "product": "MySQL", "version": "5.0.51a",
+             "banner": "MySQL 5.0.51a-3ubuntu5"},
+            {"port": 5432, "product": "PostgreSQL DB", "version": "8.3.0",
+             "banner": "PostgreSQL DB 8.3.0 - 8.3.7"},
+            {"port": 53, "product": "ISC BIND", "version": "9.4.2",
+             "banner": "ISC BIND 9.4.2"},
+            {"port": 80, "product": "Apache httpd", "version": "2.2.8",
+             "banner": "Apache/2.2.8 (Ubuntu) DAV/2"},
+            {"port": 8009, "product": "Apache Jserv", "version": "1.3",
+             "banner": "Apache Jserv (Protocol v1.3)"},
+        ],
+    }]}
+    # dynamic=False keeps this hermetic — every one of the five is a static hit.
+    res = asyncio.run(scan_eol_from_net(net_data, dynamic=False))
+    products = {f["evidence"]["product"] for f in res["findings"]}
+    assert products == {
+        "MySQL", "PostgreSQL", "ISC BIND", "Apache HTTP Server",
+        "Apache JServ / AJP connector (legacy)",
+    }, products
+    assert all(f["vuln_type"] == "unsupported_software" for f in res["findings"])
 
 
 def test_endoflife_slug_excludes_tomcat_and_ajp_from_apache():

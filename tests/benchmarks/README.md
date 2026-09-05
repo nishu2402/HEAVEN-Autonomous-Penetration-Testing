@@ -45,8 +45,12 @@ Java test cases, each either a genuine vulnerability or a safe look-alike across
 per category and pooled.
 
 The corpus is **not vendored** — it is GPLv2 and HEAVEN is MIT — so it is fetched
-(a pinned shallow clone, or a checkout you point at) and its `expectedresults`
-ground truth is read from there, never copied in.
+(a commit-pinned clone, or a checkout you point at) and its `expectedresults`
+ground truth is read from there, never copied in. The pinned clone is cached under
+`$XDG_CACHE_HOME/heaven/owasp-benchmark` (override with
+`HEAVEN_OWASP_BENCHMARK_CACHE`) and reused across runs, so the ~300 MB tree is
+pulled at most once; set `HEAVEN_OWASP_BENCHMARK_DIR` to use your own checkout
+instead.
 
 ```bash
 # Live SAST benchmark (fetches / uses a BenchmarkJava checkout; needs semgrep):
@@ -57,15 +61,26 @@ HEAVEN_OWASP_BENCHMARK_DIR=/path/to/BenchmarkJava \
   python tests/benchmarks/owasp_benchmark.py
 ```
 
-Live headline at the time of writing (semgrep 1.173): **pooled Youden ≈ 0.51,
-recall ≈ 0.96, precision ≈ 0.70**, with weak-randomness, weak-crypto and
-insecure-cookie at a perfect 1.00. The residual false positives are the
-Benchmark's deliberately adversarial "safe" cases (a tainted value discarded
-behind an always-true ternary, or sanitized through a reflection hop); the
-config-driven hash cases (algorithm read from a `.properties` file at runtime)
-are honest false negatives. The scorer's plumbing and the rules' vuln-vs-safe
-discrimination are also unit-tested Docker-free in
-`tests/test_owasp_benchmark_scorer.py`.
+Live headline at the time of writing (semgrep 1.173): **pooled Youden ≈ 0.52,
+recall ≈ 0.97, precision ≈ 0.70**, with weak-randomness, weak-crypto and
+insecure-cookie at a perfect 1.00 and every injection class (cmdi, sqli, xss,
+path traversal, LDAP/XPath injection, trust boundary) detecting **all** of its
+real vulnerabilities. The remaining gap is structural, not a rules deficiency,
+and we deliberately do not close it by matching the Benchmark's own constructs:
+
+- The false positives are the Benchmark's synthetic "safe" look-alikes, where a
+  tainted value is discarded behind an always-true arithmetic ternary
+  (`bar = (7*18)+num > 200 ? "const" : param;`), a `switch` on a constant char,
+  or a key-insensitive collection overwrite / reflection hop. A rule engine
+  cannot constant-fold these, and real vulnerable code does not hide taint this
+  way, so flagging them is a benign over-approximation, not a rule bug.
+- The false negatives are entirely the config-driven hash cases: the weak
+  algorithm is named in `benchmark.properties` (`hashAlg1=MD5`) and only the
+  strong default literal (`"SHA512"`) is visible in the source, so static
+  analysis cannot see the weak value without resolving the property file.
+
+The scorer's plumbing and the rules' vuln-vs-safe discrimination are also
+unit-tested Docker-free in `tests/test_owasp_benchmark_scorer.py`.
 
 The **always-on native tiers** need no Docker and run in regular CI:
 
@@ -173,9 +188,11 @@ Other known caveats:
    fixture, retarget the URL.
 4. Run; the same metrics + reporters work unchanged.
 
-Suggested next targets: **OWASP Juice Shop** (Node SPA, no-auth surface,
-ideal for the current HEAVEN), **VAmPI** (OWASP API Top 10), **WebGoat**
-(Java, lesson-based, covers obscure classes).
+OWASP Juice Shop (web DOM-XSS) and VAmPI (OWASP API Top 10) are already wired as
+gated live labs under `tests/benchmarks/labs/` — see that directory's README.
+Suggested further target: **WebGoat** (Java, lesson-based, covers obscure
+classes), though the Java coverage it would add is already scored via the OWASP
+Benchmark SAST tier above.
 
 ## Head-to-head with other scanners
 

@@ -10,7 +10,7 @@ import base64
 import re
 import secrets
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from heaven.utils.logger import get_logger
 
@@ -125,8 +125,15 @@ class EmailSecurityScanner:
                 issues.append("SPF uses '+all' (allows any sender)")
                 severity = "critical"
             elif "~all" in spf_record:
-                issues.append("SPF uses '~all' (softfail) instead of '-all' (hardfail)")
-                severity = "medium"
+                # '~all' (softfail) is a deliberate, widely-recommended choice for
+                # large senders — '-all' (hardfail) breaks legitimate forwarding and
+                # mailing lists, and DMARC (when present with an enforcing policy) is
+                # what actually rejects spoofed mail. Google/Microsoft/PayPal all use
+                # '~all'. So it is a mild hardening note, not a medium finding.
+                issues.append("SPF uses '~all' (softfail) rather than '-all' (hardfail) "
+                              "— acceptable, but a hardfail is stricter where DMARC "
+                              "enforcement is not relied upon")
+                severity = "low"
             elif "?all" in spf_record:
                 issues.append("SPF uses '?all' (neutral) — provides no protection")
                 severity = "high"
@@ -194,7 +201,7 @@ class EmailSecurityScanner:
             "mail", "dkim", "s1", "s2", "sig1", "smtp", "mx",
             "mandrill", "amazonses", "cm", "protonmail", "zoho",
         ]
-        found_selectors = []
+        found_selectors: list[dict[str, Any]] = []
         for selector in common_selectors:
             try:
                 dkim_domain = f"{selector}._domainkey.{domain}"
@@ -249,13 +256,25 @@ class EmailSecurityScanner:
                 continue
 
         if not found_selectors:
+            # DKIM has NO DNS discovery mechanism: a verifier learns the selector
+            # from a message's DKIM-Signature header, so probing a fixed wordlist of
+            # common selectors can only ever be inconclusive. Large senders (Google,
+            # etc.) use selectors that are not in any common list yet clearly sign
+            # with DKIM. Reporting "DKIM missing" at medium off a failed guess is an
+            # over-claim — absence of evidence is not evidence of absence. Report the
+            # honest inconclusive state at low severity.
             self._findings.append(EmailFinding(
                 target=domain, vuln_type="dkim_missing",
-                severity="medium",
-                title=f"DKIM: No selectors found for {domain}",
-                description="No DKIM records found for common selectors.",
-                confidence=0.60,
-                remediation="Configure DKIM with your email provider.",
+                severity="low",
+                title=f"DKIM: no selector found among common names for {domain}",
+                description=("No DKIM key was found at the common selector names tried. "
+                             "This is inconclusive: DKIM has no DNS discovery mechanism, "
+                             "so the domain may still sign with a custom selector. Confirm "
+                             "from the DKIM-Signature header of a message it sends."),
+                confidence=0.40,
+                remediation=("Verify whether DKIM is in use (check a sent message's "
+                             "DKIM-Signature header); if not, configure DKIM with your "
+                             "email provider."),
             ))
         else:
             self._findings.append(EmailFinding(
@@ -422,11 +441,18 @@ class EmailSecurityScanner:
         except Exception as e:
             logger.debug(f"DNSSEC check failed for {domain}: {e}")
             return
+        # DNSSEC is a DNS-hardening measure, not an exploitable email vuln, and the
+        # large majority of well-run domains (google.com, amazon.com, github.com)
+        # deliberately do not deploy it. Report it as a low hardening note — the same
+        # tier as the sibling bimi_missing / mta_sts_missing findings — rather than a
+        # medium that would fire on nearly every real domain.
         self._findings.append(EmailFinding(
-            target=domain, vuln_type="dnssec_missing", severity="medium",
+            target=domain, vuln_type="dnssec_missing", severity="low",
             title=f"DNSSEC not enabled: {domain}",
             description="No DNSKEY records — the zone is not DNSSEC-signed, so DNS "
-                        "responses (incl. MX) can be spoofed via cache poisoning.",
+                        "responses (incl. MX) are not cryptographically protected "
+                        "against spoofing/cache poisoning. A hardening gap rather "
+                        "than a directly exploitable email flaw.",
             confidence=0.85,
             remediation="Sign the zone with DNSSEC and publish a DS record at the registrar.",
         ))

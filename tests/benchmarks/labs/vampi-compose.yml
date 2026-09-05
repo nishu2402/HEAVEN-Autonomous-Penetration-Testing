@@ -1,0 +1,30 @@
+# HEAVEN benchmark: VAmPI — a real third-party OWASP API Top 10 lab
+#
+# VAmPI (github.com/erev0s/VAmPI) is a deliberately-vulnerable REST API that
+# ships its own OpenAPI 3.0.1 contract at /openapi.json. It is the API analogue
+# of what DVWA / Juice Shop are for the web tier: a genuinely-vulnerable target
+# HEAVEN's own api_scanner runs against, so the API mode's GREEN status is proved
+# against an external app and not only HEAVEN's in-repo native fixture.
+#
+# What HEAVEN detects here, live, through real spec-driven discovery (it reads
+# VAmPI's published contract, then probes the endpoints it declares):
+#   * excessive_data_exposure — GET /users/v1/_debug returns every user's
+#     password field with no auth (API3:2023, CWE-359). High confidence: the
+#     response literally carries populated `password` values.
+#   * api_broken_auth        — GET /users/v1 serves the full user collection
+#     with no credentials (API2:2023).
+#   * api_docs_exposed       — the OpenAPI spec itself is public (API9:2023).
+#
+# The test calls GET /createdb once (VAmPI's own seed route) before scanning, so
+# the user/book tables exist. Read-only probing; the lab binds to loopback only.
+
+services:
+  vampi:
+    image: erev0s/vampi:latest
+    container_name: heaven-lab-vampi
+    environment:
+      # VAmPI's own switch; "1" keeps the vulnerable-by-design behaviour.
+      - vulnerable=1
+    ports:
+      - "127.0.0.1:5001:5000"
+    restart: "no"

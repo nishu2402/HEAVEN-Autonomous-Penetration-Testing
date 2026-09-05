@@ -225,16 +225,28 @@ def test_sudo_prefix_elevates_and_enables_os_flag(monkeypatch):
 
 def test_udp_scan_uses_raw_flags_only_when_privileged(monkeypatch):
     from heaven.recon import network_scanner as ns
-    # privileged → real SYN + UDP scan
+    from heaven.recon import udp_scanner as us
+
+    # UDP is now a DEDICATED pass after the TCP scan (not merged into the TCP
+    # command). Stub the pure-Python probe scanner so this unit test asserts on
+    # nmap flags without doing any real UDP network I/O.
+    async def _no_udp_probes(*_a, **_k):
+        return {"open": [], "open_filtered": 0, "closed": 0}
+    monkeypatch.setattr(us, "scan_udp_ports", _no_udp_probes)
+
+    # privileged → a real raw nmap -sU pass (the last subprocess the scan runs).
+    # -sS is no longer used: UDP is its own -sU scan, not a combined SYN+UDP run.
     monkeypatch.setattr(ns, "_have_admin_privileges", lambda: True)
     monkeypatch.setattr(ns, "_nmap_sudo_prefix", lambda: ())
     _, cmd = _run_scan_capture_cmd(
         monkeypatch, _NMAP_XML_TTL_ONLY, "10.0.0.9",
         include_udp=True, udp_ports=[161],
     )
-    assert "-sS" in cmd and "-sU" in cmd
+    assert "-sU" in cmd
 
-    # unprivileged → fall back to a TCP connect scan instead of aborting
+    # unprivileged → no raw nmap flags at all: UDP falls back to the pure-Python
+    # service-probe scanner (which needs no root), so the captured command is the
+    # TCP scan with no -sU / -sS / -O.
     monkeypatch.setattr(ns, "_have_admin_privileges", lambda: False)
     monkeypatch.setattr(ns, "_nmap_sudo_prefix", lambda: ())
     _, cmd2 = _run_scan_capture_cmd(

@@ -1,0 +1,66 @@
+# Ground truth for HEAVEN's Software Composition Analysis (SCA) benchmark.
+#
+# The corpus lives in tests/benchmarks/labs/sca-corpus/. The `vulnerable/`
+# manifests pin real, long-published releases; every CVE listed below is a
+# permanent OSV.dev advisory whose affected range provably includes the pinned
+# version (each was live-confirmed against OSV before being added here — nothing
+# is assumed). The scorer (tests/benchmarks/sca_benchmark.py) audits the corpus
+# live and measures:
+#
+#   * recall    — of these curated must-find CVEs, how many HEAVEN detects.
+#                 The advisories are historical and immutable, so this is stable.
+#   * precision — the `patched/` manifests pin the versions that FIXED each CVE;
+#                 HEAVEN must NOT report any must-find CVE against them. This
+#                 proves version-range precision (a fixed dependency is never
+#                 flagged for the vuln it resolved), independent of any newer,
+#                 unrelated advisory the patched version may later accrue.
+#
+# We deliberately do NOT assert a total finding COUNT: OSV keeps adding real
+# advisories for genuinely-old versions, and every one of those is a true
+# positive (its range covers the pin), so the count only ever grows. Recall on
+# the curated set + the patched-version precision control are the honest metrics.
+corpus: heaven-sca-benchmark
+version: "1.0"
+
+packages:
+  - package: Django
+    ecosystem: PyPI
+    vulnerable_version: "2.2.0"
+    patched_version: "4.2.16"
+    must_find: [CVE-2019-12308, CVE-2019-14232]
+
+  - package: urllib3
+    ecosystem: PyPI
+    vulnerable_version: "1.24.1"
+    patched_version: "2.2.3"
+    must_find: [CVE-2019-11236, CVE-2019-11324]
+
+  - package: requests
+    ecosystem: PyPI
+    vulnerable_version: "2.19.1"
+    patched_version: "2.32.4"
+    must_find: [CVE-2018-18074]
+
+  - package: PyYAML
+    ecosystem: PyPI
+    vulnerable_version: "5.1"
+    patched_version: "6.0.2"
+    must_find: [CVE-2020-1747, CVE-2020-14343]
+
+  - package: Jinja2
+    ecosystem: PyPI
+    vulnerable_version: "2.10"
+    patched_version: "3.1.5"
+    must_find: [CVE-2019-10906]
+
+  - package: lodash
+    ecosystem: npm
+    vulnerable_version: "4.17.11"
+    patched_version: "4.17.21"
+    must_find: [CVE-2019-10744, CVE-2020-8203]
+
+  - package: minimist
+    ecosystem: npm
+    vulnerable_version: "1.2.0"
+    patched_version: "1.2.8"
+    must_find: [CVE-2020-7598]

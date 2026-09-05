@@ -47,6 +47,12 @@ rules:
       - pattern: $SB.insert($I, $FROM)
         from: $FROM
         to: $SB
+      - pattern: $E.nextElement()
+        from: $E
+        to: $E
+      - pattern: $IT.next()
+        from: $IT
+        to: $IT
     pattern-sources:
       - pattern: $R.getParameter(...)
       - pattern: $R.getParameterValues(...)
@@ -61,6 +67,7 @@ rules:
       - pattern: $R.getCookies()
       - pattern: $R.getTheParameter(...)
       - pattern: $R.getTheCookie(...)
+      - pattern: (javax.servlet.http.Cookie $CK).getValue()
     pattern-sinks:
       - pattern: (java.lang.Runtime $RT).exec(...)
       - pattern: $RT.exec(...)
@@ -93,6 +100,12 @@ rules:
       - pattern: $SB.insert($I, $FROM)
         from: $FROM
         to: $SB
+      - pattern: $E.nextElement()
+        from: $E
+        to: $E
+      - pattern: $IT.next()
+        from: $IT
+        to: $IT
     pattern-sources:
       - pattern: $R.getParameter(...)
       - pattern: $R.getParameterValues(...)
@@ -107,6 +120,7 @@ rules:
       - pattern: $R.getCookies()
       - pattern: $R.getTheParameter(...)
       - pattern: $R.getTheCookie(...)
+      - pattern: (javax.servlet.http.Cookie $CK).getValue()
     pattern-sinks:
       - pattern: $ST.execute($SQL, ...)
       - pattern: $ST.executeQuery($SQL, ...)
@@ -121,6 +135,7 @@ rules:
       - pattern: $JT.queryForObject($SQL, ...)
       - pattern: $JT.queryForList($SQL, ...)
       - pattern: $JT.queryForRowSet($SQL, ...)
+      - pattern: $JT.queryForMap($SQL, ...)
       - pattern: $JT.query($SQL, ...)
       - pattern: $JT.update($SQL, ...)
       - pattern: $JT.batchUpdate($SQL, ...)
@@ -151,6 +166,12 @@ rules:
       - pattern: $SB.insert($I, $FROM)
         from: $FROM
         to: $SB
+      - pattern: $E.nextElement()
+        from: $E
+        to: $E
+      - pattern: $IT.next()
+        from: $IT
+        to: $IT
     pattern-sources:
       - pattern: $R.getParameter(...)
       - pattern: $R.getParameterValues(...)
@@ -165,6 +186,7 @@ rules:
       - pattern: $R.getCookies()
       - pattern: $R.getTheParameter(...)
       - pattern: $R.getTheCookie(...)
+      - pattern: (javax.servlet.http.Cookie $CK).getValue()
     pattern-sinks:
       - pattern: new java.io.File(...)
       - pattern: new java.io.FileInputStream(...)
@@ -201,6 +223,12 @@ rules:
       - pattern: $SB.insert($I, $FROM)
         from: $FROM
         to: $SB
+      - pattern: $E.nextElement()
+        from: $E
+        to: $E
+      - pattern: $IT.next()
+        from: $IT
+        to: $IT
     pattern-sanitizers:
       - pattern: $E.encodeForLDAP(...)
       - pattern: $E.encodeForDN(...)
@@ -218,6 +246,7 @@ rules:
       - pattern: $R.getCookies()
       - pattern: $R.getTheParameter(...)
       - pattern: $R.getTheCookie(...)
+      - pattern: (javax.servlet.http.Cookie $CK).getValue()
     pattern-sinks:
       - pattern: $CTX.search($BASE, $FILTER, ...)
       - pattern: $CTX.search($FILTER)
@@ -248,6 +277,12 @@ rules:
       - pattern: $SB.insert($I, $FROM)
         from: $FROM
         to: $SB
+      - pattern: $E.nextElement()
+        from: $E
+        to: $E
+      - pattern: $IT.next()
+        from: $IT
+        to: $IT
     pattern-sanitizers:
       - pattern: $E.encodeForXPath(...)
     pattern-sources:
@@ -264,6 +299,7 @@ rules:
       - pattern: $R.getCookies()
       - pattern: $R.getTheParameter(...)
       - pattern: $R.getTheCookie(...)
+      - pattern: (javax.servlet.http.Cookie $CK).getValue()
     pattern-sinks:
       - pattern: $XP.evaluate(...)
       - pattern: $XP.compile(...)
@@ -294,6 +330,12 @@ rules:
       - pattern: $SB.insert($I, $FROM)
         from: $FROM
         to: $SB
+      - pattern: $E.nextElement()
+        from: $E
+        to: $E
+      - pattern: $IT.next()
+        from: $IT
+        to: $IT
     pattern-sanitizers:
       - pattern: $E.encodeForHTML(...)
       - pattern: $E.encodeForHTMLAttribute(...)
@@ -314,6 +356,7 @@ rules:
       - pattern: $R.getCookies()
       - pattern: $R.getTheParameter(...)
       - pattern: $R.getTheCookie(...)
+      - pattern: (javax.servlet.http.Cookie $CK).getValue()
     pattern-sinks:
       - pattern: $W.print(...)
       - pattern: $W.println(...)
@@ -348,6 +391,12 @@ rules:
       - pattern: $SB.insert($I, $FROM)
         from: $FROM
         to: $SB
+      - pattern: $E.nextElement()
+        from: $E
+        to: $E
+      - pattern: $IT.next()
+        from: $IT
+        to: $IT
     pattern-sources:
       - pattern: $R.getParameter(...)
       - pattern: $R.getParameterValues(...)
@@ -362,6 +411,7 @@ rules:
       - pattern: $R.getCookies()
       - pattern: $R.getTheParameter(...)
       - pattern: $R.getTheCookie(...)
+      - pattern: (javax.servlet.http.Cookie $CK).getValue()
     pattern-sinks:
       - pattern: $S.setAttribute(...)
       - pattern: $S.putValue(...)
@@ -438,3 +488,29 @@ rules:
       confidence: HIGH
     patterns:
       - pattern: $C.setSecure(false)
+
+  # ── Unsafe Java deserialization (CWE-502) ──────────────────────────────
+  # Reading an object graph from an ObjectInputStream is the canonical Java
+  # deserialization RCE sink: gadget chains on the classpath (Commons
+  # Collections, etc.) turn readObject() into arbitrary code execution. Deny
+  # native serialization for untrusted data — use a data-only format (JSON) with
+  # an allow-list, or an ObjectInputFilter. Matched both inline and on a typed
+  # local so `ObjectInputStream ois = ...; ois.readObject();` is caught too.
+  - id: heaven.java.unsafe-deserialization
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Unsafe deserialization: untrusted bytes are turned back into Java objects
+      via ObjectInputStream.readObject(). With a gadget chain on the classpath
+      this is remote code execution. Do not deserialize untrusted data with
+      native Java serialization; use a data-only format (JSON) with strict type
+      validation, or install an ObjectInputFilter allow-list.
+    metadata:
+      cwe: "CWE-502"
+      owasp: "A08:2025 - Software or Data Integrity Failures"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: new ObjectInputStream(...).readObject()
+          - pattern: (java.io.ObjectInputStream $O).readObject()
+          - pattern: (ObjectInputStream $O).readObject()

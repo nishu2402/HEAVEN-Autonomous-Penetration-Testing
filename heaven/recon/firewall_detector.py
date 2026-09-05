@@ -309,6 +309,48 @@ def classify_perimeter(
 
 
 # ── Finding synthesis ─────────────────────────────────────────────────────────
+def build_scan_completeness_findings(net_data: dict) -> list[dict]:
+    """Emit an honest, informational finding when the network sweep was cut short.
+
+    ``scan_network`` returns ``hosts_timed_out`` — the number of hosts still in
+    flight when the deep-scan deadline fired (their ports were NOT fully
+    enumerated). Left unsurfaced, this is exactly the "I toggled a full-port scan
+    but only got a few ports" symptom: the scan silently returned partial results.
+    Turning it into a visible observation means the operator always knows the port
+    list is incomplete and how to get a complete one — never a silent truncation.
+    """
+    if not isinstance(net_data, dict):
+        return []
+    timed_out = int(net_data.get("hosts_timed_out") or 0)
+    if timed_out <= 0:
+        return []
+    total = int(net_data.get("total_hosts") or 0) + timed_out
+    return [{
+        "target": "network scan",
+        "vuln_type": "scan_incomplete",
+        "severity": "info",
+        "title": f"Network scan incomplete — {timed_out} host(s) not fully enumerated",
+        "description": (
+            f"The deep port scan reached its time budget with {timed_out} of "
+            f"{total} host(s) still in flight, so their port lists are PARTIAL — "
+            "only the ports found before the deadline are reported. This is why a "
+            "scan can come back with fewer open ports than expected. To get a "
+            "complete enumeration, scan fewer hosts at once, narrow the port range "
+            "to the ports you care about, or re-run this scan on its own (HEAVEN "
+            "gives an explicit full-range or UDP scan a larger deadline, and a "
+            "slower stealth level more time still)."
+        ),
+        "confidence": 1.0,
+        # A statement about scan conditions, not an exploitable weakness — resolves
+        # to "Informational" and is ignored by the confirmed-only Overall Risk.
+        "observation": True,
+        "evidence": {
+            "hosts_timed_out": timed_out,
+            "hosts_completed": int(net_data.get("total_hosts") or 0),
+        },
+    }]
+
+
 def build_perimeter_findings(net_data: dict) -> list[dict]:
     """Turn the ``perimeter`` block of a :func:`scan_network` result into
     informational findings (one per host where a defence was detected).

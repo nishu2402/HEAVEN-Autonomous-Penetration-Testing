@@ -47,8 +47,27 @@ def test_paloalto_server_header():
 
 
 def test_ivanti_body_fingerprint():
-    f = e.match_edge_kev_headers({}, target="h", body="Welcome to /dana-na/ portal")
+    # A real Ivanti/Pulse login page carries the product brand in the body.
+    f = e.match_edge_kev_headers(
+        {}, target="h", body="<title>Pulse Secure</title> Ivanti Connect Secure")
     assert "edge_ivanti_pulse" in _vtypes(f)
+
+
+def test_reflected_probe_path_in_error_body_is_not_a_match():
+    """Regression (live Metasploitable FP): a body_regex that is a bare URL-path
+    fragment ("/dana-na/", "/tmui/", …) must NOT fingerprint an appliance, because
+    a normal web server reflects the requested path in its error page. Probing the
+    appliance login paths against one Ubuntu/Apache box otherwise flagged it as
+    Citrix AND Ivanti AND Fortinet AND Palo Alto AND F5 at once (five FPs)."""
+    for path in ("/dana-na/", "/tmui/", "/vpn/index.html", "/remote/login",
+                 "/global-protect/login.esp"):
+        body = ("<html><head><title>404 Not Found</title></head><body>"
+                f"<h1>Not Found</h1><p>The requested URL {path} was not found "
+                "on this server.</p><address>Apache/2.2.8 (Ubuntu) DAV/2</address>"
+                "</body></html>")
+        f = e.match_edge_kev_headers(
+            {"Server": "Apache/2.2.8 (Ubuntu) DAV/2"}, target="h", body=body)
+        assert f == [], f"path reflection {path} produced a false appliance match: {f}"
 
 
 def test_benign_server_no_match():

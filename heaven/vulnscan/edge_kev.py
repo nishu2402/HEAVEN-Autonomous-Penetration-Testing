@@ -180,6 +180,18 @@ def _match_signature(sig: EdgeSignature, headers_l: dict[str, str],
             reasons.append(f"cookie~{rgx}")
     if body:
         for rgx in sig.body_regexes:
+            # A bare URL-path fragment (e.g. "/dana-na/", "/tmui/") is NOT a
+            # reliable appliance signal: a normal web server reflects the
+            # requested path in its error page — Apache's 404 body literally
+            # reads "The requested URL /dana-na/ was not found on this server" —
+            # so probing an appliance login path against any Apache/nginx/IIS host
+            # made every path-fragment match its own probe, flagging one Ubuntu box
+            # as Citrix AND Ivanti AND Fortinet AND F5 at once. The path is already
+            # requested via probe_paths; a real appliance is fingerprinted by its
+            # branded body strings ("Pulse Secure", "FortiGate", "BIG-IP"), cookies
+            # (DSID, SVPNCOOKIE, BIGipServer) and headers, which we keep matching.
+            if rgx.startswith("/"):
+                continue
             if re.search(rgx, body):
                 reasons.append(f"body~{rgx}")
     return (bool(reasons), reasons)
@@ -262,6 +274,7 @@ async def scan_edge_appliances(urls: list[str], *, session: Any = None,
                 continue
             origins.setdefault(p.netloc, f"{p.scheme}://{p.netloc}")
         except Exception:
+            logger.debug("could not parse target URL %r", u, exc_info=True)
             continue
         if len(origins) >= max_hosts:
             break
@@ -283,8 +296,7 @@ async def scan_edge_appliances(urls: list[str], *, session: Any = None,
             for sig in _SIGNATURES:
                 paths.extend(sig.probe_paths)
             # De-dup while preserving order, bounded.
-            seen_paths: set[str] = set()
-            ordered = [p for p in paths if not (p in seen_paths or seen_paths.add(p))]
+            ordered = list(dict.fromkeys(paths))
             for path in ordered[:16]:
                 url = base + path
                 try:
@@ -297,6 +309,7 @@ async def scan_edge_appliances(urls: list[str], *, session: Any = None,
                         except Exception:
                             body = ""
                 except Exception:
+                    logger.debug("edge-KEV probe of %s failed", url, exc_info=True)
                     continue
                 for f in match_edge_kev_headers(headers, target=netloc, body=body):
                     fam = f["evidence"]["family"]
@@ -309,7 +322,7 @@ async def scan_edge_appliances(urls: list[str], *, session: Any = None,
             try:
                 await session.close()
             except Exception:
-                pass
+                logger.debug("closing edge-KEV session failed", exc_info=True)
 
     if findings:
         logger.info("Edge-KEV scan → %d appliance exposure(s) across %d host(s)",

@@ -27,7 +27,7 @@ test calling a detector directly — :func:`record` is a graceful no-op.
 from __future__ import annotations
 
 import contextvars
-from typing import Optional
+from typing import Any, Optional
 
 # The per-scan store: {url: (status, body_snippet)}. ``None`` means "no scan
 # context is active" so record()/attach are inert (never raise, never leak
@@ -105,6 +105,16 @@ def _candidate_urls(finding: dict) -> list[str]:
     return out
 
 
+def _as_int(value: Any) -> Optional[int]:
+    """Best-effort int() of a status value; None if it is missing/unparseable."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def attach(finding: dict) -> bool:
     """Fold the captured transaction into one finding's evidence, in place.
 
@@ -121,11 +131,21 @@ def attach(finding: dict) -> bool:
                     or finding.get("response_snippet"))
     if has_status and has_body:
         return False  # already complete
+    recorded_status = ev.get("status")
     for url in _candidate_urls(finding):
         hit = get(url)
         if hit is None:
             continue
         status, body = hit
+        # If the finding recorded its OWN status and the captured transaction's
+        # status differs, this capture is a DIFFERENT request to the same URL
+        # (e.g. a later race/POST probe that got a 405), not the proof of THIS
+        # finding. Attaching its body would show a response that contradicts the
+        # finding's own status (a status-200 detection with a "405 Method Not
+        # Allowed" body), so skip it — an absent body is more honest than a
+        # mismatched one.
+        if has_status and status > 0 and _as_int(recorded_status) not in (None, status):
+            continue
         changed = False
         if not has_status and status > 0:
             ev.setdefault("status", status)

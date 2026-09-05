@@ -77,17 +77,19 @@ def test_cloud_lab_detects_public_bucket():
 # ── iot: anonymous MQTT + unauthenticated Modbus ─────────────────────────────
 def test_iot_lab_detects_mqtt_and_modbus():
     _skip_if_unavailable()
-    from heaven.recon.iot_scanner import probe_modbus, probe_mqtt, scan_iot_targets
+    from heaven.recon.iot_scanner import (
+        probe_modbus, probe_mqtt, probe_rtsp, scan_iot_targets)
 
     with LabStack("iot-compose.yml", build=True):
-        # Ready only when BOTH protocol handshakes actually succeed (not merely
+        # Ready only when the protocol handshakes actually succeed (not merely
         # when the TCP port accepts) — the pymodbus server needs a moment after
         # the port opens before it answers a Read-Device-Identification request.
         ready = wait_until(
             lambda: asyncio.run(probe_mqtt("127.0.0.1", 1883, 4.0)) is not None
-            and asyncio.run(probe_modbus("127.0.0.1", 502, 4.0)) is not None,
+            and asyncio.run(probe_modbus("127.0.0.1", 502, 4.0)) is not None
+            and asyncio.run(probe_rtsp("127.0.0.1", 554, 4.0)) is not None,
             timeout_s=120.0)
-        assert ready, "iot lab (mqtt + modbus) handshakes never confirmed"
+        assert ready, "iot lab (mqtt + modbus + rtsp) handshakes never confirmed"
 
         res = asyncio.run(scan_iot_targets(["127.0.0.1"]))
         fs = res["findings"]
@@ -95,23 +97,37 @@ def test_iot_lab_detects_mqtt_and_modbus():
                    for f in fs), "no critical anonymous-MQTT finding"
         assert any(f["protocol"] == "Modbus TCP" and f["severity"] == "critical"
                    for f in fs), "no critical unauthenticated-Modbus finding"
+        # RTSP: a real MediaMTX server answers DESCRIBE with RTSP/1.0, so the
+        # camera/streaming surface is confirmed live (broadens IoT beyond
+        # MQTT+Modbus). Any RTSP finding proves the probe fired against a real
+        # RTSP service.
+        assert any(f["protocol"] == "RTSP" for f in fs), (
+            f"no RTSP finding; got {[f['protocol'] for f in fs]}")
 
 
 # ── ot: Modbus reachable as an ICS service ───────────────────────────────────
-def test_ot_lab_detects_modbus_ics():
+def test_ot_lab_detects_modbus_and_opcua_ics():
     _skip_if_unavailable()
-    from heaven.recon.iot_scanner import probe_modbus, scan_ot_targets
+    from heaven.recon.iot_scanner import probe_modbus, probe_opcua, scan_ot_targets
 
     with LabStack("ot-compose.yml", build=True):
         ready = wait_until(
-            lambda: asyncio.run(probe_modbus("127.0.0.1", 502, 4.0)) is not None,
+            lambda: asyncio.run(probe_modbus("127.0.0.1", 502, 4.0)) is not None
+            and asyncio.run(probe_opcua("127.0.0.1", 4840, 5.0)) is not None,
             timeout_s=120.0)
-        assert ready, "ot lab (modbus) handshake never confirmed"
+        assert ready, "ot lab (modbus + opc-ua) handshakes never confirmed"
 
         res = asyncio.run(scan_ot_targets(["127.0.0.1"]))
         fs = res["findings"]
         assert any(f["protocol"] == "Modbus TCP" and f["severity"] == "critical"
                    for f in fs), "no critical Modbus-ICS finding"
+        # OPC-UA: a real asyncua server completes the HEL->ACK handshake, so the
+        # modern-ICS interoperability surface is confirmed live (a third real OT
+        # protocol alongside Modbus + S7comm).
+        assert any(f["protocol"] == "OPC-UA" and f["severity"] != "info"
+                   for f in fs), (
+            f"no confirmed OPC-UA ICS finding; got "
+            f"{[(f['protocol'], f['severity']) for f in fs]}")
 
 
 # ── dos: slow-HTTP (Slowloris) susceptibility, + best-effort amplification ────
@@ -303,6 +319,32 @@ def test_k3s_lab_detects_anonymous_k8s_api():
         # cluster-admin for system:anonymous also exposes every cluster Secret.
         assert "k8s_secrets_exposed" in types, f"no k8s_secrets_exposed in {types}"
 
+        # RBAC over-privilege analysis, live: pull the admin kubeconfig out of the
+        # k3s container and run analyze_rbac against the real apiserver. The lab's
+        # binding grants cluster-admin to system:anonymous + system:unauthenticated
+        # (a User + a Group), so the corrected detector must flag it CRITICAL while
+        # never tripping on the legitimate system:masters binding k3s ships with.
+        import subprocess
+        import tempfile
+        raw = subprocess.run(
+            ["docker", "exec", "heaven-lab-k3s",
+             "cat", "/etc/rancher/k3s/k3s.yaml"],
+            capture_output=True, text=True, timeout=30)
+        assert raw.returncode == 0 and "clusters:" in raw.stdout, raw.stderr
+        with tempfile.NamedTemporaryFile(
+                "w", suffix=".yaml", delete=False) as kc:
+            kc.write(raw.stdout)
+            kubeconfig = kc.name
+        try:
+            rbac = asyncio.run(KubernetesScanner.analyze_rbac(kubeconfig))
+        finally:
+            import os
+            os.unlink(kubeconfig)
+        crit = [f for f in rbac if f.vuln_type == "k8s_rbac_overprivileged"
+                and f.severity == "critical"]
+        assert crit, f"analyze_rbac missed the anonymous cluster-admin: {rbac}"
+        assert "anonymous" in crit[0].description or "authenticated" in crit[0].description
+
 
 # ── email: open SMTP relay detected live against a real Postfix MTA ───────────
 def _smtp_banner_ok(host: str, port: int) -> bool:
@@ -346,6 +388,33 @@ def test_postfix_lab_detects_open_relay():
         # Postfix answers VRFY with 252 (cannot verify), which discloses nothing,
         # so the user-enumeration differential must correctly stay silent.
         assert "smtp_user_enumeration" not in types, res["findings"]
+
+
+# ── email: VRFY user-enumeration live against a real VRFY-enabled MTA ─────────
+def test_smtp_vrfy_lab_detects_user_enumeration():
+    """Complete the EMAIL surface: the Postfix lab proves open-relay + no-STARTTLS
+    but answers VRFY with 252 (a true negative). This lab runs a real aiosmtpd
+    server with VRFY enabled against a genuine local-user set — 250 for a user
+    that exists, 550 for one that doesn't — the classic sendmail-style account
+    enumeration. HEAVEN's non-intrusive VRFY differential (postmaster vs a random
+    name) detects smtp_user_enumeration live. The server's behaviour is driven by
+    real user existence, never by inspecting HEAVEN's probe."""
+    _skip_if_unavailable()
+    from heaven.recon.email_scanner import scan_smtp_endpoint
+
+    with LabStack("smtp-vrfy-compose.yml", build=True):
+        ready = wait_until(lambda: _smtp_banner_ok("127.0.0.1", 2526),
+                           timeout_s=90.0)
+        assert ready, "smtp-vrfy lab never answered a 220 greeting"
+
+        res = asyncio.run(scan_smtp_endpoint("127.0.0.1", 2526))
+        enum = [f for f in res.get("findings", [])
+                if f["vuln_type"] == "smtp_user_enumeration"]
+        assert enum, f"VRFY user-enum not detected; got " \
+                     f"{[f['vuln_type'] for f in res.get('findings', [])]}"
+        ev = enum[0]["evidence"]
+        assert ev["valid_vrfy"].startswith("250"), ev
+        assert ev["invalid_vrfy"][:3] in ("550", "551", "553"), ev
 
 
 # ── ad: Kerberos enumeration + NTLM coercion live against a Samba AD DC ───────
@@ -399,3 +468,210 @@ def test_samba_dc_lab_detects_kerberos_enum_and_coercion():
         assert any(f["vuln_type"] == "ntlm_coercion" for f in cfind), cfind
         methods = {m["method"] for f in cfind for m in f["evidence"]["methods"]}
         assert "SpoolSample" in methods, methods  # MS-RPRN (PrinterBug) reachable
+
+
+# ── web: DOM-XSS proven live in a headless browser against OWASP Juice Shop ───
+def test_juiceshop_lab_proves_dom_xss():
+    """OWASP Juice Shop's search DOM XSS: the ``q`` parameter is rendered into an
+    innerHTML sink through Angular's bypassSecurityTrustHtml, so the payload's
+    JavaScript executes client-side — invisible to an HTTP-only scanner. HEAVEN's
+    shipped XSS execution prover (reached through ``prove_finding``, the
+    orchestrator's exploit-proof entry) loads the injected route in headless
+    Chromium and proves the vuln by observing a dialog carrying a unique per-run
+    token; a mere reflection cannot fire that dialog, so a patched build could not
+    false-positive. This complements the DVWA web lab, which proves
+    server-reflected/stored XSS: DVWA cannot exercise a client-side DOM sink,
+    Juice Shop can.
+
+    The SPA's toolbar-hidden search box is supplied as the known injection point
+    (the crawler maps the app's routes but does not auto-reveal that input); the
+    *proof* — real JavaScript execution in a browser — is what this lab
+    machine-checks.
+    """
+    _skip_if_unavailable()
+    from heaven.utils.runtime_capabilities import _chromium_status
+
+    ok, detail = _chromium_status()
+    if not ok:
+        pytest.skip(f"headless Chromium not available: {detail}")
+
+    from heaven.vulnscan.exploit_proof import prove_finding
+
+    with LabStack("juiceshop-compose.yml"):
+        # Juice Shop serves its Angular shell immediately; wait for the app HTML.
+        ready = wait_until(
+            lambda: http_status("http://127.0.0.1:3000/") == 200
+            and "Juice Shop" in http_body("http://127.0.0.1:3000/"),
+            timeout_s=180.0, interval_s=3.0)
+        assert ready, "Juice Shop never became reachable"
+
+        finding = {
+            "vuln_type": "reflected_xss",
+            "target": "http://127.0.0.1:3000/#/search",
+            "evidence": {"parameter": "q", "method": "GET"},
+            "confidence": 0.5,
+        }
+        out = asyncio.run(prove_finding(finding, authorized=True))
+
+        # The proof is real JavaScript execution in the browser, not reflection.
+        assert out.get("proved") is True, out.get("evidence")
+        proofs = out["evidence"]["exploit_proof"]
+        hit = next(p for p in proofs if p["proved"])
+        assert hit["technique"] == "xss_dom_execution", hit
+        assert "javascript_executed_in_browser" in hit["evidence"]["signals"], hit
+        # A fired dialog carrying the run token is the irrefutable execution proof.
+        assert hit["evidence"].get("token"), hit
+        # Confidence is upgraded to proven ground truth.
+        assert out["confidence"] >= 0.99, out["confidence"]
+
+
+# ── api: VAmPI (real third-party OWASP API Top 10) ───────────────────────────
+def test_vampi_lab_detects_api_flaws():
+    """VAmPI is a deliberately-vulnerable third-party REST API that publishes its
+    own OpenAPI 3.0.1 contract. HEAVEN's api_scanner discovers the spec, probes
+    the endpoints it *declares* (not just conventional ``/api/*`` guesses), and
+    confirms the real flaws live:
+
+      * ``excessive_data_exposure`` — GET /users/v1/_debug serialises every
+        user's ``password`` (API3:2023, CWE-359). High confidence: the response
+        literally carries populated password values, not a heuristic.
+      * ``api_broken_auth``        — GET /users/v1 returns the whole user
+        collection unauthenticated (API2:2023).
+      * ``api_docs_exposed``       — the OpenAPI spec is itself public (API9).
+
+    This proves the API mode against an external app, complementing the always-on
+    native API fixture (which HEAVEN authored). Nothing is mocked: the scanner
+    reads VAmPI's real contract and confirms each finding against a live response.
+    """
+    _skip_if_unavailable()
+    from heaven.vulnscan.api_scanner import scan_api_targets
+
+    base = "http://127.0.0.1:5001"
+    with LabStack("vampi-compose.yml"):
+        ready = wait_until(
+            lambda: http_status(f"{base}/") == 200
+            and "VAmPI" in http_body(f"{base}/"),
+            timeout_s=120.0, interval_s=3.0)
+        assert ready, "VAmPI never became reachable"
+        # VAmPI seeds its user/book tables on demand via its own /createdb route.
+        assert http_status(f"{base}/createdb") == 200, "VAmPI /createdb seed failed"
+
+        res = asyncio.run(scan_api_targets(urls=[base]))
+        by_type = {f["vuln_type"]: f for f in res.get("findings", [])}
+
+        # The signature VAmPI leak: /users/v1/_debug hands back passwords.
+        assert "excessive_data_exposure" in by_type, (
+            f"missed the /users/v1/_debug password leak; got {list(by_type)}")
+        leak = by_type["excessive_data_exposure"]
+        assert leak["evidence"]["leaked_field"] in ("password", "passwd", "pwd"), leak
+        assert leak["evidence"]["records_with_credential"] >= 1, leak
+        assert leak["endpoint"].endswith("/users/v1/_debug"), leak
+        assert leak["owasp_api"].startswith("API3"), leak
+
+        # Unauthenticated user collection + public contract, via spec discovery.
+        assert "api_broken_auth" in by_type, (
+            f"missed the unauthenticated /users/v1 collection; got {list(by_type)}")
+        assert "api_docs_exposed" in by_type, (
+            f"missed the public OpenAPI spec; got {list(by_type)}")
+
+
+# ── wireless: exposed WLAN admin panel (the reachable subset, proven live) ────
+def test_wireless_lab_detects_exposed_panel():
+    """Prove the network-reachable half of WIRELESS mode (its honest scope, per
+    the 'Wireless Posture Review' label). A real nginx server hosts an
+    unauthenticated MikroTik RouterOS 'webfig' page (an inert decoy carrying the
+    genuine vendor fingerprint); scan_wireless_posture fetches it, fingerprints
+    the vendor and reports the exposed management interface live. RF/802.11
+    capture stays honestly hardware-gated and is never simulated."""
+    _skip_if_unavailable()
+    from heaven.recon.wireless_posture import scan_wireless_posture
+
+    with LabStack("wireless-compose.yml"):
+        ready = wait_until(
+            lambda: "routeros" in http_body("http://127.0.0.1:8080/").lower(),
+            timeout_s=90.0)
+        assert ready, "wireless lab (RouterOS panel) never became reachable"
+
+        res = asyncio.run(scan_wireless_posture(["127.0.0.1"]))
+        fs = res.get("findings", [])
+        assert any("RouterOS" in f.get("title", "") for f in fs), (
+            f"no MikroTik RouterOS panel fingerprinted; got "
+            f"{[f.get('title') for f in fs]}")
+        assert any(f["vuln_type"].startswith("wireless_mgmt") for f in fs), fs
+
+
+# ── cloud: metadata-SSRF confirmed live against a real (inert) IMDS ───────────
+def test_cloud_ssrf_lab_reaches_instance_metadata():
+    """Prove HEAVEN's metadata-SSRF detection end to end: a deliberately
+    SSRF-vulnerable web app (/fetch?url=) sits on a Docker network whose subnet
+    is the link-local metadata range, with a fake EC2 IMDS pinned to the real
+    169.254.169.254. HEAVEN's validate_ssrf injects the AWS metadata endpoints;
+    the app fetches them server-side and returns instance-metadata indicators,
+    so the SSRF is CONFIRMED against a real IMDS reachable at the canonical
+    address — not a unit-test double. The IMDS hands back only an inert
+    AKIA...EXAMPLE placeholder.
+
+    This also guards the real ordering fix in validate_ssrf: the cloud-metadata
+    probes used to be crowded out of the probe budget by localhost-obfuscation
+    variants, so a metadata SSRF was never actually tested.
+    """
+    _skip_if_unavailable()
+    import aiohttp
+
+    from heaven.vulnscan.safe_validator import validate_ssrf
+
+    base = "http://127.0.0.1:8095"
+    with LabStack("cloud-ssrf-compose.yml"):
+        ready = wait_until(
+            lambda: "ami-id" in http_body(
+                f"{base}/fetch?url=http://169.254.169.254/latest/meta-data/"),
+            timeout_s=120.0, interval_s=3.0)
+        assert ready, "cloud SSRF lab (app -> IMDS) never became reachable"
+
+        async def _run():
+            async with aiohttp.ClientSession() as s:
+                return await validate_ssrf(s, f"{base}/fetch", "url")
+
+        res = asyncio.run(_run())
+        assert res.result == "confirmed", f"metadata SSRF not confirmed: {res.result}"
+        assert "169.254.169.254" in res.evidence.get("probe_url", ""), res.evidence
+
+
+# ── malware: webshell sweep detected live against a real HTTP server ──────────
+def test_webshell_lab_detects_dropped_shells():
+    """Elevate MALWARE mode from PARTIAL to proven: a real nginx server hosts a
+    webroot of INERT webshell-signature decoys (no PHP interpreter, nothing
+    executes — see labs/webshell-root/README.txt), and HEAVEN's read-only
+    webshell sweep GETs the known shell paths and flags every one. This proves
+    BOTH detection paths against a live server, not a unit-test double:
+
+      * named-shell response signatures — c99 / r57 / b374k / WSO / IndoXploit /
+        Alfa are each fingerprinted from the served banner;
+      * the generic YARA path — ``shell.php`` carries only a China-Chopper
+        ``@eval($_POST[...])`` one-liner (no named banner), so it can be caught
+        solely by ``PHP_Webshell_Eval_Superglobal``. That path had been
+        unit-tested only; here it fires against a real HTTP response.
+    """
+    _skip_if_unavailable()
+    from heaven.vulnscan.malware_scan import scan_malware_targets
+
+    base = "http://127.0.0.1:8093"
+    with LabStack("webshell-compose.yml"):
+        ready = wait_until(
+            lambda: http_status(f"{base}/c99.php") == 200
+            and "c99shell" in http_body(f"{base}/c99.php"),
+            timeout_s=90.0)
+        assert ready, "webshell lab (nginx) never became reachable"
+
+        res = asyncio.run(scan_malware_targets(urls=[base]))
+        shells = [f for f in res["findings"]
+                  if f["vuln_type"] == "webshell_detected"]
+        paths = {f["target"].rsplit("/", 1)[-1] for f in shells}
+        # Every seeded decoy must be detected (named-signature path).
+        assert {"c99.php", "r57.php", "b374k.php", "wso.php",
+                "indoxploit.php", "alfa.php"} <= paths, paths
+        # The generic YARA path must catch the banner-less China-Chopper shell.
+        generic = [f for f in shells if f["target"].endswith("/shell.php")]
+        assert generic, f"generic YARA webshell path missed shell.php; got {paths}"
+        assert generic[0]["evidence"]["signature"] == "PHP_Webshell_Eval_Superglobal"
+        assert all(f["severity"] == "critical" for f in shells)

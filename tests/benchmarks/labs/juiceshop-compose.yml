@@ -1,0 +1,27 @@
+# HEAVEN benchmark: OWASP Juice Shop DOM-XSS lab.
+#
+# A real, modern single-page application (Angular) whose signature client-side
+# DOM XSS lives in the search route: the `q` parameter is rendered into the DOM
+# through Angular's bypassSecurityTrustHtml, so a payload reaches an innerHTML
+# sink and its JavaScript executes in the browser. A server-side (HTTP-only)
+# scanner cannot see this — the markup is assembled client-side after the
+# framework boots — which is exactly why it complements the DVWA web lab:
+# DVWA proves server-reflected/stored XSS, Juice Shop proves DOM XSS that only a
+# real headless browser can confirm.
+#
+# HEAVEN's shipped XSS execution prover (heaven/vulnscan/exploit_proof.py,
+# reached through prove_finding in the orchestrator's exploit-proof phase) loads
+# the injected route in headless Chromium and reports success ONLY when the
+# payload's JavaScript actually runs, observed as a dialog carrying a unique
+# per-run token. A mere reflection cannot fire that dialog, so a patched build
+# could not produce a false positive.
+#
+# SECURITY: binds to loopback (127.0.0.1) only. Deliberately vulnerable — never
+# publish on 0.0.0.0.
+services:
+  juiceshop:
+    image: bkimminich/juice-shop:latest
+    container_name: heaven-lab-juiceshop
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: "no"

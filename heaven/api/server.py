@@ -118,6 +118,13 @@ class ScanRequest(BaseModel):
     # (CLI default) and a plain `nmap -p-` — the launcher exposes a Port scope
     # control to narrow this to a fast common-ports run when speed matters.
     ports: str = "1-65535"
+    # UDP service scanning (opt-in). TCP-only by default because a UDP sweep is
+    # slow; when true, HEAVEN probes real UDP services (DNS/NTP/SNMP/NetBIOS/IKE/
+    # SIP/…) the TCP sweep can never see — via nmap -sU when privileged, and its
+    # pure-Python service-probe scanner otherwise (works without root). ``udp_ports``
+    # is an optional nmap-style spec ("" / "top" = the curated common-UDP set).
+    scan_udp: bool = False
+    udp_ports: str = ""
     scan_type: str = "full"
     mode: str = "full"
     stealth_level: int = 3
@@ -826,14 +833,15 @@ def create_app() -> FastAPI:
     # bootstrap script from a CDN, so they get a relaxed policy rather than a
     # broken page.
     # script-src stays 'self' (the Vite bundle has no inline <script>) — the key
-    # anti-XSS win. The other sources match exactly what the shipped UI loads:
-    # Google Fonts (stylesheet + font files) and same-origin WebSockets for the
-    # live scan/log streams. Widen only if the UI genuinely starts loading more.
+    # anti-XSS win. Everything the shipped UI loads is now same-origin: fonts are
+    # self-hosted (bundled woff2, no Google Fonts), so font-src / style-src need no
+    # external host; connect-src allows same-origin WebSockets for the live
+    # scan/log streams. Widen only if the UI genuinely starts loading more.
     _CSP_APP = (
         "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
         "object-src 'none'; img-src 'self' data:; "
-        "font-src 'self' data: https://fonts.gstatic.com; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; connect-src 'self' ws: wss:"
     )
     _CSP_DOCS = (
@@ -1488,8 +1496,25 @@ def create_app() -> FastAPI:
             try:
                 for s in store.list_scans(limit=limit * 3):
                     sid = s.get("scan_id") or s.get("id", "")
-                    if sid not in active_scans:
-                        persisted.append(s)
+                    if sid in active_scans:
+                        continue
+                    # Self-heal an orphaned row on read. A scan persists 'running'
+                    # (or 'pending') and only flips to a terminal state from inside
+                    # its own in-process task. If the row is still 'running' but NO
+                    # live task in this process is driving it — the id is in neither
+                    # `active_scans` (checked above) nor `_scan_tasks_by_id` — then
+                    # the process that started it is gone (killed/crashed/closed) and
+                    # nothing will ever finish it. The startup pass reconciles these,
+                    # but a row orphaned mid-session, or in a DB that was locked when
+                    # the startup pass ran, would otherwise tick "running" forever and
+                    # show a phantom scan in the header badge. Flip it to 'interrupted'
+                    # (checkpoints kept → still resumable) so the badge clears on the
+                    # very next poll without needing a server restart.
+                    if (s.get("status") in ("running", "pending")
+                            and sid and sid not in _scan_tasks_by_id):
+                        if store.record_scan_interrupted(sid):
+                            s = {**s, "status": "interrupted"}
+                    persisted.append(s)
             except Exception:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
         combined = [s for s in (mem + persisted) if _keep(s)]
@@ -1657,6 +1682,8 @@ def create_app() -> FastAPI:
             repositories=list(tgt.get("repositories") or []),
             cloud_providers=list(tgt.get("cloud_providers") or []),
             ports=str(tgt.get("ports") or "1-65535"),
+            scan_udp=bool(tgt.get("scan_udp")),
+            udp_ports=str(tgt.get("udp_ports") or ""),
             mode=row.get("mode") or cfg.get("mode") or "full",
             stealth_level=_name2int.get(str(tgt.get("stealth_level") or "normal"), 3),
             evade=bool(tgt.get("evade")),
@@ -1929,8 +1956,23 @@ def create_app() -> FastAPI:
                 stats["overall_risk"] = _overall_risk_from(csev)
             except Exception:
                 logger.debug("confirmation stats unavailable", exc_info=True)
+            eng_dict = eng.__dict__ if eng else None
+            if eng_dict is None and not no_engagement:
+                # The active store has scans/findings but no engagement-metadata
+                # row (data written before the row existed, or an implicitly
+                # created store). Surface the canonical name — the DB filename
+                # stem, the same fallback the engagement switcher uses — so the
+                # header shows the active engagement instead of a misleading
+                # "no active engagement" banner.
+                db_path = getattr(store, "db_path", None)
+                name = db_path.stem if db_path is not None else _resolve_engagement_name()
+                eng_dict = {
+                    "name": name, "client": "", "statement_of_work": "",
+                    "tester": "", "created_at": "", "updated_at": "",
+                    "notes": "", "id": None,
+                }
             return {
-                "engagement": eng.__dict__ if eng else None,
+                "engagement": eng_dict,
                 "stats": stats,
                 "no_engagement": no_engagement,
             }
@@ -3838,6 +3880,10 @@ def create_app() -> FastAPI:
         text = str(body.get("text") or "")
         if not text:
             raise HTTPException(400, "text is required")
+        # The decoder itself truncates its input, but reject an oversized blob up
+        # front so a hostile client cannot make us buffer megabytes of it.
+        if len(text) > 4 * 1024 * 1024:
+            raise HTTPException(413, "text too large (limit 4 MB)")
         from heaven.forensics.crypto import analyze_crypto
         return analyze_crypto("", decode_text=text)
 
@@ -3847,53 +3893,152 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("config.modify")),
     ):
         """Analyze an offline artifact (pcap/binary/firmware/apk/image/hash file)
-        and return findings. The file arrives base64-encoded in JSON so no extra
-        server dependency is needed; it is written to a private temp path,
-        analyzed, then deleted — nothing is persisted.
+        and return findings. The file is written to a private temp path, analyzed,
+        then deleted — nothing is persisted.
 
-        Body JSON:
-          {"filename": "capture.pcap", "content_b64": "<base64>",
-           "kind": ""}   # kind optional — forces the type, else auto-detected
+        Two request shapes are accepted:
+
+        * ``multipart/form-data`` with a ``file`` part (preferred): the upload is
+          streamed to disk in bounded chunks, so a large artifact never has to sit
+          in memory. Optional ``kind`` form field forces the type. This is the path
+          the web UI uses and the one that supports large real-world files.
+        * ``application/json`` ``{"filename", "content_b64", "kind"}`` (back-compat
+          for scripts): the base64 body is decoded in memory.
+
+        The size ceiling is ``HEAVEN_ANALYZE_MAX_MB`` (default 512 MB); an operator
+        can raise it for very large captures/firmware.
         """
-        import base64
         import tempfile
+
         try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        b64 = body.get("content_b64") or ""
-        if not b64:
-            raise HTTPException(400, "content_b64 is required")
-        try:
-            data = base64.b64decode(b64, validate=False)
-        except Exception:
-            raise HTTPException(400, "content_b64 is not valid base64")
-        # Bounded so an oversized artifact cannot exhaust memory/disk.
-        max_bytes = 40 * 1024 * 1024
-        if len(data) > max_bytes:
-            raise HTTPException(413, "file too large (limit 40 MB)")
-        kind = str(body.get("kind") or "")
-        filename = str(body.get("filename") or "artifact")
+            max_mb = int(os.environ.get("HEAVEN_ANALYZE_MAX_MB", "512"))
+        except ValueError:
+            max_mb = 512
+        max_mb = max(1, max_mb)
+        max_bytes = max_mb * 1024 * 1024
+
+        ctype = (request.headers.get("content-type") or "").lower()
         from heaven.forensics.dispatch import analyze_artifact, detect_kind
+
+        # First gather the metadata (filename/kind) and the raw source, so the temp
+        # file can carry the original extension — detect_kind uses it for the
+        # extension-only types (e.g. a firmware .bin with no filesystem signature).
+        multipart = ctype.startswith("multipart/form-data")
+        upload_reader: Any = None
+        data = b""
+        if multipart:
+            from starlette.datastructures import UploadFile as _UploadFile
+            form = await request.form()
+            upload = form.get("file")
+            if not isinstance(upload, _UploadFile):
+                raise HTTPException(400, "a 'file' part is required")
+            upload_reader = upload
+            kind = str(form.get("kind") or "")
+            filename = str(upload.filename or "artifact")
+        else:
+            import base64
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            b64 = body.get("content_b64") or ""
+            if not b64:
+                raise HTTPException(400, "content_b64 (or a multipart file) is required")
+            try:
+                data = base64.b64decode(b64, validate=False)
+            except Exception:
+                raise HTTPException(400, "content_b64 is not valid base64")
+            if len(data) > max_bytes:
+                raise HTTPException(413, f"file too large (limit {max_mb} MB)")
+            kind = str(body.get("kind") or "")
+            filename = str(body.get("filename") or "artifact")
+
+        # The on-disk name stays random; only the client's extension is reused, so
+        # the filename is never trusted as a path.
         safe_suffix = Path(filename).suffix[:12]
         tmp = tempfile.NamedTemporaryFile(prefix="heaven_analyze_",
                                           suffix=safe_suffix, delete=False)
+        wrote = 0
         try:
-            tmp.write(data)
+            if multipart:
+                # Stream in bounded chunks; stop hard the moment the cap is passed
+                # so a hostile client cannot fill the disk or exhaust memory.
+                while True:
+                    chunk = await upload_reader.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    wrote += len(chunk)
+                    if wrote > max_bytes:
+                        raise HTTPException(413, f"file too large (limit {max_mb} MB)")
+                    tmp.write(chunk)
+            else:
+                tmp.write(data)
+                wrote = len(data)
             tmp.flush()
             tmp.close()
+            if wrote == 0:
+                raise HTTPException(400, "empty file")
             detected = kind or detect_kind(tmp.name)
             result = analyze_artifact(tmp.name, kind=kind or "")
             result.setdefault("detected_kind", detected)
             result["filename"] = filename
             return result
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(500, f"analysis failed: {e}")
         finally:
             try:
+                tmp.close()
+            except Exception:
+                logger.debug("temp artifact close failed", exc_info=True)
+            try:
                 os.unlink(tmp.name)
             except Exception:
                 logger.debug("temp artifact cleanup failed", exc_info=True)
+
+    @app.post("/api/analyze/report")
+    async def analyze_report(
+        request: Request,
+        user: User = Depends(require_permission("config.modify")),
+    ):
+        """Render an analysis result into a downloadable report.
+
+        Body JSON: {"result": {<analyze result>}, "format": "md"|"html"|"json"|"pdf"}.
+        Returns {"filename", "mimetype", "content", "encoding"}. ``encoding`` is
+        "utf-8" for the text formats and "base64" for PDF (a binary document), so
+        the client knows how to turn ``content`` back into a file.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        result = body.get("result")
+        if not isinstance(result, dict):
+            raise HTTPException(400, "result object is required")
+        fmt = str(body.get("format") or "md").lower()
+        if fmt not in ("md", "html", "json", "pdf"):
+            raise HTTPException(400, "format must be md, html, json or pdf")
+        kind = str(result.get("kind") or result.get("detected_kind") or "artifact")
+        base = Path(str(result.get("filename") or kind)).stem or kind
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", base)[:60]
+        if fmt == "pdf":
+            import base64 as _b64
+            from heaven.forensics.report import render_pdf
+            try:
+                pdf_bytes = render_pdf(result)
+            except RuntimeError as e:
+                raise HTTPException(501, str(e))
+            except Exception as e:
+                raise HTTPException(500, f"PDF render failed: {e}")
+            return {"filename": f"heaven-{kind}-{safe}.pdf",
+                    "mimetype": "application/pdf",
+                    "content": _b64.b64encode(pdf_bytes).decode("ascii"),
+                    "encoding": "base64"}
+        from heaven.forensics.report import render_report
+        content, mimetype, ext = render_report(result, fmt)
+        return {"filename": f"heaven-{kind}-{safe}.{ext}",
+                "mimetype": mimetype, "content": content, "encoding": "utf-8"}
 
     # ── Network pivoting (admin only — tunnels into networks behind a foothold) ──
 
@@ -5461,6 +5606,8 @@ async def _run_scan_background(scan_id: str, req: ScanRequest, *, resume: bool =
         "repositories": req.repositories,
         "cloud_providers": req.cloud_providers,
         "ports": req.ports,
+        "scan_udp": bool(req.scan_udp),
+        "udp_ports": req.udp_ports,
         "stealth_level": stealth_name,
         "evade": bool(req.evade),
         # Active exploitation is gated in the orchestrator; the task also fires

@@ -1,10 +1,13 @@
 # HEAVEN benchmark: IoT device lab
 #
-# Two genuinely-insecure IoT services HEAVEN's real protocol probes confirm:
+# Three genuinely-insecure IoT services HEAVEN's real protocol probes confirm:
 #   * Mosquitto with anonymous access enabled (MQTT :1883) — probe_mqtt gets a
 #     CONNACK return code 0 (anonymous accepted) -> critical CWE-306.
 #   * A real pymodbus server with no authentication (Modbus/TCP :502) —
 #     probe_modbus gets a valid Read-Device-Identification reply -> critical.
+#   * A real MediaMTX RTSP server (RTSP :554) — probe_rtsp gets a valid
+#     RTSP/1.0 DESCRIBE response, confirming a live streaming/camera service
+#     (the class of exposed IP-camera surface IoT assessments look for).
 #
 # SECURITY: every port binds to loopback ONLY (127.0.0.1). These services are
 # deliberately unauthenticated; publishing on 0.0.0.0 would expose them to the
@@ -27,4 +30,13 @@ services:
     container_name: heaven-lab-iot-modbus
     ports:
       - "127.0.0.1:502:502"
+    restart: "no"
+
+  rtsp:
+    image: bluenviron/mediamtx:latest
+    container_name: heaven-lab-iot-rtsp
+    # MediaMTX serves RTSP on 8554 by default; publish it on the standard RTSP
+    # port 554 so the IoT scanner's port discovery (IOT_TCP_PORTS) reaches it.
+    ports:
+      - "127.0.0.1:554:8554"
     restart: "no"

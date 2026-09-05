@@ -1168,6 +1168,24 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
     except Exception:
         logger.debug("perimeter-finding synthesis failed", exc_info=True)
 
+    # Scan-completeness observation: if the deep scan hit its deadline with hosts
+    # still in flight, say so plainly — a partial port list must never look final.
+    try:
+        from heaven.recon.firewall_detector import build_scan_completeness_findings
+        findings.extend(build_scan_completeness_findings(net_data))
+    except Exception:
+        logger.debug("scan-completeness synthesis failed", exc_info=True)
+
+    # NetBIOS node-status observations: name/workgroup/MAC disclosure over UDP/137,
+    # AD domain-controller pointers, and the honest "Windows host, exact version
+    # undetermined — re-scan privileged for OS/EOL" note. All evidence-based and
+    # flagged as observations; empty when no host answered NBSTAT.
+    try:
+        from heaven.recon.netbios import build_netbios_findings
+        findings.extend(build_netbios_findings(net_data))
+    except Exception:
+        logger.debug("netbios-finding synthesis failed", exc_info=True)
+
     for host in hosts:
         ip = host.get("ip") or host.get("host") or ""
         if not ip:
@@ -1322,10 +1340,15 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     "without requiring Network Level Authentication. Without NLA, "
                     "authentication happens after a full session is set up, exposing "
                     "the host to pre-authentication man-in-the-middle attacks and "
-                    "lowering the cost of credential brute-forcing. Require NLA "
-                    "(CredSSP) via Group Policy / System Properties.",
+                    "lowering the cost of credential brute-forcing. Critically, NLA "
+                    "is the front-line mitigation for the pre-auth RDP RCE BlueKeep "
+                    "(CVE-2019-0708) on Windows 7 / Server 2008 R2 and earlier — an "
+                    "unpatched host of that vintage with NLA off is directly "
+                    "wormable. Require NLA (CredSSP) via Group Policy / System "
+                    "Properties, and confirm the RDP patch level.",
                     confidence=0.85,
-                    evidence={"port": rport, "nla_required": False, "proven": True},
+                    evidence={"port": rport, "nla_required": False, "proven": True,
+                              "related_cve": "CVE-2019-0708 (BlueKeep, if unpatched)"},
                 ))
 
         # 2d) NFS — read-only export enumeration (showmount -e). A share offered

@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -102,8 +104,6 @@ def locate_corpus(explicit: Optional[Path] = None) -> Optional[BenchmarkCorpus]:
     environment variable. Returns None if neither points at a valid checkout, so
     the caller can decide to clone or skip.
     """
-    import os
-
     candidates: list[Path] = []
     if explicit:
         candidates.append(Path(explicit))
@@ -115,6 +115,78 @@ def locate_corpus(explicit: Optional[Path] = None) -> Optional[BenchmarkCorpus]:
         if corpus:
             return corpus
     return None
+
+
+def _cache_root() -> Path:
+    """Stable per-user cache directory for the fetched Benchmark corpus.
+
+    Honours ``HEAVEN_OWASP_BENCHMARK_CACHE``, then ``XDG_CACHE_HOME``, then
+    ``~/.cache``. The corpus is GPLv2 and lives outside the (MIT) repo, so it
+    is never copied into the tree; it is fetched once here and reused.
+    """
+    override = os.environ.get("HEAVEN_OWASP_BENCHMARK_CACHE", "").strip()
+    if override:
+        return Path(override).expanduser()
+    xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
+    return base / "heaven" / "owasp-benchmark"
+
+
+def cached_corpus_path() -> Path:
+    """Location of the pinned corpus cache.
+
+    Keyed to the pinned commit so bumping :data:`PINNED_COMMIT` transparently
+    invalidates an old checkout and triggers a fresh fetch.
+    """
+    return _cache_root() / f"BenchmarkJava-{PINNED_COMMIT[:12]}"
+
+
+def get_or_fetch_corpus(explicit: Optional[Path] = None) -> BenchmarkCorpus:
+    """Return a ready corpus, fetching it once into a persistent cache if needed.
+
+    Order: an ``explicit``/``HEAVEN_OWASP_BENCHMARK_DIR`` checkout always wins;
+    otherwise a commit-pinned clone kept under :func:`cached_corpus_path`, pulled
+    at most once per machine (unlike a throwaway ``mkdtemp`` clone that re-pulls
+    ~300 MB every run). Raises on a missing git binary or a fetch failure so the
+    caller can skip rather than fail.
+    """
+    located = locate_corpus(explicit)
+    if located is not None:
+        return located
+
+    cache_dir = cached_corpus_path()
+    cached = _validate_root(cache_dir)
+    if cached is not None:
+        return cached
+
+    # A leftover directory that does not validate is a corrupt/partial cache
+    # (an interrupted clone from an older code path); clear it so it self-heals
+    # rather than skipping forever.
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+    # Clone into a sibling staging dir, then atomically move it into place, so a
+    # concurrent or aborted run never leaves a half-written cache behind.
+    cache_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".BenchmarkJava-staging-",
+                                    dir=str(cache_dir.parent)))
+    try:
+        clone_pinned(staging)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    try:
+        os.replace(staging, cache_dir)
+    except OSError:
+        # Another run populated the cache first (or a cross-device move): keep
+        # whatever is now at the destination and drop our staging copy.
+        shutil.rmtree(staging, ignore_errors=True)
+
+    corpus = _validate_root(cache_dir)
+    if corpus is None:
+        raise RuntimeError(
+            f"cached clone did not yield a valid Benchmark checkout at {cache_dir}")
+    return corpus
 
 
 def clone_pinned(dest: Path) -> BenchmarkCorpus:
@@ -382,29 +454,26 @@ async def run(corpus: BenchmarkCorpus, timeout_s: int = 1800) -> Scorecard:
 
 
 def _main() -> int:
-    """Standalone runner: locate or clone the corpus, score, print the card."""
+    """Standalone runner: locate or fetch the corpus, score, print the card."""
     import argparse
-    import tempfile
 
     ap = argparse.ArgumentParser(description="Score HEAVEN SAST against the OWASP Benchmark")
     ap.add_argument("--dir", type=Path, default=None,
                     help="Path to a BenchmarkJava checkout (else $HEAVEN_OWASP_BENCHMARK_DIR, "
-                         "else a shallow clone of the pinned corpus).")
+                         "else the pinned corpus, cached under $XDG_CACHE_HOME/heaven).")
     ap.add_argument("--timeout", type=int, default=1800)
     args = ap.parse_args()
 
-    corpus = locate_corpus(args.dir)
-    tmp: Optional[Path] = None
-    if corpus is None:
-        tmp = Path(tempfile.mkdtemp(prefix="heaven_owasp_bench_"))
-        print(f"No corpus found; shallow-cloning the pinned corpus into {tmp} ...")
-        corpus = clone_pinned(tmp)
+    if locate_corpus(args.dir) is None:
+        print(f"No local corpus; fetching the pinned corpus into {cached_corpus_path()} ...")
     try:
-        card = asyncio.run(run(corpus, timeout_s=args.timeout))
-        print(card.render())
-    finally:
-        if tmp is not None:
-            shutil.rmtree(tmp, ignore_errors=True)
+        corpus = get_or_fetch_corpus(args.dir)
+    except Exception as e:  # git missing / network failure
+        print(f"could not obtain the OWASP Benchmark corpus: {e}")
+        return 2
+
+    card = asyncio.run(run(corpus, timeout_s=args.timeout))
+    print(card.render())
     return 0
 
 

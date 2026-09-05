@@ -72,6 +72,8 @@ def _lt(version: tuple[int, ...], cutoff: tuple[int, ...]) -> bool:
 # ── OS end-of-life table (regex on the OS guess → date + note) ───────────────
 # Ordered most-specific first; the first match wins.
 _OS_EOL: list[tuple[str, str, str, str]] = [
+    (r"windows\s+(?:nt\s+4|2000)", "2010-07-13", "high",
+     "Windows 2000 / NT 4.0 has been unsupported since 2010."),
     (r"windows\s+xp", "2014-04-08", "high",
      "Windows XP has been unsupported since 2014."),
     (r"windows\s+vista", "2017-04-11", "high",
@@ -107,16 +109,37 @@ _PRODUCT_EOL: list[tuple[str, str, Optional[tuple[int, ...]], str, str, str]] = 
     ("Adobe Flash Player", r"flash\s*player|shockwave\s*flash", None, "2020-12-31",
      "high", "Adobe Flash Player reached end of life on 2020-12-31 and is blocked "
      "by modern browsers."),
-    # Match Apache HTTP Server ONLY — require an httpd/`Apache/<n>` context so the
-    # OTHER "Apache" products (Tomcat, Jserv/AJP, Coyote, Traffic Server) don't
-    # match this rule and get flagged EOL off their PROTOCOL version (AJP 1.3,
-    # Coyote 1.1 are < 2.4 and used to fire a bogus "Apache httpd 2.2" finding on
-    # Metasploitable's :8009 / :8180). Display carries no branch number so the
-    # detected version isn't doubled ("Apache httpd 2.2 2.2.8").
-    ("Apache HTTP Server", r"apache[ /]?httpd|apache/\d|\bhttpd\b", (2, 4),
+    # Match Apache HTTP Server ONLY — require an explicit "apache" token (an
+    # `apache httpd` / `Apache/<n>` context). This keeps the OTHER "Apache"
+    # products (Tomcat, Jserv/AJP, Coyote, Traffic Server) from matching off their
+    # PROTOCOL version (AJP 1.3, Coyote 1.1 are < 2.4 and used to fire a bogus
+    # "Apache httpd 2.2" finding on Metasploitable's :8009 / :8180). A bare
+    # `httpd` token is deliberately NOT matched: nmap fingerprints non-Apache
+    # servers as "<vendor> httpd" too — a filtered Windows box answering on
+    # 5357/wsdapi is "Microsoft HTTPAPI httpd 2.0", busybox is "busybox httpd" —
+    # so a bare `httpd` matched them and mislabeled the host as EOL Apache 2.0.
+    # Real Apache always carries the "apache" token in its banner. Display carries
+    # no branch number so the detected version isn't doubled ("Apache httpd 2.2 2.2.8").
+    ("Apache HTTP Server", r"apache[ /]?httpd|apache/\d", (2, 4),
      "2017-12-31", "medium",
      "Apache HTTP Server branches before 2.4 are end-of-life and receive no "
      "security fixes."),
+    # Apache JServ / AJP connector. Version-less (cutoff None) on purpose: the
+    # `jserv` token is unambiguous (no non-AJP service fingerprints as "Jserv"),
+    # and the "1.3" in "Protocol v1.3" is the AJP PROTOCOL version, never a
+    # software release — so we must NOT version-compare it (that is exactly the
+    # bogus "Apache httpd 2.2" FP the rule above avoids). The finding is framed
+    # as an exposure, which is correct for any AJP version: the connector must
+    # never be network-reachable (it is the Ghostcat / CVE-2020-1938 surface),
+    # and the original Apache JServ project has been retired since ~2000.
+    ("Apache JServ / AJP connector (legacy)", r"\bjserv\b", None,
+     "2000-12-31", "medium",
+     "An Apache JServ / AJP connector is reachable over the network. The AJP "
+     "connector is legacy middleware that must be bound to localhost or trusted "
+     "reverse proxies only: a network-exposed AJP port is the Ghostcat "
+     "(CVE-2020-1938) file-read/RCE attack surface, and the original Apache "
+     "JServ project has been retired and unmaintained since ~2000. Disable the "
+     "AJP connector or restrict it to trusted hosts."),
     ("PHP", r"\bphp\b", (8, 1), "2025-12-31", "medium",
      "PHP versions before 8.1 have reached end of security support. Upgrade to a "
      "supported 8.x branch."),
@@ -198,9 +221,10 @@ _ENDOFLIFE_SLUGS: list[tuple[str, str]] = [
     (r"nginx", "nginx"),
     # "apache" alone matched the OTHER Apache products (Tomcat, Jserv/AJP,
     # Coyote), sending their PROTOCOL version to the Apache HTTP Server EOL feed
-    # ("Apache Jserv 1.3" flagged EOL). Require an httpd context; Tomcat matches
-    # its own slug on the next line.
-    (r"apache[ /]?httpd|apache/\d|\bhttpd\b", "apache"),
+    # ("Apache Jserv 1.3" flagged EOL). Require an explicit "apache" token; a bare
+    # `httpd` is NOT matched (it also fingerprints non-Apache servers such as
+    # "Microsoft HTTPAPI httpd" / "busybox httpd"). Tomcat matches its own slug.
+    (r"apache[ /]?httpd|apache/\d", "apache"),
     (r"tomcat", "tomcat"),
     (r"\bphp\b", "php"),
     (r"mariadb", "mariadb"),

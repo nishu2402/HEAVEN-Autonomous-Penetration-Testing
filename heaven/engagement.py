@@ -440,6 +440,26 @@ def _strip_query(url: str) -> str:
     return url.split("?", 1)[0].split("#", 1)[0]
 
 
+def _canon_url_path(url: str) -> str:
+    """Canonicalise a URL for finding identity: lower-case, collapse redundant
+    path slashes and drop the trailing slash.
+
+    The SAME endpoint reached from a base spelled ``http://h:5001`` vs
+    ``http://h:5001/`` yields ``.../users/v1`` vs ``...//users/v1`` (a scanner
+    that joins ``f"{base}/users/v1"``). Those are one endpoint, so a plain
+    trailing-slash strip is not enough — the duplicate slash sits mid-path. Collapse
+    all ``//`` runs in the netloc+path (never in the ``scheme://`` separator) so
+    both spellings hash to one finding instead of duplicating per slash variant."""
+    u = (url or "").strip().lower()
+    if "://" in u:
+        scheme, rest = u.split("://", 1)
+        rest = re.sub(r"/{2,}", "/", rest)
+        u = f"{scheme}://{rest}"
+    else:
+        u = re.sub(r"/{2,}", "/", u)
+    return u.rstrip("/")
+
+
 def _param_of(f: dict) -> str:
     """The distinguishing parameter of a finding, from the top level OR its
     evidence.
@@ -499,8 +519,14 @@ def _finding_hash(target: str, vuln_type: str, param: str = "",
     elif is_host_level(vt):
         key = f"{_host_key(target)}|{vt}"
     else:
-        base = _strip_query(target).lower()
-        ep = _strip_query(endpoint).lower()
+        # Canonicalise the path-level identity so the SAME endpoint reached from a
+        # base spelled ``http://host:5001`` vs ``http://host:5001/`` collapses to
+        # one finding instead of duplicating. This normalises BOTH the trailing
+        # slash and the mid-path ``//`` a scanner produces when it joins
+        # ``f"{base}/users/v1"`` onto a slash-terminated base. The query string is
+        # already stripped above.
+        base = _canon_url_path(_strip_query(target))
+        ep = _canon_url_path(_strip_query(endpoint))
         key = f"{base}|{vt}|{ep}|{param.lower()}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
@@ -1649,7 +1675,7 @@ class EngagementStore:
                 # mode after an exploit scan must not turn a confirmed Critical RCE
                 # back into a Medium. Only when the incoming copy is the stronger
                 # evidence does it overwrite the stored severity/evidence.
-                existing_ev = {}
+                existing_ev: dict = {}
                 with suppress(Exception):
                     existing_ev = json.loads(existing["evidence_json"] or "{}") or {}
                 stored_finding = {

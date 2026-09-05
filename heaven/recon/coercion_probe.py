@@ -58,7 +58,7 @@ def _try_bind(host: str, pipe: str, uuid_tuple: tuple[str, str],
     try:
         rpctransport.set_connect_timeout(timeout)
     except Exception:
-        pass
+        logger.debug("set_connect_timeout unsupported by this transport", exc_info=True)
     if hasattr(rpctransport, "set_credentials"):
         rpctransport.set_credentials(username, password, domain, "", "")
     dce = rpctransport.get_dce_rpc()
@@ -72,7 +72,7 @@ def _try_bind(host: str, pipe: str, uuid_tuple: tuple[str, str],
         try:
             dce.disconnect()
         except Exception:
-            pass
+            logger.debug("dce.disconnect failed", exc_info=True)
 
 
 def _probe_host(host: str, username: str, password: str, domain: str,
@@ -91,6 +91,7 @@ def _probe_host(host: str, username: str, password: str, domain: str,
                                           "pipe": pipe, "interface": uuid_tuple[0]})
                         break  # one reachable pipe is enough for this method
                 except Exception:
+                    logger.debug("bind attempt on pipe %s failed", pipe, exc_info=True)
                     continue
     finally:
         socket.setdefaulttimeout(old_timeout)

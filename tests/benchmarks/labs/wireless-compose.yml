@@ -1,0 +1,23 @@
+# HEAVEN benchmark: wireless posture-review lab (reachable-subset).
+#
+# WIRELESS mode is honestly scoped as a "Wireless Posture Review": RF/802.11
+# sniffing needs a monitor-mode radio a remote scanner cannot have, so the mode
+# reviews the network-REACHABLE part — exposed AP / router / WLAN-controller web
+# admin panels. This lab serves a real, unauthenticated MikroTik RouterOS
+# "webfig" management page (an inert decoy carrying the genuine vendor
+# fingerprint); HEAVEN's scan_wireless_posture fetches it, fingerprints the
+# vendor, and reports the exposed wireless management interface — proving the
+# reachable subset live. No RF is claimed or simulated.
+#
+# Published to loopback only; nginx serves static content, nothing executes.
+services:
+  wireless-panel:
+    image: nginx:alpine
+    container_name: heaven-lab-wireless
+    # scan_wireless_posture probes only 80/443/8080/8443, so publish on 8080
+    # (one of those fixed management ports) — not an arbitrary high port.
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./wireless-root:/usr/share/nginx/html:ro
+    restart: "no"

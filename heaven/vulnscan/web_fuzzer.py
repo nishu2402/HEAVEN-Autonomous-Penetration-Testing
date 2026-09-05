@@ -9,6 +9,7 @@ from heaven.net.egress import client_session as _egress_cs  # egress-routed aioh
 
 import asyncio
 import base64
+import hashlib
 import re
 import secrets
 import string
@@ -29,6 +30,40 @@ logger = get_logger("web_fuzzer")
 # Canary markers use a CSPRNG so a target cannot pre-compute / pre-seed them and
 # mask reflection, and to satisfy HEAVEN's `weak-random-for-crypto` SAST rule.
 _rng = secrets.SystemRandom()
+
+
+def _page_fingerprint(body: str) -> str:
+    """A stable fingerprint of a page for same-page comparison across requests.
+
+    Collapses whitespace and strips volatile tokens (long hex/digit runs such as
+    CSRF tokens or timestamps) so the SAME page yields the SAME fingerprint on
+    two fetches, then hashes a bounded prefix. Used by the web-cache-deception
+    check to tell "the server served this very page under a static-extension URL"
+    apart from "the server serves one catch-all page for everything"."""
+    t = re.sub(r"\s+", " ", body or "").strip()
+    t = re.sub(r"[0-9a-f]{8,}", "", t, flags=re.IGNORECASE)  # tokens / hashes
+    t = re.sub(r"\d+", "", t)                                # bare numbers / times
+    return hashlib.md5(t[:2000].encode("utf-8", "replace"),
+                       usedforsecurity=False).hexdigest()
+
+
+def _cacheable_for_deception(cache_control: str) -> bool:
+    """True only when a response would actually be stored+served stale by a shared
+    cache — the precondition for exploitable web cache deception.
+
+    ``no-store`` / ``no-cache`` / ``private`` disqualify outright, and an explicit
+    ``max-age=0`` / ``s-maxage=0`` means "revalidate every time" (never served
+    stale), so ``public, max-age=0`` — the common default that used to
+    false-positive — is correctly treated as NOT cacheable."""
+    cc = (cache_control or "").lower()
+    if any(t in cc for t in ("no-store", "no-cache", "private")):
+        return False
+    for m in re.finditer(r"(?:s-maxage|max-age)\s*=\s*(\d+)", cc):
+        if int(m.group(1)) == 0:
+            return False
+    if "public" in cc:
+        return True
+    return bool(re.search(r"(?:s-maxage|max-age)\s*=\s*[1-9]", cc))
 
 
 def _dedup(findings: list[dict]) -> list[dict]:
@@ -445,23 +480,64 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
             logger.debug("suppressed non-fatal exception", exc_info=True)
             continue
 
-    # Check for web cache deception (path confusion)
+    # Check for web cache deception (path confusion). Real WCD requires THREE
+    # things, all verified here so a SPA catch-all can never false-positive:
+    #   1. appending a static extension serves the SAME page as the base URL
+    #      (the server ignores the extension → path confusion), AND
+    #   2. that same page is NOT served for an arbitrary unrelated static path
+    #      (else it is just a catch-all / SPA index served for everything, which
+    #      is not deception), AND
+    #   3. the response is genuinely cacheable — ``public`` or a POSITIVE max-age,
+    #      never ``max-age=0`` / ``no-store`` / ``no-cache`` / ``private`` (a
+    #      ``public, max-age=0`` response revalidates every time and is not served
+    #      stale, so it is not exploitable).
     try:
         parsed = urllib.parse.urlparse(url)
         if parsed.path and not parsed.path.endswith((".css", ".js", ".png")):
+            base_body = None
+            try:
+                async with session.get(
+                        url, timeout=aiohttp.ClientTimeout(total=8)) as rb:
+                    if rb.status == 200:
+                        base_body = _page_fingerprint(await rb.text(errors="replace"))
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+
             decept_url = url.rstrip("/") + "/nonexistent.css"
             async with session.get(decept_url, timeout=aiohttp.ClientTimeout(total=8)) as r:
-                if r.status == 200:
-                    cache_ctrl = r.headers.get("Cache-Control", "")
-                    if "public" in cache_ctrl or "max-age" in cache_ctrl:
-                        findings.append(_finding(
-                            url, "web_cache_deception", "high",
-                            "Web Cache Deception — Static Extension Bypass",
-                            f"Appending a static extension ({decept_url}) returns authenticated "
-                            f"content with caching headers. Attackers can cache and steal private data.",
-                            confidence=0.80,
-                            evidence={"deception_url": decept_url, "cache_control": cache_ctrl},
-                        ))
+                d_status = r.status
+                d_cache = r.headers.get("Cache-Control", "")
+                d_body = _page_fingerprint(await r.text(errors="replace")) if d_status == 200 else None
+
+            # Control: an unrelated static path at the site root. If it returns
+            # the SAME body as the deception URL, the server serves one page for
+            # every ``*.css`` (a catch-all), so this is not deception.
+            control_body = None
+            try:
+                p2 = urllib.parse.urlparse(url)
+                control_url = f"{p2.scheme}://{p2.netloc}/heaven-wcd-{secrets.token_hex(6)}.css"
+                async with session.get(
+                        control_url, timeout=aiohttp.ClientTimeout(total=8)) as rc:
+                    if rc.status == 200:
+                        control_body = _page_fingerprint(await rc.text(errors="replace"))
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+
+            serves_app_page = (d_body is not None and base_body is not None
+                               and d_body == base_body)
+            is_catch_all = (control_body is not None and control_body == d_body)
+            if (d_status == 200 and serves_app_page and not is_catch_all
+                    and _cacheable_for_deception(d_cache)):
+                findings.append(_finding(
+                    url, "web_cache_deception", "high",
+                    "Web Cache Deception — Static Extension Bypass",
+                    f"Appending a static extension ({decept_url}) returns the SAME "
+                    f"dynamic page as {url} with cacheable headers, and an unrelated "
+                    f"static path does not — a shared cache could store and serve this "
+                    f"private page to other users.",
+                    confidence=0.80,
+                    evidence={"deception_url": decept_url, "cache_control": d_cache},
+                ))
     except Exception:
         logger.debug("suppressed non-fatal exception", exc_info=True)
 

@@ -1,0 +1,44 @@
+# HEAVEN benchmark: cloud metadata-SSRF lab.
+#
+# A deliberately SSRF-vulnerable web app (/fetch?url=) sits on a Docker network
+# whose subnet is the real link-local metadata range, and a fake EC2 IMDS is
+# pinned to the canonical 169.254.169.254. So when HEAVEN's SSRF validator
+# injects http://169.254.169.254/latest/meta-data/..., the app fetches it
+# server-side and returns recognisable instance-metadata — proving metadata-SSRF
+# detection end to end against a real (if inert) IMDS, not a unit-test double.
+#
+# The IMDS hands back only an INERT placeholder key (AKIA...EXAMPLE); nothing
+# here grants access. The web app is published to loopback only.
+services:
+  imds:
+    image: python:3.12-slim
+    container_name: heaven-lab-ssrf-imds
+    command: ["python", "/imds.py"]
+    volumes:
+      - ./cloud-ssrf/imds.py:/imds.py:ro
+    networks:
+      metadata_net:
+        ipv4_address: 169.254.169.254
+    restart: "no"
+
+  webapp:
+    image: python:3.12-slim
+    container_name: heaven-lab-ssrf-webapp
+    command: ["python", "/webapp.py"]
+    volumes:
+      - ./cloud-ssrf/webapp.py:/webapp.py:ro
+    ports:
+      - "127.0.0.1:8095:8080"
+    networks:
+      - metadata_net
+    depends_on:
+      - imds
+    restart: "no"
+
+networks:
+  metadata_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 169.254.169.0/24
+          gateway: 169.254.169.1

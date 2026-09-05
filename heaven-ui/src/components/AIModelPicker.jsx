@@ -20,8 +20,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Settings as SettingsApi } from "../api";
 
+// Use backgroundColor (not the `background` shorthand): a bare <select> now gets
+// appearance:none + a custom chevron via background-image from index.css, and a
+// `background` shorthand here would reset that image and leave the arrow gone.
 const inputStyle = {
-  padding: "9px 12px", background: "rgba(255,255,255,0.02)",
+  padding: "9px 12px", backgroundColor: "var(--bg-1)",
   border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
   color: "var(--text-0)", fontSize: 13, fontFamily: "var(--font-ui)", outline: "none",
 };
@@ -145,7 +148,7 @@ export default function AIModelPicker({ provider, value, onChange }) {
         />
       ) : (
         <>
-          <select value={selectValue()} onChange={onSelect} style={inputStyle}>
+          <select value={selectValue()} onChange={onSelect} style={{ ...inputStyle, paddingRight: 34, cursor: "pointer" }}>
             <option value={DEFAULT_OPT}>
               {grouped
                 ? "Provider default (auto-detect)"

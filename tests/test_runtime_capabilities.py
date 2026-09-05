@@ -8,6 +8,7 @@ ever spawned here.
 """
 from __future__ import annotations
 
+import logging
 import sys
 
 import heaven.utils.runtime_capabilities as rc
@@ -69,6 +70,57 @@ def test_filesystem_heuristic_empty_dir_is_absent(tmp_path, monkeypatch):
     present, detail = rc._chromium_via_filesystem()
     assert present is False
     assert "playwright install chromium" in detail
+
+
+def _log_record(msg, exc=None):
+    r = logging.LogRecord("asyncio", logging.ERROR, "x.py", 1, msg, (), None)
+    if exc is not None:
+        r.exc_info = (type(exc), exc, None)
+    return r
+
+
+def test_teardown_filter_drops_only_playwright_noise():
+    """The asyncio filter must hide Playwright's benign driver-teardown chatter
+    (a browser probe / DAST proof leaves an init() future that ends in a
+    TargetClosedError) while never masking a genuine asyncio error."""
+    f = rc._PlaywrightTeardownFilter()
+
+    # Playwright 'Task was destroyed' — the connection path is in the message.
+    pw_task = _log_record(
+        "Task was destroyed but it is pending!\n"
+        "task: <Task coro=<Connection.run.<locals>.init() running at "
+        "/x/playwright/_impl/_connection.py:344>>")
+    assert f.filter(pw_task) is False
+
+    # Playwright 'Future exception' — 'playwright' appears only in exc_info.
+    class _PWErr(Exception):
+        pass
+    _PWErr.__module__ = "playwright._impl._errors"
+    pw_future = _log_record(
+        "Future exception was never retrieved\n"
+        "future: <Future exception=TargetClosedError(...)>", exc=_PWErr("closed"))
+    assert f.filter(pw_future) is False
+
+    # A REAL non-Playwright pending task with the identical headline is KEPT.
+    real_task = _log_record(
+        "Task was destroyed but it is pending!\n"
+        "task: <Task coro=<app.worker() running at /app/worker.py:20>>")
+    assert f.filter(real_task) is True
+
+    # Any unrelated asyncio error is KEPT.
+    assert f.filter(_log_record("Exception in callback SomeHandler")) is True
+
+
+def test_teardown_filter_installs_once():
+    aio = logging.getLogger("asyncio")
+    before = [x for x in aio.filters if isinstance(x, rc._PlaywrightTeardownFilter)]
+    for x in before:  # start from a clean slate for a deterministic count
+        aio.removeFilter(x)
+    rc._teardown_filter_installed = False
+    rc._install_playwright_teardown_filter()
+    rc._install_playwright_teardown_filter()  # idempotent
+    installed = [x for x in aio.filters if isinstance(x, rc._PlaywrightTeardownFilter)]
+    assert len(installed) == 1
 
 
 def test_cache_serves_prior_result(monkeypatch):

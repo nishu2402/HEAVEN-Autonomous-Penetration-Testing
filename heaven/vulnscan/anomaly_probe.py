@@ -606,28 +606,44 @@ class WebAnomalyProbe:
                                 cwe_id="CWE-90", technique="ldap_error_based",
                             )
 
-            # Boolean differential: wildcard (*) vs impossible value
+            # Boolean differential: wildcard (*) vs impossible value.
             async with session.request(method, url, params={param: "*"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                 wild_body = await r.text()
                 wild_len  = len(wild_body)
+                wild_status = r.status
 
             async with session.request(method, url,
                                         params={param: "HEAVEN_LDAP_NOEXI$T_XYZ123"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                 false_body = await r.text()
                 false_len  = len(false_body)
+                false_status = r.status
 
-            # If wildcard produces significantly more content → boolean LDAP injection
-            if wild_len > false_len + 200 and wild_len > base_len:
+            # A raw length gap is NOT sufficient — the '*' character is often routed
+            # or rejected differently from an ordinary string, so a 200-vs-405 (or
+            # any status mismatch) inflates the differential for reasons unrelated
+            # to an LDAP filter. Require BOTH probes to return the SAME successful
+            # (2xx) status, AND the impossible value to differ from the baseline (so
+            # an endpoint that ignores the parameter entirely — e.g. a DB-seed route
+            # — cannot false-positive on incidental length variance).
+            same_ok_status = (wild_status == false_status and 200 <= wild_status < 300)
+            if (same_ok_status
+                    and wild_len > false_len + 200
+                    and wild_len > base_len
+                    and false_len != base_len):
                 return AnomalyCandidate(
                     target=url, category="ldap_injection",
                     confidence=0.72, severity="high",
                     description=(
                         f"Boolean LDAP Injection on param '{param}': wildcard (*) "
-                        f"returns {wild_len - false_len} more bytes than impossible value."
+                        f"returns {wild_len - false_len} more bytes than an impossible "
+                        f"value, both at HTTP {wild_status} and both differing from the "
+                        f"baseline — the filter logic is attacker-controlled."
                     ),
-                    evidence={"param": param, "wildcard_len": wild_len, "false_len": false_len},
+                    evidence={"param": param, "wildcard_len": wild_len,
+                              "false_len": false_len, "base_len": base_len,
+                              "status": wild_status},
                     remediation="Escape LDAP special chars. Use parameterised queries.",
                     cwe_id="CWE-90", technique="ldap_boolean_differential",
                 )
@@ -1150,16 +1166,53 @@ class WebAnomalyProbe:
                     # NOTE: a same-status response that merely differs in length is
                     # NOT a signal — every dynamic page varies >100 bytes per
                     # request. That branch was removed: it produced pure-noise FPs.
-                    if status >= 500 and baseline_status < 500:
-                        return AnomalyCandidate(
-                            target=url, category="integer_overflow",
-                            confidence=0.5, severity="high",
-                            description=f"Server error with integer boundary value '{payload}' on param '{param}'",
-                            evidence={"param": param, "payload": payload,
-                                      "baseline_status": baseline_status, "error_status": status},
-                            remediation="Validate numeric inputs. Use appropriate data types with bounds checking.",
-                            cwe_id="CWE-190", technique="integer_boundary_testing",
-                        )
+                    if not (status >= 500 and baseline_status < 500):
+                        continue
+
+                    # A single 500 is NOT proof: it can be a transient server
+                    # hiccup, or a STATEFUL endpoint (e.g. a DB-seed route that
+                    # ignores the numeric param and simply fell over once). Confirm
+                    # before claiming an integer overflow, so a one-off 500 on an
+                    # unrelated endpoint can never be reported:
+                    #   1. re-send the SAME boundary payload — the 500 must recur
+                    #      (rules out a transient error), and
+                    #   2. re-send the baseline value — it must stay healthy
+                    #      (rules out an endpoint that broke for reasons unrelated
+                    #      to the boundary value, which our first request may have
+                    #      triggered as a side effect).
+                    try:
+                        async with session.request(
+                                method, url, params={param: payload},
+                                timeout=aiohttp.ClientTimeout(total=self.timeout)) as r2:
+                            await r2.text()
+                            confirm_status = r2.status
+                        async with session.request(
+                                method, url, params={param: "1"},
+                                timeout=aiohttp.ClientTimeout(total=self.timeout)) as rb:
+                            await rb.text()
+                            rebaseline_status = rb.status
+                    except Exception:
+                        logger.debug("suppressed non-fatal exception", exc_info=True)
+                        continue
+
+                    if confirm_status < 500 or rebaseline_status >= 500:
+                        # Not reproducible, or the endpoint is now broken for the
+                        # healthy value too — not attributable to the boundary
+                        # value. Skip (no false positive).
+                        continue
+
+                    return AnomalyCandidate(
+                        target=url, category="integer_overflow",
+                        confidence=0.6, severity="high",
+                        description=f"Reproducible server error with integer boundary value '{payload}' on param '{param}' (baseline stays healthy)",
+                        evidence={"param": param, "payload": payload,
+                                  "baseline_status": baseline_status,
+                                  "error_status": status,
+                                  "confirm_status": confirm_status,
+                                  "rebaseline_status": rebaseline_status},
+                        remediation="Validate numeric inputs. Use appropriate data types with bounds checking.",
+                        cwe_id="CWE-190", technique="integer_boundary_testing",
+                    )
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
         return None

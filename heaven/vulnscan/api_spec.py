@@ -221,7 +221,7 @@ def _openapi_params(op: dict, item: dict) -> tuple[tuple[str, ...], tuple[str, .
     Parameters can sit on the operation or be shared on the path item."""
     q: list[str] = []
     p: list[str] = []
-    params = []
+    params: list[dict] = []
     for src in (item.get("parameters"), op.get("parameters")):
         if isinstance(src, list):
             params.extend(x for x in src if isinstance(x, dict))

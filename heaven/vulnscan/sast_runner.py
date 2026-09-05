@@ -128,6 +128,7 @@ async def run_sast(
     extra_configs: Optional[list[str]] = None,
     use_builtin_rules: bool = True,
     timeout_s: int = 300,
+    fallback_native: bool = False,
 ) -> SastRunResult:
     """Run Semgrep against `source_path` and return parsed findings.
 
@@ -138,6 +139,9 @@ async def run_sast(
       use_builtin_rules: When True, includes HEAVEN's curated rule pack at
                          heaven/vulnscan/sast_rules/.
       timeout_s: Hard cap on Semgrep subprocess runtime.
+      fallback_native: When True and Semgrep is unavailable, run HEAVEN's
+                       zero-dependency native SAST engine instead of erroring,
+                       so the scan still produces real findings.
     """
     import time
     t0 = time.time()
@@ -148,6 +152,11 @@ async def run_sast(
         result.error = f"path not found: {source_path}"
         return result
     if not has_semgrep():
+        if fallback_native:
+            from heaven.vulnscan.native_sast import run_native_sast
+            logger.info("semgrep unavailable — using HEAVEN's native SAST engine")
+            return await asyncio.get_event_loop().run_in_executor(
+                None, run_native_sast, str(src))
         result.error = "semgrep not installed; pip install semgrep"
         return result
 

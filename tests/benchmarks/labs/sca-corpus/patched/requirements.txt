@@ -6,8 +6,8 @@
 # never flags a patched dependency for a vulnerability it already resolved. (A
 # patched version may still carry *later, unrelated* advisories; that is correct
 # and is not what this control checks.)
-Django==4.2.16
-urllib3==2.2.3
-requests==2.32.4
-PyYAML==6.0.2
-Jinja2==3.1.5
+Django==5.2.16
+urllib3==2.7.0
+requests==2.33.0
+PyYAML==6.0.3
+Jinja2==3.1.6

@@ -103,7 +103,7 @@ if HAS_CLICK:
     @click.pass_context
     def cli(ctx: click.Context, debug: bool, quiet: bool, json_out: bool,
             config_file: Optional[str]) -> None:
-        """HEAVEN — Automated Vulnerability Scanner & Risk Triage Platform"""
+        """HEAVEN · Automated Vulnerability Scanner & Risk Triage Platform"""
         # Always load environment from a .env file, so the flow
         #   heaven init  →  writes .env  →  heaven serve / heaven autonomous
         # "just works" without having to remember `--config-file` or `source .env`.

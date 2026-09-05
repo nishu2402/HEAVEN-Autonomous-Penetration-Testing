@@ -23,7 +23,7 @@ def demo_cmd(engagement: str | None) -> None:
 
     Writes an example engagement + findings to the same SQLite store the web UI
     reads, then tells you how to view it. Re-running is safe (it dedupes).
-    Nothing is scanned — the targets are reserved/placeholder addresses.
+    Nothing is scanned; the targets are reserved/placeholder addresses.
     """
     from heaven.demo import DEMO_ENGAGEMENT, resolve_demo_store, seed_demo
     from heaven.engagement import DEMO_DB_NAME, set_active_engagement
@@ -50,7 +50,7 @@ def demo_cmd(engagement: str | None) -> None:
     _print("  [cyan]heaven findings[/cyan]         # list the sample findings in the terminal")
     _print("  [cyan]heaven report -o demo.html --framework OWASP_TOP10[/cyan]   # generate a report")
     _print("")
-    _print("[dim]Sample data only — no systems were scanned. Re-run `heaven demo` "
+    _print("[dim]Sample data only · no systems were scanned. Re-run `heaven demo` "
            "anytime; it updates in place.[/dim]")
 
 

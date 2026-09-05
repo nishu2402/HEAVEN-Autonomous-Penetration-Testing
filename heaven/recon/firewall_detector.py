@@ -329,11 +329,11 @@ def build_scan_completeness_findings(net_data: dict) -> list[dict]:
         "target": "network scan",
         "vuln_type": "scan_incomplete",
         "severity": "info",
-        "title": f"Network scan incomplete — {timed_out} host(s) not fully enumerated",
+        "title": f"Network scan incomplete: {timed_out} host(s) not fully enumerated",
         "description": (
             f"The deep port scan reached its time budget with {timed_out} of "
-            f"{total} host(s) still in flight, so their port lists are PARTIAL — "
-            "only the ports found before the deadline are reported. This is why a "
+            f"{total} host(s) still in flight, so their port lists are PARTIAL. "
+            "Only the ports found before the deadline are reported. This is why a "
             "scan can come back with fewer open ports than expected. To get a "
             "complete enumeration, scan fewer hosts at once, narrow the port range "
             "to the ports you care about, or re-run this scan on its own (HEAVEN "

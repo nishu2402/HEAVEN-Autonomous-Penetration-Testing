@@ -92,7 +92,7 @@ def show_dashboard() -> None:
 
     # Plain fallback when Rich is not installed
     print(_BANNER)
-    print(f"  HEAVEN v{__version__} — Autonomous Penetration Testing Platform\n")
+    print(f"  HEAVEN v{__version__} · Autonomous Penetration Testing Platform\n")
     cur_eng = get_current_engagement()
     if cur_eng:
         print(f"  Active engagement: {cur_eng}\n")

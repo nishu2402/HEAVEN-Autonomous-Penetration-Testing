@@ -847,7 +847,7 @@ async def confirm_egress(timeout: float = 10.0) -> dict:
     if cfg.mode == "off":
         return {"mode": "off", "ok": True, "public_ip": base, "baseline_ip": base,
                 "changed": False, "via": "direct",
-                "detail": "no egress configured — traffic exits directly"}
+                "detail": "no egress configured, traffic exits directly"}
 
     if cfg.error:
         return {"mode": cfg.mode, "ok": False, "public_ip": None, "baseline_ip": base,

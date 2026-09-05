@@ -146,7 +146,7 @@ def train_desc_model(csv: Optional[str] = None,
 
     csv_path = _resolve_csv(csv)
     if csv_path is None:
-        print("Description-model CSV not found — skipping (set --csv or HEAVEN_NVD_CSV). "
+        print("Description-model CSV not found · skipping (set --csv or HEAVEN_NVD_CSV). "
               "The hybrid risk model will use the vector model for every finding.")
         return None
 
@@ -163,7 +163,7 @@ def train_desc_model(csv: Optional[str] = None,
     n_zero = int((df["CVSS_Base_Score"] == 0).sum())
     df = df[df["CVSS_Base_Score"] > 0].copy()
     if len(df) < 500:
-        print(f"Only {len(df)} non-zero labelled rows — too few to train; skipping.")
+        print(f"Only {len(df)} non-zero labelled rows · too few to train; skipping.")
         return None
 
     # The finding's description text — lower-cased to match Clean_Description and

@@ -137,7 +137,7 @@ def benchmark(tier: str, as_json: bool, no_report: bool, scorecard: str | None) 
     """Score HEAVEN's scanners against the built-in labelled targets.
 
     Runs the real detectors against faithful, in-process reproductions of
-    vulnerable targets and reports precision / recall / F1 vs. ground truth — the
+    vulnerable targets and reports precision / recall / F1 vs. ground truth, the
     same numbers the web Benchmark page shows. Docker-free, ~1 s per tier.
     """
     want = ["web", "api"] if tier == "all" else [tier]
@@ -152,7 +152,7 @@ def benchmark(tier: str, as_json: bool, no_report: bool, scorecard: str | None) 
         pretty = {"bs4": "beautifulsoup4", "yaml": "pyyaml"}
         pkgs = " ".join(pretty.get(m, m) for m in missing)
         msg = (f"Benchmark needs the [dev] extras (missing: {', '.join(missing)}). "
-               f"Install: pip install {pkgs}   — or: pip install -e \".[dev]\"")
+               f"Install: pip install {pkgs}   (or: pip install -e \".[dev]\")")
         if as_json or json_output():
             emit_json({"available": False, "error": "missing_deps",
                        "missing": missing, "note": msg})
@@ -198,7 +198,7 @@ def benchmark(tier: str, as_json: bool, no_report: bool, scorecard: str | None) 
         _print(f"\n[bold]▶ {_TIERS[t][1]} tier[/bold]")
         _print_payload(run, payload)
 
-    _print("\n[dim]Controlled functional benchmark on known surfaces — not a claim "
+    _print("\n[dim]Controlled functional benchmark on known surfaces · not a claim "
            "against any live third-party app.[/dim]")
 
 
@@ -216,7 +216,7 @@ def _write_scorecard(scorecard: str, runs: dict, as_json: bool) -> None:
             "required_total": payload["required_total"],
             "categories": sorted(payload["per_category"]),
             "duration_seconds": payload["duration_seconds"],
-            "note": ("Controlled functional benchmark on a known, labelled surface — "
+            "note": ("Controlled functional benchmark on a known, labelled surface that "
                      "measures end-to-end detection + attribution, not a claim against "
                      "any live third-party app."),
         }

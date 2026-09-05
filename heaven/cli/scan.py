@@ -68,7 +68,7 @@ def _print_inventory(assets: Optional[list]) -> None:
     if not inventory:
         return
     tot = inventory_totals(inventory)
-    _print(f"\n[bold]Host & Service Inventory[/bold]  [dim]— {tot['hosts']} host(s), "
+    _print(f"\n[bold]Host & Service Inventory[/bold]  [dim] · {tot['hosts']} host(s), "
            f"{tot['open_ports']} open port(s), {tot['distinct_services']} service(s)[/dim]")
     for h in inventory:
         os_txt = h.get("os_label") or "OS not determined"
@@ -96,7 +96,7 @@ def _print_inventory(assets: Optional[list]) -> None:
         from heaven.recon.network_scanner import scan_capability
         cap = scan_capability()
         if not cap.get("raw_capable"):
-            _print("  [yellow]⚠ Unprivileged scan[/yellow] [dim]— open ports found via TCP "
+            _print("  [yellow]⚠ Unprivileged scan[/yellow] [dim] · open ports found via TCP "
                    "connect, but OS fingerprinting and SYN/UDP scanning were off "
                    "(they need raw sockets).[/dim]")
             if cap.get("remedy"):
@@ -276,14 +276,14 @@ def scan(
     if autonomous:
         auto_prove = True
         verify = True
-        _print("[bold magenta]⚙ AUTONOMOUS MODE[/bold magenta] — auto-prove + active-verify + post-ex chaining enabled")
+        _print("[bold magenta]⚙ AUTONOMOUS MODE[/bold magenta] · auto-prove + active-verify + post-ex chaining enabled")
 
     # `-m exploit` is itself a request to actively exploit — imply the flag so
     # the gated task runs in either invocation form.
     if str(mode).lower() == "exploit":
         active_exploit = True
     if active_exploit:
-        _print("[bold red]⚔ ACTIVE EXPLOITATION[/bold red] — confirming RCE via the "
+        _print("[bold red]⚔ ACTIVE EXPLOITATION[/bold red] · confirming RCE via the "
                "real exploit path with a benign proof command")
 
     targets: dict[str, Any] = {
@@ -385,7 +385,7 @@ def scan(
                 # If scope filtering removed EVERY target, stop now with a clear
                 # fix instead of proceeding into a guaranteed "zero findings" run.
                 if not kept_ips and not kept_urls:
-                    _print("[red]All targets are outside this engagement's scope — "
+                    _print("[red]All targets are outside this engagement's scope ·  "
                            "nothing to scan.[/red]")
                     _print("[dim]Add a target with [cyan]heaven scope add <target>[/cyan], "
                            "choose a different [cyan]--engagement[/cyan], or re-run with "
@@ -827,7 +827,7 @@ def scan(
                     else:
                         html_path = (output_file[:-4] + ".html"
                                      if output_file.endswith(".pdf") else output_file + ".html")
-                        _print(f"  [yellow]reportlab not installed — wrote HTML report instead:"
+                        _print(f"  [yellow]reportlab not installed · wrote HTML report instead:"
                                f"[/yellow] {html_path}")
                         _print("  [dim]For PDF: pip install reportlab  (then re-run)[/dim]")
                 else:
@@ -875,7 +875,7 @@ def scan(
               help="Required for scheduled scans — confirms all targets are authorized")
 def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
              i_have_authorization: bool) -> None:
-    """[Deprecated — use `heaven watch`] Re-scan targets every N minutes.
+    """[Deprecated: use `heaven watch`] Re-scan targets every N minutes.
 
     Kept for backward compatibility. This is a naive fixed-interval re-scan
     with no diffing and no alert-on-change. `heaven watch` supersedes it: it
@@ -883,7 +883,7 @@ def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
     actually changed, with optional auto-ticketing.
     """
     print_banner()
-    _print("[yellow]Note:[/yellow] `heaven schedule` is deprecated — "
+    _print("[yellow]Note:[/yellow] `heaven schedule` is deprecated ·  "
            "`heaven watch` adds change-detection and alert-on-change. "
            "See [cyan]heaven watch --help[/cyan].")
 
@@ -995,7 +995,7 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
                             scan_mode=_resume_scan_mode)
 
     def progress_callback(progress):
-        _print(f"  [{progress.phase.value}] {progress.progress_pct:.0f}% — {progress.current_task}")
+        _print(f"  [{progress.phase.value}] {progress.progress_pct:.0f}% · {progress.current_task}")
 
     orch.on_progress(progress_callback)
     try:
@@ -1009,7 +1009,7 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
             finally:
                 loop.close()
     except KeyboardInterrupt:
-        _print("\n[yellow]Resume aborted — checkpoints saved, run again to continue.[/yellow]")
+        _print("\n[yellow]Resume aborted · checkpoints saved, run again to continue.[/yellow]")
         sys.exit(0)
 
     _print(f"\n[green]Resumed scan completed in {summary['elapsed_seconds']}s[/green]")

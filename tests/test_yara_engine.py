@@ -21,6 +21,43 @@ def test_named_php_webshell_detected():
     assert Y.worst_severity(hits) == "critical"
 
 
+def test_named_webshell_requires_script_context():
+    # A brand token with NO server-side-script context is not a webshell. This
+    # is the exact class of false positive that binary media triggered: a byte
+    # run like "FilesMan" or "WSO 2" appearing outside any PHP/JSP/ASP code.
+    for token in ("FilesMan", "WSO 2", "b374k", "alfa team", "IndoXploit",
+                  "c99shell"):
+        hits = _rules(Y.scan_bytes(f"harmless text mentioning {token} here"))
+        assert "PHP_Webshell_Named" not in hits, token
+
+
+def test_wso2_vendor_string_not_flagged():
+    # "WSO2" is a well-known software vendor; naming it in benign content must
+    # not raise a critical webshell finding.
+    body = "<html><body>Powered by WSO2 API Manager 4.2</body></html>"
+    hits = [m for m in Y.scan_bytes(body) if m.severity in ("critical", "high")]
+    assert hits == [], hits
+
+
+def test_binary_media_bytes_have_no_webshell_fp():
+    # Plausible bytes inside a real media container: a brand token embedded in
+    # binary noise, but no PHP/JSP code anywhere. Must not fire the named rule.
+    import os
+    for token in (b"FilesMan", b"WSO 2", b"b374k", b"IndoXploit", b"alfa team"):
+        blob = os.urandom(64) + b"\x00moov" + token + b"\x00\xff" + os.urandom(64)
+        crit = [m for m in Y.scan_bytes(blob)
+                if m.severity in ("critical", "high")]
+        assert crit == [], (token, crit)
+
+
+def test_named_webshell_in_polyglot_still_detected():
+    # A media/PHP polyglot (binary prefix + real PHP shell) must STILL fire, so
+    # the context gate does not create a false negative for a genuine threat.
+    body = b"GIF89a\x00\x01\x00\x01\x00" + b"\x00" * 16 + \
+           b"<?php /* b374k */ system($_GET['c']); ?>"
+    assert "PHP_Webshell_Named" in _rules(Y.scan_bytes(body))
+
+
 def test_generic_eval_superglobal_shell_detected():
     # A one-liner backdoor the fixed named-signature list would miss.
     body = "<?php system($_GET['cmd']); ?>"

@@ -110,7 +110,7 @@ def coverage(engagement: str | None, standard: str | None, as_json: bool) -> Non
 
     Shows each standard's automated-vs-manual coverage (computed from the
     mapping docs) and how many of those tests the engagement's real findings
-    actually exercised — the same data the web Methodology page renders, so CLI
+    actually exercised: the same data the web Methodology page renders, so CLI
     and UI stay in sync.
     """
     from heaven import methodology as _m
@@ -169,7 +169,7 @@ def coverage(engagement: str | None, standard: str | None, as_json: bool) -> Non
                f"  [dim](rows whose detector produced a finding)[/dim]\n")
 
     if not findings:
-        _print("[yellow]No findings in this engagement yet — run a scan to populate live coverage.[/yellow]")
+        _print("[yellow]No findings in this engagement yet · run a scan to populate live coverage.[/yellow]")
 
 
 def register(cli: click.Group) -> None:

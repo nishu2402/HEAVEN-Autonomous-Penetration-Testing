@@ -51,7 +51,7 @@ def watch(
       - a fixed finding REGRESSED (was closed, came back), OR
       - --heartbeat is set (operator wants confirmation every run)
 
-    Example — watch a SaaS app every 30 min, auto-create Jira tickets on new criticals:
+    Example: watch a SaaS app every 30 min, auto-create Jira tickets on new criticals:
 
         heaven watch -u https://app.example.com \\
             --engagement prod-monitor \\

@@ -40,7 +40,7 @@ def cve_cmd(product: str, version: str, vendor: str, cpe: str, limit: int,
 
     feed = LiveCVEFeed()
     if not feed.available:
-        _print("[yellow]Live CVE lookup needs httpx — install with "
+        _print("[yellow]Live CVE lookup needs httpx · install with "
                "`pip install httpx` (or the [recon] extra).[/yellow]")
         raise SystemExit(1)
 
@@ -71,7 +71,7 @@ def cve_cmd(product: str, version: str, vendor: str, cpe: str, limit: int,
                f"CVSS {r.cvss:<4}{kev}{poc}{epss}  [dim]{conf}[/dim]")
         if r.title:
             _print(f"           [dim]{r.title[:90]}[/dim]")
-    _print(f"\n[bold]{len(records)}[/bold] CVE(s) — "
+    _print(f"\n[bold]{len(records)}[/bold] CVE(s) ·  "
            f"[dim]'confirmed' = a version range matched {version or 'the given version'}[/dim]")
 
     if engagement:

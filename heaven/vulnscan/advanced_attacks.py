@@ -291,7 +291,7 @@ class RaceConditionDetector:
                 evidence={"method": method, "concurrent_requests": concurrent_requests,
                           "identical_success_variants": len(succ_hashes),
                           "success_statuses": sorted(succ_statuses),
-                          "note": "manual verification required — potential false positive"},
+                          "note": "manual verification required (potential false positive)"},
                 remediation="Implement proper locking/mutex. Use database-level transactions with appropriate isolation.",
                 cwe="CWE-362",
             )
@@ -467,7 +467,7 @@ class RequestSmugglingDetector:
                     "technique": "CL.TE",
                     "baseline_ms": round(baseline),
                     "probe_ms": round(probe),
-                    "note": "timing indicator — manual verification required",
+                    "note": "timing indicator, manual verification required",
                 },
                 remediation=(
                     "Configure the front-end to reject ambiguous CL/TE requests "

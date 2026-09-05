@@ -135,6 +135,7 @@ def _pdf_inflate_streams(data: bytes) -> bytes:
                     inflated += 1
                     break
             except Exception:               # noqa: BLE001 — non-flate stream
+                logger.debug("non-flate PDF stream, skipping", exc_info=True)
                 continue
         if inflated >= _MAX_STREAMS:
             break
@@ -338,6 +339,7 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
         try:
             xml = zf.read(n).decode("utf-8", "replace")
         except Exception:                    # noqa: BLE001
+            logger.debug("skipping unreadable .rels member %s", n, exc_info=True)
             continue
         for m in re.finditer(r"<Relationship\b[^>]*>", xml):
             tag = m.group(0)
@@ -381,6 +383,7 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
         try:
             body = zf.read(n)
         except Exception:                    # noqa: BLE001
+            logger.debug("skipping unreadable xml member %s", n, exc_info=True)
             continue
         if b"DDEAUTO" in body or b"DDE " in body or b" DDE" in body:
             for dm in re.finditer(rb"(DDEAUTO|DDE)\s+([^<]{1,200})", body):
@@ -403,6 +406,7 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
             try:
                 ob = zf.read(n)[:2_000_000]
             except Exception:                # noqa: BLE001
+                logger.debug("skipping unreadable embedded object %s", n, exc_info=True)
                 continue
             if b"Equation Native" in ob or b"\x01Ole10Native" in ob or b"Microsoft Equation 3.0" in ob:
                 add("ooxml_equation_object", "high",
@@ -424,6 +428,7 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
             try:
                 cx = zf.read(core).decode("utf-8", "replace")
             except Exception:                # noqa: BLE001
+                logger.debug("skipping unreadable core-props %s", core, exc_info=True)
                 continue
             md: dict[str, str] = {}
             for tag in ("dc:creator", "cp:lastModifiedBy", "Company", "Template",

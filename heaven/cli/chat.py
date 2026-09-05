@@ -66,7 +66,7 @@ def chat_cmd(engagement: Optional[str], no_context: bool, one_shot: Optional[str
         sys.stdout.flush()
         text = "".join(chunks)
         if not text:
-            _print("[dim](no response — the model returned nothing)[/dim]")
+            _print("[dim](no response · the model returned nothing)[/dim]")
         return text
 
     if one_shot:

@@ -36,7 +36,7 @@ def labs(check: bool, as_json: bool) -> None:
     if check:
         issues = lab_matrix.validate()
         if not issues:
-            _print("[green]Lab matrix OK[/green] — every mode's status is backed "
+            _print("[green]Lab matrix OK[/green] · every mode's status is backed "
                    "by a real lab or an honest gate.")
             return
         _print(f"[red]{len(issues)} lab-matrix violation(s):[/red]")
@@ -69,7 +69,7 @@ def labs(check: bool, as_json: bool) -> None:
     summary = lab_matrix.status_summary()
     parts = [f"{_STATUS_STYLE.get(k, k)}={v}" for k, v in summary.items() if v]
     _print("[bold]Summary:[/bold] " + "  ".join(parts))
-    _print("\n[bold]Exploit corpus — proving lab per exploit:[/bold]")
+    _print("\n[bold]Exploit corpus · proving lab per exploit:[/bold]")
     for eid, lab in lab_matrix.EXPLOIT_LABS.items():
         _print(f"  [cyan]{eid:26}[/cyan] [dim]{lab}[/dim]")
 

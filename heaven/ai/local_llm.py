@@ -32,7 +32,7 @@ DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
 # Ordered small→large; each is a real Ollama tag.
 RECOMMENDED_MODELS: tuple[dict[str, str], ...] = (
     {"model": "llama3.2:3b", "tier": "~8 GB RAM", "note": "fast, lightweight"},
-    {"model": "qwen2.5:7b", "tier": "~16 GB RAM", "note": "balanced default — strong JSON"},
+    {"model": "qwen2.5:7b", "tier": "~16 GB RAM", "note": "balanced default, strong JSON"},
     {"model": "llama3.1:8b", "tier": "~16 GB RAM", "note": "great general reasoning"},
     {"model": "qwen2.5:14b", "tier": "32 GB+ / GPU", "note": "deeper reasoning, slower on CPU"},
 )

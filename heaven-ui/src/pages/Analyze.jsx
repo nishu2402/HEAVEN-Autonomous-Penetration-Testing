@@ -147,7 +147,8 @@ export default function AnalyzePage() {
           Analyze a file you are authorized to examine: a packet capture,
           firmware image, binary, mobile app (Android APK or iOS IPA), office
           document (PDF, Word, Excel, PowerPoint, RTF), archive (zip, tar, gz,
-          7z), image (steganography), or hash file. Get real, detailed
+          7z), audio/video (MP4, MOV, MKV, MP3, WAV), image (steganography),
+          or hash file. Get real, detailed
           findings with no live target. Every file is fingerprinted (SHA-256,
           entropy, YARA) and analyzed in a private temp path, then deleted;
           nothing is persisted.

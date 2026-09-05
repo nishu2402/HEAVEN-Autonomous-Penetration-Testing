@@ -16,7 +16,7 @@ def tickets() -> None:
     """Push findings to Jira / Linear / other ticketing backends.
 
     Configured by env vars (see `heaven tickets status`). All backends are
-    optional — `heaven tickets push` no-ops when none are configured.
+    optional: `heaven tickets push` no-ops when none are configured.
     """
 
 
@@ -27,7 +27,7 @@ def status() -> None:
     d = TicketingDispatcher()
     j, lin = JiraAlerter(), LinearAlerter()
 
-    _print(f"[bold]Ticketing backends — configured: {len(d.configured_backends)}[/bold]")
+    _print(f"[bold]Ticketing backends · configured: {len(d.configured_backends)}[/bold]")
     _print("")
     icon_j = "[green]✓[/green]" if j.configured else "[red]✗[/red]"
     _print(f"  {icon_j} Jira       {j.base_url or '(HEAVEN_JIRA_URL not set)'}")

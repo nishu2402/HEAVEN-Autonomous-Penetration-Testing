@@ -12,7 +12,7 @@ from heaven.utils.logger import print_banner
 
 @click.command(name="init-db")
 def init_db_cmd() -> None:
-    """Initialise the PostgreSQL database schema (optional — core features use SQLite)."""
+    """Initialise the PostgreSQL database schema (optional; core features use SQLite)."""
     print_banner()
     _print("[cyan]Initialising PostgreSQL schema...[/cyan]")
     _print("[dim]Note: PostgreSQL is optional. HEAVEN uses SQLite for engagement data by default.[/dim]")

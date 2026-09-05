@@ -99,7 +99,7 @@ def test_nvd_cmd() -> None:
     """Live-check NVD reachability + that NVD_API_KEY (if set) is valid.
 
     Makes one real lookup. NVD answers a good query with HTTP 200 (key valid or
-    no key) but HTTP 404 when the key is rejected — so this tells you whether CVE
+    no key) but HTTP 404 when the key is rejected, so this tells you whether CVE
     enrichment will actually return results before you run a scan.
     """
     import asyncio
@@ -118,11 +118,11 @@ def test_nvd_cmd() -> None:
         emit_json(res)
         return
     if res.get("ok"):
-        _print(f"[green]✓ NVD reachable[/green] — {res['reason']}")
+        _print(f"[green]✓ NVD reachable[/green] · {res['reason']}")
         if res.get("sample_results") is not None:
             _print(f"  [dim]sample query returned {res['sample_results']} CVEs[/dim]")
     else:
-        _print(f"[red]✗ NVD check failed[/red] — {res['reason']}")
+        _print(f"[red]✗ NVD check failed[/red] · {res['reason']}")
         if res.get("status_code"):
             _print(f"  [dim]HTTP {res['status_code']}[/dim]")
         raise SystemExit(1)
@@ -137,7 +137,7 @@ def test_llm_cmd(live: bool) -> None:
 
     Without ``--live`` this is the same cheap check as the web-UI Settings page:
     it confirms a provider is selected, a key is present and the SDK is importable
-    — no billed call. With ``--live`` it sends a one-token prompt through the same
+    with no billed call. With ``--live`` it sends a one-token prompt through the same
     gateway the AI layers use, so you can confirm the key actually works before a
     scan relies on it. HEAVEN runs fully without any of this (in-house fallbacks).
     """
@@ -174,19 +174,19 @@ def test_llm_cmd(live: bool) -> None:
         return
 
     if not res["available"]:
-        _print(f"[yellow]· LLM not configured[/yellow] — {res['reason']}")
+        _print(f"[yellow]· LLM not configured[/yellow] · {res['reason']}")
         _print("[dim]HEAVEN runs fully without it (in-house planning, triage & "
                "remediation). To enable: heaven config set ANTHROPIC_API_KEY[/dim]")
         raise SystemExit(1)
 
-    _print(f"[green]✓ LLM ready[/green] — provider [bold]{res['provider']}[/bold], "
+    _print(f"[green]✓ LLM ready[/green] · provider [bold]{res['provider']}[/bold], "
            f"model [bold]{res['model']}[/bold]")
     if live:
         if res.get("live_ok"):
-            _print(f"  [green]✓ live round-trip[/green] — reply "
+            _print(f"  [green]✓ live round-trip[/green] · reply "
                    f"'{res['live_reply']}' in {res['latency_ms']} ms")
         else:
-            _print(f"  [red]✗ live call failed[/red] — {res.get('live_error', 'unknown')}")
+            _print(f"  [red]✗ live call failed[/red] · {res.get('live_error', 'unknown')}")
             raise SystemExit(1)
     else:
         _print("  [dim]Add --live to confirm the key with a real one-token call.[/dim]")

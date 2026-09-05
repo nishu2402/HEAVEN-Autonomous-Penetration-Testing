@@ -359,7 +359,7 @@ def analyze_stego(path: str, **_: Any) -> dict[str, Any]:
                                 "histogram unusually equalised "
                                 f"(pair difference {lsb_stat['pair_difference']}), a "
                                 "statistical signature of LSB steganography. This is "
-                                "an indicator, not proof — confirm with extraction."),
+                                "an indicator, not proof; confirm with extraction."),
                 "cwe": "CWE-311", "evidence": lsb_stat})
 
     return {"report": report, "findings": findings,

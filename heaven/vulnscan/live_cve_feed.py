@@ -93,7 +93,7 @@ class LiveCVE:
             "target": target,
             "vuln_type": "vulnerable_service",
             "cve": self.cve_id,
-            "title": f"{product} {version} — {self.cve_id}: {self.title}".strip(),
+            "title": f"{product} {version} · {self.cve_id}: {self.title}".strip(),
             "severity": self.severity,
             "confidence": conf,
             "cvss": self.cvss,

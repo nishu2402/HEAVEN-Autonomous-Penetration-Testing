@@ -58,10 +58,10 @@ def autonomous(
     """Run an LLM-driven iterative pen-test against the seed targets.
 
     The loop:
-      1. Observe — read all findings stored so far
-      2. Plan    — ask the LLM (or rule-based fallback): what next?
-      3. Act     — execute that plan (scan / prove / post-ex) via the orchestrator
-      4. Score   — credit the bandit based on new findings produced
+      1. Observe: read all findings stored so far
+      2. Plan:    ask the LLM (or rule-based fallback): what next?
+      3. Act:     execute that plan (scan / prove / post-ex) via the orchestrator
+      4. Score:   credit the bandit based on new findings produced
       5. Repeat until: max-iterations, time-budget, objective-met, or planner gives up
     """
     print_banner()
@@ -110,7 +110,7 @@ def autonomous(
         sys.exit(2)
     store = EngagementStore(db_path)
 
-    _print(f"[bold magenta]⚙ AUTONOMOUS LOOP[/bold magenta] — "
+    _print(f"[bold magenta]⚙ AUTONOMOUS LOOP[/bold magenta] ·  "
            f"max_iter={max_iterations} budget={time_budget}s "
            f"llm={'OFF' if no_llm else 'ON'}")
     _print(f"  Seeds: {', '.join(list(target) + list(url))}")

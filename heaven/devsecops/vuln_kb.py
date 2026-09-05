@@ -1663,7 +1663,7 @@ _KB: dict[str, dict[str, Any]] = {
         "typical_cvss": 2.6,
         "description": (
             "DMARC is enforced but no BIMI record is published, so supporting mail "
-            "clients cannot display a verified brand logo — a missed anti-impersonation "
+            "clients cannot display a verified brand logo, a missed anti-impersonation "
             "and brand-trust control."
         ),
         "impact": "Recipients have a weaker visual signal to distinguish genuine mail.",
@@ -2430,8 +2430,8 @@ _KB: dict[str, dict[str, Any]] = {
             "The host answered an unauthenticated NetBIOS node-status query on "
             "UDP/137 with its computer name, workgroup/domain membership and MAC "
             "address. NetBIOS name service replies to any peer on the local "
-            "network — even when the host's TCP ports (135/139/445/3389) are "
-            "firewall-filtered — so it hands an attacker free reconnaissance for "
+            "network, even when the host's TCP ports (135/139/445/3389) are "
+            "firewall-filtered, so it hands an attacker free reconnaissance for "
             "lateral movement, targeted social engineering and OS/vendor profiling."
         ),
         "impact": "Machine name, domain/workgroup and hardware address are "
@@ -2462,7 +2462,7 @@ _KB: dict[str, dict[str, Any]] = {
             "services). A DC is the highest-value internal target: it holds the "
             "domain's authentication surface (Kerberos, LDAP, SMB, ADCS)."
         ),
-        "impact": "A domain controller concentrates AD attack surface — "
+        "impact": "A domain controller concentrates AD attack surface: "
                   "Kerberoasting, AS-REP roasting, NTLM relay, coercion and ADCS "
                   "abuse all target it. Identification is a reconnaissance "
                   "observation, not itself a compromise.",
@@ -2485,14 +2485,14 @@ _KB: dict[str, dict[str, Any]] = {
         "typical_cvss": 0.0,
         "description": (
             "The host's operating-system family was determined but its exact "
-            "release could not be — typically because the scan ran without raw-"
-            "socket privileges (no nmap -O fingerprint) and the version-bearing "
+            "release could not be. This is typically because the scan ran without "
+            "raw-socket privileges (no nmap -O fingerprint) and the version-bearing "
             "service (SMB) was firewall-filtered. No OS end-of-life check can run "
             "without the precise release, so this is surfaced so the gap is not "
             "mistaken for a clean result."
         ),
         "impact": "An unsupported OS (e.g. Windows 7 / Server 2008) would go "
-                  "unflagged until the exact version is obtained — the finding is "
+                  "unflagged until the exact version is obtained. The finding is "
                   "a pointer to close that visibility gap, not a target defect.",
         "remediation": (
             "Re-run with privileges (sudo / Administrator, or grant nmap the raw-"

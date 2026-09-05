@@ -159,7 +159,7 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
 
     if inventory:
         tot = inventory_totals(inventory)
-        _print(f"\n[bold]Host & Service Inventory[/bold]  [dim]— {tot['hosts']} host(s), "
+        _print(f"\n[bold]Host & Service Inventory[/bold]  [dim] · {tot['hosts']} host(s), "
                f"{tot['open_ports']} open port(s), {tot['distinct_services']} service(s)[/dim]")
         for h in inventory:
             os_txt = h.get("os_label") or "OS not determined"
@@ -181,12 +181,12 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
                 ver = p.get("service_version") or ""
                 _print(f"  {p['port']:>7}  {p.get('protocol','tcp'):5}  "
                        f"{(p.get('service') or '—')[:14]:14}  {ver}")
-        _print("\n[dim]An OS marked '(heuristic — unconfirmed)' is a TTL guess, not a "
+        _print("\n[dim]An OS marked '(heuristic · unconfirmed)' is a TTL guess, not a "
                "stack fingerprint.[/dim]")
 
     if dns_inv:
         dtot = dns_totals(dns_inv)
-        _print(f"\n[bold]DNS Enumeration[/bold]  [dim]— {dtot['domains']} domain(s), "
+        _print(f"\n[bold]DNS Enumeration[/bold]  [dim] · {dtot['domains']} domain(s), "
                f"{dtot['records']} record(s), {dtot['subdomains']} subdomain(s)[/dim]")
         for n in dns_inv:
             dnssec = "enabled" if (n.get("dnssec") or {}).get("enabled") else "not detected"

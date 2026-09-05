@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2649 tests · 61 CLI commands · 97 API routes · 25 UI pages · 16 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2655 tests · 61 CLI commands · 97 API routes · 25 UI pages · 16 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -21,7 +21,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-214-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-215-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-61-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-25-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
@@ -110,9 +110,9 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 2649 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 2655 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 214 |
+| 🧩 **Modules** | 215 |
 | ⌨️ **CLI Commands** | 61 |
 | 🌐 **API Routes** | 97 RBAC-protected routes |
 | 🖥️ **UI Pages** | 25 (React + Vite, dark glassmorphic) |
@@ -145,8 +145,8 @@ It runs three ways from the **same engagement dataset**:
 | 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud (AWS/GCP/Azure) · containers & Kubernetes (Docker socket / K8s API / RBAC) · IoT/SCADA · Git secrets · email OSINT · honeypot detection · firewall / IDS-IPS / WAF detection + adaptive evasion re-probe (`--evade`) |
 | 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS (reflected-origin + credentials) · CRLF · open redirect (canary-confirmed) · IDOR · mass assignment · dir/file fuzzing · JWT attacks (alg:none · weak-secret crack) · insecure session cookies · race conditions · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
 | 🗝️ **Active Directory & Identity** | authenticated LDAP assessment (Kerberoasting · AS-REP roasting via LDAP *and* credential-free Kerberos pre-auth · DCSync rights · unconstrained/constrained delegation · SMB-signing / SMBv1 / NTLMv1 · anonymous LDAP) · **AD CS certificate-template abuse (ESC1 to ESC4 · ESC8 web-enrolment relay)** · **NTLM coercion surface (PetitPotam · PrinterBug · DFSCoerce, bind-only, never triggers coercion)** · Kerberos pre-auth username enumeration · BloodHound-style path analysis · SSO testing (OAuth 2.0 redirect_uri/state · **SAML** unsigned assertions + RelayState open redirect) |
-| 🌐 **Network & Threat** | cleartext/legacy protocols · SNMP/IPMI/NFS/VNC exposure · Cisco Smart Install · SMB-signing → NTLM-relay · **internet-facing edge/VPN appliance KEV fingerprint** (Citrix NetScaler · Ivanti Connect Secure · FortiOS SSL-VPN · PAN GlobalProtect · Exchange · F5 BIG-IP → actively-exploited CVEs) · **DoS/DDoS susceptibility** — amplification-reflector detection with a *measured* factor (NTP monlist · open DNS · memcached · SSDP · CLDAP · chargen · RIPv1 · NetBIOS) + Slowloris slow-HTTP (`-m dos`, one benign probe, never a flood) · **sniffing / internal MITM** — LLMNR / NBT-NS / mDNS name-poisoning + mitm6 dual-stack susceptibility (`-m sniff`) · **malware / backdoor** — Ingreslock/NetBus/Back-Orifice listeners · unauthenticated-shell banners · trojaned vsftpd 2.3.4 / UnrealIRCd / ProFTPD · webshell signature sweep (`-m malware`) |
-| 📱 **Offline & Mobile Analysis** | `heaven analyze` / `heaven mobile`: binary (ELF/PE/Mach-O hardening) · firmware carving · pcap · steganography · hash/crypto · **mobile apps — Android APK + iOS IPA scored vs OWASP Mobile Top 10** (embedded secrets · cleartext/ATS · permissions · debuggable/allowBackup · URL schemes) |
+| 🌐 **Network & Threat** | cleartext/legacy protocols · SNMP/IPMI/NFS/VNC exposure · Cisco Smart Install · SMB-signing → NTLM-relay · **internet-facing edge/VPN appliance KEV fingerprint** (Citrix NetScaler · Ivanti Connect Secure · FortiOS SSL-VPN · PAN GlobalProtect · Exchange · F5 BIG-IP → actively-exploited CVEs) · **DoS/DDoS susceptibility**: amplification-reflector detection with a *measured* factor (NTP monlist · open DNS · memcached · SSDP · CLDAP · chargen · RIPv1 · NetBIOS) + Slowloris slow-HTTP (`-m dos`, one benign probe, never a flood) · **sniffing / internal MITM**: LLMNR / NBT-NS / mDNS name-poisoning + mitm6 dual-stack susceptibility (`-m sniff`) · **malware / backdoor**: Ingreslock/NetBus/Back-Orifice listeners · unauthenticated-shell banners · trojaned vsftpd 2.3.4 / UnrealIRCd / ProFTPD · webshell signature sweep (`-m malware`) |
+| 📱 **Offline & Mobile Analysis** | `heaven analyze` / `heaven mobile`: binary (ELF/PE/Mach-O hardening) · firmware carving · pcap · steganography · documents/archives · audio/video media · hash/crypto · **mobile apps: Android APK + iOS IPA scored vs OWASP Mobile Top 10** (embedded secrets · cleartext/ATS · permissions · debuggable/allowBackup · URL schemes) |
 | 🧬 **API Security** | OWASP API Top 10: BOLA/IDOR · broken auth · mass assignment · excessive data exposure (REST + GraphQL) |
 | 🧾 **CVE Intelligence** | Curated **offline** inline CVE DB (~150 CVEs, version-range matched) **+ dynamic live fallback**: any product/version *not* in the local DB is looked up in real time against **NVD + CIRCL**, merged/de-duped, version-confirmed, **KEV-flagged, EPSS-scored (real-world exploitation probability) and Exploit-DB-correlated (public PoC link)**, and disk-cached (7-day TTL) · degrades gracefully offline · `heaven cve <product> [version] [--engagement]` |
 | 💥 **Verified Exploitation** | Active proof, not guesses: sqlmap SQLi dump · RCE canary file drop/read · **in-house OAST collaborator** proving SSRF **and** XXE out-of-band (no Burp Collaborator / interactsh dependency) |
@@ -697,7 +697,7 @@ Every finding carries a defensible **evidence package**: request/response, copy-
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,50:FF6E00,100:7400B8"/>
 </p>
 
-HEAVEN scores every finding with **CVSS v4.0**, the current standard, and shows its **CVSS v3.1** score alongside (the calibrated score that drives the severity band). Published CVE scores come straight from NVD / OSV, preferring v4.0 when the advisory carries it; for a finding with no published score HEAVEN predicts a base score with a **hybrid model** — a 13-feature `ExtraTreesRegressor` (5-fold CV **R²=0.91**) when the finding carries CVSS metrics, and a TF-IDF text model (`TfidfVectorizer` + `Ridge`) trained on the real-finding population of the dataset (**315,648 CVEs with a non-zero CVSS score**) that reads the finding's own vulnerability type and description when it does not. It is measured on the population HEAVEN actually routes to it — findings carrying a real vuln-type signal — where CV **R²=0.63**, MAE **0.79**, and it lands the correct CVSS severity band **99% of the time within one level** (the metric that matters, since the same vuln class genuinely spans a wide score range in the NVD data, and R² can only be driven higher by leaking the CVSS formula's own sub-scores). The severity a report shows is always reconciled to the exact CVSS-vector computation; the text model is a secondary ranking signal pinned to that authoritative severity, never the badge. HEAVEN then layers on:
+HEAVEN scores every finding with **CVSS v4.0**, the current standard, and shows its **CVSS v3.1** score alongside (the calibrated score that drives the severity band). Published CVE scores come straight from NVD / OSV, preferring v4.0 when the advisory carries it; for a finding with no published score HEAVEN predicts a base score with a **hybrid model**: a 13-feature `ExtraTreesRegressor` (5-fold CV **R²=0.91**) when the finding carries CVSS metrics, and a TF-IDF text model (`TfidfVectorizer` + `Ridge`) trained on the real-finding population of the dataset (**315,648 CVEs with a non-zero CVSS score**) that reads the finding's own vulnerability type and description when it does not. It is measured on the population HEAVEN actually routes to it (findings carrying a real vuln-type signal), where CV **R²=0.63**, MAE **0.79**, and it lands the correct CVSS severity band **99% of the time within one level** (the metric that matters, since the same vuln class genuinely spans a wide score range in the NVD data, and R² can only be driven higher by leaking the CVSS formula's own sub-scores). The severity a report shows is always reconciled to the exact CVSS-vector computation; the text model is a secondary ranking signal pinned to that authoritative severity, never the badge. HEAVEN then layers on:
 
 - **EPSS** exploit-probability and **CISA KEV** membership
 - An **asset-criticality** multiplier (`scope add --criticality crown_jewel`)
@@ -738,7 +738,7 @@ The models (~6 MB vector + ~2 MB description) aren't bundled in the wheel or git
 </p>
 
 ```
-heaven/                   ← Python package (214 modules)
+heaven/                   ← Python package (215 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines - Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -752,7 +752,7 @@ heaven/                   ← Python package (214 modules)
 └── cli/                  Click CLI - one module per command group (61 commands)
 
 heaven-ui/                React + Vite web console (25 pages)
-tests/                    2649 pytest tests + native & DVWA benchmark suites
+tests/                    2655 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -771,7 +771,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (2649 tests)
+pytest tests/                  # full suite, ~3.5 min (2655 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -838,7 +838,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>2649 tests · 214 modules · 61 CLI commands · 97 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>2655 tests · 215 modules · 61 CLI commands · 97 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

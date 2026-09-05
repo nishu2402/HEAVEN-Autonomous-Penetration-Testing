@@ -16,6 +16,6 @@ project.
 | Inter           | `inter-latin-var.woff2`           | https://github.com/rsms/inter                       | OFL-1.1 |
 | JetBrains Mono  | `jetbrains-mono-latin-var.woff2`  | https://github.com/JetBrains/JetBrainsMono          | OFL-1.1 |
 
-Both are licensed under the SIL Open Font License, Version 1.1 — see `OFL.txt`.
+Both are licensed under the SIL Open Font License, Version 1.1. See `OFL.txt`.
 The OFL permits bundling and redistribution with the accompanying software; the
 license text and copyright notices are retained here as it requires.

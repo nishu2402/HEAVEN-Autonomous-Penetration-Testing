@@ -147,6 +147,7 @@ def _analyze_zip(path: str, target: str) -> dict[str, Any]:
         try:
             blob = zf.read(zi)[:512 * 1024]
         except Exception:                    # noqa: BLE001 (encrypted / bad member)
+            logger.debug("skipping unreadable archive member", exc_info=True)
             continue
         secrets += _carve_secrets(blob, zi.filename)
         if len(secrets) >= 12:

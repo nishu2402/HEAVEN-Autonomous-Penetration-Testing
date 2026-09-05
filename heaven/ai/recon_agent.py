@@ -253,7 +253,7 @@ class ReconAgent:
         try:
             from heaven.vulnscan.cve_mapper import lookup_cve  # type: ignore[attr-defined]
         except (ImportError, AttributeError):
-            return {"cve_id": cve_id, "note": "cve_mapper.lookup_cve not available — stub response"}
+            return {"cve_id": cve_id, "note": "cve_mapper.lookup_cve not available, stub response"}
         try:
             data = await asyncio.to_thread(lookup_cve, cve_id)
             return data or {"cve_id": cve_id, "found": False}
@@ -284,7 +284,7 @@ class ReconAgent:
             return {
                 "service": service, "version": version,
                 "known_exploits": [], "error": str(e),
-                "note": "exploit lookup failed — treat absence as 'unknown'",
+                "note": "exploit lookup failed, treat absence as 'unknown'",
             }
         entries = result.entries[:10]
         return {
@@ -303,7 +303,7 @@ class ReconAgent:
                 f"{len(result.entries)} Exploit-DB match(es) found"
                 if entries else
                 "no public exploits in available sources (searchsploit / CSV "
-                "mirror) — absence is not proof none exist"
+                "mirror); absence is not proof none exist"
             ),
         }
 

@@ -105,7 +105,7 @@ def serve(host: str, port: int, open_browser: bool) -> None:
     if not _port_available(host, port):
         reachable = f"http://{_browser_host(host)}:{port}/"
         _print(f"[red]✗ Cannot start: {host}:{port} is already in use.[/red]")
-        _print("[yellow]  Something is already listening there — most likely a HEAVEN "
+        _print("[yellow]  Something is already listening there · most likely a HEAVEN "
                "server you started earlier.[/yellow]")
         _print("")
         _print("[dim]  Do one of these:[/dim]")
@@ -118,7 +118,7 @@ def serve(host: str, port: int, open_browser: bool) -> None:
     _print(f"[cyan]Starting HEAVEN API server on {host}:{port}[/cyan]")
 
     if host == "0.0.0.0":  # intentional all-interfaces bind; user is warned below
-        _print("[yellow]⚠  Binding to 0.0.0.0 — make sure you are behind a reverse proxy with TLS.[/yellow]")
+        _print("[yellow]⚠  Binding to 0.0.0.0 · make sure you are behind a reverse proxy with TLS.[/yellow]")
 
     url = f"http://{_browser_host(host)}:{port}/"
 
@@ -144,7 +144,7 @@ def serve(host: str, port: int, open_browser: bool) -> None:
                 target=_wait_and_open, args=(host, port, url), daemon=True
             ).start()
         elif open_browser and headless:
-            _print(f"[dim]Headless environment detected — open the Command Centre manually → {url}[/dim]")
+            _print(f"[dim]Headless environment detected · open the Command Centre manually → {url}[/dim]")
 
         uvicorn.run(app, host=host, port=port, log_level="info")
     except ImportError:

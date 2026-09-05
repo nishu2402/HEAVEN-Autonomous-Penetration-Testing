@@ -112,7 +112,7 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
 
     Writes a .env file with the mandatory passwords + any optional API
     keys you want to configure (LLM, SIEM, ticketing, NVD, Shodan).
-    Idempotent — re-running offers to update individual keys without
+    Idempotent: re-running offers to update individual keys without
     overwriting the ones you've already set.
     """
     env_path = Path(env_file).resolve()
@@ -120,7 +120,7 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
 
     _print("[bold cyan]🚀 HEAVEN first-time setup[/bold cyan]")
     if existing:
-        _print(f"  [dim]Found existing {env_path} — updating in place[/dim]")
+        _print(f"  [dim]Found existing {env_path} · updating in place[/dim]")
     else:
         _print(f"  [dim]Writing fresh {env_path}[/dim]")
     _print("")
@@ -173,7 +173,7 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
 
     # ── Optional: LLM for the AI layers ─────────────────────────────────
     _print("\n[bold]LLM for AI layers[/bold] (Layer B/D/E + autonomous loop)")
-    _print("  [dim]Optional — HEAVEN runs fully without it ([cyan]--no-llm[/cyan]). "
+    _print("  [dim]Optional · HEAVEN runs fully without it ([cyan]--no-llm[/cyan]). "
            "Press Enter to skip.[/dim]")
     _print("  [dim]Get a key:  Gemini (free) https://aistudio.google.com/apikey"
            "  ·  Anthropic https://console.anthropic.com"
@@ -241,10 +241,10 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
     # there's no `source .env` / `export` step — just run from this directory.
     is_default = env_path == (Path.cwd() / ".env").resolve()
     _print("\n[bold]Next steps:[/bold]")
-    _print(f"  [dim]HEAVEN auto-loads {env_path.name} from this directory — "
+    _print(f"  [dim]HEAVEN auto-loads {env_path.name} from this directory ·  "
            "no need to `source` or `export` it.[/dim]")
     if not is_default:
-        _print(f"  [dim](custom path — pass [cyan]--config-file {env_path}[/cyan] "
+        _print(f"  [dim](custom path · pass [cyan]--config-file {env_path}[/cyan] "
                "or run from its directory)[/dim]")
     _print( "  1. Create your first engagement: [cyan]heaven engage init <name>[/cyan]")
     _print( "  2. Add a target with criticality: "
@@ -254,7 +254,7 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
     # ── Reminder about gitignore ───────────────────────────────────────
     gi = Path(".gitignore")
     if gi.exists() and ".env" not in gi.read_text(encoding="utf-8"):
-        _print("\n[yellow]⚠ .env is not in your .gitignore — add it to avoid "
+        _print("\n[yellow]⚠ .env is not in your .gitignore · add it to avoid "
                "committing secrets.[/yellow]")
 
 

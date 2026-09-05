@@ -39,7 +39,7 @@ def kill_chain_cmd(engagement: Optional[str], output: Optional[str]) -> None:
     store = EngagementStore(_engagement_db_path(engagement))
     all_findings = store.list_findings(limit=10000)
     if not all_findings:
-        _print("[yellow]No findings yet — run a scan first.[/yellow]")
+        _print("[yellow]No findings yet · run a scan first.[/yellow]")
         return
 
     finding_dicts = [

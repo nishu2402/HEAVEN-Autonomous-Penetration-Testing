@@ -43,7 +43,7 @@ def lateral(
     Outputs a "hop graph" of which target accepted which credential, so
     the attack-chain analyzer can incorporate the lateral edges.
 
-    Example — spray a captured id_rsa across 5 hosts:
+    Example: spray a captured id_rsa across 5 hosts:
 
         heaven lateral \\
             --ssh-key /loot/id_rsa \\
@@ -51,7 +51,7 @@ def lateral(
             -t 10.0.0.5:22 -t 10.0.0.6:22 -t 10.0.0.7:22 \\
             --i-have-authorization
 
-    Example — pass-the-hash against an AD member server:
+    Example: pass-the-hash against an AD member server:
 
         heaven lateral \\
             --smb-user Administrator --smb-domain CORP \\
@@ -73,7 +73,7 @@ def lateral(
     targets: list[tuple[str, int]] = []
     for t in target:
         if ":" not in t:
-            _print(f"[red]Invalid target '{t}' — expected host:port[/red]")
+            _print(f"[red]Invalid target '{t}'  · expected host:port[/red]")
             sys.exit(2)
         host, _, port_s = t.rpartition(":")
         try:
@@ -104,7 +104,7 @@ def lateral(
             _print(f"  {h['from']:24}  →  {h['to']:24}  via {h['technique']:20}  "
                    f"as {h['credential_label']}")
     if result.get("errors"):
-        _print(f"\n[dim]{len(result['errors'])} error(s) suppressed — pass --verbose to dump[/dim]")
+        _print(f"\n[dim]{len(result['errors'])} error(s) suppressed · pass --verbose to dump[/dim]")
 
     if output:
         Path(output).write_text(json.dumps(result, indent=2))

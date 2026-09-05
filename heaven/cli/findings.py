@@ -179,8 +179,8 @@ def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
       csv         For Jira / spreadsheet import
       json        Raw findings, full evidence
       sarif       SARIF 2.1.0 for GitHub/GitLab code-scanning dashboards
-      junit       JUnit XML for CI — fails the build on --fail-on severity
-      burp        Burp Suite XML — load into Site Map, replay in Repeater
+      junit       JUnit XML for CI, fails the build on --fail-on severity
+      burp        Burp Suite XML, load into Site Map, replay in Repeater
       proxy-jsonl JSONL with full request/response, for mitmproxy / Caido
     """
     from heaven.engagement import EngagementStore
@@ -300,7 +300,7 @@ def remediate(finding_id: str, engagement: Optional[str]) -> None:
         return
 
     if not engine.available:
-        _print("[yellow]No LLM configured — showing knowledge-base remediation. "
+        _print("[yellow]No LLM configured · showing knowledge-base remediation. "
                "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / "
                "DEEPSEEK_API_KEY for AI-tailored guidance.[/yellow]")
     if HAS_RICH:
@@ -323,8 +323,8 @@ def verify(engagement: Optional[str], i_have_authorization: bool, limit: int) ->
 
     A network version banner does not prove a CVE is exploitable (vendors
     backport fixes without bumping the banner). For a curated set of well-known
-    CVEs — e.g. Apache path-traversal (CVE-2021-41773/42013), Shellshock
-    (CVE-2014-6271) — HEAVEN runs a SAFE, read-only behavioural probe. A probe
+    CVEs, for example Apache path-traversal (CVE-2021-41773/42013), Shellshock
+    (CVE-2014-6271). HEAVEN runs a SAFE, read-only behavioural probe. A probe
     that fires promotes the finding Potential → Confirmed and persists the proof;
     a negative probe leaves the finding untouched (never fabricated, never
     deleted). Requires --i-have-authorization.
@@ -396,7 +396,7 @@ def verify(engagement: Optional[str], i_have_authorization: bool, limit: int) ->
             _print(f"  [green]CONFIRMED[/green] {p['cve']:16} {p['target']} "
                    f"[dim]({p['technique']})[/dim]")
     else:
-        _print("[dim]No probe fired — findings remain Potential "
+        _print("[dim]No probe fired · findings remain Potential "
                "(patched, endpoint disabled, or not reachable).[/dim]")
 
 

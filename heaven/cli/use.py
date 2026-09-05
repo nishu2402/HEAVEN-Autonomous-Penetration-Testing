@@ -87,7 +87,7 @@ def use(engagement: Optional[str], do_clear: bool) -> None:
 
     if engagement not in available:
         db_path = _engagement_db_path(engagement)
-        _print(f"[yellow]![/yellow] No DB at [dim]{db_path}[/dim] yet — "
+        _print(f"[yellow]![/yellow] No DB at [dim]{db_path}[/dim] yet ·  "
                f"create it with:")
         _print(f"  [cyan]heaven engage init {engagement} "
                f"--client \"<client>\"[/cyan]")

@@ -30,7 +30,7 @@ def diff(baseline_scan_id: str, current_scan_id: str,
 
     Bucketed output: NEW · RESOLVED · REGRESSED · UNCHANGED, plus a risk-drift
     line showing how the severity-weighted open-risk index moved between the two
-    scans. `regressed` is the most-important bucket — those are findings that were
+    scans. `regressed` is the most-important bucket: those are findings that were
     dispositioned closed (fixed / false_positive / accepted_risk) but came
     back in the current scan.
 
@@ -65,7 +65,7 @@ def diff(baseline_scan_id: str, current_scan_id: str,
     else:
         # Table — pretty terminal output
         out_text = ""
-        _print(f"\n[bold]Scan diff — {current_scan_id[:8]} vs. {baseline_scan_id[:8]}[/bold]")
+        _print(f"\n[bold]Scan diff · {current_scan_id[:8]} vs. {baseline_scan_id[:8]}[/bold]")
         _print(f"  🆕 New:       [bold green]{s['new']:4}[/bold green]   "
                f"({s['critical_new']} critical)")
         _print(f"  ✅ Resolved:  [green]{s['resolved']:4}[/green]")
@@ -126,7 +126,7 @@ def retest(baseline_scan_id: str, current_scan_id: str,
     Compares a baseline scan to a later re-scan of the same engagement and
     reports the remediation posture in plain language: how many baseline
     findings are verified fixed, which are still open, which were reintroduced
-    (a previously-fixed finding that came back — flagged urgent), and any newly
+    (a previously-fixed finding that came back, flagged urgent), and any newly
     introduced since the baseline. The remediation rate counts only findings
     that existed at the baseline (the set under retest).
 
@@ -175,7 +175,7 @@ def retest(baseline_scan_id: str, current_scan_id: str,
 
     rate = posture["remediation_rate"]
     rate_str = f"{rate:.0f}%" if rate is not None else "—"
-    _print(f"\n[bold]Remediation retest — {current_scan_id[:8]} vs. {baseline_scan_id[:8]}[/bold]")
+    _print(f"\n[bold]Remediation retest · {current_scan_id[:8]} vs. {baseline_scan_id[:8]}[/bold]")
     _print(f"  Remediated:       [green]{posture['remediated']:4}[/green]  "
            f"([bold green]{rate_str}[/bold green] of {posture['prior_total']} baseline findings)")
     _print(f"  Still open:       [yellow]{posture['still_open']:4}[/yellow]")

@@ -268,8 +268,8 @@ def federation_findings(domain: str, realm: dict[str, Any],
                 f"password-spray target and a username-enumeration oracle, since "
                 f"valid and invalid users elicit different responses."),
             "remediation": (
-                "Disable the IdP-initiated sign-on page — "
-                "`Set-AdfsProperties -EnableIdpInitiatedSignonPage $false` — "
+                "Disable the IdP-initiated sign-on page "
+                "(`Set-AdfsProperties -EnableIdpInitiatedSignonPage $false`), then "
                 "publish ADFS only through the Web Application Proxy, and enforce "
                 "MFA plus extranet smart-lockout to blunt password spraying."),
             "evidence": {
@@ -306,7 +306,7 @@ def federation_findings(domain: str, realm: dict[str, Any],
                    if meta.get("token_signing_cert") else "")
                 + ". This maps an internet-facing identity component as a pivot "
                 "and phishing-infrastructure target. The metadata is public by "
-                "design — reported as attack-surface recon, not a flaw."),
+                "design, so it is reported as attack-surface recon, not a flaw."),
             "remediation": (
                 "Where the relying-party set is known, restrict access to the "
                 "ADFS/STS federation endpoints; keep the STS fully patched and "
@@ -354,7 +354,7 @@ def tenant_finding(domain: str, realm: dict[str, Any],
                   f"{f' (tenant {tenant_id})' if tenant_id else ''}"),
         "severity": "info",
         "confidence": 0.9,
-        "description": " — ".join(bits) + (
+        "description": " · ".join(bits) + (
             ". Microsoft's unauthenticated discovery endpoints reveal the "
             "tenant's existence, authentication model and identifiers to any "
             "external party, seeding targeted phishing and password-spray "

@@ -40,7 +40,7 @@ def sbom(engagement: Optional[str], output: Optional[str]) -> None:
     _print(f"  components (services) : {n_comp}")
     _print(f"  vulnerabilities (CVEs): {n_vuln}")
     if n_comp == 0:
-        _print("[dim]No service/version data yet — run a network scan with "
+        _print("[dim]No service/version data yet · run a network scan with "
                "service detection first, then re-run [cyan]heaven sbom[/cyan].[/dim]")
 
 

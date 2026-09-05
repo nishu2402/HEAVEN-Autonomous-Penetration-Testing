@@ -53,7 +53,7 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
     from heaven.vulnscan.sca_scanner import scan_path
 
     if not OSVClient().available:
-        _print("[yellow]httpx not installed — OSV lookups need it.[/yellow]")
+        _print("[yellow]httpx not installed · OSV lookups need it.[/yellow]")
         _print("[dim]Install:[/dim] [cyan]pip install httpx[/cyan]")
         sys.exit(2)
 
@@ -86,7 +86,7 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
                f"cvss {f.get('cvss', 0):<4} {e['package']}@{e['installed_version']}  "
                f"{cve}  [dim]fix: {e.get('fixed_version') or '—'}[/dim]")
     if len(findings) > 30:
-        _print(f"  [dim]… and {len(findings) - 30} more — pass --output for full JSON[/dim]")
+        _print(f"  [dim]… and {len(findings) - 30} more · pass --output for full JSON[/dim]")
 
     if not findings:
         _print("[green]No known-vulnerable dependencies found.[/green]")

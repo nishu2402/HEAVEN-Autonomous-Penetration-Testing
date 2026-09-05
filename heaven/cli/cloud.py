@@ -102,7 +102,7 @@ def iam_cmd(provider: str, profile: Optional[str], region: Optional[str],
 
     Supply credentials the standard way for the chosen --provider (AWS env vars /
     profile, GCP Application Default Credentials, Azure DefaultAzureCredential).
-    HEAVEN never reads or logs the secret — the SDK resolves it — and every call
+    HEAVEN never reads or logs the secret (the SDK resolves it), and every call
     is read-only. Reports over-privileged principals and public / broad IAM
     grants (AWS also: MFA, stale keys, root keys, weak password policy).
     """

@@ -1290,7 +1290,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                         f"cannot be established from the outside. {len(candidates)} "
                         f"CVEs are known for this product "
                         f"(e.g. {', '.join(examples)}). These are UNVERIFIED "
-                        f"candidates — confirm the running version via an "
+                        f"candidates. Confirm the running version via an "
                         f"authenticated check or vendor advisory before treating any "
                         f"as present. Distributions frequently backport security "
                         f"fixes while leaving the banner version unchanged."
@@ -1404,7 +1404,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                 "description": (
                     f"Shodan's public InternetDB associates {cid} with this host's "
                     "internet-facing exposure. This is passive OSINT, UNVERIFIED "
-                    "from the scan origin — confirm the affected component and "
+                    "from the scan origin. Confirm the affected component and "
                     "version (authenticated check or active exploitation) before "
                     "treating it as exploitable."
                 ),

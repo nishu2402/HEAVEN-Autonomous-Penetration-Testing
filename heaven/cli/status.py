@@ -282,7 +282,7 @@ def _render_pretty(report: dict) -> None:
         _print(f"  [green]✓ LLM[/green]        {llm['provider']} ({llm['model']}){fb_note}")
     else:
         err = llm.get("init_error") or llm.get("error") or "no API key set"
-        _print(f"  [yellow]· LLM[/yellow]        not configured — {err}")
+        _print(f"  [yellow]· LLM[/yellow]        not configured · {err}")
 
     # Local LLM runtime (Ollama) — private, no rate limits.
     local = report.get("local_llm", {})
@@ -296,7 +296,7 @@ def _render_pretty(report: dict) -> None:
             _print("  [yellow]· Local AI[/yellow]   Ollama installed but not "
                    "running — [cyan]ollama serve[/cyan]")
     else:
-        _print("  [dim]· Local AI    not installed — heaven ai setup "
+        _print("  [dim]· Local AI    not installed · heaven ai setup "
                "(no key, no rate limits)[/dim]")
 
     # SIEM
@@ -343,7 +343,7 @@ def _render_pretty(report: dict) -> None:
     if not eng.get("exists"):
         _print("[bold]Engagement[/bold]")
         if "hint" in eng:
-            _print(f"  [dim]· no active engagement — {eng['hint']}[/dim]")
+            _print(f"  [dim]· no active engagement · {eng['hint']}[/dim]")
         else:
             _print(f"  [yellow]· engagement '{eng.get('name','?')}' DB not found[/yellow]")
     else:

@@ -23,7 +23,7 @@ from heaven.cli._helpers import _engagement_db_path, _print, json_output
 
 
 def _render_table(inv: list[dict], totals: dict) -> None:
-    _print(f"\n[bold]DNS Enumeration[/bold]  [dim]— {totals['domains']} domain(s), "
+    _print(f"\n[bold]DNS Enumeration[/bold]  [dim] · {totals['domains']} domain(s), "
            f"{totals['records']} record(s), {totals['subdomains']} subdomain(s), "
            f"{totals['mail_servers']} mail server(s)[/dim]")
     for n in inv:

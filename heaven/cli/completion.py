@@ -362,7 +362,7 @@ def _do_install(shell: str, dry_run: bool) -> None:
                + ("" if dry_run else f"  [dim](backup: {_backup_path(rc).name})[/dim]"))
 
     if dry_run:
-        _print("\n[dim]DRY-RUN — nothing was written. Drop --dry-run to apply.[/dim]")
+        _print("\n[dim]DRY-RUN · nothing was written. Drop --dry-run to apply.[/dim]")
         return
 
     if shell == "powershell":
@@ -373,7 +373,7 @@ def _do_install(shell: str, dry_run: bool) -> None:
         reload_cmd = f"source {rc}"
     _print("\n[bold]Done![/bold] Reload your shell to activate completion now:")
     _print(f"  [cyan]{reload_cmd}[/cyan]")
-    _print("Then type [cyan]heaven [/cyan]and press [bold]Tab[/bold] — every "
+    _print("Then type [cyan]heaven [/cyan]and press [bold]Tab[/bold] · every "
            "command, subcommand and option will complete.")
 
 
@@ -421,7 +421,7 @@ def completion_cmd(shell: Optional[str], do_install: bool, do_uninstall: bool,
                    dry_run: bool, install_hint: bool) -> None:
     """Enable Tab-completion for the `heaven` command.
 
-    The easy way — one command, auto-detects your shell, safe to re-run:
+    The easy way: one command, auto-detects your shell, safe to re-run:
 
         heaven completion --install
 

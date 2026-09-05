@@ -72,11 +72,11 @@ def quickstart_cmd(ctx: click.Context, do_serve: bool, no_demo: bool) -> None:
     if created:
         _print(f"[green]✓ Created[/green] {env_path}")
         _print(f"  Web UI login:  [bold]{admin_user}[/bold] / [bold]{generated_pw}[/bold]")
-        _print("  [dim](saved in .env — change it anytime in the web UI → Settings)[/dim]")
+        _print("  [dim](saved in .env · change it anytime in the web UI → Settings)[/dim]")
     else:
         _print(f"[green]✓ Using existing[/green] {env_path}  [dim](admin: {admin_user})[/dim]")
     if seeded:
-        _print(f"[green]✓ Loaded[/green] {seeded} sample findings — every page is populated to explore")
+        _print(f"[green]✓ Loaded[/green] {seeded} sample findings · every page is populated to explore")
     _print("")
 
     if do_serve:

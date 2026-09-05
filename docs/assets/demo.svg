@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 470" font-family="'JetBrains Mono','Fira Code',ui-monospace,monospace" role="img" aria-label="HEAVEN demo: heaven quickstart loads sample data, heaven serve starts the web UI, dashboard shows ranked findings">
-  <title>HEAVEN — quickstart → serve → dashboard</title>
+  <title>HEAVEN · quickstart → serve → dashboard</title>
 
   <!-- window -->
   <rect x="8" y="8" width="824" height="454" rx="14" fill="#0B0F1A" stroke="#1b2438" stroke-width="1.5"/>
@@ -9,7 +9,7 @@
   <circle cx="32" cy="28" r="6" fill="#FF5F57"/>
   <circle cx="52" cy="28" r="6" fill="#FEBC2E"/>
   <circle cx="72" cy="28" r="6" fill="#28C840"/>
-  <text x="420" y="33" fill="#64718C" font-size="13" text-anchor="middle">heaven — terminal</text>
+  <text x="420" y="33" fill="#64718C" font-size="13" text-anchor="middle">heaven · terminal</text>
 
   <!-- ── terminal lines (fade in sequentially, 13s loop) ── -->
   <g opacity="0">
@@ -30,7 +30,7 @@
   <g opacity="0">
     <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"
              keyTimes="0;0.22;0.24;0.96;1" values="0;0;1;1;0"/>
-    <text x="30" y="176" font-size="14.5"><tspan fill="#34E5A3">✓ </tspan><tspan fill="#9BA7C0">Loaded </tspan><tspan fill="#ECEFF7">12 sample findings</tspan><tspan fill="#9BA7C0"> — every page populated</tspan></text>
+    <text x="30" y="176" font-size="14.5"><tspan fill="#34E5A3">✓ </tspan><tspan fill="#9BA7C0">Loaded </tspan><tspan fill="#ECEFF7">12 sample findings</tspan><tspan fill="#9BA7C0">, every page populated</tspan></text>
   </g>
   <g opacity="0">
     <animate attributeName="opacity" dur="13s" repeatCount="indefinite" calcMode="linear"

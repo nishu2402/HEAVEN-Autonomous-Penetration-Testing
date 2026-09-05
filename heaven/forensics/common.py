@@ -50,10 +50,19 @@ def _identify(head: bytes) -> tuple[str, str]:
         (b"\x0a\x0d\x0d\x0a", 0, "pcapng capture", "application/x-pcapng"),
         (b"hsqs", 0, "SquashFS filesystem", "application/octet-stream"),
         (b"UBI#", 0, "UBI firmware volume", "application/octet-stream"),
+        (b"ftyp", 4, "ISO media (MP4/MOV)", "video/mp4"),
+        (b"\x1aE\xdf\xa3", 0, "Matroska / WebM", "video/x-matroska"),
+        (b"OggS", 0, "Ogg container", "application/ogg"),
+        (b"fLaC", 0, "FLAC audio", "audio/flac"),
+        (b"ID3", 0, "MP3 audio", "audio/mpeg"),
     ]
     for sig, off, label, mime in sigs:
         if head[off:off + len(sig)] == sig:
             return label, mime
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "WAV audio", "audio/wav"
+    if head[:4] == b"RIFF" and head[8:12] == b"AVI ":
+        return "AVI video", "video/x-msvideo"
     if head[:5] == b"ustar" or (len(head) > 262 and head[257:262] == b"ustar"):
         return "tar archive", "application/x-tar"
     # printable-text heuristic
@@ -109,8 +118,10 @@ def file_overview(path: str) -> dict[str, Any]:
         size = p.stat().st_size
     except OSError:
         return {}
-    md5 = hashlib.md5()      # noqa: S324 - file identity/threat-intel pivot, not a security control
-    sha1 = hashlib.sha1()    # noqa: S324 - same; sha1 kept because many feeds key on it
+    # md5/sha1 are file-identity + threat-intel pivots (many feeds key on them),
+    # never a security control, so they are marked usedforsecurity=False.
+    md5 = hashlib.md5(usedforsecurity=False)
+    sha1 = hashlib.sha1(usedforsecurity=False)
     sha256 = hashlib.sha256()
     head = b""
     sample = bytearray()

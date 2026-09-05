@@ -240,7 +240,7 @@ def analyze_firmware(path: str, **_: Any) -> dict[str, Any]:
             "scanner": "firmware_analyzer", "confidence": 0.8,
             "title": f"{len(versions)} software component/version(s) identified",
             "description": ("Version banners were extracted from the image. Cross-"
-                            "reference these against CVE feeds — IoT firmware often "
+                            "reference these against CVE feeds. IoT firmware often "
                             "ships years-old, vulnerable components: "
                             + ", ".join(f"{v['product']} {v['version']}"
                                         for v in versions[:8]) + "."),

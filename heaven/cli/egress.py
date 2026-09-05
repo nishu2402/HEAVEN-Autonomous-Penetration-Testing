@@ -31,7 +31,7 @@ def _fmt_bool(v: bool) -> str:
 def _render_status(snap: dict) -> None:
     mode = snap.get("mode", "off")
     armed = snap.get("armed")
-    _print("\n[bold]Egress[/bold]  [dim]— the dashboard stays local; only scan "
+    _print("\n[bold]Egress[/bold]  [dim] · the dashboard stays local; only scan "
            "traffic is routed[/dim]")
     colour = "green" if armed else "dim"
     _print(f"  Mode        [{colour}]{mode}[/{colour}]"
@@ -67,12 +67,12 @@ def _render_status(snap: dict) -> None:
 def _render_confirm(res: dict) -> None:
     ok = res.get("ok")
     icon = "[green]✓[/green]" if ok else "[red]✗[/red]"
-    _print(f"\n{icon} Egress [bold]{res.get('mode')}[/bold] — {res.get('detail')}")
+    _print(f"\n{icon} Egress [bold]{res.get('mode')}[/bold] · {res.get('detail')}")
     _print(f"  Apparent public IP : {res.get('public_ip') or '[dim]unknown[/dim]'}")
     _print(f"  Direct baseline IP : {res.get('baseline_ip') or '[dim]unknown[/dim]'}")
     _print(f"  Routed via         : {res.get('via')}")
     if res.get("mode") not in ("off", None) and not res.get("changed"):
-        _print("  [yellow]⚠ exit IP did not change vs the direct baseline — "
+        _print("  [yellow]⚠ exit IP did not change vs the direct baseline ·  "
                "traffic may NOT be anonymised.[/yellow]")
 
 
@@ -93,7 +93,7 @@ def register(cli: click.Group) -> None:
 
     @egress.command("confirm")
     def confirm_cmd() -> None:
-        """Leak check — what public IP does the target actually see?"""
+        """Leak check: what public IP does the target actually see?"""
         from heaven.net import egress as eg
         res = asyncio.run(eg.confirm_egress(timeout=12.0))
         if json_output():
@@ -153,7 +153,7 @@ def register(cli: click.Group) -> None:
         if killswitch is not None:
             updates["HEAVEN_EGRESS_KILLSWITCH"] = killswitch
         if not updates:
-            _print("[yellow]nothing to set — pass --mode / --proxy / --wg-config / …[/yellow]")
+            _print("[yellow]nothing to set · pass --mode / --proxy / --wg-config / …[/yellow]")
             return
         result = apply_settings(updates)
         if json_output():

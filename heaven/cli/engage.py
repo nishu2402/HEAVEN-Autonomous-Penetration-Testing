@@ -106,7 +106,7 @@ def engage_list() -> None:
         tag = " [dim](sample)[/dim]" if name == DEMO_DB_NAME else ""
         detail = (f"{findings} finding{'s' if findings != 1 else ''}, "
                   f"{scans} scan{'s' if scans != 1 else ''}")
-        _print(f"  {marker} [bold]{name}[/bold]{tag}  [dim]— {detail}[/dim]")
+        _print(f"  {marker} [bold]{name}[/bold]{tag}  [dim] · {detail}[/dim]")
     _print("\nSwitch with [cyan]heaven use <name>[/cyan] · "
            "rename with [cyan]heaven engage rename <old> <new>[/cyan] · "
            "delete with [cyan]heaven engage delete <name>[/cyan]")

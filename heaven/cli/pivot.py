@@ -57,12 +57,12 @@ def pivot(jumps: tuple[str, ...], key: Optional[str], targets: tuple[str, ...],
           i_have_authorization: bool) -> None:
     """Tunnel through authorized SSH jump host(s) and scan hosts behind them.
 
-    Example — single pivot, scan an internal host reachable only via the foothold:
+    Example: single pivot, scan an internal host reachable only via the foothold:
 
         heaven pivot --jump msfadmin:msfadmin@192.168.0.162 \\
             -t 10.1.1.20 --ports 22,445,3389 --i-have-authorization
 
-    Example — double pivot:
+    Example: double pivot:
 
         heaven pivot --jump user:pw@10.0.0.5 --jump user:pw@192.168.5.230 \\
             -t 192.168.35.100 --i-have-authorization

@@ -130,25 +130,44 @@ class SelfAuditor:
         for filepath in py_files:
             if skip_parts.intersection(filepath.parts):
                 continue
+            # Skip HEAVEN's own test files — fixtures deliberately embed fake
+            # secrets. Match on the path RELATIVE to the project root: matching
+            # the absolute path would also skip every file whenever an ancestor
+            # directory name happens to contain "test" (e.g. a checkout under
+            # "…-Penetration-Testing"), silently disabling this whole scan.
+            try:
+                rel = str(filepath.relative_to(self._root))
+            except ValueError:
+                rel = str(filepath)
+            if "test" in rel.lower():
+                continue
             try:
                 content = filepath.read_text(errors="ignore")
                 for line_num, line in enumerate(content.splitlines(), 1):
-                    # Skip comments and known test fixtures
                     stripped = line.strip()
-                    if stripped.startswith("#") or "test" in str(filepath).lower():
+                    if stripped.startswith("#"):
                         continue
                     for pattern, desc in SECRET_PATTERNS:
-                        if re.search(pattern, line):
-                            # Verify it's not just a variable assignment from env
-                            if "os.environ" in line or "_env(" in line or "getenv" in line:
-                                continue
-                            self._findings.append(AuditFinding(
-                                category="hardcoded_secrets", severity="high",
-                                title=f"{desc} detected", description=f"Potential {desc} in source code",
-                                file_path=str(filepath.relative_to(self._root)),
-                                line_number=line_num,
-                                remediation="Move secrets to environment variables or the encrypted vault",
-                            ))
+                        match = re.search(pattern, line)
+                        if not match:
+                            continue
+                        # A value read from the environment is not hardcoded.
+                        if "os.environ" in line or "_env(" in line or "getenv" in line:
+                            continue
+                        # Detector/matcher code searches for credential keywords
+                        # as string needles (e.g. `"password=" in payload`). When
+                        # a quote sits immediately before the match the keyword is
+                        # the CONTENT of a string literal — a search token, not an
+                        # assignment — so it is not a hardcoded secret.
+                        if match.start() > 0 and line[match.start() - 1] in "\"'":
+                            continue
+                        self._findings.append(AuditFinding(
+                            category="hardcoded_secrets", severity="high",
+                            title=f"{desc} detected", description=f"Potential {desc} in source code",
+                            file_path=rel,
+                            line_number=line_num,
+                            remediation="Move secrets to environment variables or the encrypted vault",
+                        ))
             except OSError:
                 pass
 

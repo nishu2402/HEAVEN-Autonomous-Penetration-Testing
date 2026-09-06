@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Real UDP service scanning — privileged and unprivileged.** UDP was previously
+- **Real UDP service scanning. Privileged and unprivileged.** UDP was previously
   dead: no code path ever enabled it, the probe table was never used, and the only
   route (nmap `-sU`) needs raw sockets most operators do not have, so real UDP
   services (DNS, DHCP, TFTP, NTP, SNMP, NetBIOS, RPC/portmap, IKE, SIP, mDNS, SSDP,

@@ -131,7 +131,10 @@ def test_severity_bands(score, sev):
 # ── manifest parsers ─────────────────────────────────────────────────────────
 
 def test_parse_requirements_txt():
-    text = ("Flask==0.12.2\nJinja2 == 2.4.1\nrequests>=2.0\n# a comment\n"
+    # Exact pins, a version floor (audited via its concrete floor version, like
+    # the pyproject/Pipfile/package.json parsers), extras, comments, and env
+    # markers; option/URL/VCS lines and a bare unpinned name are skipped.
+    text = ("Flask==0.12.2\nJinja2 == 2.4.1\nrequests>=2.0\nblack\n# a comment\n"
             "django==2.2.0 ; python_version>'3'\n-e .\nhttps://x/y.whl\n"
             "uvicorn[standard]==0.17.0\n")
     got = {(p.name, p.version) for p in sca_scanner.parse_manifest("requirements.txt", text)}
@@ -139,7 +142,8 @@ def test_parse_requirements_txt():
     assert ("Jinja2", "2.4.1") in got
     assert ("django", "2.2.0") in got
     assert ("uvicorn", "0.17.0") in got
-    assert all(name != "requests" for name, _ in got)  # unpinned dropped
+    assert ("requests", "2.0") in got               # floor audited (matches pyproject)
+    assert all(name != "black" for name, _ in got)  # bare/unpinned dropped
 
 
 def test_parse_package_lock_v3_and_v1():

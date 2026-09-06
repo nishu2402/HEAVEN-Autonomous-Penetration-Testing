@@ -41,6 +41,9 @@ starlette>=1.3.1          # security floor: fastapi allows <1.3.1 which has 6 ad
 uvicorn[standard]>=0.27.0
 websockets>=12.0
 slowapi>=0.1.9
+python-multipart>=0.0.32  # streamed multipart uploads; floor patched: DoS / arbitrary
+                          # file write / parameter smuggling (CVE-2024-53981,
+                          # CVE-2026-24486/40347/42561/53537-40, OSV)
 
 # ── Machine learning & risk scoring ────────────────────────────────────
 # The CVSS risk model is a scikit-learn ExtraTreesRegressor loaded with joblib.
@@ -62,7 +65,8 @@ cvss>=3.0                # reference-grade CVSS v4.0 base scoring
 # HEAVEN shells out to them. Shodan recon and WHOIS use plain HTTP (aiohttp).
 scapy>=2.7.0              # floor patched (OSV)
 dnspython>=2.6.1         # floor patched (OSV)
-asyncssh>=2.14.2         # SSH credential testing; floor patched (OSV)
+asyncssh>=2.24.0         # SSH credential testing; floor patched: SCP path-traversal +
+                         # AuthorizedKeysFile %u escape (CVE-2026-54590/54591, OSV)
 
 # ── Web reconnaissance & parsing ────────────────────────────────────────
 # The crawler parses with the stdlib "html.parser" backend, so no lxml needed.

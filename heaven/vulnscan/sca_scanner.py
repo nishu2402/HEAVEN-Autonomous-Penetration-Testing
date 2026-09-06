@@ -52,18 +52,36 @@ _SKIP_DIRS = {
 # ── individual manifest parsers: each returns [(name, version), ...] ──
 
 def _parse_requirements_txt(text: str) -> list[tuple[str, str]]:
-    """Parse a pip ``requirements.txt`` — only ``name==version`` pins."""
+    """Parse a pip ``requirements.txt``.
+
+    Handles exact pins (``name==1.2.3``) and — consistently with the other
+    Python-ecosystem parsers here (``pyproject.toml``, ``Pipfile``,
+    ``package.json``) — version floors/ranges (``name>=1.2``, ``~=``, ``!=``,
+    ``name>=1.2,<2``) by reducing the specifier to its first concrete version
+    token via :func:`_concrete_version`. A floor pinned at a known-vulnerable
+    release is itself a finding (installs may resolve to it), and OSV
+    range-matches the concrete floor precisely. Extras (``pkg[extra]``), inline
+    comments, and environment markers (``; python_version<'3.11'``) are
+    stripped; ``-r``/``-e``/option/URL/VCS lines and *bare, unpinned* names
+    (no specifier, so no version to audit) are skipped.
+    """
     out: list[tuple[str, str]] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith(("#", "-", "http://", "https://", "git+")):
             continue
         line = line.split("#", 1)[0].split(";", 1)[0].strip()  # drop comment/marker
-        m = re.match(r"^([A-Za-z0-9_.\-]+)\s*\[[^\]]*\]?\s*==\s*([A-Za-z0-9_.\-]+)", line)
+        if not line:
+            continue
+        m = re.match(r"^([A-Za-z0-9_.\-]+)\s*(?:\[[^\]]*\])?\s*(.*)$", line)
         if not m:
-            m = re.match(r"^([A-Za-z0-9_.\-]+)\s*==\s*([A-Za-z0-9_.\-]+)", line)
-        if m:
-            out.append((m.group(1), m.group(2)))
+            continue
+        name, spec = m.group(1), m.group(2).strip()
+        if not spec or spec.startswith("@"):
+            continue  # bare name (no version) or a direct URL/path reference
+        ver = _concrete_version(spec)
+        if ver:
+            out.append((name, ver))
     return out
 
 

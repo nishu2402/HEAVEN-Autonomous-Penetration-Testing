@@ -223,6 +223,11 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
     "ignore:Using .httpx. with .starlette.testclient. is deprecated",
+    # Starlette's TestClient also type-annotates with anyio.abc.BlockingPortal,
+    # an alias anyio 4.15 deprecated in favour of anyio.from_thread.BlockingPortal.
+    # HEAVEN never references the alias directly (verified) — it is import-time
+    # noise inside the same vendored test-only client as the httpx notice above.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
     # ldap3 imports pyasn1's renamed tagMap/typeMap at module load; google-genai
     # references a typing internal slated for removal in 3.17. Both are import-time
     # notices inside the vendored libraries — HEAVEN uses neither symbol directly.

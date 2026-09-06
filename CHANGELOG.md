@@ -480,6 +480,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`heaven sca` on a `requirements.txt` that uses version floors now audits it
+  instead of reporting zero packages.** The `requirements.txt` parser only
+  recognised exact `==` pins, so a normal floor-pinned file (`aiohttp>=3.14.3`,
+  the industry-standard form every other tool audits) parsed to nothing and the
+  scan reported "0 packages across 0 manifests" · yet the `pyproject.toml`,
+  `Pipfile` and `package.json` parsers already reduced a range to its concrete
+  floor via the shared helper and audited it. The parser now does the same: a
+  floor or range (`>=`, `~=`, `!=`, `>=1.2,<2`) is reduced to its concrete floor
+  version and range-matched against OSV, exactly like the other manifests, while
+  a bare unpinned name (no version to audit) is still skipped. A floor pinned at
+  a known-vulnerable release is a real finding, so this closes a silent gap in
+  dependency coverage. Regression test updated to lock in the floor-audited and
+  bare-name-skipped cases.
+
 - **Offline artifact analysis no longer flags a media file as a critical PHP
   webshell (false positive).** Uploading a video (an `.MP4`, reproduced end to
   end) came back as a critical "PHP Webshell Named" match. The named-webshell
@@ -733,6 +747,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clears in seconds) and is tunable with `HEAVEN_LLM_OVERLOAD_COOLDOWN`. A busy provider
   never causes a real finding to be dropped: an unavailable verdict simply leaves the
   finding untouched.
+
+### Security
+
+- **Dependency floors raised past newly published advisories, and the whole
+  install brought current.** HEAVEN's own self-audit (`heaven sca`) reads the
+  declared minimum of each dependency, so a floor left at an old release is
+  itself a finding once a CVE lands in that range. Three floors had fallen
+  behind: `python-multipart` (`>=0.0.9` → `>=0.0.32`) past a run of 2026 DoS,
+  arbitrary-file-write and parameter-smuggling advisories
+  (CVE-2024-53981, CVE-2026-24486 / 40347 / 42561 / 53537-40); `asyncssh`
+  (`>=2.14.2` → `>=2.24.0`) past SCP path-traversal arbitrary write and the
+  `AuthorizedKeysFile %u` directory-escape (CVE-2026-54590 / 54591); and the
+  test-only `pypdf` (`>=6.15.0` → `>=6.17.0`) past the outline / XForm
+  long-runtime and `TreeObject.insert_child` infinite-loop advisories
+  (CVE-2026-84309 / 84310 / 84311). The installed environment was upgraded to the
+  latest compatible release of every package as well, so `pip-audit` now reports
+  no known vulnerabilities. `websockets` stays at 16.x and `pydantic-core` tracks
+  `pydantic` because `google-genai` and `pydantic` cap them respectively · those
+  are deliberate resolver caps, not missed updates. The web UI dependencies were
+  likewise brought to latest (`framer-motion` 13, `three` 0.185, `vite` 8.2.x and
+  the React 19 toolchain), with `npm audit` clean and the production build and a
+  live browser smoke test both green.
+
+- **`requirements.txt` now mirrors `pyproject.toml`.** The base dependency list
+  was missing `python-multipart` entirely · it is now present with the patched
+  floor, keeping the two manifests in sync as the file header requires.
 
 ## [3.1.0]: 2026-08-27
 

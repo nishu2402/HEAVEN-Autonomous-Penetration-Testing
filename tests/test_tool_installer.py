@@ -171,9 +171,13 @@ def test_cli_dry_run_is_safe_and_reports_ok():
     assert r.exit_code == 0, r.output
     payload = json.loads(r.output)
     assert payload["ok"] is True
-    # No result may be "installed" — dry-run only plans or reports present.
+    # Nothing may be actually installed or errored — a dry-run only previews.
+    # It plans an install ("planned"), reports an already-present tool
+    # ("present"), or — when THIS host has no auto-install recipe for a tool
+    # (e.g. nuclei on a box without Go or a package for it) — reports it as a
+    # "manual" install with a hint. None of those touch the system.
     for res in payload.get("results", []):
-        assert res["status"] in ("planned", "present")
+        assert res["status"] not in ("installed", "failed"), res
 
 
 # ── Windows package managers ──────────────────────────────────────────────────

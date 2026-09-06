@@ -129,8 +129,15 @@ def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
 
 def _emit_results(results: list[InstallResult], as_json: bool, *, dry_run: bool) -> None:
     if as_json:
+        # Only a genuine "failed" makes the run not-ok. A tool with no
+        # auto-install recipe on THIS host (status "manual" — e.g. nuclei on a
+        # box that has neither Go nor a package for it) is a legitimate, reported
+        # outcome, not a failure: a dry run installs nothing at all, and a real
+        # run still exits 0 (it only raises on "failed") while handing back a
+        # manual hint. Defining ok this way keeps it consistent with the exit
+        # code and lets the safe `--dry-run` preview always report ok.
         emit_json({
-            "ok": all(r.ok for r in results),
+            "ok": not any(r.status == "failed" for r in results),
             "dry_run": dry_run,
             "results": [
                 {"name": r.name, "status": r.status,

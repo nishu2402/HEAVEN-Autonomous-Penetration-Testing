@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Engagement, Engagements, Compliance, downloadReport, previewReport, downloadSbom } from "../api";
+import { safeHref } from "../safeHref";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
 
@@ -326,7 +327,7 @@ export default function Reports() {
               <div className="dim" style={{ fontSize: 11.5, marginBottom: 12 }}>
                 {cur.subtitle}
                 {cur.reference ? (
-                  <> · <a href={cur.reference} target="_blank" rel="noopener noreferrer"
+                  <> · <a href={safeHref(cur.reference)} target="_blank" rel="noopener noreferrer"
                           style={{ color: "var(--brand)" }}>reference →</a></>
                 ) : null}
               </div>

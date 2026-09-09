@@ -83,11 +83,57 @@ def _host_of(finding: dict) -> str:
     return raw.split("/", 1)[0].split(":", 1)[0].strip() or "unknown-host"
 
 
+# Separators a human writes but a slug does not (and the reverse). We fold them
+# all to single spaces so a rule keyword written as an internal slug
+# (``sql_injection``) matches a finding a human worded naturally
+# (``SQL Injection in the login form``) and vice versa. The word-start rule in
+# ``_kw_matches`` is what keeps this fold from over-matching.
+_SEP_RE = re.compile(r"[_\-/:]+")
+_WS_RE = re.compile(r"\s+")
+
+# Fields scanned for keyword evidence. ``title``/``name`` carry the human wording;
+# ``vuln_type``/``type``/``subtype``/``category`` carry HEAVEN's slugs; ``cwe`` and
+# ``cve_id`` carry precise identifiers a slot can match on directly. This is what
+# lets the matcher work whether a finding came from a HEAVEN scan or was pasted
+# in by an operator using their own wording or an external tool's output.
+_MATCH_FIELDS = ("vuln_type", "type", "subtype", "category", "title", "name",
+                 "cwe", "cwe_id", "cve_id")
+
+
+def _normalize(text: Any) -> str:
+    """Lowercase, then fold separators and runs of whitespace to single spaces."""
+    return _WS_RE.sub(" ", _SEP_RE.sub(" ", str(text or "").lower())).strip()
+
+
 def _haystack(finding: dict) -> str:
-    """Lowercased text used for keyword matching a finding to a component slot."""
-    return " ".join(
-        str(finding.get(k, "")) for k in ("vuln_type", "type", "title", "cve_id", "name")
-    ).lower()
+    """Normalised text used for keyword-matching a finding to a component slot."""
+    return _normalize(" ".join(str(finding.get(k, "")) for k in _MATCH_FIELDS))
+
+
+def _kw_matches(hay: str, keyword: str) -> bool:
+    """True when ``keyword`` occurs in ``hay`` starting at a word boundary.
+
+    Both are already normalised (separators folded to spaces). Matching at a
+    word start lets a stem match its inflections (``clickjack`` → ``clickjacking``)
+    while stopping a short token from matching the middle of an unrelated word
+    (``iam`` must not match ``reclaim``). A keyword ending in a digit additionally
+    requires a non-digit on its right, so ``cwe 89`` does not match ``cwe 890``.
+    """
+    kw = _normalize(keyword)
+    if not kw:
+        return False
+    tail_digit = kw[-1].isdigit()
+    start = 0
+    while True:
+        idx = hay.find(kw, start)
+        if idx == -1:
+            return False
+        left_ok = idx == 0 or hay[idx - 1] == " "
+        after = idx + len(kw)
+        right_ok = not (tail_digit and after < len(hay) and hay[after].isdigit())
+        if left_ok and right_ok:
+            return True
+        start = idx + 1
 
 
 def _confidence_of(finding: dict) -> float:
@@ -233,7 +279,7 @@ class Component:
 
     def matches(self, finding: dict) -> bool:
         hay = _haystack(finding)
-        return any(k in hay for k in self.any_of)
+        return any(_kw_matches(hay, k) for k in self.any_of)
 
 
 @dataclass(frozen=True)
@@ -268,10 +314,10 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("File read / inclusion",
                       ("lfi", "local_file", "path_traversal", "directory_traversal",
-                       "file_inclusion")),
+                       "file_inclusion", "cwe-22", "cwe-98", "cwe-73")),
             Component("Unrestricted upload",
                       ("file_upload", "unrestricted_upload", "arbitrary_file_upload",
-                       "upload")),
+                       "upload", "cwe-434")),
         ),
         combined_severity="critical",
         impact=("An attacker uploads a script to a known path and then includes/"
@@ -306,10 +352,11 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("File read / inclusion",
                       ("lfi", "local_file", "path_traversal", "directory_traversal",
-                       "file_inclusion")),
+                       "file_inclusion", "cwe-22", "cwe-98", "cwe-73")),
             Component("Log or header injection",
                       ("log_injection", "log_poison", "header_injection",
-                       "crlf_injection", "response_splitting")),
+                       "crlf_injection", "response_splitting",
+                       "cwe-117", "cwe-93", "cwe-113")),
         ),
         combined_severity="critical",
         impact=("Attacker-controlled data written into a server log is then executed "
@@ -340,7 +387,7 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         name="SSRF + Exposed Internal Service → Internal/Cloud Compromise",
         components=(
             Component("Server-side request forgery",
-                      ("ssrf", "server_side_request")),
+                      ("ssrf", "server_side_request", "cwe-918")),
             Component("Reachable internal target",
                       ("cloud_metadata", "metadata_service", "public_s3", "iam",
                        "exposed_database", "database_exposure", "mongodb", "redis",
@@ -376,7 +423,7 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         rule_id="sqli_admin_rce",
         name="SQL Injection + Exposed Admin Interface → Full Application Takeover",
         components=(
-            Component("SQL injection", ("sqli", "sql_injection")),
+            Component("SQL injection", ("sqli", "sql_injection", "cwe-89")),
             Component("Exposed admin surface",
                       ("admin_panel", "exposed_admin", "admin_interface",
                        "management_interface")),
@@ -410,7 +457,8 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("Authentication gap",
                       ("auth_bypass", "authentication_bypass", "broken_auth",
-                       "missing_auth", "unauthenticated", "no_authentication")),
+                       "missing_auth", "unauthenticated", "no_authentication",
+                       "cwe-287", "cwe-306")),
             Component("Sensitive function",
                       ("file_upload", "unrestricted_upload", "admin_panel",
                        "management_interface", "command_injection", "rce",
@@ -445,7 +493,8 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("Weak or default credentials",
                       ("default_cred", "default_password", "weak_password",
-                       "weak_cred", "guessable", "reused_password")),
+                       "weak_cred", "guessable", "reused_password",
+                       "cwe-798", "cwe-521", "cwe-1392", "cwe-1391")),
             Component("Exposed privileged surface",
                       ("admin_panel", "exposed_admin", "management_interface",
                        "ssh", "rdp", "winrm", "smb", "database_exposure",
@@ -479,10 +528,12 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         name="Stored XSS + CSRF/Weak Session Cookie → Account or Admin Takeover",
         components=(
             Component("Cross-site scripting",
-                      ("xss", "cross_site_script", "stored_xss", "persistent_xss")),
+                      ("xss", "cross_site_script", "stored_xss", "persistent_xss",
+                       "cwe-79")),
             Component("Session/request-forgery weakness",
                       ("csrf", "cross_site_request", "cookie_no_samesite",
-                       "samesite", "cookie_no_httponly", "session_fixation")),
+                       "samesite", "cookie_no_httponly", "session_fixation",
+                       "cwe-352", "cwe-1275", "cwe-1004", "cwe-384")),
         ),
         combined_severity="critical",
         impact=("Script injected into an authenticated view rides the victim's session "
@@ -514,7 +565,8 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("Exposed credential or secret",
                       ("hardcoded_secret", "exposed_credential", "exposed_secret",
-                       "api_key", "private_key", "credential_leak")),
+                       "api_key", "private_key", "credential_leak",
+                       "cwe-798", "cwe-522", "cwe-540")),
             Component("Reachable authenticated service",
                       ("ssh", "rdp", "winrm", "smb", "database_exposure",
                        "exposed_database", "ftp", "vpn")),
@@ -548,10 +600,12 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
             Component("Content/backup exposure",
                       ("directory_listing", "dir_listing", "backup_file",
                        "exposed_file", "sensitive_file", "git_exposure",
-                       "source_disclosure", ".git")),
+                       "source_disclosure", ".git",
+                       "cwe-538", "cwe-548", "cwe-527")),
             Component("Exposed secret",
                       ("hardcoded_secret", "exposed_credential", "exposed_secret",
-                       "api_key", "private_key", "credential_leak")),
+                       "api_key", "private_key", "credential_leak",
+                       "cwe-798", "cwe-522", "cwe-540")),
         ),
         combined_severity="high",
         impact=("Browsable files or a leaked backup expose a working secret, which an "
@@ -579,11 +633,12 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         name="IDOR/BOLA + User or Object Enumeration → Mass Data Exposure",
         components=(
             Component("Broken object-level access",
-                      ("idor", "bola", "broken_object", "insecure_direct_object")),
+                      ("idor", "bola", "broken_object", "insecure_direct_object",
+                       "cwe-639", "cwe-566")),
             Component("Enumeration/disclosure primitive",
                       ("user_enumeration", "username_enumeration", "id_enumeration",
                        "information_disclosure", "info_disclosure",
-                       "excessive_data_exposure")),
+                       "excessive_data_exposure", "cwe-203", "cwe-204")),
         ),
         combined_severity="high",
         impact=("The enumeration primitive supplies the valid identifiers the IDOR "
@@ -611,9 +666,15 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         rule_id="open_redirect_oauth_ato",
         name="Open Redirect + OAuth/SSO/Token Flow → Token Theft & Account Takeover",
         components=(
-            Component("Open redirect", ("open_redirect", "unvalidated_redirect")),
+            Component("Open redirect",
+                      ("open_redirect", "unvalidated_redirect", "cwe-601")),
             Component("Token-bearing flow",
-                      ("oauth", "sso", "saml", "jwt", "token", "auth_code")),
+                      # Specific token-bearing constructs only. A bare "token"
+                      # would wrongly match "CSRF token missing" (the opposite of
+                      # a token-bearing auth flow), so match the real carriers.
+                      ("oauth", "sso", "saml", "jwt", "auth_code", "authorization_code",
+                       "access_token", "id_token", "refresh_token", "bearer_token",
+                       "session_token")),
         ),
         combined_severity="high",
         impact=("The open redirect is used as the OAuth/SSO callback target, so the "
@@ -644,7 +705,8 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         name="CORS Misconfiguration + XSS/Sensitive API → Cross-Origin Data Theft",
         components=(
             Component("Permissive CORS",
-                      ("cors", "cross_origin", "access_control_allow_origin")),
+                      ("cors", "cross_origin", "access_control_allow_origin",
+                       "cwe-942", "cwe-346")),
             Component("Reachable sensitive response",
                       ("xss", "cross_site_script", "sensitive_data",
                        "excessive_data_exposure", "information_disclosure",
@@ -676,7 +738,8 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         name="Subdomain Takeover + Domain-Scoped Cookies/OAuth → Session & Token Theft",
         components=(
             Component("Subdomain takeover",
-                      ("subdomain_takeover", "dangling_dns", "dangling_cname")),
+                      ("subdomain_takeover", "dangling_dns", "dangling_cname",
+                       "cwe-350")),
             Component("Domain-scoped trust",
                       ("cookie_no_samesite", "samesite", "domain_cookie", "oauth",
                        "sso", "saml", "cookie_scope")),
@@ -710,10 +773,10 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("Framing allowed",
                       ("clickjack", "x_frame", "frame_ancestors", "missing_x_frame",
-                       "ui_redress")),
+                       "ui_redress", "cwe-1021")),
             Component("Unprotected state change",
                       ("csrf", "cross_site_request", "no_csrf_token",
-                       "state_changing")),
+                       "state_changing", "cwe-352")),
         ),
         combined_severity="high",
         impact=("The page can be framed and its state-changing actions lack CSRF "
@@ -744,7 +807,7 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("Forgeable token",
                       ("alg_none", "alg:none", "jwt_none", "jwt_weak", "weak_jwt_secret",
-                       "weak_signing", "jwt_key_confusion", "unsigned_jwt")),
+                       "weak_signing", "jwt_key_confusion", "unsigned_jwt", "cwe-347")),
             Component("Claim-authorized surface",
                       ("admin_panel", "management_interface", "privileged",
                        "role_based", "authorization", "broken_access")),
@@ -779,7 +842,8 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
             Component("Cleartext credential transport",
                       ("cleartext_transmission", "cleartext_credential",
                        "cleartext_password", "http_login", "password_over_http",
-                       "insecure_transmission", "no_tls_login")),
+                       "insecure_transmission", "no_tls_login",
+                       "cwe-319", "cwe-311", "cwe-523")),
             Component("Credential entry point",
                       ("login_form", "password_field", "basic_auth",
                        "authentication_form", "login_endpoint")),
@@ -810,10 +874,10 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
         components=(
             Component("Account enumeration",
                       ("user_enumeration", "username_enumeration", "account_enumeration",
-                       "email_enumeration")),
+                       "email_enumeration", "cwe-203", "cwe-204")),
             Component("No lockout or throttling",
                       ("no_account_lockout", "no_rate_limit", "missing_rate_limit",
-                       "weak_lockout", "no_throttle", "brute")),
+                       "weak_lockout", "no_throttle", "brute", "cwe-307", "cwe-799")),
         ),
         combined_severity="high",
         impact=("Valid accounts can be enumerated and then guessed at speed because the "

@@ -8,6 +8,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Settings as SettingsApi, Egress as EgressApi, changePassword, getUser } from "../api";
+import { safeHref } from "../safeHref";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import LocalAISetup from "../components/LocalAISetup.jsx";
@@ -326,7 +327,7 @@ export default function Settings() {
                     {s.help}
                     {s.url ? (
                       <> {" "}
-                        <a href={s.url} target="_blank" rel="noopener noreferrer"
+                        <a href={safeHref(s.url)} target="_blank" rel="noopener noreferrer"
                            style={{ color: "var(--brand)" }}>
                           How to get it →
                         </a>

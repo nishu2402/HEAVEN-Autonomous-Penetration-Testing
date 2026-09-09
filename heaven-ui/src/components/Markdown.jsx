@@ -1,12 +1,17 @@
 // HEAVEN — lightweight, dependency-free Markdown renderer.
 //
-// The methodology / benchmark docs are our own trusted GitHub-flavoured
-// Markdown (headings, alignment-aware pipe tables, lists, links, inline code
-// and bold). Rather than pull in react-markdown + remark-gfm (~40 KB), this
-// renders exactly those constructs. React escapes all text children, so there
-// is no dangerouslySetInnerHTML and no XSS surface.
+// Renders GitHub-flavoured Markdown (headings, alignment-aware pipe tables,
+// lists, links, inline code and bold) without pulling in react-markdown +
+// remark-gfm (~40 KB). React escapes every text child, so there is no
+// dangerouslySetInnerHTML. The one attribute sink is a link href: this
+// component also renders untrusted LLM output (chat replies, AI remediation /
+// plan reasoning, gap summaries), so a model-emitted `[x](javascript:...)`
+// link must never become a live href — every href is scheme-allowlisted
+// through safeHref() before it reaches the DOM.
 
 import React from "react";
+
+import { safeHref } from "../safeHref";
 
 // ── Inline: `code`, **bold**, [text](url) ──
 function renderInline(text) {
@@ -26,7 +31,7 @@ function renderInline(text) {
     } else {
       const lm = /\[([^\]]+)\]\(([^)]+)\)/.exec(tok);
       nodes.push(
-        <a key={key++} href={lm[2]} target="_blank" rel="noopener noreferrer"
+        <a key={key++} href={safeHref(lm[2])} target="_blank" rel="noopener noreferrer"
            style={{ color: "var(--brand)" }}>{lm[1]}</a>
       );
     }

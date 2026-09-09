@@ -256,6 +256,12 @@ _SECRET_RULES: tuple[tuple[str, re.Pattern, str, bool], ...] = (
 )
 _SECRET_PLACEHOLDERS = re.compile(
     r"(?i)(example|placeholder|changeme|your[_-]?|xxx+|dummy|sample|redacted|<[^>]+>|\$\{|process\.env|getenv|os\.environ)")
+# A "value" that is nothing but interpolation tokens is a template, not a literal
+# secret: an f-string / str.format field (``{cracked_secret}``, ``{}``) or a
+# percent-format specifier (``%s``, ``%(name)s``). This is how a line that merely
+# *reports* a secret found on a target — e.g. ``f"Weak secret: '{cracked}'"`` — used
+# to be flagged as a hardcoded secret in our own source.
+_INTERP_ONLY = re.compile(r"(?:\{[^}]*\}|%\(?\w*\)?[sdrfxeiu])+")
 
 
 def _shannon(s: str) -> float:
@@ -270,6 +276,26 @@ def _shannon(s: str) -> float:
 
 def _exts_for(path: str) -> str:
     return Path(path).suffix.lower()
+
+
+def _logical_window(lines: list[str], idx: int, max_span: int = 8) -> str:
+    """Join a matched line with the continuation lines of the *same* bracketed
+    statement, so a suppression guard a formatter wrapped onto a later line is
+    still seen. A long ``hashlib.md5(\\n  data,\\n  usedforsecurity=False,\\n)``
+    keeps its ``usedforsecurity=False`` guard on line 3; a strictly per-line
+    check would miss it and flag a false weak-hash. Bracket depth is counted
+    naively (string/comment contents included) — acceptable because this only
+    *widens* an ``unless`` guard, so at worst it suppresses a borderline hit,
+    never invents one. Bounded by ``max_span`` to stay O(1) per match."""
+    depth = 0
+    out: list[str] = []
+    for j in range(idx, min(idx + max_span, len(lines))):
+        seg = lines[j]
+        out.append(seg)
+        depth += sum(seg.count(c) for c in "([{") - sum(seg.count(c) for c in ")]}")
+        if depth <= 0:
+            break
+    return "\n".join(out)
 
 
 def scan_text(file_path: str, text: str) -> list[SastFinding]:
@@ -295,7 +321,14 @@ def scan_text(file_path: str, text: str) -> list[SastFinding]:
                 continue
             if rule.needs and not rule.needs.search(line):
                 continue
-            if rule.unless and rule.unless.search(line):
+            if rule.unless and (
+                rule.unless.search(line)
+                # …or the guard token was wrapped onto a continuation line of
+                # the same call (e.g. ``usedforsecurity=False`` under a long
+                # ``hashlib.md5(``). Only computed when the fast per-line check
+                # misses, and only for suppression, so it never adds findings.
+                or rule.unless.search(_logical_window(lines, lineno - 1))
+            ):
                 continue
             findings.append(SastFinding(
                 rule_id=f"heaven.native.{rule.id}",
@@ -313,6 +346,8 @@ def scan_text(file_path: str, text: str) -> list[SastFinding]:
                 continue
             value = m.group(2) if m.lastindex and m.lastindex >= 2 else m.group(0)
             if _SECRET_PLACEHOLDERS.search(value):
+                continue
+            if _INTERP_ONLY.fullmatch(value):  # an f-string / %-format field, not a literal
                 continue
             if need_entropy and _shannon(value) < 3.0:
                 continue

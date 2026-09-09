@@ -550,6 +550,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The native secret scanner no longer flags a line that merely reports a
+  secret found on a target as a hardcoded secret in HEAVEN's own code.** A
+  finding title such as ``f"JWT Weak Signing Secret: '{cracked_secret}'"`` reads
+  to the generic credential rule like ``secret: '<value>'`` where the value is
+  the f-string field ``{cracked_secret}`` · high enough entropy to clear the
+  filter, so HEAVEN's own `sast` run reported one medium false positive on
+  `heaven/vulnscan/advanced_attacks.py`. A captured value that is nothing but an
+  interpolation token · a Python `{…}` f-string / `.format()` field or a `%s`
+  style specifier · is now recognised as a template rather than a literal and
+  skipped, which removes the whole false-positive class for any code that builds
+  report strings. Real hardcoded secrets (including ones that merely contain a
+  brace elsewhere) still flag. A regression test pins it, and `heaven sast scan
+  heaven/` is now clean.
+
+- **The native SAST engine no longer raises a false weak-hash finding when the
+  `usedforsecurity=False` guard sits on a continuation line.** The engine
+  matched rules line by line, so a long `hashlib.md5(...)` / `sha1(...)` call
+  that a formatter (Black / PEP 8) wrapped across several lines kept its
+  `usedforsecurity=False` guard on a later line where the per-line `unless`
+  check never saw it · a false medium/low on idiomatic modern Python. A rule's
+  suppression guard is now evaluated against the whole bracketed statement (the
+  matched line plus its continuation lines), computed only when the fast
+  per-line check misses and applied to suppression alone, so it can only remove
+  false positives, never add findings. Genuine unguarded weak hashes and the
+  classic same-line guard behave exactly as before. A regression test pins all
+  three cases.
+
+- **A DER certificate is no longer occasionally misread as firmware.** The
+  offline-artifact dispatcher (`heaven.forensics.dispatch.detect_kind`) scanned
+  the whole file header for firmware filesystem magics with a substring test,
+  and one of those magics is the 2-byte JFFS2 signature `0x1985`. Two random
+  bytes land somewhere in the roughly 1 KB of modulus and signature inside a
+  real certificate about 1% of the time, so that share of DER certs were routed
+  to the firmware analyzer instead of the certificate analyzer (and it made the
+  detection test flaky). The exact certificate signals · a `.der` / `.crt` /
+  `.pem` extension, PEM `-----BEGIN-----` markers, and an ASN.1 SEQUENCE header ·
+  are now checked before the fuzzy firmware scan, so a certificate can never be
+  mistaken for firmware while genuine squashfs / JFFS2 images still detect
+  exactly as before. Two deterministic regression tests pin it.
+
 - **Boolean-blind SQLi no longer fires on a parameter the page ignores when a
   one-shot session flash message is in flight.** The live DVWA benchmark scored a
   single false positive · a critical boolean-blind SQLi on `index.php?option=`,
@@ -881,6 +921,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finding untouched.
 
 ### Security
+
+- **WebSocket session validation is now centralized, closing a stream that
+  accepted an expired token, and 500 responses no longer echo the raw exception
+  back to the client.** Two defense-in-depth cleanups on the API server. First,
+  every real-time stream (scan, logs, AI chat, model pull, autonomous and watch
+  jobs) validated its handshake `token` with its own copy of the check, reaching
+  directly into the auth manager's private session store · one of them, the log
+  stream, had drifted to check only that the token existed and skipped the
+  expiry check, so an expired token could still stream server logs. All of them,
+  and the HTTP bearer-token dependency, now go through one
+  `AuthManager.validate_session` (missing, unknown, or expired all reject
+  identically) via a single `_ws_authenticate` helper, so the expiry check can
+  never again be missing from one endpoint. Second, roughly two dozen error
+  paths raised `HTTP 500` with the raw exception text interpolated into the
+  client-facing message (CWE-209, information exposure through an error
+  message), which can disclose internal file paths, addresses or library
+  internals to an authenticated caller · they now route through a `_server_error`
+  helper that logs the full exception and traceback server-side under a short
+  reference id and returns a stable, generic message carrying only that id, so an
+  operator can still correlate a reported error with the server log. The same
+  treatment now also covers the two streaming workers (the model-pull and the AI
+  chat sockets) whose catch-all previously relayed the raw `str(e)` in a
+  WebSocket `error` frame · they route through a streaming analogue, `_ws_error`,
+  that logs server-side under a reference id and sends only a generic message plus
+  that id, so the transport no longer decides whether an exception leaks. Proven
+  with new regression tests in `tests/test_ws_auth_and_error_hygiene.py`,
+  including source-level guards that fail if any future 500 or WebSocket error
+  frame reintroduces a raw exception string.
+
+- **Every link built from data HEAVEN ingests from outside is now
+  scheme-allowlisted, so a hostile URL can never become a live, clickable
+  `javascript:` link in the UI or in a shared report.** React does not sanitise
+  an anchor's `href`, and `html.escape` stops an attribute break-out but not a
+  dangerous URL scheme, so a URL carrying a `javascript:` / `data:` / `vbscript:`
+  / `file:` scheme rendered as a link would execute (or exfiltrate) in the app
+  origin the moment a user clicked it. Several link sinks are fed by data the
+  tool does not control: a finding's `references` and the CVE-feed reference and
+  exploit URLs (OSV / NVD / CIRCL / Exploit-DB), and LLM output rendered as
+  Markdown (chat replies, AI remediation, plan reasoning, coverage gap
+  summaries) where a prompt-injected `[click](javascript:...)` link could reach
+  the page. A new shared `safeHref` (frontend `heaven-ui/src/safeHref.js`, used
+  by the Markdown renderer and every data-derived `<a href>`) and the matching
+  `_safe_href` in the HTML and PDF report generators
+  (`heaven.devsecops.compliance_report` / `pdf_report`) keep only http / https /
+  mailto plus relative and in-page links, collapsing any other scheme to `#`
+  before it reaches the DOM. Control-byte and whitespace obfuscation
+  (`java\tscript:`) is stripped before the scheme is judged, so it cannot slip
+  past. The link text is still shown verbatim (escaped) so the reader keeps full
+  awareness of the URL · only its ability to execute is removed. Proven with new
+  regression tests in `tests/test_report_href_sanitization.py` plus a matching
+  JavaScript check.
 
 - **Uploaded-artifact analysis is now bomb-proof across every zip-backed and
   compressed format, so a malicious file can never exhaust the tool's memory.**

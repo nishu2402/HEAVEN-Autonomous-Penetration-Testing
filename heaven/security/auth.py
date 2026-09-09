@@ -231,6 +231,21 @@ class AuthManager:
         allowed = PERMISSIONS.get(user.role, set())
         return permission in allowed
 
+    def validate_session(self, token: Optional[str]) -> Optional[Session]:
+        """Return the live Session for a bearer token, or None if the token is
+        missing, unknown, or expired.
+
+        Single source of truth for token -> session validation so callers (the
+        HTTP dependency and every WebSocket handshake) share one code path
+        instead of reaching into the private session store and re-implementing
+        the expiry check — which is how one endpoint ended up skipping it."""
+        if not token:
+            return None
+        session = self._sessions.get(token)
+        if session is None or session.expires_at <= time.time():
+            return None
+        return session
+
     def _issue_token(self, user: User, source_ip: str = "") -> str:
         now = time.time()
         payload = {

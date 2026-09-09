@@ -36,6 +36,7 @@ from heaven.devsecops.compliance_report import (
     ComplianceReportGenerator,
     _cvss_with_band,
     _fmt_cvss,
+    _safe_href,
     roadmap_action_lines,
 )
 from heaven.utils.cvss import is_confirmed_finding as _is_confirmed
@@ -1015,7 +1016,7 @@ class PDFReportGenerator:
         if refs:
             out.append(Paragraph("REFERENCES", styles["label"]))
             for r in refs:
-                out.append(Paragraph(f'• <link href="{_esc(r)}"><font color="#1f6feb">{_esc(r)}'
+                out.append(Paragraph(f'• <link href="{_safe_href(r)}"><font color="#1f6feb">{_esc(r)}'
                                      f'</font></link>', styles["small"]))
         section("ASSESSOR NOTES", f.get("operator_notes"))
         out.append(Spacer(1, 12))

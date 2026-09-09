@@ -456,3 +456,112 @@ def test_get_correlations_latest_ok(client):
     d = r.json()
     assert "combinations" in d and "total_combinations" in d
     assert d["scan_id"] == "latest"
+
+
+# ── Operator-submitted, natural-language findings (the real user scenario) ────
+# A tester pastes their OWN findings, worded the way a human writes them
+# ("SQL Injection in login form"), not HEAVEN's internal slugs ("sqli"). The
+# matcher must fold separators and match at word boundaries so these still
+# correlate, without matching the middle of unrelated words.
+
+
+def test_users_exact_scenario_three_high_one_medium_natural_titles():
+    # The user's example: three high + one medium, worded naturally, submitted
+    # to the tool. They must combine into higher-severity issues.
+    findings = [
+        _f(id="1", title="SQL Injection in login form", severity="high",
+           target="http://acme.test/login.php?id=1"),
+        _f(id="2", title="Exposed Administrator Panel", severity="medium",
+           target="http://acme.test/admin/"),
+        _f(id="3", title="Stored Cross-Site Scripting in comments", severity="high",
+           target="http://acme.test/guestbook"),
+        _f(id="4", title="Session cookie missing SameSite attribute", severity="high",
+           target="http://acme.test/"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    rule_ids = {c.rule_id for c in combos}
+    assert "sqli_admin_rce" in rule_ids
+    assert "xss_csrf_account_takeover" in rule_ids
+    assert all(c.combined_severity == "critical" for c in combos)
+
+
+def test_natural_lfi_plus_upload_wording_elevates_to_rce():
+    findings = [
+        _f(id="1", title="Local File Inclusion via page parameter", severity="high",
+           target="http://acme.test/index.php?page=home"),
+        _f(id="2", title="Unrestricted File Upload", severity="high",
+           target="http://acme.test/upload.php"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert len(combos) == 1
+    assert combos[0].rule_id == "lfi_upload_rce"
+    assert combos[0].combined_severity == "critical"
+
+
+def test_natural_default_creds_plus_ssh_wording_elevates():
+    findings = [
+        _f(id="1", title="Default credentials accepted", severity="high",
+           target="http://acme.test/login"),
+        _f(id="2", title="SSH service exposed", severity="medium",
+           target="acme.test", port=22),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert len(combos) == 1
+    assert combos[0].rule_id == "defaultcreds_exposed_service"
+    assert combos[0].combined_severity == "critical"
+
+
+def test_separator_folding_is_symmetric():
+    # A slug keyword must match a spaced human title and the reverse.
+    from heaven.vulnscan.correlation import _haystack, _kw_matches
+    assert _kw_matches(_haystack({"title": "SQL Injection in login"}), "sql_injection")
+    assert _kw_matches(_haystack({"vuln_type": "sql_injection"}), "sql injection")
+    assert _kw_matches(_haystack({"title": "Open Redirect found"}), "open_redirect")
+
+
+def test_word_boundary_stops_substring_false_positives():
+    from heaven.vulnscan.correlation import _haystack, _kw_matches
+    # "iam" must not match the middle of "reclaim"; it must match a real IAM
+    # finding (word start). A stem still matches its inflection.
+    assert not _kw_matches(_haystack({"title": "User can reclaim account"}), "iam")
+    assert _kw_matches(_haystack({"title": "AWS IAM role over-privileged"}), "iam")
+    assert _kw_matches(_haystack({"title": "Clickjacking possible"}), "clickjack")
+
+
+def test_missing_csrf_token_is_not_treated_as_token_theft():
+    # Regression: a MISSING csrf token is the opposite of a token-bearing auth
+    # flow. Open redirect + "CSRF token missing" must NOT fabricate token theft.
+    findings = [
+        _f(id="1", title="Open Redirect in return parameter", severity="medium",
+           target="http://acme.test/go?url=x"),
+        _f(id="2", title="CSRF token missing on form", severity="medium",
+           target="http://acme.test/form"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert all(c.rule_id != "open_redirect_oauth_ato" for c in combos)
+
+
+def test_cwe_tagged_findings_correlate_even_with_terse_titles():
+    # External tools often emit a CWE with a terse title. The engine should
+    # still recognise the class from the CWE alone.
+    findings = [
+        _f(id="1", title="Injection", cwe="CWE-89", severity="high",
+           target="http://acme.test/q?id=1"),
+        _f(id="2", vuln_type="admin_panel", severity="medium",
+           target="http://acme.test/admin/"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert len(combos) == 1
+    assert combos[0].rule_id == "sqli_admin_rce"
+
+
+def test_cwe_numeric_tail_guard_prevents_prefix_false_match():
+    # CWE-890 is not CWE-89: a numeric keyword must not match a longer number.
+    findings = [
+        _f(id="1", title="Some issue", cwe="CWE-890", severity="high",
+           target="http://acme.test/x"),
+        _f(id="2", vuln_type="admin_panel", severity="medium",
+           target="http://acme.test/admin/"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert all(c.rule_id != "sqli_admin_rce" for c in combos)

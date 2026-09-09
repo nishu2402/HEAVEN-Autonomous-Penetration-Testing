@@ -87,6 +87,34 @@ def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
 
+# Schemes that are safe to keep in a report anchor. A finding's `references`
+# can originate from external advisory feeds (OSV / NVD / CIRCL), so a hostile
+# "javascript:" / "data:" URL must never survive into a clickable link in a
+# report that then gets shared with a client.
+_SAFE_URL_SCHEMES = ("http", "https", "mailto")
+
+
+def _safe_href(url: Any) -> str:
+    """Return an HTML-attribute-safe href, neutralising dangerous schemes.
+
+    Keeps http/https/mailto plus scheme-relative and in-page links; anything
+    carrying another explicit scheme (``javascript:``, ``data:``, ``vbscript:``,
+    ``file:`` ...) collapses to ``"#"`` so it can never execute or exfiltrate
+    when the report is opened. The result is HTML-escaped, so it drops straight
+    into an ``href="..."`` slot. ``_esc`` alone stops attribute break-out but
+    NOT a dangerous scheme, so href sinks fed by scan/feed data use this.
+    """
+    raw = "" if url is None else str(url)
+    # Browsers ignore leading and embedded ASCII whitespace / control bytes when
+    # resolving a scheme (so "java\tscript:alert(1)" still runs) — strip them
+    # before deciding, exactly as the parser would.
+    probe = re.sub(r"[\x00-\x20]", "", raw).lower()
+    m = re.match(r"^([a-z][a-z0-9+.\-]*):", probe)
+    if m and m.group(1) not in _SAFE_URL_SCHEMES:
+        return "#"
+    return _esc(raw)
+
+
 def _fmt_cvss(value: Any) -> str:
     """Render a CVSS score as a clean 1-dp string.
 
@@ -1206,7 +1234,9 @@ class ComplianceReportGenerator:
         refs = ev.get("references") or f.get("references") or []
         refs_html = ""
         if refs:
-            lis = "".join(f'<li><a href="{_esc(r)}">{_esc(r)}</a></li>' for r in refs)
+            lis = "".join(
+                f'<li><a href="{_safe_href(r)}" rel="noopener noreferrer">{_esc(r)}</a></li>'
+                for r in refs)
             refs_html = f'<div class="block-label">References</div><ul class="small">{lis}</ul>'
 
         notes = f.get("operator_notes") or ""
@@ -1632,7 +1662,7 @@ class ComplianceReportGenerator:
                      f'<td>{_esc(cn)}{examples}</td>'
                      f'<td style="color:{color};font-weight:600">{status}</td>'
                      f'<td class="small">{n}</td></tr>')
-        ref = (f' <a href="{_esc(fw.reference)}" target="_blank" rel="noopener noreferrer">'
+        ref = (f' <a href="{_safe_href(fw.reference)}" target="_blank" rel="noopener noreferrer">'
                f'{_esc(fw.title)}</a>' if fw.reference else _esc(fw.title))
         return f"""<div class="page section" id="compliance"><h2>{_esc(fw.title)} Compliance Mapping</h2>
           <p class="small muted">Identified findings mapped to{ref}

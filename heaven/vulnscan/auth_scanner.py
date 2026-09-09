@@ -220,7 +220,7 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                     findings.append(_make_finding(
                         url, "cookie_no_samesite", "medium",
                         f"Cookie '{name}' Missing SameSite Attribute",
-                        "No SameSite attribute — cookie is sent on cross-site requests, "
+                        "No SameSite attribute, cookie is sent on cross-site requests, "
                         "enabling CSRF attacks. Set SameSite=Strict or Lax.",
                         confidence=0.92,
                         evidence={"cookie_name": name},
@@ -535,7 +535,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
         if errored_attempts > len(pairs) // 3:
             findings.append(_make_finding(
                 action, "lockout_inconclusive", "info",
-                "Account Lockout — Inconclusive",
+                "Account Lockout: Inconclusive",
                 f"{errored_attempts}/{len(pairs)} brute-force attempts failed to "
                 f"complete (timeouts/drops). The endpoint may be blocking "
                 f"automated logins. Verify the lockout policy manually.",
@@ -587,7 +587,7 @@ async def _audit_password_policy(session: "aiohttp.ClientSession",
                         test_url, "weak_password_policy", "info",
                         "No Client-Side Password Policy Hints",
                         "Registration form exposes no minlength/pattern attributes. "
-                        "This is a client-side observation only — server-side "
+                        "This is a client-side observation only, server-side "
                         "enforcement was not tested and may still be present.",
                         confidence=0.4,
                         evidence={"path": path, "unconfirmed": True},
@@ -801,7 +801,7 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
             "Without CSP, XSS attacks cannot be mitigated by the browser. "
             "Implement a strict CSP with nonce or hash-based script whitelisting."),
         "X-Frame-Options":                   ("clickjacking_no_xfo", "medium",
-            "X-Frame-Options Missing — Clickjacking Risk",
+            "X-Frame-Options Missing: Clickjacking Risk",
             "Page can be embedded in an iframe on an attacker-controlled site, "
             "enabling clickjacking attacks. Add X-Frame-Options: DENY or SAMEORIGIN."),
         "X-Content-Type-Options":            ("no_x_content_type", "low",
@@ -867,7 +867,7 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
                 if "'unsafe-inline'" in csp:
                     findings.append(_make_finding(
                         url, "csp_unsafe_inline", "high",
-                        "CSP Contains 'unsafe-inline' — XSS Mitigation Bypassed",
+                        "CSP Contains 'unsafe-inline', XSS Mitigation Bypassed",
                         "CSP with 'unsafe-inline' does not prevent XSS. "
                         "Use nonces or hashes instead.",
                         confidence=0.97,
@@ -993,7 +993,7 @@ async def _audit_wstg_surrogates(session: "aiohttp.ClientSession",
                     "Alternate authentication channel present",
                     "An alternate (API/mobile) authentication endpoint is reachable "
                     "and advertises no rate-limit controls. Alternate channels often "
-                    "skip the lockout/MFA the web login enforces (WSTG-ATHN-10) — "
+                    "skip the lockout/MFA the web login enforces (WSTG-ATHN-10), "
                     "verify control parity across all auth channels.",
                     0.55, {"endpoint": origin.rstrip('/') + path,
                            "rate_limit_headers": has_ratelimit}))

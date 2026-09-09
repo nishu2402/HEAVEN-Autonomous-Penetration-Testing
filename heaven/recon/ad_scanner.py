@@ -274,7 +274,7 @@ class ADScanner:
                             "query for its RootDSE, exposing domain, forest, DC name "
                             "and functional level pre-auth. This is standard LDAP "
                             "behaviour (RootDSE is designed to be read before "
-                            "binding), not a misconfiguration on its own — it only "
+                            "binding), not a misconfiguration on its own, it only "
                             "leaks directory metadata. The real risk is present only "
                             "if anonymous access also reaches the domain naming "
                             "context, which is tested and reported separately."
@@ -535,7 +535,7 @@ class ADScanner:
             self._findings.append(ADFinding(
                 target=target, attack_type=ADAttackType.SMB_SIGNING_DISABLED,
                 severity="high",
-                title="SMB Signing Not Required — NTLM Relay Exposure",
+                title="SMB Signing Not Required: NTLM Relay Exposure",
                 description=(
                     "The host does not require SMB signing, so captured/coerced "
                     "NTLM authentication can be relayed to it (e.g. ntlmrelayx). "
@@ -1046,7 +1046,7 @@ class ADScanner:
                 if min_len < 12:
                     issues.append(f"Minimum password length is {min_len} (should be ≥12)")
                 if lockout == 0:
-                    issues.append("No account lockout threshold — password spraying possible")
+                    issues.append("No account lockout threshold, password spraying possible")
                 if history < 12:
                     issues.append(f"Password history is {history} (should be ≥12)")
 

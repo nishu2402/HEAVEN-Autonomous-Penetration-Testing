@@ -98,7 +98,7 @@ _PDF_MARKERS: dict[str, tuple[str, str, str]] = {
     "/JS": ("PDF JavaScript action", "CWE-94", "medium"),
     "/OpenAction": ("action that runs automatically when the file opens", "CWE-94", "medium"),
     "/AA": ("additional (automatic) actions on document/page events", "CWE-94", "medium"),
-    "/Launch": ("Launch action — starts an external program", "CWE-78", "high"),
+    "/Launch": ("Launch action, starts an external program", "CWE-78", "high"),
     "/EmbeddedFile": ("a file embedded inside the PDF", "CWE-506", "medium"),
     "/URI": ("action that opens an external URL", "CWE-601", "low"),
     "/SubmitForm": ("form that submits data to a remote URL", "CWE-201", "low"),
@@ -108,7 +108,7 @@ _PDF_MARKERS: dict[str, tuple[str, str, str]] = {
     "/XFA": ("XFA dynamic form (historically abused for exploitation)", "CWE-611", "low"),
     "/AcroForm": ("interactive form", "CWE-200", "info"),
     "/JBIG2Decode": ("JBIG2 image filter (CVE-2021-30860 class parser bugs)", "CWE-787", "low"),
-    "/ObjStm": ("object stream — commonly used to obfuscate/hide objects", "CWE-506", "info"),
+    "/ObjStm": ("object stream, commonly used to obfuscate/hide objects", "CWE-506", "info"),
     "/Encrypt": ("the document is encrypted", "CWE-311", "info"),
 }
 
@@ -212,7 +212,7 @@ def _analyze_pdf(data: bytes, target: str) -> dict[str, Any]:
             "PDF runs JavaScript automatically on open",
             "The document embeds JavaScript and an automatic action "
             "(/OpenAction or /AA), so the script executes the moment the file is "
-            "opened in a reader that permits it — the classic malicious-PDF "
+            "opened in a reader that permits it, the classic malicious-PDF "
             "pattern.", cwe="CWE-94", confidence=0.9,
             evidence={"markers": {k: counts[k] for k in counts
                                   if k in ("/JavaScript", "/JS", "/OpenAction", "/AA")},
@@ -359,7 +359,7 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
                 "Remote template / OLE relationship (CVE-2017-0199 class)",
                 "A relationship points at a remote " +
                 dangerous[0]["type"] + f" ({dangerous[0]['target']}). Opening the "
-                "document fetches and can execute that remote resource — the "
+                "document fetches and can execute that remote resource, the "
                 "remote-template / remote-object injection technique.",
                 cwe="CWE-610", confidence=0.85, mitre="T1221",
                 evidence={"relationships": dangerous},
@@ -775,7 +775,7 @@ def _analyze_rtf(data: bytes, target: str) -> dict[str, Any]:
             cwe="CWE-506", confidence=0.7, evidence={"object_classes": classes})
     if templates:
         add("rtf_remote_template", "high", "RTF references a remote template",
-            "A remote \\*\\template pull fetches content on open — a remote-content "
+            "A remote \\*\\template pull fetches content on open, a remote-content "
             "injection technique.", cwe="CWE-610", confidence=0.75,
             evidence={"templates": templates})
     if obf > 200:

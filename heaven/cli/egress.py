@@ -50,7 +50,7 @@ def _render_status(snap: dict) -> None:
         _print(f"  [yellow]⚠ {snap['error']}[/yellow]")
     if snap.get("mode") in ("socks5", "tor"):
         _print("  [dim]Note: SOCKS/Tor routes nuclei, nmap (via proxychains) and "
-               "in-process HTTP checks (built-in SOCKS5 — no extra install). Raw "
+               "in-process HTTP checks (built-in SOCKS5, no extra install). Raw "
                "SYN/UDP scans and authenticated SOCKS proxies need WireGuard.[/dim]")
     tools = snap.get("tools", {})
     _print("\n  [bold]Tools[/bold]")
@@ -112,7 +112,7 @@ def register(cli: click.Group) -> None:
         if res.get("ok"):
             _print("[green]✓[/green] tunnel up"
                    + (f" ({res.get('interface')})" if res.get("interface") else "")
-                   + (" — already up" if res.get("already_up") else ""))
+                   + (", already up" if res.get("already_up") else ""))
         else:
             _print(f"[red]✗[/red] {res.get('error')}")
 

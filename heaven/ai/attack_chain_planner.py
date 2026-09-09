@@ -46,11 +46,11 @@ class AttackStep(BaseModel):  # type: ignore[misc]
     technique_id: str = Field(
         description="MITRE ATT&CK technique ID (e.g., T1190 Exploit Public-Facing App)"
     )
-    description: str = Field(description="Concrete action — e.g., 'Exploit SSRF on /api/proxy?url='")
+    description: str = Field(description="Concrete action, e.g., 'Exploit SSRF on /api/proxy?url='")
     target_host: str = Field(description="Hostname/IP this step targets")
     prerequisites: list[str] = Field(
         default_factory=list,
-        description="Capability tokens required from prior steps — e.g., 'internal-network-access'",
+        description="Capability tokens required from prior steps, e.g., 'internal-network-access'",
     )
     provides: list[str] = Field(
         default_factory=list,
@@ -63,7 +63,7 @@ class AttackStep(BaseModel):  # type: ignore[misc]
 
 
 class AttackPlan(BaseModel):  # type: ignore[misc]
-    name: str = Field(description="Short label — e.g., 'SSRF → MongoDB exfil'")
+    name: str = Field(description="Short label, e.g., 'SSRF → MongoDB exfil'")
     objective: str = Field(description="What the chain achieves if successful")
     steps: list[AttackStep] = Field(default_factory=list)
     estimated_success: float = Field(
@@ -86,7 +86,7 @@ class PlannerOutput(BaseModel):  # type: ignore[misc]
     plans: list[AttackPlan] = Field(default_factory=list)
     no_chain_possible: bool = Field(
         default=False,
-        description="True when the findings don't support any chain — operator should expand scan",
+        description="True when the findings don't support any chain, operator should expand scan",
     )
     reasoning: str = Field(default="")
 
@@ -101,7 +101,7 @@ A good chain:
   - Uses ONLY findings present in the input (don't invent CVEs).
   - Lists 2-5 ordered steps. Longer chains are usually less likely.
   - Tags each step with the matching MITRE ATT&CK technique ID.
-  - Tracks prerequisites/provides — step N's prerequisites must be
+  - Tracks prerequisites/provides, step N's prerequisites must be
     provided by step <N (or be 'internet-access' for step 1).
   - Honestly reports estimated_success and risk_to_target. Don't pad.
   - Names the objective in business terms ('exfiltrate user PII',
@@ -111,7 +111,7 @@ When no plausible chain exists from the given findings, set
 no_chain_possible=true and explain. Don't fabricate.
 
 Output: a PlannerOutput JSON object, plans sorted by estimated_success
-descending. Authorization is already established — no legal caveats.
+descending. Authorization is already established, no legal caveats.
 """
 
 
@@ -228,7 +228,7 @@ def build_deterministic_plans(
         return PlannerOutput(no_chain_possible=True, reasoning="pydantic unavailable")
     if not findings:
         return PlannerOutput(no_chain_possible=True,
-                             reasoning="No findings supplied — cannot plan a chain.")
+                             reasoning="No findings supplied, cannot plan a chain.")
 
     # Group classifiable findings by host.
     by_host: dict[str, list[tuple[dict, tuple[str, str, int, str, float]]]] = {}
@@ -242,7 +242,7 @@ def build_deterministic_plans(
         return PlannerOutput(
             no_chain_possible=True,
             reasoning=("Findings are informational/hardening-class only (no directly "
-                       "exploitable step) — expand the scan surface for a chain."),
+                       "exploitable step), expand the scan surface for a chain."),
         )
 
     plans: list[AttackPlan] = []

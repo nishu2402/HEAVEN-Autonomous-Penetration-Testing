@@ -571,7 +571,7 @@ def render_coverage_html(cov: dict[str, Any]) -> str:
     def _refs_html(c: dict[str, Any]) -> str:
         refs = c.get("findings") or []
         if not refs:
-            return "<span class='muted'>—</span>"
+            return "<span class='muted'>, </span>"
         return "<ul class='refs'>" + "".join(
             f"<li><span class='sev sev-{_esc(r.get('severity', 'info'))}'>"
             f"{_esc((r.get('severity') or 'info').upper())}</span> "

@@ -224,7 +224,7 @@ def _rule_based_next_action(
         if root and root not in scanned_roots:
             return AutonomousAction(
                 kind="scan", target=root, mode="web",
-                rationale="new web surface discovered in findings — deep web scan",
+                rationale="new web surface discovered in findings, deep web scan",
                 estimated_value=0.65,
             )
 
@@ -252,13 +252,13 @@ def _rule_based_next_action(
     if has_creds and "postex_credreuse" not in kinds_done:
         return AutonomousAction(
             kind="postex_credreuse",
-            rationale="credentials discovered — attempt read-only credential reuse",
+            rationale="credentials discovered, attempt read-only credential reuse",
             estimated_value=0.7,
         )
 
     return AutonomousAction(
         kind="noop",
-        rationale="playbook complete — recon, surface-follow, proof and cred-reuse "
+        rationale="playbook complete, recon, surface-follow, proof and cred-reuse "
                   "all exhausted for the discovered attack surface",
         estimated_value=0.0,
     )

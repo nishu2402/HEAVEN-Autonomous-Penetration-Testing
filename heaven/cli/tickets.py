@@ -129,7 +129,7 @@ def bulk(engagement: Optional[str], severity: str, status: str,
         sys.exit(2)
 
     _print(f"[cyan]Pushing {len(candidates)} finding(s) to "
-           f"{', '.join(d.configured_backends) or '(none — dry-run)'}[/cyan]\n")
+           f"{', '.join(d.configured_backends) or '(none, dry-run)'}[/cyan]\n")
 
     async def _go() -> None:
         ok_count = 0

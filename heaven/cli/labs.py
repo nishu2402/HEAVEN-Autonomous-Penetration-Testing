@@ -54,7 +54,7 @@ def labs(check: bool, as_json: bool) -> None:
         return
 
     _print("[bold]HEAVEN lab matrix[/bold] "
-           "[dim]— a mode earns 10/10 only when green against a real lab[/dim]\n")
+           "[dim], a mode earns 10/10 only when green against a real lab[/dim]\n")
     for row in lab_matrix.matrix_rows():
         status = _STATUS_STYLE.get(row["status"], row["status"])
         _print(f"[bold cyan]{row['mode']:10}[/bold cyan] {status}  "

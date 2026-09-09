@@ -87,7 +87,7 @@ def _print_inventory(assets: Optional[list]) -> None:
             _print(f"    [dim]{p['port']:>5}/{p.get('protocol','tcp')}[/dim]  "
                    f"{(p.get('service') or '—')[:14]:14}  {ver}")
     _print("  [dim]View later:[/dim] [cyan]heaven assets[/cyan]  "
-           "[dim](an OS marked 'heuristic — unconfirmed' is a TTL guess)[/dim]")
+           "[dim](an OS marked 'heuristic, unconfirmed' is a TTL guess)[/dim]")
 
     # If this run couldn't do SYN/UDP/OS scans (no raw sockets), say so plainly
     # and give the exact platform-correct command to unlock them — instead of the
@@ -139,14 +139,14 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
 @click.option("--iot", is_flag=True, help="Enable IoT/SCADA/OT scanning")
 @click.option("--api-scan", is_flag=True, help="Enable advanced API security scanning")
 @click.option("--api-spec", "api_spec_src", default=None,
-              help="OpenAPI/Swagger, Postman, or GraphQL-introspection file (or URL) — "
+              help="OpenAPI/Swagger, Postman, or GraphQL-introspection file (or URL), "
                    "every operation it declares is tested, not just crawled ones.")
 @click.option("--api-base-url", default=None,
               help="Base URL to resolve --api-spec operations against "
                    "(overrides the spec's own server list).")
 @click.option("--container", is_flag=True, help="Enable Container/Kubernetes scanning")
 @click.option("--mitre-map", is_flag=True, help="Enable MITRE ATT&CK mapping")
-@click.option("--engagement", help="Engagement name — persists findings into engagement DB")
+@click.option("--engagement", help="Engagement name, persists findings into engagement DB")
 @click.option("--use-scope/--no-use-scope", default=True,
               help="If --engagement set, restrict scan to in-scope targets only")
 @click.option("--i-have-authorization", is_flag=True,
@@ -191,7 +191,7 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
                    "phase / finding to stdout. Better for CI, ssh sessions, and `tee` piping.")
 @click.option("--cloud-buckets", is_flag=True,
               help="Also hunt for publicly exposed S3/GCS/Azure buckets guessed from the "
-                   "target domain. Off by default — it fires external requests to the cloud "
+                   "target domain. Off by default, it fires external requests to the cloud "
                    "providers, so it stays an explicit opt-in.")
 @click.option("--evade", is_flag=True,
               help="Firewall/IDS evasion for AUTHORIZED testing: apply nmap evasion "
@@ -319,7 +319,7 @@ def scan(
                    f"operation(s), {len(new_urls)} new endpoint(s) added.")
             if not base and any(u.startswith("/") for u in spec_urls):
                 _print("[yellow]  Spec paths are relative and no base URL was "
-                       "given — pass --api-base-url or a --url target.[/yellow]")
+                       "given, pass --api-base-url or a --url target.[/yellow]")
         except Exception as e:  # noqa: BLE001
             _print(f"[red]Could not load --api-spec:[/red] {e}")
             raise SystemExit(2)
@@ -668,10 +668,10 @@ def scan(
                     )
             else:
                 ftable.add_row(
-                    "[dim]—[/dim]",
+                    "[dim], [/dim]",
                     "[dim]Waiting for findings...[/dim]",
-                    "[dim]—[/dim]",
-                    "[dim]—[/dim]",
+                    "[dim], [/dim]",
+                    "[dim], [/dim]",
                 )
 
             findings_panel = Panel(
@@ -881,7 +881,7 @@ def scan(
 @click.option("--target", "-t", multiple=True, required=True, help="Target IPs or URLs")
 @click.option("--mode", "-m", type=click.Choice([m.value for m in ScanMode]), default="full")
 @click.option("--i-have-authorization", is_flag=True, required=True,
-              help="Required for scheduled scans — confirms all targets are authorized")
+              help="Required for scheduled scans, confirms all targets are authorized")
 def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
              i_have_authorization: bool) -> None:
     """[Deprecated: use `heaven watch`] Re-scan targets every N minutes.

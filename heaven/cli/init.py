@@ -54,7 +54,7 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
     """Write a .env file preserving the documented key order. Unknown keys
     are appended in alphabetical order so we don't lose operator customisations."""
     lines: list[str] = [
-        "# HEAVEN environment variables — written by `heaven init`",
+        "# HEAVEN environment variables, written by `heaven init`",
         "# Do not commit this file. Add to .gitignore if not already there.",
         "",
     ]
@@ -215,7 +215,7 @@ def init_cmd(env_file: str, minimal: bool, non_interactive: bool) -> None:
     # offer the EXACT same keys + help text + where-to-get links — change a key
     # in one place (heaven/settings_catalog.py) and all three update together.
     _print("\n[bold]API keys & integrations[/bold] "
-           "[dim](all optional — press Enter to skip any)[/dim]")
+           "[dim](all optional, press Enter to skip any)[/dim]")
     shown_group: Optional[str] = None
     for spec in SETTINGS:
         if spec.group == "AI / LLM":

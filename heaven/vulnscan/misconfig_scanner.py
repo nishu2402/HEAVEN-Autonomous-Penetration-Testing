@@ -149,7 +149,7 @@ def _jwt_findings(target: str, token: str, source: str) -> list[dict]:
     if alg == "none":
         out.append(_finding(
             target, "jwt_alg_none", "critical",
-            "JWT accepts alg:none — tokens are forgeable",
+            "JWT accepts alg:none, tokens are forgeable",
             "A JWT using the 'none' algorithm carries no signature, so any client "
             "can forge a token with arbitrary claims (e.g. escalate to admin).",
             0.95, {"source": source, "jwt_header": header},
@@ -386,7 +386,7 @@ async def _check_clickjacking(session: "aiohttp.ClientSession", url: str) -> lis
     origin = f"{p.scheme}://{p.netloc}"
     return [_finding(
         origin, "clickjacking", "low",
-        "Page is framable — clickjacking possible",
+        "Page is framable, clickjacking possible",
         "The HTML response sets neither X-Frame-Options (DENY/SAMEORIGIN) nor a CSP "
         "frame-ancestors directive, so the page can be embedded in a hostile iframe "
         "and used for UI-redress (clickjacking) attacks.",
@@ -423,7 +423,7 @@ async def _check_login_form(session: "aiohttp.ClientSession", url: str) -> list[
             url, "password_autocomplete_enabled", "low",
             "Password field allows browser autocomplete",
             "A password input does not set autocomplete=\"off\"/\"new-password\", so "
-            "browsers may store the credential — a risk on shared/public machines "
+            "browsers may store the credential, a risk on shared/public machines "
             "(WSTG-ATHN-05).",
             0.8, {"password_inputs": len(pw_inputs), "without_autocomplete_off": len(lax)}))
     # Cache-control: a credential page must not be cacheable.

@@ -19,7 +19,7 @@ from heaven.config import ScanMode, get_config
 @click.option("--target", "-t", multiple=True, help="Target IPs / hostnames / CIDRs")
 @click.option("--url", "-u", multiple=True, help="Target URLs")
 @click.option("--engagement", required=True,
-              help="Engagement to record scans into (REQUIRED — watch loop persists everything)")
+              help="Engagement to record scans into (REQUIRED, watch loop persists everything)")
 @click.option("--interval", "-i", default="60m",
               help="Time between scan starts. Suffix: s (seconds), m (minutes), h (hours), d (days). Default 60m.")
 @click.option("--jitter", default=0.1, type=float,
@@ -35,7 +35,7 @@ from heaven.config import ScanMode, get_config
 @click.option("--seed", type=int, default=None,
               help="RNG seed (+ iteration index) for reproducible watch runs.")
 @click.option("--i-have-authorization", is_flag=True, required=True,
-              help="Required. Watch will keep scanning until stopped — you must have written authorization for every target.")
+              help="Required. Watch will keep scanning until stopped, you must have written authorization for every target.")
 def watch(
     target: tuple[str, ...], url: tuple[str, ...],
     engagement: str, interval: str, jitter: float,

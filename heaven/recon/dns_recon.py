@@ -344,7 +344,7 @@ async def _scan_email_security(domain: str) -> list[dict]:
         if policy == "none":
             findings.append(_finding(
                 domain, "dmarc_policy_none", "high",
-                "DMARC Policy Is 'none' — No Enforcement",
+                "DMARC Policy Is 'none', No Enforcement",
                 "DMARC p=none means failing messages are reported but not rejected. "
                 "Attackers can still spoof this domain. Change to p=quarantine or p=reject.",
                 confidence=0.97,

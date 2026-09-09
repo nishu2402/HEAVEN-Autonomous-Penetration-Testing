@@ -429,7 +429,7 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
     if not authed:
         report.recommendations.append(
             "No authenticated scan recorded. Most real apps' attack surface "
-            "is behind login — use `heaven scan --cookie-file` or `--auth`."
+            "is behind login, use `heaven scan --cookie-file` or `--auth`."
         )
     if not auto_prove_run:
         report.recommendations.append(

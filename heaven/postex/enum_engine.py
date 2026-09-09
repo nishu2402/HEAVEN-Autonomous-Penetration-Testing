@@ -310,7 +310,7 @@ def _parse_sudo(text: str) -> list[dict[str, Any]]:
     if re.search(r"\(all\s*(:\s*all)?\)\s+all\b", low):
         passwordless = "nopasswd" in low
         vectors.append(_vector(
-            "Sudo grants full root (ALL) ALL" + (" — NOPASSWD" if passwordless else ""),
+            "Sudo grants full root (ALL) ALL" + (", NOPASSWD" if passwordless else ""),
             "critical", 0.98 if passwordless else 0.9,
             detail=_clip(text), abuse="`sudo /bin/sh` for an immediate root shell",
             signals=["sudo_all"] + (["nopasswd"] if passwordless else []),
@@ -524,7 +524,7 @@ class LinuxEnumEngine:
             import asyncssh  # type: ignore[import-not-found]  # noqa: F401 — import is the availability guard; connect() goes via ssh_safe
         except ImportError:
             return EnumResult(host=host, user=username, success=False,
-                              error="asyncssh not installed — pip install asyncssh")
+                              error="asyncssh not installed, pip install asyncssh")
         from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
 
         client_keys = [private_key] if private_key else None

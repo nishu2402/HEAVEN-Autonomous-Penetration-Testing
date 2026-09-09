@@ -241,7 +241,7 @@ async def perform_form_login(base_url: str, spec: dict[str, str]) -> AuthSession
       - Absolute or path-only login URLs (resolved against base_url)
     """
     if aiohttp is None:
-        raise RuntimeError("aiohttp not installed — cannot perform form login")
+        raise RuntimeError("aiohttp not installed, cannot perform form login")
 
     login_url = spec["url"]
     if login_url.startswith("/"):
@@ -307,7 +307,7 @@ async def perform_form_login(base_url: str, spec: dict[str, str]) -> AuthSession
 
     if not cookies:
         raise RuntimeError(
-            "form login completed but no cookies were set — check that the "
+            "form login completed but no cookies were set, check that the "
             "login URL and field names are correct"
         )
 

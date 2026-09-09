@@ -94,7 +94,6 @@ function cveCell(f) {
         ? "No matching CVE was resolved for this service/version."
         : "This finding is a configuration, policy, or hygiene issue, it is not tracked by a specific CVE."}
     >
-, {" "}
       <span style={{ fontSize: 11 }}>
         {cveClass ? "(no CVE resolved)" : "(not a CVE-class finding)"}
       </span>

@@ -359,7 +359,7 @@ class CredentialValidator:
         domain, u = self._split_domain(user)
         if not domain:
             raise RuntimeError(
-                "kerberos requires a realm — supply DOMAIN\\user or user@domain")
+                "kerberos requires a realm, supply DOMAIN\\user or user@domain")
         if not pwd:
             return None  # empty password can't yield a valid AS-REP; never overclaim
 

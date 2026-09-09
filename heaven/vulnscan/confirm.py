@@ -397,7 +397,7 @@ async def _confirm_http_dirlisting(session: Any, finding: dict[str, Any]) -> Con
     return ConfirmResult(
         CONFIRMED if proved else UNCONFIRMED, proved=proved,
         method="http-recheck", technique="directory_listing_recheck", reprobed=True,
-        summary=("Directory index served on the live response — confirmed."
+        summary=("Directory index served on the live response, confirmed."
                  if proved else "No directory index in the live response."),
         detail=f"GET {url} → HTTP {status}"
                + (" with an autoindex page." if proved else " (no listing signature)."),
@@ -499,7 +499,7 @@ async def _confirm_http_endpoint(session: Any, finding: dict[str, Any]) -> Confi
     if same_as_junk:
         return ConfirmResult(
             UNCONFIRMED, method="http-recheck", technique=tech, reprobed=True,
-            summary="Response is identical to a known-nonexistent path — the server "
+            summary="Response is identical to a known-nonexistent path, the server "
                     "is a catch-all (soft-404); nothing is exposed here.",
             detail=f"GET {url} → HTTP 200 but its body matches a random nonexistent "
                    f"sibling path, so this is the catch-all page, not a real resource.",
@@ -507,7 +507,7 @@ async def _confirm_http_endpoint(session: Any, finding: dict[str, Any]) -> Confi
     if redirected_home:
         return ConfirmResult(
             UNCONFIRMED, method="http-recheck", technique=tech, reprobed=True,
-            summary="The probe was redirected to the site homepage — the resource is "
+            summary="The probe was redirected to the site homepage, the resource is "
                     "not exposed at its own URL.",
             detail=f"GET {url} → HTTP 200 only after redirecting to {final_url} "
                    "(the homepage / catch-all), so the requested resource is not served.",
@@ -539,7 +539,7 @@ async def _confirm_http_endpoint(session: Any, finding: dict[str, Any]) -> Confi
         method="http-recheck", technique=tech, reprobed=True,
         summary=("Resource is served (HTTP 200"
                  + (f", matched {signature_hit} signature" if signature_hit else "")
-                 + ") — confirmed."),
+                 + "), confirmed."),
         detail=f"GET {url} → HTTP 200, {len(body)} bytes, content-type {ctype or 'unknown'}.",
         evidence=ev)
 
@@ -554,13 +554,13 @@ async def _confirm_http_cors(session: Any, finding: dict[str, Any]) -> ConfirmRe
     wildcard = acao == "*"
     proved = reflected or (wildcard and acac)
     if reflected and acac:
-        summary = "Server reflects an arbitrary Origin AND allows credentials — confirmed."
+        summary = "Server reflects an arbitrary Origin AND allows credentials, confirmed."
     elif reflected:
-        summary = "Server reflects an arbitrary Origin in ACAO — confirmed."
+        summary = "Server reflects an arbitrary Origin in ACAO, confirmed."
     elif wildcard and acac:
-        summary = "ACAO '*' combined with credentials — confirmed."
+        summary = "ACAO '*' combined with credentials, confirmed."
     else:
-        summary = "The live response did not reflect the probe Origin — could not confirm."
+        summary = "The live response did not reflect the probe Origin, could not confirm."
     return ConfirmResult(
         CONFIRMED if proved else UNCONFIRMED, proved=proved,
         method="http-recheck", technique="cors_recheck", reprobed=True,
@@ -586,7 +586,7 @@ async def _confirm_http_redirect(session: Any, finding: dict[str, Any]) -> Confi
     return ConfirmResult(
         CONFIRMED if proved else UNCONFIRMED, proved=proved,
         method="http-recheck", technique="open_redirect_recheck", reprobed=True,
-        summary=("Live response 3xx-redirects off-site — confirmed."
+        summary=("Live response 3xx-redirects off-site, confirmed."
                  if proved else "No off-site redirect observed on the live response."),
         detail=f"GET {url} → HTTP {status}, Location: {location!r}",
         evidence=[{"request": f"GET {url}", "response_status": status,
@@ -650,8 +650,8 @@ async def _confirm_tcp(finding: dict[str, Any]) -> ConfirmResult:
 # Short, honest "how would a human confirm this?" note per finding family, so a
 # not_applicable result is still actionable rather than a dead end.
 _MANUAL_HINTS: dict[str, str] = {
-    "spf": "Confirm with `dig TXT <domain>` — the absence of a v=spf1 record is itself the proof.",
-    "dmarc": "Confirm with `dig TXT _dmarc.<domain>` — a missing/relaxed record is directly observable.",
+    "spf": "Confirm with `dig TXT <domain>`, the absence of a v=spf1 record is itself the proof.",
+    "dmarc": "Confirm with `dig TXT _dmarc.<domain>`, a missing/relaxed record is directly observable.",
     "dkim": "Confirm the DKIM selector record via `dig TXT <selector>._domainkey.<domain>`.",
     "dnssec": "Confirm with `dig +dnssec <domain>` and check for RRSIG/DS records.",
     "mta_sts": "Confirm by fetching https://mta-sts.<domain>/.well-known/mta-sts.txt.",
@@ -808,7 +808,7 @@ async def _confirm_via_exploit(finding: dict[str, Any], *, authorized: bool,
     if "sqli" not in vt and not has_param:
         return ConfirmResult(
             NOT_APPLICABLE, method="exploit",
-            summary="No injectable parameter recorded — cannot fire a safe canary.",
+            summary="No injectable parameter recorded, cannot fire a safe canary.",
             detail="This injection finding has no parameter/method in its evidence, "
                    "so the exploit-proof canary has nothing to target. Re-run the "
                    "scan with the injectable request captured, or verify manually.")
@@ -825,9 +825,9 @@ async def _confirm_via_exploit(finding: dict[str, Any], *, authorized: bool,
     last = proofs[-1] if proofs else {}
     proved = bool(out.get("proved"))
     if proved:
-        summary = "Exploitation canary fired — the flaw is proven exploitable."
+        summary = "Exploitation canary fired, the flaw is proven exploitable."
     elif last:
-        summary = "Exploitation ran but the canary did not fire — could not prove it."
+        summary = "Exploitation ran but the canary did not fire, could not prove it."
     else:
         summary = "Exploitation could not run for this finding."
     return ConfirmResult(

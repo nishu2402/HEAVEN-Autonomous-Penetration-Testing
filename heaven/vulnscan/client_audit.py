@@ -108,7 +108,7 @@ def _review_source(target: str, html: str) -> list[dict]:
             f"Sensitive data in page source ({', '.join(kinds)})",
             "Reviewing the delivered HTML/JS source exposed sensitive content in "
             "comments or developer notes (credentials, keys, tokens, internal IPs "
-            "or backdoor markers). Attackers read source first — strip these before "
+            "or backdoor markers). Attackers read source first, strip these before "
             "shipping.",
             0.9, {"hits": hits[:12], "count": len(hits)}))
     return out
@@ -161,7 +161,7 @@ def _analyse_js(target: str, script: str, origin_label: str) -> list[dict]:
     if exec_pairs:
         out.append(_finding(
             target, "dom_xss_sink", "medium",
-            "Potential DOM-based XSS — tainted source flows to an HTML/JS sink",
+            "Potential DOM-based XSS, tainted source flows to an HTML/JS sink",
             "The page's own JavaScript passes an attacker-influenceable source "
             "(location/URL/referrer/window.name/postMessage) into a dangerous sink "
             "(innerHTML/document.write/eval/setTimeout-string). This is the DOM-XSS "
@@ -188,7 +188,7 @@ def _analyse_js(target: str, script: str, origin_label: str) -> list[dict]:
                 target, "insecure_postmessage", "medium",
                 "postMessage handler without origin validation",
                 "A window 'message' event handler is registered but never checks "
-                "event.origin, so any site can postMessage into it — a cross-origin "
+                "event.origin, so any site can postMessage into it, a cross-origin "
                 "data-injection / XSS vector (WSTG-CLNT-11).",
                 0.6, {"where": origin_label,
                        "signal": "message listener present, no event.origin check"}))

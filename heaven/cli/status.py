@@ -88,7 +88,7 @@ def _collect_status(engagement: Optional[str]) -> dict:
     if _pv > (3, 13):
         report["python_note"] = (
             "newer than the tested range (3.11-3.13); native libraries may not be "
-            "ABI-stable yet — use Python 3.12 or 3.13 if you hit a native crash"
+            "ABI-stable yet, use Python 3.12 or 3.13 if you hit a native crash"
         )
     elif _pv < (3, 11):
         report["python_note"] = "older than the minimum supported (3.11); please upgrade"
@@ -235,7 +235,7 @@ def _next_steps(report: dict) -> list[str]:
     # thing to fix — it can crash scans natively — so surface it first.
     if not report.get("python_supported", True) and report.get("python_note"):
         steps.append(
-            "[cyan]rebuild your venv on Python 3.12 or 3.13[/cyan]  — current "
+            "[cyan]rebuild your venv on Python 3.12 or 3.13[/cyan], current "
             f"Python is {report['python_note'].split(';')[0]}"
         )
     # Missing scanner binaries cap HEAVEN below full power — offer the one-shot
@@ -249,20 +249,20 @@ def _next_steps(report: dict) -> list[str]:
     caps = report.get("runtime_capabilities") or []
     pw = next((c for c in caps if c.get("name") == "playwright-chromium"), None)
     if pw and not pw.get("present"):
-        steps.append("[cyan]playwright install chromium[/cyan]  — arm the headless-browser XSS execution proof")
+        steps.append("[cyan]playwright install chromium[/cyan], arm the headless-browser XSS execution proof")
     if not admin_set:
-        steps.append("[cyan]heaven init[/cyan]  — set the Web-UI admin password + optional API keys")
+        steps.append("[cyan]heaven init[/cyan], set the Web-UI admin password + optional API keys")
     if not eng.get("exists"):
-        steps.append("[cyan]heaven engage init <name>[/cyan]  — create your first engagement")
-        steps.append("[cyan]heaven scope add <target> --criticality high[/cyan]  — add an authorized target")
+        steps.append("[cyan]heaven engage init <name>[/cyan], create your first engagement")
+        steps.append("[cyan]heaven scope add <target> --criticality high[/cyan], add an authorized target")
     elif (eng.get("total_findings") or 0) == 0:
         steps.append(
             f"[cyan]heaven scan -u <url> --engagement {name} --i-have-authorization[/cyan]"
-            "  — run your first scan"
+            ", run your first scan"
         )
     else:
         steps.append(f"[cyan]heaven report --engagement {name}[/cyan]  — generate a deliverable")
-        steps.append("[cyan]heaven serve[/cyan]  — open the web dashboard")
+        steps.append("[cyan]heaven serve[/cyan], open the web dashboard")
     return steps
 
 
@@ -290,11 +290,11 @@ def _render_pretty(report: dict) -> None:
         if local.get("reachable"):
             models = local.get("models") or []
             note = (", ".join(models[:3]) + ("…" if len(models) > 3 else "")) \
-                if models else "no models pulled — heaven ai pull"
+                if models else "no models pulled, heaven ai pull"
             _print(f"  [green]✓ Local AI[/green]   Ollama up · {note}")
         else:
             _print("  [yellow]· Local AI[/yellow]   Ollama installed but not "
-                   "running — [cyan]ollama serve[/cyan]")
+                   "running, [cyan]ollama serve[/cyan]")
     else:
         _print("  [dim]· Local AI    not installed · heaven ai setup "
                "(no key, no rate limits)[/dim]")

@@ -104,17 +104,17 @@ _RULES: tuple[_Rule, ...] = (
                   _SCRIPT_CTX)),
     _Rule("PHP_Webshell_Eval_Superglobal", "critical",
           "Obfuscated PHP command execution: an exec/eval sink fed directly from "
-          "an HTTP superglobal — the core of a generic webshell.",
+          "an HTTP superglobal, the core of a generic webshell.",
           all_of=(_ci(r"\$_(?:GET|POST|REQUEST|COOKIE|SERVER)\b"),
                   _ci(r"\b(?:eval|assert|system|shell_exec|passthru|popen|proc_open"
                       r"|exec)\s*\(")),),
     _Rule("PHP_Obfuscated_Loader", "high",
           "Obfuscated PHP loader: gzinflate/str_rot13/base64_decode chained into "
-          "eval — a common packer for malicious payloads.",
+          "eval, a common packer for malicious payloads.",
           all_of=(_ci(r"\beval\s*\("),
                   _ci(r"\b(?:gzinflate|gzuncompress|str_rot13|base64_decode)\s*\(")),),
     _Rule("PHP_PregReplace_Eval", "high",
-          "preg_replace with the /e modifier — deprecated PHP code-execution "
+          "preg_replace with the /e modifier, deprecated PHP code-execution "
           "primitive abused for RCE.",
           all_of=(_ci(r"preg_replace\s*\(\s*['\"].*?/e['\"]"),)),
     _Rule("China_Chopper", "critical",
@@ -274,7 +274,7 @@ def scan_bytes(data: bytes | str, *, include_entropy: bool = True
             matches["Suspicious_HighEntropy_Blob"] = SignatureMatch(
                 rule="Suspicious_HighEntropy_Blob", severity="info",
                 description="A long, high-entropy base64 blob is embedded in the "
-                            "content — often an obfuscated or packed payload.",
+                            "content, often an obfuscated or packed payload.",
                 engine="builtin", excerpt=blob.group(0)[:60] + "…",
                 cwe="CWE-506", mitre="T1027")
     return list(matches.values())

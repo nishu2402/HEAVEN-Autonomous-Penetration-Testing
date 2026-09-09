@@ -121,7 +121,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             "HEAVEN's shipped XSS execution prover (exploit_proof.prove_finding, "
             "the orchestrator's exploit-proof entry) loads the injected route in "
             "headless Chromium and proves the DOM XSS by observing a dialog that "
-            "carries a unique per-run token — real client-side JavaScript "
+            "carries a unique per-run token, real client-side JavaScript "
             "execution, which a mere reflection cannot fake. This complements the "
             "DVWA lab: DVWA proves server-reflected/stored XSS, Juice Shop proves "
             "a client-side DOM sink an HTTP-only scanner cannot see.",
@@ -129,8 +129,8 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
                  "chromium); without it the prover degrades honestly to a "
                  "detected candidate and the lab test skips. The SPA's "
                  "toolbar-hidden search box is supplied as the known injection "
-                 "point — the JS crawler maps the app's routes but does not "
-                 "auto-reveal that input — so the lab machine-checks the proof "
+                 "point, the JS crawler maps the app's routes but does not "
+                 "auto-reveal that input, so the lab machine-checks the proof "
                  "(JavaScript actually running), not unassisted input discovery. "
                  "The gated live test is test_juiceshop_lab_proves_dom_xss in "
                  "tests/benchmarks/test_domain_labs.py.",
@@ -167,7 +167,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             "Real remote command execution proven live: HEAVEN's exploit_shellshock "
             "injects the `() { :; };` header payload with a benign reverse-callback "
             "command and the vulnerable bash CGI connects back with root output "
-            "(uid=0) — the eighth of eight corpus exploits, now live.",
+            "(uid=0), the eighth of eight corpus exploits, now live.",
             note="The container reaches HEAVEN's callback listener on the host via "
                  "host.docker.internal (the HEAVEN_CALLBACK_HOST override, the same "
                  "knob a real NAT/redirector engagement uses).",
@@ -200,7 +200,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
                  "environment-gated, not merely unfinished: AD CS is a "
                  "Windows-only role (MS-ICPR certificate enrolment), which Samba "
                  "does not implement and no Linux/Docker CA provides, so proving "
-                 "it end to end needs a Windows Enterprise CA + Certipy — the "
+                 "it end to end needs a Windows Enterprise CA + Certipy, the "
                  "same class of honest gate as Wireless RF.",
             artifact=_LAB_SAMBA_DC,
             target="127.0.0.1:88 (Kerberos) + :445 (SMB) + :389 (LDAP)"),
@@ -211,11 +211,11 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             "0.0.0.0/0, so permit_mynetworks matches every client before any "
             "reject) accepts MAIL FROM + RCPT TO for two unrelated external "
             "domains with no authentication. HEAVEN's non-intrusive probe detects "
-            "smtp_open_relay live on the raw endpoint (RSET before DATA — no mail "
+            "smtp_open_relay live on the raw endpoint (RSET before DATA, no mail "
             "is ever relayed), plus smtp_no_starttls on the same cleartext box.",
             note="VRFY user-enum is not demonstrable on Postfix (it answers VRFY "
                  "with 252 / cannot-verify, disclosing nothing, so the "
-                 "differential probe correctly stays silent — a true negative). "
+                 "differential probe correctly stays silent, a true negative). "
                  "That surface is proved live by the VRFY lab below; DNS-based "
                  "posture by the entry after it.",
             artifact=_LAB_POSTFIX, target="127.0.0.1:2525 (SMTP)"),
@@ -223,7 +223,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             "The SMTP user-enumeration differential is proved live against a real "
             "SMTP server (aiosmtpd, a real independent stack) with VRFY left "
             "enabled: it answers 250 for a user that exists in its real "
-            "local-user set and 550 for one that does not — the classic "
+            "local-user set and 550 for one that does not, the classic "
             "sendmail-style account-enumeration misconfiguration. HEAVEN's "
             "non-intrusive probe (VRFY postmaster vs VRFY <random>) detects "
             "smtp_user_enumeration live.",
@@ -306,7 +306,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
                  "is pulled from the k3s container and analyze_rbac flags the "
                  "cluster-admin-to-system:anonymous binding as critical live "
                  "(while never tripping on the legitimate system:masters group). "
-                 "That drove a real detector fix — the old analyzer only counted "
+                 "That drove a real detector fix, the old analyzer only counted "
                  "ServiceAccount admins above a threshold, so an anonymous/"
                  "all-users cluster-admin binding was missed entirely "
                  "(tests/test_k8s_rbac_assessment.py locks the FP-safe rule). "
@@ -343,7 +343,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             "service reachable'). Mapped to IEC 62443 / MITRE ATT&CK for ICS.",
             note="Modbus (the most widely deployed ICS protocol) and OPC-UA (the "
                  "modern ICS interoperability standard) are proved live here; "
-                 "Siemens S7comm is proved live by the Conpot lab below — three "
+                 "Siemens S7comm is proved live by the Conpot lab below, three "
                  "real OT protocols in total. DNP3 + IEC-104 share the same "
                  "read-only handshake harness and stay unit-tested (no clean "
                  "pure-Python outstation to run reproducibly; a real simulator is "
@@ -394,7 +394,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             "tests/benchmarks/labs/sca-corpus/ pins seven real known-vulnerable "
             "PyPI + npm releases, and HEAVEN's SCA scanner audits them against "
             "OSV.dev. Recall over a curated set of permanent CVE advisories is "
-            "100% (11/11), and a precision control passes — the patched half of "
+            "100% (11/11), and a precision control passes, the patched half of "
             "the corpus (the versions that FIXED each CVE) reports none of those "
             "CVEs, proving HEAVEN honours OSV's fixed ranges and never flags a "
             "resolved dependency.",
@@ -428,8 +428,8 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
             "management page (an inert decoy carrying the genuine vendor "
             "fingerprint), and scan_wireless_posture fetches it, fingerprints the "
             "vendor, and reports 'Unauthenticated wireless management interface: "
-            "MikroTik RouterOS' (high). This is exactly what the mode's label — "
-            "'Wireless Posture Review' — promises.",
+            "MikroTik RouterOS' (high). This is exactly what the mode's label, "
+            "'Wireless Posture Review', promises.",
             note="Vendor-fingerprinted, read-only. The gated live test is "
                  "test_wireless_lab_detects_exposed_panel in "
                  "tests/benchmarks/test_domain_labs.py.",
@@ -472,7 +472,7 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
                  "additionally blocked on this host because LLMNR/NBT-NS/mDNS are "
                  "UDP multicast/broadcast, which Docker Desktop for Mac's "
                  "userspace UDP NAT does not forward (the same platform limit the "
-                 "DoS amplification and IoT/OT UDP probes document) — so it stays "
+                 "DoS amplification and IoT/OT UDP probes document), so it stays "
                  "honestly NEEDS_AGENT and is never simulated.",
             target="local segment"),
     ],
@@ -480,9 +480,9 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
         Lab("Webshell sweep (seeded webroot lab)", COMPOSE, GREEN,
             "The read-only webshell sweep is proven live against a real HTTP "
             "server: an nginx webroot is seeded with INERT webshell-signature "
-            "decoys (no PHP interpreter — nothing executes) and HEAVEN's "
+            "decoys (no PHP interpreter, nothing executes) and HEAVEN's "
             "scan_malware_targets GETs the known shell paths and flags every one "
-            "via BOTH detection paths — the named-shell response signatures "
+            "via BOTH detection paths, the named-shell response signatures "
             "(c99/r57/b374k/WSO/IndoXploit/Alfa) and the generic YARA path "
             "(PHP_Webshell_Eval_Superglobal on a banner-less China-Chopper "
             "one-liner), the latter previously unit-tested only.",

@@ -171,7 +171,7 @@ def _rc_block(shell: str) -> str:
         )
     return (
         f"{_MARK_START}\n"
-        "# HEAVEN CLI tab-completion — managed by `heaven completion --install`.\n"
+        "# HEAVEN CLI tab-completion, managed by `heaven completion --install`.\n"
         f"{body}\n"
         f"{_MARK_END}"
     )
@@ -184,25 +184,25 @@ def _install_hint(shell: str) -> str:
             "mkdir -p ~/.zsh && heaven completion zsh > ~/.zsh/_heaven\n"
             "  Then add to ~/.zshrc (BEFORE compinit runs):\n"
             "  fpath=(~/.zsh $fpath); autoload -U compinit; compinit\n"
-            "  — or just run: heaven completion --install"
+            ", or just run: heaven completion --install"
         )
     if shell == "bash":
         return (
             "heaven completion bash > ~/.heaven-completion.bash\n"
             "  Then add to ~/.bashrc:  source ~/.heaven-completion.bash\n"
-            "  — or just run: heaven completion --install"
+            ", or just run: heaven completion --install"
         )
     if shell == "fish":
         return (
             "mkdir -p ~/.config/fish/completions && "
             "heaven completion fish > ~/.config/fish/completions/heaven.fish\n"
-            "  — or just run: heaven completion --install"
+            ", or just run: heaven completion --install"
         )
     if shell == "powershell":
         return (
             "heaven completion powershell > $HOME/.heaven-completion.ps1\n"
             "  Then add to your $PROFILE:  . $HOME/.heaven-completion.ps1\n"
-            "  — or just run: heaven completion --install"
+            ", or just run: heaven completion --install"
         )
     return ""
 

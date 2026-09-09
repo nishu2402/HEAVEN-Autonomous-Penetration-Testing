@@ -74,7 +74,7 @@ _FINDINGS: list[dict] = [
        target=f"{HOST}:2375", risk=94.0, confidence=0.95, cwe="CWE-284",
        description="The Docker Engine API is reachable unauthenticated on 2375/tcp. "
                    "Anyone who can reach it can start a privileged container.",
-       impact="Trivial host takeover — mount the host FS or run --privileged.",
+       impact="Trivial host takeover, mount the host FS or run --privileged.",
        remediation="Never expose the Docker socket over TCP; require mTLS, or bind "
                    "to the local UNIX socket only."),
 
@@ -84,7 +84,7 @@ _FINDINGS: list[dict] = [
        description="The search term is reflected into the page unencoded.",
        impact="Session theft / account takeover via crafted links.",
        remediation="Context-aware output encoding; a strict Content-Security-Policy."),
-    _f("high", "idor", "IDOR — other users' records via 'user_id'",
+    _f("high", "idor", "IDOR, other users' records via 'user_id'",
        target=WEB, endpoint=f"{WEB}/api/account", param="user_id", risk=82.0,
        confidence=0.88, cwe="CWE-639", owasp="A01:2025", method="GET",
        payload="user_id=1002",
@@ -185,7 +185,7 @@ _ASSETS: list[dict] = [
              "banner": "SSH-2.0-OpenSSH_6.6.1p1 Debian-4~bpo70+1"},
             {"port": 2375, "protocol": "tcp", "service": "docker", "product": "Docker",
              "version": "18.06.1-ce", "cpe": "cpe:/a:docker:docker:18.06.1",
-             "banner": "HTTP/1.1 200 OK — Docker Engine API"},
+             "banner": "HTTP/1.1 200 OK: Docker Engine API"},
         ],
     },
     {

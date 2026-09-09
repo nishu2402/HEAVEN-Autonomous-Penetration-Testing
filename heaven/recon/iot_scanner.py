@@ -463,7 +463,7 @@ class IoTScanner:
                 target=host, protocol="Modbus TCP", severity="critical", port=port,
                 title=f"Modbus TCP unauthenticated access on {host}:{port}",
                 description="Modbus responded to a Read-Device-Identification "
-                            "request without authentication — registers/coils are "
+                            "request without authentication, registers/coils are "
                             "reachable and could be read or written by an attacker.",
                 device_info=ev, confidence=0.9, cwe="CWE-306",
                 remediation="Segment the ICS network; front Modbus with an "
@@ -501,7 +501,7 @@ class IoTScanner:
             self._findings.append(IoTFinding(
                 target=host, protocol="RTSP", severity="high", port=port,
                 title=f"Unauthenticated RTSP stream on {host}:{port}",
-                description="RTSP DESCRIBE returned 200 OK without authentication — "
+                description="RTSP DESCRIBE returned 200 OK without authentication, "
                             "the camera stream is viewable by anyone.",
                 device_info=ev, confidence=0.85, cwe="CWE-306",
                 remediation="Require RTSP authentication; encrypt the stream.",
@@ -535,7 +535,7 @@ class IoTScanner:
                 target=host, protocol="CoAP", severity="medium", port=5683,
                 title=f"CoAP service exposed on {host}:5683",
                 description="A CoAP endpoint answered GET /.well-known/core over "
-                            "unencrypted UDP — resources are discoverable without DTLS.",
+                            "unencrypted UDP, resources are discoverable without DTLS.",
                 device_info=ev, confidence=0.85, cwe="CWE-319",
                 remediation="Require CoAPs (DTLS); restrict to trusted networks.",
             ))
@@ -627,7 +627,7 @@ class IoTScanner:
                 title=f"{vendor} device web panel detected on {host}:{port}",
                 description=f"Fingerprinted a {vendor} device management panel "
                             f"(server: {server or 'n/a'}).{hint} Default login was "
-                            "not confirmed — manual verification recommended.",
+                            "not confirmed, manual verification recommended.",
                 device_info={"vendor": vendor, "server": server,
                              "verified_login": False},
                 confidence=0.5, cwe="CWE-1188",

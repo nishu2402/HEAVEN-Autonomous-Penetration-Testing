@@ -139,7 +139,7 @@ class InputSanitizer:
             if not parsed.scheme:
                 result.sanitized_value = f"https://{url}"
                 parsed = urlparse(result.sanitized_value)
-                result.warnings.append("No scheme specified — defaulting to HTTPS")
+                result.warnings.append("No scheme specified, defaulting to HTTPS")
             if parsed.scheme in BLOCKED_SCHEMES:
                 result.valid = False
                 result.errors.append(f"Blocked URL scheme: {parsed.scheme}")

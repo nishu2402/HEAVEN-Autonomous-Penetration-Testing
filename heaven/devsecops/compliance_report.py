@@ -490,7 +490,7 @@ class ComplianceReportGenerator:
         h3{font-size:15px;margin:22px 0 6px;}
         p{margin:0 0 12px;} a{color:var(--brand);}
         /* Any wide table scrolls WITHIN its own box instead of spilling past the
-           page — the report body never scrolls sideways. */
+           page, the report body never scrolls sideways. */
         .tablewrap{overflow-x:auto;max-width:100%;margin:8px 0 4px;-webkit-overflow-scrolling:touch;}
         .tablewrap>table{margin:0;}
         table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 4px;}

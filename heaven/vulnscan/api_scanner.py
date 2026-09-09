@@ -299,7 +299,7 @@ class GraphQLScanner:
                     target=url, vuln_type="graphql_dos",
                     severity="medium", endpoint=endpoint,
                     title="GraphQL: Potential Query Complexity DoS",
-                    description="Deep nested query caused timeout — DoS potential.",
+                    description="Deep nested query caused timeout, DoS potential.",
                     confidence=0.60,
                     remediation="Implement query complexity analysis and timeout.",
                     cwe="CWE-400",

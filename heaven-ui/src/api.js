@@ -373,6 +373,14 @@ export const KillChain = {
   get: (scanId = "latest") => api(`/kill-chain/${scanId}`),
 };
 
+export const Correlate = {
+  // GET /api/correlations/{scanId} — combinations from the engagement's findings.
+  get: (scanId = "latest") => api(`/correlations/${scanId}`),
+  // POST /api/correlate — correlate an operator-supplied findings list.
+  run: (findings) =>
+    api(`/correlate`, { method: "POST", body: JSON.stringify({ findings }) }),
+};
+
 export const Dashboard = {
   get: () => api("/dashboard"),
 };

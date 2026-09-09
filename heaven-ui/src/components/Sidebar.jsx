@@ -28,6 +28,7 @@ const GROUPS = [
     name: "Findings",
     items: [
       { to: "/findings",    label: "Findings",     icon: "⚠" },
+      { to: "/correlations", label: "Combined Risk", icon: "🔗" },
       { to: "/kill-chain",  label: "Kill Chain",   icon: "⛓" },
       { to: "/ai-plans",    label: "AI Plans",     icon: "✦" },
       { to: "/chat",        label: "Assistant",    icon: "💬" },

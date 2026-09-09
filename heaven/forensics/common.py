@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import math
+import zipfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,57 @@ logger = get_logger("forensics.common")
 
 _SAMPLE = 32 * 1024 * 1024        # entropy/fingerprint sample cap
 _HASH_CAP = 512 * 1024 * 1024     # hashing cap (streamed)
+
+
+# ── decompression-bomb-safe readers (shared by the archive/document analyzers) ─
+# A crafted upload can hide a "zip bomb": a member (or a deflate stream) that is
+# tiny on disk but expands to gigabytes. ``zipfile.ZipFile.read`` and
+# ``zlib.decompress`` both inflate the WHOLE thing into memory before the caller
+# can slice it, so even code that only wants a small prefix can be made to
+# exhaust memory. These helpers inflate incrementally and stop at a hard byte
+# cap, so a hostile artifact can never make the analyzer OOM the tool.
+def safe_zip_read(zf: zipfile.ZipFile, member: Any, cap: int,
+                  *, ratio_limit: int = 1500) -> bytes:
+    """Read at most ``cap`` DECOMPRESSED bytes from a zip member, safely.
+
+    ``member`` may be a name or a ``ZipInfo``. A member whose declared
+    uncompressed:compressed ratio is already implausible (a bomb signature) is
+    skipped outright; otherwise the entry is opened and only ``cap`` bytes are
+    inflated. Never raises — an unreadable/encrypted member yields ``b""``.
+    """
+    try:
+        info = member if isinstance(member, zipfile.ZipInfo) else zf.getinfo(member)
+    except KeyError:
+        return b""
+    comp = getattr(info, "compress_size", 0) or 0
+    unc = getattr(info, "file_size", 0) or 0
+    if comp and unc / max(comp, 1) > ratio_limit and unc > cap:
+        logger.debug("skipping high-ratio zip entry %s (%d/%d)",
+                     getattr(info, "filename", member), unc, comp)
+        return b""
+    try:
+        with zf.open(info) as fh:               # bounded, incremental inflate
+            data = fh.read(cap + 1)
+    except Exception:                            # noqa: BLE001 — bad/encrypted member
+        logger.debug("could not read zip entry", exc_info=True)
+        return b""
+    return data[:cap]
+
+
+def safe_inflate(blob: bytes, wbits: int, *, max_output: int) -> bytes:
+    """Inflate a raw deflate / zlib / gzip blob to at most ``max_output`` bytes.
+
+    Uses a decompress object with a ``max_length`` so a small compressed blob
+    that would expand to gigabytes (the decompression-bomb DoS) is stopped at
+    the cap instead of being fully materialised in memory. Returns ``b""`` if
+    ``blob`` is not compressed with the given window.
+    """
+    if not blob or max_output <= 0:
+        return b""
+    try:
+        return zlib.decompressobj(wbits).decompress(blob, max_output)
+    except Exception:                            # noqa: BLE001 — not a flate stream
+        return b""
 
 
 # ── magic / MIME identification (offline, no libmagic) ───────────────────────

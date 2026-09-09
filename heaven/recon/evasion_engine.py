@@ -147,6 +147,70 @@ def profile_for(level: str | StealthLevel) -> EvasionProfile:
     return replace(get_profile(resolve_stealth_level(level)))
 
 
+# Stealth levels that already pace the scan gently enough for a fragile host.
+_GENTLE_STEALTH: frozenset[StealthLevel] = frozenset(
+    {StealthLevel.STEALTH, StealthLevel.PARANOID})
+
+
+def _is_lab_host(token: str) -> bool:
+    """True when a target looks like a lab / internal host: a private, loopback or
+    link-local IP (or CIDR), ``localhost``, or an mDNS ``.local`` name.
+
+    These are the hosts where fragile or emulated practice VMs (e.g. a
+    Metasploitable image running under CPU emulation) actually live. A public
+    domain or address is assumed to be a real, robust server and is left alone, so
+    the advisory stays quiet on ordinary external engagements.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+
+    raw = (token or "").strip()
+    if not raw:
+        return False
+    host = (urlparse(raw).hostname or "") if "://" in raw else raw
+    host = host.strip().rstrip(".")
+    if not host:
+        return False
+    low = host.lower()
+    if low == "localhost" or low.endswith(".local"):
+        return True
+    try:
+        if "/" in host:
+            net = ipaddress.ip_network(host, strict=False)
+            return net.is_private or net.is_loopback or net.is_link_local
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        return False
+
+
+def fragile_target_stealth_advisory(
+    targets: list[str], stealth_level: str | StealthLevel
+) -> str | None:
+    """Return a one-line advisory recommending a slower stealth profile, or ``None``.
+
+    Fragile, emulated or legacy hosts (an old Metasploitable VM under CPU
+    emulation, a low-resource appliance) can be driven unresponsive by a fast
+    scan, and force-resetting a wedged VM is what corrupts its disk. Pacing the
+    scan keeps such a host answering. We nudge only when the operator has NOT
+    already chosen a gentle profile (stealth / paranoid) AND at least one target
+    is an internal / lab host. The scan is never blocked or altered: this is
+    advice the operator can take or ignore.
+    """
+    if resolve_stealth_level(stealth_level) in _GENTLE_STEALTH:
+        return None
+    if not any(_is_lab_host(t) for t in (targets or [])):
+        return None
+    current = resolve_stealth_level(stealth_level).value
+    return (
+        f"Scanning an internal/lab host at the {current} rate. If any target is a "
+        "fragile, emulated or legacy VM (e.g. an old Metasploitable image), a fast "
+        "scan can drive it unresponsive, and force-resetting a wedged VM can "
+        "corrupt its disk. Consider pacing with --stealth stealth (or --stealth "
+        "paranoid) so the host stays responsive."
+    )
+
+
 class EvasionEngine:
     """Stateful wrapper around EvasionProfile for scanner integration."""
 

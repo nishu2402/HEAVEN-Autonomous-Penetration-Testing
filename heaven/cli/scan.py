@@ -468,6 +468,15 @@ def scan(
     if mitre_map:
         _print("[cyan]MITRE ATT&CK:[/cyan] Enabled")
 
+    # Fragile-target nudge: a fast scan can drive an emulated / legacy lab VM
+    # unresponsive, and force-resetting a wedged VM is what corrupts its disk.
+    # Advice only — the scan is never blocked or changed.
+    from heaven.recon.evasion_engine import fragile_target_stealth_advisory
+    _fragile_note = fragile_target_stealth_advisory(
+        list(targets.get("ips") or []) + list(targets.get("urls") or []), stealth)
+    if _fragile_note:
+        _print(f"[yellow]⚠ Fragile-target note:[/yellow] [dim]{_fragile_note}[/dim]")
+
     from heaven.orchestrator import build_full_scan
     config = get_config()
     config.scan_mode = ScanMode(mode)

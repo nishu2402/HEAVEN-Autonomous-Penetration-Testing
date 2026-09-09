@@ -165,7 +165,7 @@ if HAS_CLICK:
         analyze as analyze_module,
         assets as assets_module,
         audit, autonomous, benchmark as benchmark_module, chat as chat_module, cloud, completion,
-        config_cmd, coverage, cve as cve_module,
+        config_cmd, correlate as correlate_module, coverage, cve as cve_module,
         db, demo as demo_module,
         diff, dns as dns_module, egress as egress_module, engage,
         exploit as exploit_module, exploitdb, findings, info, init as init_module,
@@ -188,6 +188,7 @@ if HAS_CLICK:
     completion.register(cli)
     cve_module.register(cli)
     config_cmd.register(cli)
+    correlate_module.register(cli)
     coverage.register(cli)
     demo_module.register(cli)
     db.register(cli)

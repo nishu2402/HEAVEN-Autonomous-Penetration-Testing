@@ -91,8 +91,11 @@ async def test_boolean_sqli_reported_when_reproduced(monkeypatch):
     import heaven.vulnscan.injection_scanner as inj
 
     async def fake_get(session, url, headers=None, timeout=8.0):
-        # TRUE condition (1=1) returns the row; FALSE (1=2) hides it — every time.
-        return 200, (_ROW if "1=1" in unquote(url) else _EMPTY)
+        # A real oracle: the baseline (id=1) and the TRUE condition (…AND 1=1)
+        # return the row; only the FALSE condition (…AND 1=2) hides it — every
+        # time, and independent of fetch order (so it survives the order-swapped
+        # reproduction round the scanner now runs).
+        return 200, (_EMPTY if "1=2" in unquote(url) else _ROW)
 
     monkeypatch.setattr(inj, "_get", fake_get)
     scanner = inj.InjectionScanner()

@@ -11,6 +11,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Fragile-target pacing advisory before a fast scan of a lab host.** A
+  pen-test is meant to check a system, not knock it over. Old or emulated
+  practice VMs (an Ubuntu 8.04 Metasploitable image running under CPU emulation,
+  a low-resource appliance) can be driven unresponsive by a fast scan, and
+  force-resetting a wedged VM is what corrupts its disk. HEAVEN now recognises
+  when a scan aims a fast profile (aggressive/normal) at an internal or lab host
+  (a private/loopback/link-local IP or CIDR, `localhost`, or an mDNS `.local`
+  name) and prints a one-line nudge to pace the scan with `--stealth stealth`
+  (concurrency 500 → 50, 100-500 ms spacing) or `--stealth paranoid` (10
+  concurrent, 500-3000 ms spacing) so the host stays responsive. It is advice
+  only: the scan is never blocked or changed, it stays silent when the operator
+  already chose a paced profile, and it stays silent for public targets (assumed
+  to be real, robust servers). The network scanner's existing "nmap hit its
+  host-timeout on a slow/emulated host" recovery message now carries the same
+  `--stealth stealth` recommendation, so the advice also appears at runtime the
+  moment a host shows it is struggling. New
+  `heaven.recon.evasion_engine.fragile_target_stealth_advisory`, wired into
+  `heaven scan`; 18 tests in `tests/test_stealth_levels.py`.
+
+- **Combined Risk: correlate 2+ findings into an elevated, more critical issue.**
+  A real assessment reports impact, and impact often lives in the *combination* of
+  findings, not any one alone. A new `heaven.vulnscan.correlation` engine inspects
+  the finding set (from a scan, the engagement store, or a list the tester submits)
+  and recognises well-established amplification patterns where two or more findings
+  together form a materially worse problem: local file inclusion + file upload →
+  remote code execution, SSRF + an exposed internal service → internal/cloud
+  compromise, default credentials + an exposed admin panel → full takeover, stored
+  XSS + a CSRF/weak-cookie gap → account takeover, an exposed secret + a reachable
+  service → credential reuse and lateral movement, a forgeable JWT + a privileged
+  endpoint → privilege escalation, cleartext credential transport + a login form →
+  interception, account enumeration + a missing lockout → a practical credential
+  attack, and more (17 curated patterns). Each match is surfaced as a single
+  elevated item that names the emergent vulnerability, its combined severity, every
+  constituent finding, why the combination is worse than its parts, and the one fix
+  that breaks the chain. Crucially, each one is operational rather than cosmetic: it
+  states the prerequisites that must hold and gives an ordered, in-scope proof
+  playbook rendered against the *real* evidence of the constituent findings (their
+  actual URLs, parameters, ports and CVEs), so a tester can act on it against the
+  live target, plus a kill-chain phase and a priority/actionability score to sequence
+  the work. It is honest by construction: a combination is reported only when each
+  slot is filled by a *distinct* real finding and the emergent severity is strictly
+  higher than the strongest constituent (so nothing is invented and there is no
+  "critical + info → critical" noise); confidence tracks the weakest link; a
+  combination is "Confirmed" only when every constituent is; and any evidence the
+  scan did not capture renders as an explicit placeholder rather than a guess. The
+  feature is wired end to end: a `Finding Correlation` scan phase, a
+  `GET /api/correlations/{scan_id}` endpoint plus a `POST /api/correlate` for an
+  operator-supplied finding list, a `heaven correlate` CLI command (with `--input`
+  for a JSON finding list and `--steps` for the playbook), a "Combined Risk" page in
+  the web UI, and a "Combined Risk (Correlated Findings)" section in the
+  penetration-test report.
+
 - **Real UDP service scanning. Privileged and unprivileged.** UDP was previously
   dead: no code path ever enabled it, the probe table was never used, and the only
   route (nmap `-sU`) needs raw sockets most operators do not have, so real UDP
@@ -480,6 +532,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Boolean-blind SQLi no longer fires on a parameter the page ignores when a
+  one-shot session flash message is in flight.** The live DVWA benchmark scored a
+  single false positive · a critical boolean-blind SQLi on `index.php?option=`,
+  a parameter DVWA's home page does not use (the baseline, TRUE and FALSE bodies
+  are byte-identical when the session is quiet). Under a concurrent authenticated
+  scan a different probe kept queueing DVWA's one-shot `dvwaMessage` flash, and
+  because the scanner always fetches the TRUE body before the FALSE body, the
+  first read consumed the transient and the second found it gone · so TRUE tracked
+  the baseline while FALSE looked "hidden", a perfect fake oracle that even
+  repeated (a fresh message kept arriving). The oracle now measures the page's own
+  request-to-request jitter from a re-fetched baseline and requires the TRUE/FALSE
+  swing to EXCEED it, and the reproduction round re-fetches that baseline and
+  SWAPS the TRUE/FALSE fetch order · a position-locked transient then flips
+  branches and collapses, while a genuine order-independent oracle holds. Recall
+  is unchanged (the real `/vulnerabilities/sqli_blind/` oracle still confirms):
+  DVWA recall stays 100% and the false positive is gone (precision → 100%).
+  Proven by a regression test built from the real captured DVWA responses
+  (`tests/fixtures/dvwa_bool_sqli/`) plus a fake session that models the
+  flash-message queue.
+
+- **Network scan no longer loses a host's signature service CVEs when `nmap -sV`
+  cannot finish (slow, emulated or rate-limited hosts).** A live Metasploitable-2
+  audit surfaced the "many findings before, few now" regression: on a QEMU-TCG
+  emulated host the CPU is too slow for a bulk `nmap -sV` to complete inside its
+  per-host timeout, so version detection fell back to a pure-Python banner path
+  that (a) never grabbed several greeting services and (b) could not fingerprint
+  the binary ones · so the version-aware CVE mapper was starved and every
+  signature remote-code-execution finding vanished (vsftpd 2.3.4 backdoor, Samba
+  usermap, UnrealIRCd 3.2.8.1 backdoor, distccd). The banner-read set now covers
+  the greeting services that were missed (ProFTPD 2121, VNC 5900-5903, IRC /
+  UnrealIRCd 6660/6667/6697, and more), a lightweight SMB negotiation reads the
+  native "Samba x.y.z" version without needing `-sV`, and the `-sV` enrichment is
+  batched over the CVE-bearing ports so a slow host still yields versions. The
+  banner fingerprinter also now extracts the OpenSSH *build* (`4.7p1`) instead of
+  the SSH *protocol* token (`2.0`). The result: the signature CVEs fire from the
+  banners alone, while honesty holds · a version-less UnrealIRCd is NOT asserted
+  as the trojaned-build backdoor (it stays a Potential), and distccd's
+  unconditional CVE still fires version-less.
+
+- **A Linux host running Samba is no longer mislabeled a "Windows Host".** The
+  NetBIOS (NBSTAT) enricher treated any node-status reply as proof of Windows,
+  but Samba on Linux answers NBSTAT identically · so a Metasploitable-2 (Linux)
+  box was reported as a Windows host, and the reply could even override a
+  heuristic Linux guess. OS resolution now reads the service banners first: a
+  Unix token anywhere (an SSH banner advertising Debian/Ubuntu, say) vetoes the
+  NetBIOS "Windows" call and the host is labeled Linux / an SMB file server. A
+  genuine Windows signal (IIS, a Windows banner) or a host with nothing but
+  NBSTAT still resolves to Windows, so the firewalled-Windows recovery path is
+  unchanged.
+
+- **Passive-OSINT (Shodan InternetDB) CVEs no longer inflate the high-severity
+  count with unverified, look-alike-confirmed findings.** CVE IDs that Shodan's
+  public record associates with a host's internet-facing IP were each emitted as
+  an individual high `vulnerable_service` · so on a shared-hosting IP a single
+  target collected a wall of high findings that read like confirmed
+  vulnerabilities, when they are unverified from the scan origin and may belong
+  to the shared server rather than the site. They now collapse into one honest,
+  low `potential_vulnerable_service` per host that lists every associated CVE for
+  follow-up (mirroring the version-less inline path) · surfaced so nothing is
+  missed, but never inflating the confirmed or high-severity risk they cannot
+  substantiate.
+
 - **`heaven sca` on a `requirements.txt` that uses version floors now audits it
   instead of reporting zero packages.** The `requirements.txt` parser only
   recognised exact `==` pins, so a normal floor-pinned file (`aiohttp>=3.14.3`,
@@ -749,6 +863,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finding untouched.
 
 ### Security
+
+- **Uploaded-artifact analysis is now bomb-proof across every zip-backed and
+  compressed format, so a malicious file can never exhaust the tool's memory.**
+  The mobile (APK/IPA) analyzer already read zip members incrementally through a
+  hard byte budget, but the generic archive and document analyzers did not: they
+  called `zipfile.read()` (and, for PDF, `zlib.decompress()`) which inflate a
+  whole member before the caller can slice it, so a crafted "zip bomb" entry
+  that is tiny on disk but expands to gigabytes could OOM the process even though
+  only a small prefix was wanted. Two shared, bounded helpers
+  (`safe_zip_read` / `safe_inflate` in `heaven.forensics.common`) now inflate
+  incrementally and stop at a fixed cap, and every member read in the archive
+  analyzer (zip secret scan), the OOXML document analyzer (vbaProject.bin,
+  `.rels`, `.xml` DDE, embedded objects, core properties, URL sweep) and the PDF
+  stream-inflation pass routes through them, with a per-stream and an aggregate
+  ceiling on the PDF path and a declared-size guard that stops a compressed-tar
+  bomb before its huge member is streamed. Legitimate files are analyzed exactly
+  as before · only the pathological expansion is refused. Proven with new
+  adversarial tests in `tests/test_forensics_security.py`.
+
+- **The offline-analysis report renderers no longer trust a client-supplied
+  severity.** `POST /api/analyze/report` renders a result object that the client
+  provides, and the forensic HTML/PDF renderers interpolated its `severity`
+  string straight into a CSS class / element text (HTML) and reportlab markup
+  (PDF). Severity is now normalised to the known set before rendering, closing an
+  HTML-injection sink in a shared report and a markup-corruption path in the PDF.
+  The main pentest, compliance, coverage and retest report builders were audited
+  and already escape every target-controlled field.
+
+- **The API refuses an oversized request body before a handler buffers it.** Most
+  endpoints read the whole JSON body into memory (`request.json()`), so a huge
+  body was an easy memory-exhaustion lever. A new body-size middleware rejects a
+  request whose declared `Content-Length` exceeds a ceiling (HTTP 413). The
+  ceiling is derived from the artifact-upload limit (`HEAVEN_ANALYZE_MAX_MB`, and
+  an optional `HEAVEN_MAX_REQUEST_MB` floor) so raising the upload limit can never
+  make the guard reject a legitimate upload. The artifact-upload temp path also
+  now strips anything but letters, digits and dots from the client-supplied
+  extension, so a hostile filename can never smuggle a path separator or control
+  byte into the on-disk name.
 
 - **Dependency floors raised past newly published advisories, and the whole
   install brought current.** HEAVEN's own self-audit (`heaven sca`) reads the

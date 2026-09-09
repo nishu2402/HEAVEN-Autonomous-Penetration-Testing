@@ -103,15 +103,17 @@ def detect_kind(path: str) -> str:
             or head[:6] == b"7z\xbc\xaf\x27\x1c" or head[:4] == b"Rar!"
             or (len(head) > 262 and head[257:262] == b"ustar")):
         return "archive"
-    # Firmware: filesystem signatures anywhere in the header, or a firmware ext.
-    if any(sig in head for sig in _FW_FS_SIGS) or ext in (".bin", ".img", ".trx",
-                                                          ".chk", ".fw", ".rom"):
-        return "firmware"
-
     # X.509 certificate / key material — PEM markers, a cert extension, or a
-    # DER ASN.1 SEQUENCE header (0x30 0x81/82/83). Checked after the more
-    # specific magics above so it only ever rescues bytes that would otherwise
-    # be "unknown"; the analyzer degrades gracefully if it is not really a cert.
+    # DER ASN.1 SEQUENCE header (0x30 0x81/82/83). Checked BEFORE the fuzzy
+    # firmware filesystem-signature scan below: a cert extension or an ASN.1
+    # SEQUENCE header is an exact, structural signal, whereas a short FS magic
+    # matched *anywhere* in the header false-positives on the ~512 bytes of
+    # random modulus + signature in a real certificate — the 2-byte JFFS2 magic
+    # (0x1985) alone lands in roughly 1% of DER certs, which intermittently
+    # misrouted them to the firmware analyzer. Still runs after the exact magics
+    # above (PDF/ELF/PCAP/image/media/ZIP/gzip/...), so it only claims bytes
+    # those left unresolved; the analyzer degrades gracefully if it is not
+    # really a cert.
     if b"-----BEGIN" in head and (b"CERTIFICATE-----" in head or b"PRIVATE KEY-----" in head
                                   or b"PUBLIC KEY-----" in head):
         return "certificate"
@@ -119,6 +121,11 @@ def detect_kind(path: str) -> str:
         return "certificate"
     if head[:1] == b"\x30" and len(head) >= 2 and head[1] in (0x81, 0x82, 0x83):
         return "certificate"
+
+    # Firmware: filesystem signatures anywhere in the header, or a firmware ext.
+    if any(sig in head for sig in _FW_FS_SIGS) or ext in (".bin", ".img", ".trx",
+                                                          ".chk", ".fw", ".rom"):
+        return "firmware"
 
     # Text that looks like hashes → crypto.
     try:

@@ -9,6 +9,7 @@ import { Cve } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import { sevColor } from "../theme";
+import { safeHref } from "../safeHref";
 
 export default function CvePage() {
   const [product, setProduct] = useState("");
@@ -169,7 +170,7 @@ export default function CvePage() {
                         </td>
                         <td className="mono" style={{ fontSize: 11.5 }}>
                           {ref ? (
-                            <a href={ref} target="_blank" rel="noopener noreferrer"
+                            <a href={safeHref(ref)} target="_blank" rel="noopener noreferrer"
                                style={{ color: "var(--accent-2)" }}>{c.cve_id}</a>
                           ) : c.cve_id}
                           {c.in_kev && (
@@ -180,7 +181,7 @@ export default function CvePage() {
                           )}
                           {c.exploit_available && (
                             c.exploit_url ? (
-                              <a href={c.exploit_url} target="_blank" rel="noopener noreferrer"
+                              <a href={safeHref(c.exploit_url)} target="_blank" rel="noopener noreferrer"
                                  className="badge" style={{
                                    marginLeft: 6, background: "#7b2ff7", color: "#fff",
                                    fontSize: 9, padding: "1px 5px", borderRadius: 4,

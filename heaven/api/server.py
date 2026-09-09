@@ -406,12 +406,11 @@ async def require_user(
         # guard the index so a malformed header returns 401, not a 500.
         parts = authorization.split(None, 1)
         token = parts[1].strip() if len(parts) > 1 else ""
-        if token:
-            session = auth._sessions.get(token)
-            if session and session.expires_at > __import__("time").time():
-                user = auth._users.get(session.user_id)
-                if user and user.is_active:
-                    return user
+        session = auth.validate_session(token)
+        if session:
+            user = auth._users.get(session.user_id)
+            if user and user.is_active:
+                return user
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
@@ -422,6 +421,52 @@ def require_permission(permission: str):
             raise HTTPException(status_code=403, detail=f"Missing permission: {permission}")
         return user
     return _checker
+
+
+async def _ws_authenticate(websocket: WebSocket, token: Optional[str]) -> bool:
+    """Validate a WebSocket handshake ``token`` (browsers can't set headers on a
+    WS open, so the token rides the query string).
+
+    Returns True on success — or when auth is disabled — and False after closing
+    the socket with 4401 on any failure, so every handler guards with::
+
+        if not await _ws_authenticate(websocket, token):
+            return
+
+    Centralising this keeps token -> session validation in one place
+    (``AuthManager.validate_session``) and guarantees every stream enforces token
+    expiry identically."""
+    if _auth_disabled():
+        return True
+    if get_auth_manager().validate_session(token) is None:
+        await websocket.close(code=4401, reason="Unauthorized")
+        return False
+    return True
+
+
+def _server_error(message: str, exc: Optional[BaseException] = None) -> HTTPException:
+    """Build a 500 that says WHAT failed without leaking the raw exception text
+    to the client (CWE-209, information exposure through an error message).
+
+    The message, exception and traceback are logged server-side under a short
+    reference id that the client-facing detail echoes, so an operator can
+    correlate a reported error with the full server log."""
+    ref = uuid.uuid4().hex[:8]
+    logger.error("server error [%s] %s", ref, message, exc_info=exc)
+    return HTTPException(status_code=500, detail=f"{message} (ref {ref})")
+
+
+def _ws_error(message: str, exc: Optional[BaseException] = None) -> str:
+    """Client-safe error string for a WebSocket 'error' frame — the streaming
+    analogue of ``_server_error``.
+
+    An unexpected exception raised inside a socket worker must not have its raw
+    text relayed to the browser (CWE-209); the full detail and traceback are
+    logged server-side under a short reference id, and only the generic message
+    plus that id go to the client, so an operator can still correlate the two."""
+    ref = uuid.uuid4().hex[:8]
+    logger.error("ws error [%s] %s", ref, message, exc_info=exc)
+    return f"{message} (ref {ref})"
 
 
 # The active-engagement pointer helpers live in heaven.engagement so the CLI,
@@ -2579,7 +2624,7 @@ def create_app() -> FastAPI:
                     except OSError:
                         pass
                     logger.exception("PDF report generation failed")
-                    raise HTTPException(500, f"PDF generation failed: {exc}") from exc
+                    raise _server_error("PDF generation failed", exc) from exc
                 if not os.path.getsize(tmp.name):
                     try:
                         os.unlink(tmp.name)
@@ -2623,7 +2668,7 @@ def create_app() -> FastAPI:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(500, f"report generation failed: {e}")
+            raise _server_error("report generation failed", e)
         filename = f"heaven-report-{safe}.{ext.get(fmt, fmt)}"
         return Response(content=body, media_type=media.get(fmt, "text/plain"),
                         headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -3085,15 +3130,8 @@ def create_app() -> FastAPI:
         {type:'done', ok, models}. A dead/absent Ollama server fails fast with a
         friendly {type:'error'} instead of hanging.
         """
-        if not _auth_disabled():
-            auth = get_auth_manager()
-            if not token or token not in auth._sessions:
-                await websocket.close(code=4401, reason="Unauthorized")
-                return
-            session = auth._sessions[token]
-            if session.expires_at < time.time():
-                await websocket.close(code=4401, reason="Token expired")
-                return
+        if not await _ws_authenticate(websocket, token):
+            return
         await websocket.accept()
         from heaven.ai import local_llm
         try:
@@ -3145,7 +3183,8 @@ def create_app() -> FastAPI:
                              "(open the Ollama app, or run `ollama serve`)"})
         except Exception as e:  # noqa: BLE001 — never crash the socket worker
             with contextlib.suppress(Exception):
-                await websocket.send_json({"type": "error", "error": str(e)})
+                await websocket.send_json({"type": "error",
+                                           "error": _ws_error("model pull failed", e)})
         with contextlib.suppress(Exception):
             await websocket.send_json({"type": "done", "ok": ok,
                                        "models": local_llm.list_models()})
@@ -3197,15 +3236,8 @@ def create_app() -> FastAPI:
         """Streaming AI assistant. Auth via `token` query param (browsers can't
         set WS headers). Client sends one JSON {messages, engagement?, grounded?,
         max_tokens?}; server streams {type:'delta', text} frames, then 'done'."""
-        if not _auth_disabled():
-            auth = get_auth_manager()
-            if not token or token not in auth._sessions:
-                await websocket.close(code=4401, reason="Unauthorized")
-                return
-            session = auth._sessions[token]
-            if session.expires_at < time.time():
-                await websocket.close(code=4401, reason="Token expired")
-                return
+        if not await _ws_authenticate(websocket, token):
+            return
         await websocket.accept()
         try:
             raw = await websocket.receive_json()
@@ -3243,7 +3275,8 @@ def create_app() -> FastAPI:
             return
         except Exception as e:  # noqa: BLE001 — never crash the socket worker
             with contextlib.suppress(Exception):
-                await websocket.send_json({"type": "error", "error": str(e)})
+                await websocket.send_json({"type": "error",
+                                           "error": _ws_error("assistant stream failed", e)})
         with contextlib.suppress(Exception):
             await websocket.send_json({"type": "done", "empty": not got})
             await websocket.close()
@@ -3451,7 +3484,7 @@ def create_app() -> FastAPI:
             from heaven.config import get_config
             from heaven.cli._helpers import _engagement_db_path
         except Exception as e:
-            raise HTTPException(500, f"replay subsystem unavailable: {e}")
+            raise _server_error("replay subsystem unavailable", e)
 
         body: dict = {}
         try:
@@ -3555,7 +3588,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.vulnscan.confirm import confirm_finding
         except Exception as e:
-            raise HTTPException(500, f"confirm module not importable: {e}")
+            raise _server_error("confirm module not importable", e)
 
         store = _engagement_store_factory(engagement)
         f = store.get_finding(finding_id)
@@ -3766,7 +3799,7 @@ def create_app() -> FastAPI:
                 )
                 return hyp_out.model_dump() if hasattr(hyp_out, "model_dump") else hyp_out.__dict__
         except Exception as e:
-            raise HTTPException(500, f"AI {kind} failed: {e}")
+            raise _server_error(f"AI {kind} failed", e)
 
         raise HTTPException(400, f"unknown AI layer kind: {kind!r}")
 
@@ -3885,7 +3918,7 @@ def create_app() -> FastAPI:
         except KeyError as e:
             raise HTTPException(400, f"missing required field: {e}")
         except Exception as e:
-            raise HTTPException(500, f"postex {module} failed: {e}")
+            raise _server_error(f"postex {module} failed", e)
 
         raise HTTPException(400, f"unknown postex module: {module!r}")
 
@@ -3945,7 +3978,7 @@ def create_app() -> FastAPI:
         except PermissionError as e:
             raise HTTPException(403, str(e))
         except Exception as e:
-            raise HTTPException(500, f"exploitation failed: {e}")
+            raise _server_error("exploitation failed", e)
 
     # ── Offline artifact analysis (forensics — authorized files only) ──
 
@@ -4070,7 +4103,7 @@ def create_app() -> FastAPI:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(500, f"analysis failed: {e}")
+            raise _server_error("analysis failed", e)
         finally:
             try:
                 tmp.close()
@@ -4114,7 +4147,7 @@ def create_app() -> FastAPI:
             except RuntimeError as e:
                 raise HTTPException(501, str(e))
             except Exception as e:
-                raise HTTPException(500, f"PDF render failed: {e}")
+                raise _server_error("PDF render failed", e)
             return {"filename": f"heaven-{kind}-{safe}.pdf",
                     "mimetype": "application/pdf",
                     "content": _b64.b64encode(pdf_bytes).decode("ascii"),
@@ -4175,7 +4208,7 @@ def create_app() -> FastAPI:
         except PermissionError as e:
             raise HTTPException(403, str(e))
         except Exception as e:
-            raise HTTPException(500, f"pivot failed: {e}")
+            raise _server_error("pivot failed", e)
 
     # ── Gap 7: Trigger train-priors from the UI ──
 
@@ -4187,7 +4220,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.ml.train_priors import discover_engagement_dbs, train_priors
         except Exception as e:
-            raise HTTPException(500, f"train_priors not importable: {e}")
+            raise _server_error("train_priors not importable", e)
 
         dirs = [Path("engagements"), Path("data/engagements")]
         dbs = discover_engagement_dbs(*dirs)
@@ -4332,7 +4365,7 @@ def create_app() -> FastAPI:
                     _methodology.render_coverage_pdf, std, engagement_name)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("methodology PDF generation failed")
-                raise HTTPException(500, f"PDF generation failed: {exc}") from exc
+                raise _server_error("PDF generation failed", exc) from exc
             filename = f"heaven-methodology-{safe_std}.pdf"
             return Response(content=pdf_bytes, media_type="application/pdf",
                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -4442,7 +4475,7 @@ def create_app() -> FastAPI:
                 pdf_bytes = await asyncio.to_thread(_cf.render_coverage_pdf, cov)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("compliance PDF generation failed")
-                raise HTTPException(500, f"PDF generation failed: {exc}") from exc
+                raise _server_error("PDF generation failed", exc) from exc
             filename = f"heaven-compliance-{safe}.pdf"
             return Response(content=pdf_bytes, media_type="application/pdf",
                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -4502,7 +4535,7 @@ def create_app() -> FastAPI:
             api_run = await asyncio.to_thread(run_api_benchmark, write_report=True)
         except Exception as e:  # noqa: BLE001 — surface the failure to the UI
             logger.exception("Native benchmark run failed")
-            raise HTTPException(500, f"Benchmark run failed: {e}")
+            raise _server_error("Benchmark run failed", e)
 
         logger.info("Native benchmarks (web + API) re-run by %s", user.username)
         # Return the two tiers we just ran (fresh markdown, not a stale disk read),
@@ -4545,7 +4578,7 @@ def create_app() -> FastAPI:
             from heaven.ai.autonomous_loop import run_autonomous
             from heaven.config import get_config as _get_config
         except Exception as e:
-            raise HTTPException(500, f"autonomous loop unavailable: {e}")
+            raise _server_error("autonomous loop unavailable", e)
 
         try:
             body = await request.json()
@@ -4661,15 +4694,8 @@ def create_app() -> FastAPI:
         on a WebSocket handshake). Polling GET /api/autonomous/jobs/{id} remains a
         complete fallback.
         """
-        if not _auth_disabled():
-            auth = get_auth_manager()
-            if not token or token not in auth._sessions:
-                await websocket.close(code=4401, reason="Unauthorized")
-                return
-            session = auth._sessions[token]
-            if session.expires_at < time.time():
-                await websocket.close(code=4401, reason="Token expired")
-                return
+        if not await _ws_authenticate(websocket, token):
+            return
 
         job = autonomous_jobs.get(job_id)
         if not job:
@@ -4927,15 +4953,8 @@ def create_app() -> FastAPI:
         (status + progress so far), then `iteration` frames, then a final
         `done`. Auth via the `token` query param (WS handshakes can't set
         headers). Polling GET /api/watch/jobs/{id} is a complete fallback."""
-        if not _auth_disabled():
-            auth = get_auth_manager()
-            if not token or token not in auth._sessions:
-                await websocket.close(code=4401, reason="Unauthorized")
-                return
-            session = auth._sessions[token]
-            if session.expires_at < time.time():
-                await websocket.close(code=4401, reason="Token expired")
-                return
+        if not await _ws_authenticate(websocket, token):
+            return
 
         job = watch_jobs.get(job_id)
         if not job:
@@ -4986,7 +5005,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.ai.coverage_grader import grade_engagement
         except Exception as e:
-            raise HTTPException(500, f"coverage_grader unavailable: {e}")
+            raise _server_error("coverage_grader unavailable", e)
         store = _read_store(engagement)
         report = await grade_engagement(store, use_llm=use_llm)
         return report.to_dict()
@@ -5009,7 +5028,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.postex.lateral import run_lateral
         except Exception as e:
-            raise HTTPException(500, f"lateral module unavailable: {e}")
+            raise _server_error("lateral module unavailable", e)
         try:
             body = await request.json()
         except Exception:
@@ -5027,7 +5046,7 @@ def create_app() -> FastAPI:
                 targets=targets,
             )
         except Exception as e:
-            raise HTTPException(500, f"lateral.run failed: {e}")
+            raise _server_error("lateral.run failed", e)
 
     # ── Knowledge graph (cross-engagement memory) ──
     @app.get("/api/knowledge/stats")
@@ -5038,7 +5057,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.ai.knowledge_graph import get_knowledge_graph
         except Exception as e:
-            raise HTTPException(500, f"knowledge_graph unavailable: {e}")
+            raise _server_error("knowledge_graph unavailable", e)
         return get_knowledge_graph().stats()
 
     @app.get("/api/knowledge/rank")
@@ -5053,7 +5072,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.ai.knowledge_graph import TargetProfile, get_knowledge_graph
         except Exception as e:
-            raise HTTPException(500, f"knowledge_graph unavailable: {e}")
+            raise _server_error("knowledge_graph unavailable", e)
         try:
             port_ints = [int(p) for p in ports.split(",") if p.strip()]
         except ValueError:
@@ -5092,7 +5111,7 @@ def create_app() -> FastAPI:
                 has_semgrep, run_sast, persist_findings,
             )
         except Exception as e:
-            raise HTTPException(500, f"sast_runner unavailable: {e}")
+            raise _server_error("sast_runner unavailable", e)
         if not has_semgrep():
             raise HTTPException(412, "semgrep not installed on the server "
                                      "(pip install semgrep)")
@@ -5159,7 +5178,7 @@ def create_app() -> FastAPI:
             from heaven.vulnscan.osv_client import OSVClient
             from heaven.vulnscan.sca_scanner import scan_path
         except Exception as e:  # pragma: no cover
-            raise HTTPException(500, f"sca_scanner unavailable: {e}")
+            raise _server_error("sca_scanner unavailable", e)
         if not OSVClient().available:
             raise HTTPException(412, "httpx not installed on the server "
                                      "(needed for OSV lookups)")
@@ -5215,7 +5234,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.vulnscan.cloud_scanner import CloudStorageScanner
         except Exception as e:  # pragma: no cover
-            raise HTTPException(500, f"cloud_scanner unavailable: {e}")
+            raise _server_error("cloud_scanner unavailable", e)
 
         try:
             body = await request.json()
@@ -5265,7 +5284,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.vulnscan.live_cve_feed import LiveCVEFeed
         except Exception as e:  # pragma: no cover
-            raise HTTPException(500, f"live_cve_feed unavailable: {e}")
+            raise _server_error("live_cve_feed unavailable", e)
 
         try:
             body = await request.json()
@@ -5317,7 +5336,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.devsecops.diff_finder import compute_diff
         except Exception as e:
-            raise HTTPException(500, f"diff_finder unavailable: {e}")
+            raise _server_error("diff_finder unavailable", e)
         store = _engagement_store_factory(engagement)
         # compute_diff raises ValueError when a scan id isn't in THIS engagement
         # (the common "diff isn't working" cause: the two scans live in different
@@ -5353,7 +5372,7 @@ def create_app() -> FastAPI:
             from heaven.devsecops.diff_finder import compute_diff
             from heaven.devsecops.retest_report import retest_posture
         except Exception as e:
-            raise HTTPException(500, f"retest unavailable: {e}")
+            raise _server_error("retest unavailable", e)
         store = _engagement_store_factory(engagement)
         try:
             report = compute_diff(store, baseline, scan_id)
@@ -5376,7 +5395,7 @@ def create_app() -> FastAPI:
             from heaven.devsecops.diff_finder import compute_diff
             from heaven.devsecops.retest_report import render_retest_html
         except Exception as e:
-            raise HTTPException(500, f"retest unavailable: {e}")
+            raise _server_error("retest unavailable", e)
         store = _engagement_store_factory(engagement)
         try:
             report = compute_diff(store, baseline, scan_id)
@@ -5436,7 +5455,7 @@ def create_app() -> FastAPI:
         try:
             from heaven.vulnscan.exploitdb_client import lookup_cve as _lookup
         except Exception as e:
-            raise HTTPException(500, f"exploitdb_client unavailable: {e}")
+            raise _server_error("exploitdb_client unavailable", e)
         result = await _lookup(cve)
         return {
             "cve": result.cve,
@@ -5462,15 +5481,8 @@ def create_app() -> FastAPI:
     @app.websocket("/api/ws/scan/{scan_id}")
     async def scan_websocket(websocket: WebSocket, scan_id: str, token: Optional[str] = Query(None)):
         # WebSocket auth via query param (browsers can't set headers on WS open)
-        if not _auth_disabled():
-            auth = get_auth_manager()
-            if not token or token not in auth._sessions:
-                await websocket.close(code=4401, reason="Unauthorized")
-                return
-            session = auth._sessions[token]
-            if session.expires_at < __import__("time").time():
-                await websocket.close(code=4401, reason="Token expired")
-                return
+        if not await _ws_authenticate(websocket, token):
+            return
 
         await websocket.accept()
         ws_connections.append(websocket)
@@ -5490,11 +5502,8 @@ def create_app() -> FastAPI:
     @app.websocket("/api/ws/logs")
     async def logs_websocket(websocket: WebSocket, token: Optional[str] = Query(None)):
         """Stream real-time orchestrator logs."""
-        if not _auth_disabled():
-            auth = get_auth_manager()
-            if not token or token not in auth._sessions:
-                await websocket.close(code=4401, reason="Unauthorized")
-                return
+        if not await _ws_authenticate(websocket, token):
+            return
 
         await websocket.accept()
         log_ws_connections.append(websocket)

@@ -65,6 +65,46 @@ def test_hardcoded_secret_detected_and_placeholder_suppressed():
                    for f in scan_text("a.py", env))
 
 
+def test_interpolated_secret_value_is_not_flagged():
+    # A line that *reports* a secret found on a target is not a hardcoded secret:
+    # the quoted "value" is an interpolation field, never a literal. Both lines
+    # below match the generic-credential shape `secret: '<value>'` yet the value
+    # is only a template token — the native scanner's own false positive on
+    # advanced_attacks.py (an f-string field) and its %-format sibling.
+    for code in (
+        "title = f\"JWT Weak Signing Secret: '{cracked_secret}'\"\n",
+        "msg = \"api_key='%(api_key_value)s'\"\n",
+    ):
+        assert not any(f.rule_id == "heaven.native.hardcoded-secret"
+                       for f in scan_text("a.py", code)), code
+    # …but a real quoted literal in the same shape still flags.
+    assert any(f.rule_id == "heaven.native.hardcoded-secret"
+               for f in scan_text("a.py", 'password = "S3cr3tP@ssw0rd!"\n'))
+
+
+def test_weak_hash_guard_on_a_continuation_line_is_honored():
+    # A long ``hashlib.md5(...)`` that a formatter (Black/PEP8) wrapped across
+    # lines keeps its ``usedforsecurity=False`` guard on a *continuation* line.
+    # A strictly per-line ``unless`` check misses it and flags a false weak-hash;
+    # the guard must be read against the whole bracketed statement.
+    wrapped = (
+        "import hashlib\n"
+        "def h(x):\n"
+        "    return hashlib.md5(\n"
+        "        x.encode(),\n"
+        "        usedforsecurity=False,\n"
+        "    ).hexdigest()\n"
+    )
+    assert not any(f.rule_id.endswith("py-weak-hash")
+                   for f in scan_text("a.py", wrapped))
+    # …but an unguarded weak hash still flags, and the classic same-line guard
+    # still suppresses — the widened window only removes false positives.
+    assert any(f.rule_id.endswith("py-weak-hash")
+               for f in scan_text("a.py", "import hashlib\nhashlib.md5(pw.encode())\n"))
+    assert not any(f.rule_id.endswith("py-weak-hash") for f in scan_text(
+        "a.py", "import hashlib\nhashlib.md5(b'x', usedforsecurity=False)\n"))
+
+
 def test_aws_example_key_suppressed_but_real_flagged():
     # The canonical AWS *example* key must be suppressed as a placeholder.
     assert not any(f.rule_id == "heaven.native.hardcoded-secret"

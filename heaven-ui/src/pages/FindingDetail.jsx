@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router";
 import { Engagement, ExploitProof, AI, ExploitDB } from "../api";
 import Markdown from "../components/Markdown";
+import { safeHref } from "../safeHref";
 
 // Evidence-package keys that are rendered by their own dedicated cards (the
 // candidate-CVE table, HTTP transaction, etc.) and so must NOT be repeated in
@@ -612,7 +613,7 @@ export default function FindingDetail() {
           <ul style={{ paddingLeft: 18, lineHeight: 1.9 }}>
             {ev.references.map((r, i) => (
               <li key={i} style={{ fontSize: 13 }}>
-                <a href={r} target="_blank" rel="noopener noreferrer"
+                <a href={safeHref(r)} target="_blank" rel="noopener noreferrer"
                    style={{ color: "var(--cyan)", wordBreak: "break-all" }}>{r}</a>
               </li>
             ))}
@@ -896,7 +897,7 @@ function ExploitDBLookup({ cve }) {
         <div style={{ marginTop: 10 }}>
           <div>
             <strong>Best match:</strong>{" "}
-            <a href={data.best.url} target="_blank" rel="noopener noreferrer"
+            <a href={safeHref(data.best.url)} target="_blank" rel="noopener noreferrer"
                style={{ color: "var(--cyan)" }}>
               EDB-{data.best.edb_id}
             </a>{" "}
@@ -920,7 +921,7 @@ function ExploitDBLookup({ cve }) {
           <ul style={{ paddingLeft: 18, lineHeight: 1.6, fontSize: 12 }}>
             {data.entries.map((e) => (
               <li key={e.edb_id}>
-                <a href={e.url} target="_blank" rel="noopener noreferrer"
+                <a href={safeHref(e.url)} target="_blank" rel="noopener noreferrer"
                    style={{ color: "var(--cyan)" }}>EDB-{e.edb_id}</a>{" "}
                 <span className="dim">[{e.platform}]</span> {e.title}
               </li>

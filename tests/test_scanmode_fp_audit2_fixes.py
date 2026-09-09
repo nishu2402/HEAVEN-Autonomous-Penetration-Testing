@@ -165,6 +165,48 @@ def test_forensics_detects_der_certificate():
         Path(path).unlink()
 
 
+def test_der_cert_with_embedded_jffs2_magic_is_not_firmware():
+    """Deterministic regression for a real misclassification (and the flake it
+    caused). ``detect_kind`` scans the whole header for firmware filesystem
+    magics with ``sig in head``; the 2-byte JFFS2 magic ``0x1985`` lands in the
+    ~1 KB of random modulus/signature of roughly 1% of DER certificates, which
+    used to win over the certificate signal and misroute the cert to the
+    firmware analyzer. The exact cert signals (extension + ASN.1 SEQUENCE
+    header) are now checked first, so a cert can never be mistaken for firmware.
+
+    Rather than depend on a lucky random key, embed the JFFS2 magic explicitly
+    behind a valid ASN.1 SEQUENCE header — the exact collision that used to
+    trip the firmware scan.
+    """
+    der = b"\x30\x82\x01\x00" + b"\x00" * 40 + b"\x85\x19" + b"\x00" * 40
+    # With a cert extension the extension check must win.
+    path = _write(der, ".der")
+    try:
+        assert detect_kind(path) == "certificate"
+    finally:
+        Path(path).unlink()
+    # With no extension the structural ASN.1 header alone must still win.
+    path = _write(der, "")
+    try:
+        assert detect_kind(path) == "certificate"
+    finally:
+        Path(path).unlink()
+
+
+def test_firmware_detection_still_fires_for_real_images():
+    """The cert-first reorder must not weaken firmware detection: a squashfs
+    image (``hsqs`` magic) and a JFFS2 image are still classified as firmware.
+    """
+    fw_squashfs = _write(b"hsqs" + b"\x00" * 200, ".img")
+    fw_jffs2 = _write(b"\x85\x19" + b"\x00" * 200, ".bin")
+    try:
+        assert detect_kind(fw_squashfs) == "firmware"
+        assert detect_kind(fw_jffs2) == "firmware"
+    finally:
+        Path(fw_squashfs).unlink()
+        Path(fw_jffs2).unlink()
+
+
 # A real 1024-bit, SHA-1-signed, self-signed DER certificate (openssl-generated).
 # cryptography refuses to *create* SHA-1 signatures, but parses an existing one —
 # exactly the field case where a weak signature must be flagged.

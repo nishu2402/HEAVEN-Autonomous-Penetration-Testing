@@ -9,6 +9,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { Compliance as C, downloadCompliance } from "../api";
+import { safeHref } from "../safeHref";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 import { useToast } from "../components/Toast.jsx";
 
@@ -166,7 +167,7 @@ function FrameworkView({ cov }) {
       <div className="dim" style={{ fontSize: 12, lineHeight: 1.6 }}>
         {cov.subtitle}
         {cov.reference && (
-          <> · <a href={cov.reference} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)" }}>reference →</a></>
+          <> · <a href={safeHref(cov.reference)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)" }}>reference →</a></>
         )}
       </div>
 

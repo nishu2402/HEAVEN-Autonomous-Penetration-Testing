@@ -404,7 +404,7 @@ class IDORScanner:
                             },
                             remediation=(
                                 "Verify user authorization before returning resources by UUID. "
-                                "UUIDs are not a security control — they must be paired with authz checks."
+                                "UUIDs are not a security control, they must be paired with authz checks."
                             ),
                             cwe="CWE-639",
                         )
@@ -442,7 +442,7 @@ class IDORScanner:
             self._add(
                 target=url,
                 vuln_type="idor",
-                title="IDOR — Horizontal privilege escalation (dual-session access)",
+                title="IDOR: Horizontal privilege escalation (dual-session access)",
                 severity="critical",
                 confidence=0.92,
                 evidence={

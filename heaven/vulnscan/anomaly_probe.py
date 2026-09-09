@@ -323,7 +323,7 @@ class ProtocolFuzzer:
             return AnomalyCandidate(
                 target="", category="format_string",
                 confidence=0.7, severity="critical",
-                description="Potential format string vulnerability — memory addresses leaked in response",
+                description="Potential format string vulnerability, memory addresses leaked in response",
                 evidence={"leaked_addresses": hex_pattern[:5], "payload": payload[:100]},
                 remediation="Use parameterized format functions. Never pass user input as format strings.",
                 cwe_id="CWE-134", technique="format_string_fuzzing",
@@ -907,7 +907,7 @@ class WebAnomalyProbe:
                                 target=url, category="prototype_pollution",
                                 confidence=0.90, severity="high",
                                 description=(
-                                    "Server-Side Prototype Pollution via JSON body — "
+                                    "Server-Side Prototype Pollution via JSON body, "
                                     "__proto__ key accepted and property reflected."
                                 ),
                                 evidence={"payload": payload, "reflected": True},

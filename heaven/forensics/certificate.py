@@ -133,7 +133,7 @@ def _analyze_cert(cert: Any, path: str) -> tuple[dict[str, Any], list[dict[str, 
         add("weak_certificate_signature", sev,
             f"Weak certificate signature algorithm ({sig_alg.upper()})",
             f"The certificate is signed with {sig_alg.upper()}, which has "
-            "practical collision attacks — a forged certificate can share the "
+            "practical collision attacks, a forged certificate can share the "
             "signature. Modern CAs sign with SHA-256 or better.", cwe="CWE-327",
             remediation="Reissue signed with SHA-256 (or SHA-384) and distrust the old one.")
 

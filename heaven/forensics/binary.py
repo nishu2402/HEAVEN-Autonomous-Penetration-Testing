@@ -40,20 +40,20 @@ _NOISE_IPS = {"0.0.0.0", "127.0.0.1", "255.255.255.255", "1.2.3.4", "8.8.8.8",
 # Functions whose presence in a binary's imports is worth flagging: classic
 # memory-corruption sinks and command-exec primitives.
 _DANGEROUS_FUNCS = {
-    "gets": ("no bounds check — trivially exploitable buffer overflow", "critical"),
+    "gets": ("no bounds check, trivially exploitable buffer overflow", "critical"),
     "strcpy": ("unbounded string copy → buffer overflow", "high"),
     "strcat": ("unbounded string concat → buffer overflow", "high"),
     "sprintf": ("unbounded formatted write → buffer overflow", "high"),
     "vsprintf": ("unbounded formatted write → buffer overflow", "high"),
     "scanf": ("unbounded %s read → buffer overflow", "medium"),
     "sscanf": ("unbounded %s read → buffer overflow", "medium"),
-    "system": ("shell command execution — command-injection sink", "high"),
-    "popen": ("shell command execution — command-injection sink", "high"),
+    "system": ("shell command execution, command-injection sink", "high"),
+    "popen": ("shell command execution, command-injection sink", "high"),
     "execve": ("process execution primitive", "medium"),
     "execlp": ("PATH-searching process execution", "medium"),
     "execvp": ("PATH-searching process execution", "medium"),
     "strncpy": ("off-by-one / non-terminated buffer risk", "low"),
-    "memcpy": ("length-controlled copy — overflow if size is attacker-controlled", "low"),
+    "memcpy": ("length-controlled copy, overflow if size is attacker-controlled", "low"),
     "mktemp": ("insecure temp file (race)", "low"),
     "tmpnam": ("insecure temp file (race)", "low"),
     "rand": ("non-cryptographic RNG", "low"),
@@ -590,7 +590,7 @@ def analyze_binary(path: str, **_: Any) -> dict[str, Any]:
             slice_data = _fat_first_slice(data, magic_be == 0xCAFEBABF)
             if slice_data:
                 _analyze_macho(slice_data, rep)
-                rep.notes.append("universal (fat) Mach-O — analyzed first arch slice")
+                rep.notes.append("universal (fat) Mach-O, analyzed first arch slice")
             else:
                 rep.notes.append("fat Mach-O header not parseable")
         else:
@@ -687,7 +687,7 @@ def _build_findings(rep: BinaryReport) -> None:
         add("binary_hardcoded_endpoint", "info",
             "Hardcoded network endpoint(s) in the binary",
             "The binary embeds hardcoded URLs/IP addresses. These are the servers it "
-            "talks to (update, telemetry, or — in malware — command-and-control).",
+            "talks to (update, telemetry, or, in malware, command-and-control).",
             cwe="CWE-200",
             evidence={"urls": strs.get("urls", [])[:15], "ips": strs.get("ips", [])[:15]})
     if rep.fortified is False and rep.format == "elf" and rep.stripped is False:
@@ -713,7 +713,7 @@ def _build_findings(rep: BinaryReport) -> None:
     if rwx_secs:
         add("rwx_section", "medium", "Writable+executable PE section",
             f"Section(s) {', '.join(rwx_secs[:4])} are both writable and "
-            "executable, allowing self-modifying code / runtime unpacking — a "
+            "executable, allowing self-modifying code / runtime unpacking, a "
             "common malware trait.", cwe="CWE-119",
             evidence={"sections": [s for s in rep.sections if s.get("rwx")]})
     packer_secs = [s["name"] for s in rep.sections if s.get("packer_name")]

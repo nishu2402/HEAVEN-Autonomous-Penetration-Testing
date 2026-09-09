@@ -135,7 +135,7 @@ _PRIVESC_PRIMITIVES: tuple[_PrivescPrimitive, ...] = (
         "CreatePolicyVersion", "Publish a new default version of a managed policy",
         (("iam:CreatePolicyVersion",),), "high",
         "iam:CreatePolicyVersion lets the principal set a new *default* version of "
-        "a customer-managed policy it can reach; the new version can Allow */* — "
+        "a customer-managed policy it can reach; the new version can Allow */*, "
         "instant administrator without touching any attachment."),
     _PrivescPrimitive(
         "SetDefaultPolicyVersion", "Roll a managed policy back to a permissive version",
@@ -317,7 +317,7 @@ def _privesc_findings(documents: list[Any], target: str,
             f"'{prim.pid}' privilege-escalation technique. {prim.detail}",
             impact="A non-administrator identity with this permission can elevate "
                    "itself to full account administrator without any further "
-                   "grant — a single-step path from limited access to total "
+                   "grant, a single-step path from limited access to total "
                    "control.",
             remediation=(
                 "Remove the escalation-enabling action from this identity, or "
@@ -500,7 +500,7 @@ def _audit_user_privileges(iam: Any, user: str, account: str,
             f"allows every action (Action \"*\") on every resource (Resource "
             f"\"*\") without a restricting condition.",
             impact="A compromise of this identity's credentials yields full "
-                   "control of the AWS account — every service, every resource.",
+                   "control of the AWS account, every service, every resource.",
             remediation=(
                 "1. Replace the administrator grant with a least-privilege policy "
                 "scoped to only the actions and resources this identity needs. "
@@ -577,7 +577,7 @@ def _audit_user_hygiene(iam: Any, user: str, account: str) -> list[dict]:
                 f"IAM user '{user}' can sign in to the AWS console (a login "
                 f"profile exists) but has no MFA device registered.",
                 impact="A stolen or phished console password is sufficient to "
-                       "authenticate — there is no second factor.",
+                       "authenticate, there is no second factor.",
                 remediation="Enforce MFA for all console users and add an IAM "
                             "policy that denies actions unless "
                             "aws:MultiFactorAuthPresent is true."))
@@ -629,7 +629,7 @@ def _audit_account(iam: Any, account: str) -> list[dict]:
                 "keys grant unrestricted, unconditional access and cannot be "
                 "scoped by IAM policy.",
                 impact="A leaked root key is a full, unrecoverable account "
-                       "compromise — root cannot be restricted by IAM.",
+                       "compromise, root cannot be restricted by IAM.",
                 remediation="Delete all root access keys. Perform routine work "
                             "with least-privileged IAM roles/users and reserve "
                             "root for the few tasks that require it (with MFA)."))

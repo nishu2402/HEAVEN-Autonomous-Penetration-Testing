@@ -144,7 +144,7 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
     if not inventory and not dns_inv:
         _print("[yellow]No host inventory yet.[/yellow] Run a network scan first, e.g. "
                "[cyan]heaven scan -m network -t <target> --i-have-authorization[/cyan]"
-               "\n[dim]DNS records appear here too — run [cyan]heaven dns <domain> "
+               "\n[dim]DNS records appear here too, run [cyan]heaven dns <domain> "
                "--engagement <name>[/cyan].[/dim]")
         return
 

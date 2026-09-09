@@ -91,7 +91,7 @@ class LinpeasRunner:
         except ImportError:
             return LinpeasResult(
                 host=host, user=username, success=False,
-                error="asyncssh not installed — pip install asyncssh",
+                error="asyncssh not installed, pip install asyncssh",
             )
         from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
 

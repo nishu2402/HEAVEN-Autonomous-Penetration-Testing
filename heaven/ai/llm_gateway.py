@@ -886,13 +886,13 @@ class LLMGateway:
                 base = _local_base_url(self.provider)
                 if not base:
                     self._init_error = (
-                        "no local LLM endpoint configured — set HEAVEN_LLM_BASE_URL "
+                        "no local LLM endpoint configured, set HEAVEN_LLM_BASE_URL "
                         "for provider 'local' (e.g. http://localhost:1234/v1)"
                     )
                     return
                 if self.provider == "local" and not self.model:
                     self._init_error = (
-                        "no model set for provider 'local' — set HEAVEN_LLM_MODEL "
+                        "no model set for provider 'local', set HEAVEN_LLM_MODEL "
                         "to your served model id"
                     )
                     return
@@ -1644,7 +1644,7 @@ class LLMGateway:
             if finish is not None:
                 name = getattr(finish, "name", str(finish))
                 if name == "MAX_TOKENS":
-                    return ("response truncated before any text (MAX_TOKENS) — "
+                    return ("response truncated before any text (MAX_TOKENS), "
                             "raise max_tokens")
                 if name not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
                     return f"response stopped: {name}"

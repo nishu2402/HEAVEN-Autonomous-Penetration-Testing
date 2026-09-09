@@ -164,7 +164,7 @@ async def _probe_apache_traversal(session: Any, base: str) -> Optional[VerifyRes
         if _PASSWD_MARKER in body:
             return VerifyResult(
                 cve="", probed=True, proved=True, technique="path_traversal_file_read",
-                notes="Read /etc/passwd via the Apache path-traversal flaw — confirmed.",
+                notes="Read /etc/passwd via the Apache path-traversal flaw, confirmed.",
                 evidence={
                     "request": f"GET {path}",
                     "observable": _PASSWD_MARKER,
@@ -175,7 +175,7 @@ async def _probe_apache_traversal(session: Any, base: str) -> Optional[VerifyRes
     return VerifyResult(
         cve="", probed=True, proved=False, technique="path_traversal_file_read",
         notes="Traversal request did not return /etc/passwd (patched, cgi-bin "
-              "disabled, or not this server) — remains Potential.",
+              "disabled, or not this server), remains Potential.",
     )
 
 
@@ -200,7 +200,7 @@ async def _probe_shellshock(session: Any, base: str) -> Optional[VerifyResult]:
         if marker in body:
             return VerifyResult(
                 cve="", probed=True, proved=True, technique="shellshock_env_injection",
-                notes="CGI script executed an injected echo (Shellshock) — confirmed.",
+                notes="CGI script executed an injected echo (Shellshock), confirmed.",
                 evidence={
                     "endpoint": ep, "canary": token, "response_status": status,
                     "response_excerpt": body[:200],
@@ -209,7 +209,7 @@ async def _probe_shellshock(session: Any, base: str) -> Optional[VerifyResult]:
     return VerifyResult(
         cve="", probed=True, proved=False, technique="shellshock_env_injection",
         notes="No reachable CGI endpoint reflected the canary (patched or no CGI) "
-              "— remains Potential.",
+              ", remains Potential.",
     )
 
 
@@ -272,7 +272,7 @@ async def verify_finding(finding: dict[str, Any], *, session: Any = None,
         return finding
     if aiohttp is None:
         _record(finding, {"probed": False, "proved": False,
-                          "reason": "aiohttp not installed — cannot run active probe"})
+                          "reason": "aiohttp not installed, cannot run active probe"})
         return finding
 
     bases = _base_urls(finding)

@@ -81,7 +81,7 @@ def _persist(engagement: str, records: list[dict], findings: list[dict]) -> None
 @click.option("--no-subdomains", is_flag=True,
               help="Skip the common-subdomain brute-force enumeration")
 @click.option("--no-security", is_flag=True,
-              help="Records/subdomains only — skip the DNS security checks "
+              help="Records/subdomains only, skip the DNS security checks "
                    "(zone transfer, SPF/DMARC/DKIM, takeover)")
 @click.option("--engagement",
               help="Persist results into this engagement (surfaces in Assets + reports)")

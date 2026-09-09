@@ -771,7 +771,7 @@ def render_coverage_html(std: dict[str, Any], eng_name: str = "") -> str:
             f"<li><span class='sev sev-{_esc(r.get('severity', 'info'))}'>"
             f"{_esc((r.get('severity') or 'info').upper())}</span> "
             f"{_esc(r.get('title') or r.get('vuln_type') or 'Finding')}"
-            f"{' — <code>' + _esc(r['target']) + '</code>' if r.get('target') else ''}</li>"
+            f"{', <code>' + _esc(r['target']) + '</code>' if r.get('target') else ''}</li>"
             for r in refs)
         extra = ""
         if row.get("exercised_count", 0) > len(refs):

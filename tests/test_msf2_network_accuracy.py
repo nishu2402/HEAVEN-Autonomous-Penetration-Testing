@@ -13,9 +13,13 @@ live host and no nmap.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+
 import pytest
 
 from heaven.recon.network_scanner import (
+    HostResult,
     PortResult,
     _BANNER_READ_PORTS,
     _ENRICH_PRIORITY_PORTS,
@@ -100,6 +104,129 @@ async def test_unrealircd_stays_potential_without_the_exact_build():
                  if v.get("cve") == "CVE-2010-2075"
                  and v.get("vuln_type") == "vulnerable_service"]
     assert not confirmed, "version-less UnrealIRCd must not assert the backdoor"
+
+
+@pytest.mark.asyncio
+async def test_irc_probe_registers_before_asking_for_version(monkeypatch):
+    """UnrealIRCd only emits the build-bearing 002/004/351 numerics once the
+    client has registered, so a bare ``VERSION`` (the old probe) never captured
+    "Unreal3.2.8.1" and the backdoor CVE could not be confirmed live. Stand up a
+    fake ircd that withholds the version until it sees NICK+USER, and assert the
+    probe now registers first and comes back with the exact build (which the
+    version-aware mapper turns into the confirmed CVE-2010-2075 critical).
+    """
+    # Resolve the module at RUN time: sibling tests (e.g. test_advanced) nuke
+    # ``sys.modules['heaven*']``, so a name imported at collection can point at a
+    # stale module object while monkeypatch patches the live one. Patching and
+    # calling through the same live object keeps them in lock-step.
+    import importlib
+    ns = importlib.import_module("heaven.recon.network_scanner")
+    cve = importlib.import_module("heaven.vulnscan.cve_mapper")
+
+    async def handle(reader, writer):
+        # Greet with a hostname-lookup NOTICE only: no version pre-registration.
+        writer.write(b":irc.fake NOTICE AUTH :*** Looking up your hostname...\r\n")
+        with contextlib.suppress(Exception):
+            await writer.drain()
+        buf = b""
+        registered = False
+        try:
+            while True:
+                chunk = await asyncio.wait_for(reader.read(256), timeout=2.0)
+                if not chunk:
+                    break
+                buf += chunk
+                if not registered and b"NICK" in buf and b"USER" in buf:
+                    registered = True
+                    writer.write(
+                        b":irc.fake 001 hvnscan :Welcome\r\n"
+                        b":irc.fake 002 hvnscan :Your host is irc.fake, "
+                        b"running version Unreal3.2.8.1\r\n"
+                        b":irc.fake 004 hvnscan irc.fake Unreal3.2.8.1 abc\r\n"
+                    )
+                    await writer.drain()
+                if registered and b"VERSION" in buf:
+                    writer.write(
+                        b":irc.fake 351 hvnscan Unreal3.2.8.1. irc.fake :FhiXOoE\r\n")
+                    await writer.drain()
+                    break
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    # Treat this ephemeral port as an IRC port so the probe takes the IRC path.
+    # Patch a SUPERSET (keep the real IRC ports) so this never removes 6667 for a
+    # sibling test, and wrap the probe in a hard timeout so a stuck socket can
+    # never hang the run.
+    monkeypatch.setattr(ns, "_IRC_PORTS", frozenset(ns._IRC_PORTS | {port}))
+    try:
+        async with server:
+            banner = await asyncio.wait_for(
+                ns._grab_banner("127.0.0.1", port, 3.0), timeout=10.0)
+    finally:
+        server.close()
+        with contextlib.suppress(Exception):
+            await server.wait_closed()
+
+    assert "Unreal3.2.8.1" in banner, (
+        f"IRC probe must register then read the version; got {banner!r}")
+    assert cve._fingerprint_from_banner(banner) == ("unrealircd", "3.2.8.1")
+
+
+def _irc_host(product="UnrealIRCd", version=""):
+    hr = HostResult(host="10.0.0.9")
+    hr.open_ports = [PortResult(host="10.0.0.9", port=6667, protocol="tcp",
+                                state="open", service="irc",
+                                product=product, version=version)]
+    return hr
+
+
+@pytest.mark.asyncio
+async def test_enrich_irc_fills_version_and_enables_confirmed_backdoor(monkeypatch):
+    # nmap reports the product but no version, so the finding would stay a
+    # version-less "potential". The IRC VERSION probe recovers the exact build,
+    # which is what lets the mapper confirm the backdoor. Real capture only.
+    import importlib
+    ns = importlib.import_module("heaven.recon.network_scanner")
+    monkeypatch.setattr(ns, "_IRC_PORTS", frozenset({6667}))
+    async def fake_grab(host, port, timeout):
+        return ":irc 002 x :running version Unreal3.2.8.1"
+    monkeypatch.setattr(ns, "_grab_banner", fake_grab)
+    hr = _irc_host()
+    await ns._enrich_irc_versions(hr, "10.0.0.9", 3.0)
+    assert hr.open_ports[0].version == "3.2.8.1"
+    # And that version now yields the CONFIRMED critical (not a low potential).
+    vulns = await _map([
+        {"port": 6667, "service": "irc", "product": "UnrealIRCd",
+         "version": hr.open_ports[0].version, "banner": hr.open_ports[0].banner},
+    ])
+    assert any(v.get("cve") == "CVE-2010-2075" and v.get("severity") == "critical"
+               for v in vulns), "3.2.8.1 must confirm the backdoor as critical"
+
+
+@pytest.mark.asyncio
+async def test_enrich_irc_probes_each_port_once_no_throttle_retry(monkeypatch):
+    # UnrealIRCd extends its reconnect-throttle on every reconnect, so retrying is
+    # useless AND needless load on the target: the enrichment must probe each port
+    # exactly once (never a retry storm).
+    import importlib
+    ns = importlib.import_module("heaven.recon.network_scanner")
+    monkeypatch.setattr(ns, "_IRC_PORTS", frozenset({6667}))
+    calls = {"n": 0}
+    async def throttled(host, port, timeout):
+        calls["n"] += 1
+        return "ERROR :Closing Link: [x] (Throttled: Reconnecting too fast)"
+    monkeypatch.setattr(ns, "_grab_banner", throttled)
+    hr = _irc_host()  # one open IRC port
+    await ns._enrich_irc_versions(hr, "10.0.0.9", 3.0)
+    assert calls["n"] == 1, "one probe per port: retrying only prolongs the throttle"
+    # A throttled daemon leaves the port version-less, so it stays an HONEST low
+    # "potential" carrying the CVE candidate and is never asserted as the backdoor.
+    assert hr.open_ports[0].version == ""
 
 
 # ── OS false positive: Samba-on-Linux must never read as Windows ────────────

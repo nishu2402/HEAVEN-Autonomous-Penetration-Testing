@@ -485,37 +485,37 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     F = result.findings
     if result.heartbleed:
         F.append(_make_finding(host, port, "heartbleed", "critical",
-            "HEARTBLEED — TLS Memory Disclosure (CVE-2014-0160)",
+            "HEARTBLEED: TLS Memory Disclosure (CVE-2014-0160)",
             "Server leaks up to 64 KB of heap memory per request via malformed TLS HeartBeat.",
             cve="CVE-2014-0160"))
     if result.drown:
         F.append(_make_finding(host, port, "drown", "critical",
-            "DROWN Attack — SSLv2 Enabled (CVE-2016-0800)",
+            "DROWN Attack: SSLv2 Enabled (CVE-2016-0800)",
             "SSLv2 support allows cross-protocol RSA decryption attacks against TLS sessions.",
             cve="CVE-2016-0800"))
     if result.poodle:
         F.append(_make_finding(host, port, "poodle", "high",
-            "POODLE — SSLv3 CBC Padding Oracle (CVE-2014-3566)",
+            "POODLE: SSLv3 CBC Padding Oracle (CVE-2014-3566)",
             "SSLv3 is enabled; POODLE attack can decrypt HTTP cookies.",
             cve="CVE-2014-3566"))
     if result.freak:
         F.append(_make_finding(host, port, "freak", "high",
-            "FREAK — Export-Grade RSA Key Exchange (CVE-2015-0204)",
+            "FREAK: Export-Grade RSA Key Exchange (CVE-2015-0204)",
             "Server supports EXPORT cipher suites, enabling RSA factoring attacks.",
             cve="CVE-2015-0204"))
     if result.logjam:
         F.append(_make_finding(host, port, "logjam", "high",
-            "Logjam — Weak DHE Key Exchange (CVE-2015-4000)",
+            "Logjam: Weak DHE Key Exchange (CVE-2015-4000)",
             "Server uses 512-bit or 1024-bit DHE parameters, broken by NSA-class adversaries.",
             cve="CVE-2015-4000"))
     if result.beast:
         F.append(_make_finding(host, port, "beast", "medium",
-            "BEAST — TLS 1.0 CBC Vulnerability (CVE-2011-3389)",
+            "BEAST: TLS 1.0 CBC Vulnerability (CVE-2011-3389)",
             "TLS 1.0 with CBC cipher suites is susceptible to chosen-plaintext attacks via BEAST.",
             cve="CVE-2011-3389"))
     if result.tls10 and not result.tls12 and not result.tls13:
         F.append(_make_finding(host, port, "tls10_only", "high",
-            "TLS 1.0 Only — Deprecated Protocol",
+            "TLS 1.0 Only: Deprecated Protocol",
             "Server only supports TLS 1.0 which is deprecated by RFC 8996 and PCI DSS 3.2.",
             confidence=0.99))
     if result.tls11 and not result.tls13:
@@ -532,7 +532,7 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
         _s32 = [c for c in supported
                 if any(t in c.upper() for t in _SWEET32_TOKENS)]
         F.append(_make_finding(host, port, "sweet32", "medium",
-            "SWEET32 — 64-bit Block Cipher (3DES) Accepted (CVE-2016-2183)",
+            "SWEET32-64-bit Block Cipher (3DES) Accepted (CVE-2016-2183)",
             "The server accepts a 64-bit block cipher (e.g. 3DES/IDEA). Its "
             "birthday bound lets an attacker who can observe a long-lived TLS "
             "session recover plaintext (e.g. a session cookie) after ~2^32 "

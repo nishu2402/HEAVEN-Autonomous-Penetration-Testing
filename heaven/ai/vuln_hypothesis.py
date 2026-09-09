@@ -89,7 +89,7 @@ Rules:
 - Point each hypothesis at a concrete URL (+ parameter when relevant).
 - `prior` is your honest likelihood (0..1) that a probe confirms it.
 - You are ONLY prioritising what to test. You are NOT asserting a vulnerability
-  exists — a deterministic probe will confirm or reject each hypothesis.
+  exists, a deterministic probe will confirm or reject each hypothesis.
 - Prefer high-value, plausible hypotheses over an exhaustive dump.
 """
 

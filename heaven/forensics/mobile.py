@@ -197,7 +197,7 @@ def analyze_apk(path: str, **_: Any) -> dict[str, Any]:
 
     names = zf.namelist()
     if "AndroidManifest.xml" not in names:
-        return {"error": "no AndroidManifest.xml — not an APK"}
+        return {"error": "no AndroidManifest.xml, not an APK"}
 
     budget = _ZipBudget()
     manifest_strings = _axml_strings(budget.read(zf, "AndroidManifest.xml"))
@@ -391,7 +391,7 @@ def analyze_ipa(path: str, **_: Any) -> dict[str, Any]:
     budget = _ZipBudget()
     info, app_prefix = _load_info_plist(zf, budget)
     if not app_prefix:
-        return {"error": "no Payload/*.app/Info.plist — not an IPA"}
+        return {"error": "no Payload/*.app/Info.plist, not an IPA"}
 
     bundle_id = info.get("CFBundleIdentifier", "")
     display_name = info.get("CFBundleDisplayName") or info.get("CFBundleName", "")

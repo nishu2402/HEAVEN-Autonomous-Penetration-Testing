@@ -263,9 +263,9 @@ class NVDClient:
                     "sample_results": total,
                     "rate_limit_s": self._rate_limit,
                     "reason": (
-                        "API key valid — fast tier (50 req / 30s)"
+                        "API key valid, fast tier (50 req / 30s)"
                         if self.api_key else
-                        "Reachable without a key — slow tier (5 req / 30s); "
+                        "Reachable without a key, slow tier (5 req / 30s); "
                         "add NVD_API_KEY for ~10× faster CVE lookups"
                     ),
                 }

@@ -30,7 +30,7 @@ from heaven.utils.logger import print_banner
 @click.command(name="autonomous")
 @click.option("--target", "-t", multiple=True, help="Seed IP/host/CIDR (one or more)")
 @click.option("--url", "-u", multiple=True, help="Seed URL (one or more)")
-@click.option("--engagement", help="Engagement name (REQUIRED — autonomous mode persists everything)")
+@click.option("--engagement", help="Engagement name (REQUIRED, autonomous mode persists everything)")
 @click.option("--max-iterations", type=int, default=8, show_default=True,
               help="Hard cap on planner iterations.")
 @click.option("--time-budget", type=int, default=1800, show_default=True,
@@ -42,7 +42,7 @@ from heaven.utils.logger import print_banner
               help="Skip the LLM planner and use the rule-based playbook only "
                    "(deterministic, works without ANTHROPIC/OPENAI/GEMINI keys).")
 @click.option("--seed", type=int, default=None,
-              help="RNG seed — propagated to bandit + planner for reproducible runs.")
+              help="RNG seed, propagated to bandit + planner for reproducible runs.")
 @click.option("--output", "-o", type=click.Path(),
               help="Write the JSON run summary to this path on completion.")
 @click.option("--i-have-authorization", is_flag=True, required=True,

@@ -738,7 +738,7 @@ class _PcapAnalyzer:
                 "arp_spoofing", "high",
                 f"ARP spoofing indicators: {len(conflicts)} IP(s) claimed by multiple MACs",
                 "One or more IP addresses were advertised by more than one MAC "
-                "address in ARP replies — the signature of ARP cache poisoning / a "
+                "address in ARP replies, the signature of ARP cache poisoning / a "
                 "man-in-the-middle on the LAN.", cwe="CWE-300",
                 evidence={"conflicts": conflicts}))
         # Weak TLS.
@@ -803,7 +803,7 @@ class _PcapAnalyzer:
                 f.append(_finding(
                     "port_scan", "medium", f"Port scan from {s} ({len(ports)} ports)",
                     f"{s} sent SYN packets to {len(ports)} distinct destination "
-                    "ports — a TCP port scan.", cwe="CWE-200", confidence=0.85,
+                    "ports, a TCP port scan.", cwe="CWE-200", confidence=0.85,
                     evidence={"src": s, "ports_scanned": len(ports)}))
                 break
         for s, hosts in self.scan_dsthosts.items():
@@ -821,7 +821,7 @@ class _PcapAnalyzer:
                 f.append(_finding(
                     "syn_flood", "high", f"Possible SYN flood against {dst}",
                     f"{syns} SYN packets were sent to {dst} with only {acks} SYN/ACK "
-                    "responses — the signature of a SYN-flood denial of service.",
+                    "responses, the signature of a SYN-flood denial of service.",
                     cwe="CWE-400", evidence={"dst": dst, "syn": syns, "synack": acks}))
         # Single-source storm.
         if self.total >= 1000 and self.talkers:

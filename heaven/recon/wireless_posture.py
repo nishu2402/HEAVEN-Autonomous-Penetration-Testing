@@ -143,7 +143,7 @@ async def _probe_host(session, host: str) -> list[dict[str, Any]]:
                     "MFA where supported. Never expose the controller to the WAN."),
                 cwe="CWE-284",
                 owasp="A02:2025 Security Misconfiguration",
-                mitre="T1133 — External Remote Services",
+                mitre="T1133: External Remote Services",
             ))
         elif status == 200:
             findings.append(_finding(
@@ -165,7 +165,7 @@ async def _probe_host(session, host: str) -> list[dict[str, Any]]:
                     "a management VLAN/VPN, and change any default credentials."),
                 cwe="CWE-306",
                 owasp="A07:2025 Authentication Failures",
-                mitre="T1133 — External Remote Services",
+                mitre="T1133: External Remote Services",
             ))
     return findings
 

@@ -110,7 +110,7 @@ async def get_pool(retry: int = 3, delay: float = 2.0) -> Any:
     """
     global _pg_pool, _backend
     if not HAS_ASYNCPG:
-        raise RuntimeError("asyncpg not installed — pip install asyncpg")
+        raise RuntimeError("asyncpg not installed, pip install asyncpg")
 
     if _pg_pool is not None:
         return _pg_pool
@@ -198,7 +198,7 @@ def get_engine(echo: bool | None = None) -> Any:
     """Get or create the SQLAlchemy async engine."""
     global _sa_engine
     if not HAS_SQLALCHEMY:
-        raise RuntimeError("SQLAlchemy not installed — pip install sqlalchemy[asyncio]")
+        raise RuntimeError("SQLAlchemy not installed, pip install sqlalchemy[asyncio]")
 
     if _sa_engine is not None:
         return _sa_engine
@@ -275,7 +275,7 @@ async def init_sqlite(path: str = "data/heaven.db") -> None:
     """
     global _sqlite_path, _backend
     if not HAS_AIOSQLITE:
-        raise RuntimeError("aiosqlite not installed — pip install aiosqlite")
+        raise RuntimeError("aiosqlite not installed, pip install aiosqlite")
 
     import os
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -306,7 +306,7 @@ async def _apply_sqlite_schema(db: Any) -> None:
 async def get_sqlite_connection() -> AsyncGenerator[Any, None]:
     """Get a raw aiosqlite connection to the offline store."""
     if _sqlite_path is None:
-        raise RuntimeError("SQLite not initialised — call init_sqlite() first")
+        raise RuntimeError("SQLite not initialised, call init_sqlite() first")
     async with aiosqlite.connect(_sqlite_path) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA foreign_keys=ON")

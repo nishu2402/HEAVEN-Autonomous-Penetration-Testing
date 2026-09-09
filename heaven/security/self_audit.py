@@ -192,7 +192,7 @@ class SelfAuditor:
                 self._findings.append(AuditFinding(
                     category="insecure_defaults", severity="info",
                     title="Admin password auto-generated (no static value set)",
-                    description="HEAVEN_ADMIN_PASSWORD is not set — a random admin "
+                    description="HEAVEN_ADMIN_PASSWORD is not set, a random admin "
                                 "password is generated at startup and a change is forced "
                                 "on first login (secure, but not stable across restarts)",
                     remediation="Optional: set HEAVEN_ADMIN_PASSWORD to a strong, unique "
@@ -208,7 +208,7 @@ class SelfAuditor:
             self._findings.append(AuditFinding(
                 category="configuration", severity="medium",
                 title="Debug mode enabled",
-                description="HEAVEN_DEBUG is enabled — verbose error messages may leak information",
+                description="HEAVEN_DEBUG is enabled, verbose error messages may leak information",
                 remediation="Set HEAVEN_DEBUG=false in production",
             ))
 
@@ -379,7 +379,7 @@ class SelfAuditor:
         if "insecure_defaults" in categories:
             recs.append("Change all default passwords and secrets")
         if not recs:
-            recs.append("Security posture is good — continue monitoring")
+            recs.append("Security posture is good, continue monitoring")
         return recs
 
     @staticmethod

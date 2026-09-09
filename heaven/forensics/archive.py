@@ -162,7 +162,7 @@ def _analyze_zip(path: str, target: str) -> dict[str, Any]:
         add("archive_zip_slip", "high", "Zip-slip / path traversal in archive",
             f"{len(unsafe)} member(s) use a path that escapes the extraction "
             f"directory (e.g. {unsafe[0]}). Extracting them can overwrite files "
-            "outside the target folder — the zip-slip vulnerability.",
+            "outside the target folder, the zip-slip vulnerability.",
             cwe="CWE-22", confidence=0.9, evidence={"paths": unsafe[:20]},
             remediation="Never extract these paths; sanitize member names against "
                         "the destination root before extraction.")
@@ -378,7 +378,7 @@ def analyze_archive(path: str, **_: Any) -> dict[str, Any]:
             out = _analyze_opaque(str(p), str(p), "rar", "RAR archive (not fully parsed).")
         elif ext == ".iso" or _looks_iso(str(p)):
             out = _analyze_opaque(str(p), str(p), "iso",
-                                  "ISO-9660 disk image — a common malware-delivery "
+                                  "ISO-9660 disk image, a common malware-delivery "
                                   "container that bypasses mark-of-the-web.")
         else:
             return {"error": f"unrecognized archive format for {path}",

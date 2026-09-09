@@ -122,7 +122,7 @@ class AuthManager:
         logger.warning(
             "\n"
             "  ┌──────────────────────────────────────────────────────────────┐\n"
-            "  │  HEAVEN — first-run admin credentials (shown once)             │\n"
+            "  │  HEAVEN, first-run admin credentials (shown once)             │\n"
             "  │  No HEAVEN_ADMIN_PASSWORD set, so a random one was generated.  │\n"
             "  ├──────────────────────────────────────────────────────────────┤\n"
             "  │  username: %-51s│\n"
@@ -149,7 +149,7 @@ class AuthManager:
         if not new_password or len(new_password) < 8:
             raise ValueError("Password must be at least 8 characters")
         if new_password.lower() in {"admin", "password", "changeme", "admin123", "administrator"}:
-            raise ValueError("Password is too common — choose a stronger one")
+            raise ValueError("Password is too common, choose a stronger one")
         user.password_hash = self._hash_password(new_password)
         user.must_change_password = False
         user.failed_attempts = 0

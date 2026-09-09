@@ -30,7 +30,7 @@ from heaven.cli._helpers import _print
 @click.option("--output", "-o", type=click.Path(), default=None,
               help="Write the JSON hop graph to this path.")
 @click.option("--i-have-authorization", is_flag=True, required=True,
-              help="Required. Lateral movement is destructive — confirm authorization.")
+              help="Required. Lateral movement is destructive, confirm authorization.")
 def lateral(
     ssh_key: Optional[str],
     ssh_user: tuple[str, ...],

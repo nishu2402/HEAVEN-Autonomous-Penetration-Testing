@@ -54,7 +54,7 @@ class AssetProfile(BaseModel):  # type: ignore[misc]
     host: str = Field(description="Hostname or IP")
     tech_stack: list[str] = Field(
         default_factory=list,
-        description="Inferred technologies — e.g. 'nginx 1.18', 'php 7.4', 'wordpress 6.2'",
+        description="Inferred technologies, e.g. 'nginx 1.18', 'php 7.4', 'wordpress 6.2'",
     )
     likely_cves: list[str] = Field(
         default_factory=list,
@@ -62,7 +62,7 @@ class AssetProfile(BaseModel):  # type: ignore[misc]
     )
     exploitation_surface: list[str] = Field(
         default_factory=list,
-        description="Concrete attack vectors to try — e.g. 'sqli on /search.php?q=', 'SMB null-session'",
+        description="Concrete attack vectors to try, e.g. 'sqli on /search.php?q=', 'SMB null-session'",
     )
     waf_detected: Optional[str] = Field(
         default=None,
@@ -123,7 +123,7 @@ You can call these tools to gather information before committing to a profile:
   - correlate_known_exploit(service: str, version: str) -> dict
       Returns known public exploits for a (service, version) pair.
 
-Loop protocol — every turn, output a JSON object matching the
+Loop protocol, every turn, output a JSON object matching the
 AgentTurnResponse schema. EITHER set `tool_call` (and the agent runtime
 will dispatch it and feed the result back) OR set `final_profile`
 (and you're done). Never both. Prefer using tools when you're unsure;

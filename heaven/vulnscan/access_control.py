@@ -170,7 +170,7 @@ async def scan_access_control(
     if privileged is None or not (getattr(privileged, "cookies", None) or
                                   getattr(privileged, "headers", None)):
         return {"findings": [], "tested": 0,
-                "skipped": "no privileged session — access-control diff needs an "
+                "skipped": "no privileged session, access-control diff needs an "
                            "authenticated baseline (--cookie-file / --auth)"}
 
     # Dedupe on scheme+netloc+path (query variants are the same resource here).
@@ -228,7 +228,7 @@ async def scan_access_control(
                 if anon_denied and _similar(priv.body, low.body) >= _SIMILAR:
                     return _finding(
                         url, severity="high", confidence=0.86, proven=True,
-                        title="Broken access control — lower-privilege user reaches "
+                        title="Broken access control, lower-privilege user reaches "
                               "protected content",
                         detail=("The application enforces authentication (an "
                                 "anonymous request is denied) but not authorization: "
@@ -252,7 +252,7 @@ async def scan_access_control(
                         detail=("This administrative/privileged path returns the same "
                                 "content to an anonymous request as to the "
                                 "authenticated session. Verify it is intended to be "
-                                "public — if not, it is missing authentication."),
+                                "public, if not, it is missing authentication."),
                         evidence={
                             "privileged_status": priv.status,
                             "anonymous_status": anon.status,
@@ -278,7 +278,7 @@ def _finding(url: str, *, severity: str, confidence: float, proven: bool,
     ev = dict(evidence)
     ev["url"] = url
     ev["verification"] = ("proven by response differential"
-                          if proven else "detected — verify manually")
+                          if proven else "detected, verify manually")
     return {
         "vuln_type": "broken_access_control",
         "type": "broken_access_control",

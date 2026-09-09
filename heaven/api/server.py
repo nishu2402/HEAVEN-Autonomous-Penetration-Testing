@@ -512,15 +512,15 @@ def _parse_benchmark_metrics(md: str) -> Optional[dict]:
 # is present and did not wash out.
 _BENCHMARK_TIER_SPECS = [
     ("native_benchmark.md", "native-controlled",
-     "Native controlled target — web tier (DVWA-class), Docker-free, always current",
+     "Native controlled target, web tier (DVWA-class), Docker-free, always current",
      "heaven-native-vuln-app"),
     ("api_benchmark.md", "native-controlled-api",
-     "Native controlled target — API tier (OWASP API Top 10), Docker-free, always current",
+     "Native controlled target, API tier (OWASP API Top 10), Docker-free, always current",
      "heaven-native-vuln-app-api"),
     ("dvwa_aggregated.md", "live-dvwa",
-     "Live DVWA — Docker, multi-run aggregate (web tier)", "dvwa"),
+     "Live DVWA: Docker, multi-run aggregate (web tier)", "dvwa"),
     ("msf2_aggregated.md", "live-network",
-     "Live Metasploitable-2 — network / service tier, multi-run aggregate",
+     "Live Metasploitable-2, network / service tier, multi-run aggregate",
      "metasploitable-2"),
 ]
 # Preference order for the single "primary" tier surfaced at the top level (kept
@@ -1368,7 +1368,7 @@ def create_app() -> FastAPI:
         if not req.i_have_authorization:
             raise HTTPException(
                 status_code=400,
-                detail="i_have_authorization must be true — operator must confirm written authorization for all targets",
+                detail="i_have_authorization must be true, operator must confirm written authorization for all targets",
             )
 
         # Engagement name becomes a DB filename — block traversal from the request.
@@ -1445,7 +1445,7 @@ def create_app() -> FastAPI:
                 continue
             if _sc.get("status") in ("pending", "running"):
                 return ScanResponse(scan_id=_sid, status=str(_sc.get("status", "pending")),
-                                    message="Identical scan already in progress — duplicate ignored")
+                                    message="Identical scan already in progress, duplicate ignored")
             try:
                 _c = _sc.get("created")
                 if _c and (_now - datetime.fromisoformat(_c)).total_seconds() < 8:
@@ -1507,7 +1507,7 @@ def create_app() -> FastAPI:
         limit: int = Query(20, ge=1, le=100),
         kind: str = Query(
             "pentest",
-            description="Which section's scans to list: 'pentest' (default — "
+            description="Which section's scans to list: 'pentest' (default, "
             "active scans, excludes SAST/SCA which have their own sections), "
             "'sast', 'sca', or 'all'.",
         ),
@@ -2491,7 +2491,7 @@ def create_app() -> FastAPI:
         rows = [r for r in rows if (r.status or "").lower() != "false_positive"]
         if not rows:
             raise HTTPException(
-                404, "No reportable findings — every finding is marked "
+                404, "No reportable findings, every finding is marked "
                 "false-positive (or none exist) for this engagement.")
         findings = []
         for f in rows:
@@ -2555,7 +2555,7 @@ def create_app() -> FastAPI:
                 import importlib.util
                 if importlib.util.find_spec("reportlab") is None:
                     raise HTTPException(
-                        503, "PDF export needs reportlab — `pip install reportlab`. "
+                        503, "PDF export needs reportlab, `pip install reportlab`. "
                         "Use HTML/Markdown export, which need no extra dependency.")
                 import tempfile
 
@@ -2724,7 +2724,7 @@ def create_app() -> FastAPI:
                 if gw._init_error:
                     reason = gw._init_error
                 elif not gw.provider:
-                    reason = "no provider configured — add a key or run `heaven ai setup`"
+                    reason = "no provider configured, add a key or run `heaven ai setup`"
                 elif not (gw.api_key or getattr(gw, "_is_local", False)):
                     reason = "no API key configured for this provider"
                 else:
@@ -3179,7 +3179,7 @@ def create_app() -> FastAPI:
         if not assistant.available:
             gw = assistant.gateway
             return {"skipped": gw._init_error or
-                    "no LLM configured — add a key or run `heaven ai setup`",
+                    "no LLM configured, add a key or run `heaven ai setup`",
                     "provider": gw.provider or None, "model": gw.model or None}
         store = _read_store(body.get("engagement")) if grounded else None
         resp = await asyncio.to_thread(
@@ -3224,7 +3224,7 @@ def create_app() -> FastAPI:
                 await websocket.send_json({
                     "type": "skipped",
                     "error": gw._init_error or
-                    "no LLM configured — add a key or run `heaven ai setup`",
+                    "no LLM configured, add a key or run `heaven ai setup`",
                     "provider": gw.provider or None, "model": gw.model or None})
                 await websocket.close()
             return
@@ -3740,12 +3740,12 @@ def create_app() -> FastAPI:
                     )
                     if transient:
                         msg = (f"The AI provider is busy ({detail}). This is "
-                               "usually temporary — try again in a moment.")
+                               "usually temporary, try again in a moment.")
                     elif detail:
                         msg = (f"The AI second-opinion could not complete: {detail}. "
                                "Check the AI provider status in Settings.")
                     else:
-                        msg = ("The LLM did not return a usable verdict — try "
+                        msg = ("The LLM did not return a usable verdict, try "
                                "again, or check the AI provider status in Settings.")
                     return {"skipped": True, "reason": "no_verdict",
                             "detail": detail, "message": msg}
@@ -3924,7 +3924,7 @@ def create_app() -> FastAPI:
             raise HTTPException(400, "target is required")
         if not bool(body.get("i_have_authorization")):
             raise HTTPException(
-                403, "i_have_authorization must be true — active exploitation "
+                403, "i_have_authorization must be true, active exploitation "
                      "requires explicit written authorization for the target")
         # Ports may arrive as a list or a comma string; None → engine auto-discovers.
         raw_ports = body.get("ports")
@@ -4147,7 +4147,7 @@ def create_app() -> FastAPI:
             body = {}
         if not bool(body.get("i_have_authorization")):
             raise HTTPException(
-                403, "i_have_authorization must be true — pivoting tunnels into "
+                403, "i_have_authorization must be true, pivoting tunnels into "
                      "networks behind the foothold")
         raw_jumps = body.get("jumps") or []
         if not isinstance(raw_jumps, list) or not raw_jumps:
@@ -4325,7 +4325,7 @@ def create_app() -> FastAPI:
             import importlib.util
             if importlib.util.find_spec("reportlab") is None:
                 raise HTTPException(
-                    503, "PDF export needs reportlab — `pip install reportlab`. "
+                    503, "PDF export needs reportlab, `pip install reportlab`. "
                     "Use HTML/Markdown export, which need no extra dependency.")
             try:
                 pdf_bytes = await asyncio.to_thread(
@@ -4436,7 +4436,7 @@ def create_app() -> FastAPI:
             import importlib.util
             if importlib.util.find_spec("reportlab") is None:
                 raise HTTPException(
-                    503, "PDF export needs reportlab — `pip install reportlab`. "
+                    503, "PDF export needs reportlab, `pip install reportlab`. "
                     "Use HTML/Markdown export, which need no extra dependency.")
             try:
                 pdf_bytes = await asyncio.to_thread(_cf.render_coverage_pdf, cov)
@@ -4494,7 +4494,7 @@ def create_app() -> FastAPI:
         except Exception as e:  # noqa: BLE001 — missing optional benchmark deps
             raise HTTPException(
                 503,
-                "Benchmark runner unavailable — install the benchmark extras "
+                "Benchmark runner unavailable, install the benchmark extras "
                 f"(flask/bs4/aiohttp/pyyaml) or run `heaven benchmark` on the server. ({e})",
             )
         try:
@@ -5549,7 +5549,7 @@ def create_app() -> FastAPI:
 
 _UI_NOT_BUILT_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>HEAVEN — API running</title>
+<title>HEAVEN API running</title>
 <style>
  body{background:#05070f;color:#00FF41;font-family:monospace;margin:0;
    display:flex;align-items:center;justify-content:center;min-height:100vh}
@@ -5575,8 +5575,8 @@ npm install --legacy-peer-deps
 npm run build</pre>
  <p>Meanwhile the full API is live:</p>
  <ul>
-   <li><a href="/api/docs">/api/docs</a> &mdash; interactive API documentation</li>
-   <li><a href="/api/health">/api/health</a> &mdash; health check</li>
+   <li><a href="/api/docs">/api/docs</a> &middot; interactive API documentation</li>
+   <li><a href="/api/health">/api/health</a> &middot; health check</li>
  </ul>
  <p>Or drive HEAVEN entirely from the CLI: <code>heaven scan --help</code></p>
 </div></body></html>"""

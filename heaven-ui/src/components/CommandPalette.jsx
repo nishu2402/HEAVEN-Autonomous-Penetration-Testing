@@ -21,6 +21,7 @@ const CATALOGUE = [
   { group: "Navigate", icon: "▣",  label: "Dashboard",    hint: "g d",        nav: "/" },
   { group: "Navigate", icon: "◈",  label: "Engagement",   hint: "g e",        nav: "/engagement" },
   { group: "Navigate", icon: "⚠",  label: "Findings",     hint: "g f",        nav: "/findings" },
+  { group: "Navigate", icon: "🔗", label: "Combined Risk", hint: "",          nav: "/correlations" },
   { group: "Navigate", icon: "⛓",  label: "Kill Chain",   hint: "g k",        nav: "/kill-chain" },
   { group: "Navigate", icon: "⚡", label: "Scans",        hint: "g s",        nav: "/scans" },
   { group: "Navigate", icon: "🖧", label: "Assets",       hint: "",           nav: "/assets" },

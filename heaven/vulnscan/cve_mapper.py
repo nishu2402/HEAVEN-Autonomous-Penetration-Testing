@@ -615,7 +615,21 @@ _BANNER_FINGERPRINTS: list[tuple[str, str]] = [
     (r"openresty",                           "openresty"),
     (r"openssh[_-]([\d.p]+)",              "openssh"),
     (r"vsftpd\s+([\d.]+)",                  "vsftpd"),
+    # Bare fallback: a vsftpd that greets with an error line ("500 OOPS: vsftpd:
+    # refusing to run …") still identifies the product even though no version is
+    # in that line — surfaced as a version-less "potential" (the 2.3.4 backdoor
+    # CVE needs the exact version, so it is never asserted from the bare name).
+    (r"\bvsftpd\b",                         "vsftpd"),
     (r"proftpd[\s/]+([\d.]+)",              "proftpd"),
+    (r"\bproftpd\b",                        "proftpd"),
+    # UnrealIRCd advertises its version in the VERSION/351 reply ("Unreal3.2.8.1"
+    # / "UnrealIRCd-3.2.8.1"); capture the build so the trojaned 3.2.8.1 maps to
+    # its backdoor CVE and any other build stays a version-less candidate.
+    (r"unreal(?:ircd)?[\s_/-]*(\d+(?:\.\d+)+)", "unrealircd"),
+    (r"\bunreal\s?ircd\b",                  "unrealircd"),
+    # distccd is RCE at ANY version (CVE-2004-2687 spec is unconditional), so a
+    # bare product match is enough to confirm; no version group needed.
+    (r"\bdistcc",                            "distccd"),
     (r"exim\s+([\d.]+)",                    "exim"),
     (r"postfix",                             "postfix"),
     (r"dovecot",                             "dovecot"),
@@ -1256,17 +1270,60 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                         "confidence":       0.9,
                     })
             elif inline_cves:
-                # No version could be read from the banner. Emitting every product
-                # CVE as a confirmed Critical/High/Open is the classic "outside-in"
-                # false positive: a *patched* host that still advertises a bare
-                # product name (e.g. Bluehost's "Server: Apache", no version) would
-                # light up red with a dozen CVEs it isn't actually vulnerable to,
-                # and distributions routinely backport fixes without bumping the
-                # banner. Collapse to ONE honest, low-severity POTENTIAL finding
-                # that names the candidate CVEs for manual verification instead of
-                # N speculative Criticals. `potential_vulnerable_service` is an
-                # "unconfirmed" type, so reconcile_severity caps its score to the
-                # low band and it never inflates the Critical/High count.
+                # An "all"-spec CVE is version-INDEPENDENT: the service is
+                # exploitable at ANY release (distccd runs whatever command a
+                # reachable client sends — CVE-2004-2687), so a version-less
+                # detection still CONFIRMS it. Peel those off and emit each as a
+                # real finding; everything that genuinely needs a version we could
+                # not read stays collapsed into the single low "potential"
+                # candidate below — so a backdoor pinned to one exact build
+                # (UnrealIRCd 3.2.8.1) is never asserted from a bare banner.
+                _unconditional = [
+                    c for c in inline_cves if c.affected_versions
+                    and all(s.strip().lower().startswith("all")
+                            for s in c.affected_versions)]
+                for cve_rec in _unconditional:
+                    rec_score, rec_sev = _score_and_severity(
+                        cve_rec.cvss, cve_rec.severity)
+                    all_vulns.append({
+                        "host":              host.get("host", "unknown"),
+                        "port":              port_info.get("port", 0),
+                        "vuln_type":         "vulnerable_service",
+                        "cve":               cve_rec.cve_id,
+                        "title":             cve_rec.title,
+                        "severity":          rec_sev,
+                        "cvss":              cve_rec.cvss,
+                        "cvss_base":         rec_score,
+                        "cwe":               cve_rec.cwe,
+                        "product":           product_key,
+                        "version":           "",
+                        "exploit_available": cve_rec.exploit_available,
+                        "source":            "inline_db",
+                        "confidence":        0.9,
+                        "evidence": {
+                            "version_independent": True,
+                            "note": ("Exploitable regardless of release — the "
+                                     "affected-version range is unconditional, so "
+                                     "no running version is needed to establish "
+                                     "applicability."),
+                            "cwe": cve_rec.cwe,
+                        },
+                    })
+                inline_cves = [c for c in inline_cves if c not in _unconditional]
+
+            # No version could be read from the banner (and any unconditional
+            # "all"-spec CVE was already emitted above). Emitting every remaining
+            # product CVE as a confirmed Critical/High is the classic "outside-in"
+            # false positive: a *patched* host that still advertises a bare product
+            # name (e.g. Bluehost's "Server: Apache", no version) would light up
+            # red with a dozen CVEs it isn't actually vulnerable to, and distros
+            # routinely backport fixes without bumping the banner. Collapse to ONE
+            # honest, low-severity POTENTIAL finding that names the candidate CVEs
+            # for manual verification instead of N speculative Criticals.
+            # `potential_vulnerable_service` is an "unconfirmed" type, so
+            # reconcile_severity caps its score to the low band and it never
+            # inflates the Critical/High count.
+            if not version_str and inline_cves:
                 host_name = host.get("host", "unknown")
                 label = _PRODUCT_LABELS.get(
                     product_key, product_key.replace("_", " ").title())
@@ -1382,35 +1439,66 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
     for host in host_results:
         host_name = host.get("host", "unknown")
         seen_here = _active_cves_by_host.setdefault(host_name, set())
+        # Collect the NEW passive CVEs (not already found actively) for this host.
+        passive_new: list[str] = []
         for cve_id in host.get("passive_cves", []) or []:
             cid = str(cve_id).upper()
             if not cid.startswith("CVE-") or cid in seen_here:
                 continue
             seen_here.add(cid)
-            pub = published_cvss_for(cid)
-            score, sev = _score_and_severity(pub or 0.0, "medium")
-            all_vulns.append({
-                "host":        host_name,
-                "target":      host_name,
-                "port":        0,
-                "vuln_type":   "vulnerable_service",
-                "cve":         cid,
-                "title":       f"Publicly-reported vulnerability {cid}",
-                "severity":    sev,
-                "cvss":        pub or 0.0,
-                "cvss_base":   score,
-                "source":      "passive:internetdb",
-                "confidence":  0.5,
-                "description": (
-                    f"Shodan's public InternetDB associates {cid} with this host's "
-                    "internet-facing exposure. This is passive OSINT, UNVERIFIED "
-                    "from the scan origin. Confirm the affected component and "
-                    "version (authenticated check or active exploitation) before "
-                    "treating it as exploitable."
-                ),
-                "evidence": {"source_feed": "shodan_internetdb",
-                             "validation": "passive-osint-unconfirmed"},
-            })
+            passive_new.append(cid)
+        if not passive_new:
+            continue
+        # Shodan's InternetDB ties these CVEs to the host's IP — but that IP is
+        # often SHARED hosting (cPanel/Exim/etc.), the record is UNVERIFIED from
+        # our vantage, and the CVE has no confirmed affected component/version.
+        # Emitting each as its own HIGH `vulnerable_service` inflated the high
+        # count with a wall of look-alike "confirmed" rows on one host (14 on a
+        # single Bluehost box). Mirror the version-less inline path instead:
+        # collapse to ONE honest, LOW `potential_vulnerable_service` that lists
+        # every associated CVE for follow-up — surfaced so nothing is missed,
+        # but never inflating the confirmed/high risk it cannot substantiate.
+        passive_new.sort()
+        worst = max((published_cvss_for(c) or 0.0 for c in passive_new), default=0.0)
+        examples = sorted(
+            passive_new, key=lambda c: (published_cvss_for(c) or 0.0), reverse=True)[:6]
+        details = [{
+            "cve": c,
+            "cvss": round(published_cvss_for(c) or 0.0, 1),
+            "reference": f"https://nvd.nist.gov/vuln/detail/{c}",
+        } for c in sorted(passive_new,
+                          key=lambda c: (published_cvss_for(c) or 0.0), reverse=True)]
+        all_vulns.append({
+            "host":        host_name,
+            "target":      host_name,
+            "port":        0,
+            "vuln_type":   "potential_vulnerable_service",
+            "cve":         "",
+            "title":       (f"Passive OSINT: {len(passive_new)} CVE(s) publicly "
+                            f"associated with this host (unverified)"),
+            "severity":    "low",
+            "cvss":        0.0,
+            "source":      "passive:internetdb",
+            "confidence":  0.5,
+            "description": (
+                f"Shodan's public InternetDB associates {len(passive_new)} CVE(s) "
+                f"with this host's internet-facing IP (e.g. {', '.join(examples)}). "
+                "This is passive OSINT, UNVERIFIED from the scan origin — and the "
+                "IP may be SHARED hosting, so a CVE listed here can belong to the "
+                "shared server rather than this site. Confirm the affected "
+                "component and version (authenticated check or active exploitation) "
+                "before treating any as exploitable; these are candidates, not "
+                "confirmed vulnerabilities."
+            ),
+            "evidence": {
+                "source_feed": "shodan_internetdb",
+                "validation": "passive-osint-unconfirmed",
+                "candidate_cve_count": len(passive_new),
+                "candidate_cves": passive_new,
+                "candidate_details": details,
+                "highest_candidate_cvss": round(worst, 1),
+            },
+        })
 
     # Attribute every CVE finding to the concrete host:port it came from. The
     # persistence layer synthesises target=host, but the raw findings (rendered

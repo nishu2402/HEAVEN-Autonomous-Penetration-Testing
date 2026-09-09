@@ -90,10 +90,16 @@ def test_chokepoint_cve_mapping(monkeypatch):
     host = _enrich_certifiedhacker(monkeypatch)
     vulns = _run(map_vulnerabilities([host]))
     passive = [v for v in vulns if v.get("source") == "passive:internetdb"]
-    assert any(v["cve"] == "CVE-2016-6662" for v in passive)
-    for v in passive:
-        assert v["target"] == "45.33.32.156"
-        assert v["vuln_type"] == "vulnerable_service"
+    # Passive OSINT CVEs collapse to ONE unverified, low "potential" finding per
+    # host (not N high look-alike-confirmed rows): they are Shodan associations
+    # for the host's IP — unverified from our vantage, often on shared hosting —
+    # so they must never inflate the confirmed/high count.
+    assert len(passive) == 1
+    v = passive[0]
+    assert v["target"] == "45.33.32.156"
+    assert v["vuln_type"] == "potential_vulnerable_service"
+    assert v["severity"] == "low"
+    assert "CVE-2016-6662" in v["evidence"]["candidate_cves"]
 
 
 def test_passive_cves_dedupe_within_host():
@@ -102,5 +108,5 @@ def test_passive_cves_dedupe_within_host():
                              "not-a-cve"]}
     vulns = _run(map_vulnerabilities([host]))
     passive = [v for v in vulns if v.get("source") == "passive:internetdb"]
-    cves = sorted(v["cve"] for v in passive)
-    assert cves == ["CVE-2020-1111", "CVE-2020-2222"]
+    assert len(passive) == 1
+    assert passive[0]["evidence"]["candidate_cves"] == ["CVE-2020-1111", "CVE-2020-2222"]

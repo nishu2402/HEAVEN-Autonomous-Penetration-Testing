@@ -3321,6 +3321,42 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         phase=ScanPhase.VALIDATION, depends_on=[val_id],
     )
 
+    # ═══ Phase: FINDING CORRELATION (combine 2+ findings → elevated risk) ═══
+    # Distinct from attack-chain path discovery: this spots pairs/sets of
+    # findings that individually rate lower but together form a materially worse
+    # (often critical) issue, and recommends merging + re-rating them. Runs on
+    # the deduped, post-triage finding set so the combinations reflect what the
+    # report will actually show.
+    async def _finding_correlation(**kw):
+        try:
+            from heaven.vulnscan.correlation import CorrelationEngine
+        except ImportError:
+            return {}
+        collected: list[dict] = []
+        seen_ids: set[str] = set()
+        for tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for f in (data.get("validated_findings", [])
+                      + data.get("findings", [])
+                      + data.get("vulnerabilities", [])
+                      + data.get("candidates", [])):
+                if not isinstance(f, dict):
+                    continue
+                fid = str(f.get("id") or "")
+                if fid and fid in seen_ids:
+                    continue
+                if fid:
+                    seen_ids.add(fid)
+                collected.append(f)
+        return CorrelationEngine().summary(collected)
+
+    orch.add_task(
+        "Finding Correlation", _finding_correlation,
+        phase=ScanPhase.VALIDATION, depends_on=[val_id],
+    )
+
     # ═══ Phase: AD RECON ═══
     async def _ad_scan(**kw):
         try:

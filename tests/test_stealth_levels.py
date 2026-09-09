@@ -16,7 +16,9 @@ import pytest
 
 from heaven.recon.evasion_engine import (
     StealthLevel,
+    _is_lab_host,
     evasion_delay,
+    fragile_target_stealth_advisory,
     get_profile,
     profile_for,
     resolve_stealth_level,
@@ -63,6 +65,61 @@ def test_profiles_are_monotonic_by_stealth():
     # Aggressive is the only level that skips UA rotation (fast/loud lab use).
     assert profile_for("aggressive").rotate_user_agents is False
     assert profile_for("paranoid").rotate_user_agents is True
+
+
+# ── fragile-target stealth advisory ────────────────────────────────────────
+
+@pytest.mark.parametrize("token,is_lab", [
+    ("192.168.0.162", True),          # RFC1918 private
+    ("10.0.0.5", True),
+    ("172.16.4.9", True),
+    ("127.0.0.1", True),              # loopback
+    ("169.254.1.2", True),            # link-local
+    ("localhost", True),
+    ("dc01.corp.local", True),        # mDNS .local
+    ("http://192.168.0.162:8080/", True),   # private IP inside a URL
+    ("https://127.0.0.1:8443/app", True),
+    ("192.168.1.0/24", True),         # private CIDR
+    ("8.8.8.8", False),               # public IP
+    ("example.com", False),           # public domain
+    ("https://scanme.example.org/", False),
+    ("", False),
+])
+def test_is_lab_host(token, is_lab):
+    assert _is_lab_host(token) is is_lab
+
+
+def test_advisory_fires_for_fast_scan_of_internal_host():
+    """A normal/aggressive scan of a private lab host must produce the nudge,
+    and it must name the slower profile to switch to."""
+    note = fragile_target_stealth_advisory(["192.168.0.162"], "normal")
+    assert note is not None
+    assert "--stealth stealth" in note
+    # No em/en dashes in user-visible advisory prose (house style).
+    assert "—" not in note and "–" not in note
+
+    assert fragile_target_stealth_advisory(["http://127.0.0.1:8080/"], "aggressive")
+
+
+def test_advisory_silent_when_already_gentle():
+    """If the operator already chose a paced profile, do not nag."""
+    assert fragile_target_stealth_advisory(["192.168.0.162"], "stealth") is None
+    assert fragile_target_stealth_advisory(["10.0.0.5"], "paranoid") is None
+    assert fragile_target_stealth_advisory(["10.0.0.5"], StealthLevel.PARANOID) is None
+
+
+def test_advisory_silent_for_public_targets():
+    """A public engagement is assumed to be a real, robust server: stay quiet."""
+    assert fragile_target_stealth_advisory(["example.com"], "normal") is None
+    assert fragile_target_stealth_advisory(["8.8.8.8"], "aggressive") is None
+    assert fragile_target_stealth_advisory([], "normal") is None
+
+
+def test_advisory_fires_when_any_target_is_internal():
+    """A mixed target list nudges as soon as one host is internal."""
+    note = fragile_target_stealth_advisory(
+        ["example.com", "192.168.0.162"], "normal")
+    assert note is not None
 
 
 @pytest.mark.asyncio

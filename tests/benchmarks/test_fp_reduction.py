@@ -50,7 +50,10 @@ def _make_fake_get(state: dict):
         u = unquote(url)
         is_true = "1=1" in u
         if "genuine" in u:
-            return 200, (_ROW if is_true else _EMPTY)
+            # A real oracle, order-independent: the baseline (id=1) and TRUE(1=1)
+            # return the row; only FALSE(1=2) hides it — so it survives the
+            # scanner's order-swapped reproduction round.
+            return 200, (_EMPTY if "1=2" in u else _ROW)
         # /flaky: only the very first true/false pair looks like an oracle.
         state["flaky"] = state.get("flaky", 0) + 1
         if state["flaky"] <= 2:

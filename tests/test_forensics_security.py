@@ -157,6 +157,76 @@ def test_zip_budget_caps_a_large_entry() -> None:
     assert len(data) <= _MAX_ENTRY_BYTES
 
 
+# ── shared bounded readers (archive + document analyzers) ─────────────────────
+def test_safe_zip_read_bounds_a_bomb_member() -> None:
+    """safe_zip_read must never inflate more than the cap, even for a member that
+    expands hugely — the whole point is that read()[:cap] would OOM first."""
+    from heaven.forensics.common import safe_zip_read
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("big.txt", b"\x00" * (40 * 1024 * 1024))   # 40 MB → tiny on disk
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as zf:
+        data = safe_zip_read(zf, "big.txt", 4096)
+    # The member expands to 40 MB but we only ever hold the cap in memory —
+    # either skipped as an implausible ratio (b"") or bounded to the cap.
+    assert len(data) <= 4096
+
+
+def test_safe_zip_read_returns_small_member_intact() -> None:
+    from heaven.forensics.common import safe_zip_read
+    payload = b"hello secret world" * 4
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("small.txt", payload)
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as zf:
+        assert safe_zip_read(zf, "small.txt", 1024) == payload
+        # A cap below the member truncates rather than over-reading.
+        assert safe_zip_read(zf, "small.txt", 8) == payload[:8]
+
+
+def test_safe_inflate_caps_output() -> None:
+    from heaven.forensics.common import safe_inflate
+    blob = zlib.compress(b"\x00" * (8 * 1024 * 1024))   # ~8 MB → a few KB on disk
+    out = safe_inflate(blob, 15, max_output=2048)
+    assert len(out) == 2048                              # bounded, not 8 MB
+    assert safe_inflate(b"not-compressed", 15, max_output=2048) == b""
+
+
+def test_archive_analyzer_survives_zip_bomb(tmp_path) -> None:
+    """The generic archive analyzer must complete on a bomb archive without
+    inflating it — it reports on the container, never expands a member."""
+    from heaven.forensics.archive import analyze_archive
+    p = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("payload.txt", b"\x00" * (60 * 1024 * 1024))
+    out = analyze_archive(str(p))
+    assert isinstance(out, dict) and "report" in out
+
+
+def test_document_analyzer_survives_ooxml_bomb(tmp_path) -> None:
+    """A crafted OOXML whose parts are decompression bombs must analyze without
+    OOM — every member read is bounded."""
+    from heaven.forensics.document import analyze_document
+    p = tmp_path / "bomb.docx"
+    with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", b"<Types/>")
+        zf.writestr("word/document.xml", b"\x00" * (50 * 1024 * 1024))
+        zf.writestr("word/_rels/document.xml.rels", b"\x00" * (50 * 1024 * 1024))
+    out = analyze_document(str(p))
+    assert isinstance(out, dict)
+    assert out.get("report", {}).get("document_format") == "ooxml"
+
+
+def test_pdf_stream_inflation_is_bounded() -> None:
+    """A PDF with a giant FlateDecode stream must not inflate past the aggregate
+    ceiling — hidden /JavaScript is still visible, but memory stays bounded."""
+    from heaven.forensics import document
+    stream = zlib.compress(b"A" * (200 * 1024 * 1024))   # 200 MB → ~KB on disk
+    pdf = b"%PDF-1.7\n1 0 obj<<>>stream\n" + stream + b"\nendstream endobj\n%%EOF"
+    inflated = document._pdf_inflate_streams(pdf)
+    assert len(inflated) <= document._PDF_INFLATE_TOTAL + 4096
+
+
 # ── truncated / garbage capture ──────────────────────────────────────────────
 def test_garbage_pcap_returns_error_not_crash(tmp_path) -> None:
     pytest.importorskip("scapy")
@@ -240,3 +310,21 @@ def test_endpoint_traversal_filename_is_safe(client) -> None:
     assert r.status_code == 200
     assert r.json()["detected_kind"] == "stego"
     assert not os.path.exists("/etc/passwd.png")
+
+
+def test_oversized_request_body_is_rejected(monkeypatch) -> None:
+    """A request whose declared body exceeds the ceiling is refused with 413
+    before any handler buffers it. The ceiling is derived from the upload limit,
+    so shrinking that limit shrinks the ceiling for the test."""
+    from fastapi.testclient import TestClient
+
+    from heaven.api.server import create_app
+    monkeypatch.setenv("HEAVEN_DISABLE_AUTH", "1")
+    monkeypatch.setenv("HEAVEN_ANALYZE_MAX_MB", "1")   # floor → (1*2+64)=66 MB cap
+    monkeypatch.setenv("HEAVEN_MAX_REQUEST_MB", "1")
+    app = create_app()
+    with TestClient(app) as tc:
+        big = b"\x00" * (67 * 1024 * 1024)             # just over the 66 MB ceiling
+        r = tc.post("/api/analyze/run", content=big,
+                    headers={"content-type": "application/json"})
+        assert r.status_code == 413

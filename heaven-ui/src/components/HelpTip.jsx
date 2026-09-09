@@ -27,6 +27,7 @@ export const TERMS = {
   confidence: "Confidence: how sure HEAVEN is the finding is real (0-100%). Results below ~40% are dropped by the false-positive suppression pass.",
   risk_score: "Risk score: the CVSS score adjusted by EPSS exploit-probability, CISA-KEV membership, and the target's asset-criticality multiplier.",
   killchain: "Cyber Kill Chain: Lockheed Martin's 7 attack phases (Recon → Weaponization → Delivery → Exploitation → Installation → C2 → Actions). HEAVEN maps each finding to a phase.",
+  correlation: "Combined Risk: two or more findings that, on their own, rate lower but together form a more critical issue (for example local file inclusion + file upload → remote code execution). HEAVEN elevates the pairing to the severity it warrants, names each constituent, and points to the one fix that breaks the chain. A combination shows only when each part is a real, distinct finding and the pairing genuinely raises the severity.",
   mitre: "MITRE ATT&CK: a knowledge base of real-world attacker techniques. Each finding is tagged with the techniques it enables.",
   coverage: "Coverage: how much of the OWASP Top 10 / attack surface this engagement has exercised, as a graded percentage.",
   criticality: "Asset criticality: how important a target is (low → crown_jewel). It multiplies a finding's risk score so crown-jewel issues rank higher.",

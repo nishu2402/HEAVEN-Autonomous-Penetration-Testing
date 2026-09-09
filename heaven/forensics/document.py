@@ -31,16 +31,19 @@ from __future__ import annotations
 import re
 import struct
 import zipfile
-import zlib
 from pathlib import Path
 from typing import Any
 
+from heaven.forensics.common import safe_inflate, safe_zip_read
 from heaven.utils.logger import get_logger
 
 logger = get_logger("forensics.document")
 
 _MAX_READ = 64 * 1024 * 1024          # defensive cap on whole-file reads
 _MAX_STREAMS = 4000                   # PDF stream / CFB entry ceiling
+_PART_CAP = 16 * 1024 * 1024          # per-member cap for OOXML text/xml parts
+_PDF_STREAM_CAP = 16 * 1024 * 1024    # max inflate per PDF stream (anti-bomb)
+_PDF_INFLATE_TOTAL = 64 * 1024 * 1024  # max total inflated PDF content
 
 
 # ── shared secret / endpoint carving (mirrors binary.py) ─────────────────────
@@ -128,16 +131,15 @@ def _pdf_inflate_streams(data: bytes) -> bytes:
         if not blob:
             continue
         for wbits in (15, -15, 47):        # zlib, raw-deflate, gzip/auto
-            try:
-                out = zlib.decompress(blob, wbits)
-                if out:
-                    extra += b"\n" + out
-                    inflated += 1
-                    break
-            except Exception:               # noqa: BLE001 — non-flate stream
-                logger.debug("non-flate PDF stream, skipping", exc_info=True)
-                continue
-        if inflated >= _MAX_STREAMS:
+            # Bounded inflate: a single stream can be a decompression bomb, so
+            # cap each one and stop accumulating once the aggregate ceiling is
+            # reached — enough to see hidden /JavaScript without risking OOM.
+            out = safe_inflate(blob, wbits, max_output=_PDF_STREAM_CAP)
+            if out:
+                extra += b"\n" + out
+                inflated += 1
+                break
+        if inflated >= _MAX_STREAMS or len(extra) >= _PDF_INFLATE_TOTAL:
             break
     return bytes(extra)
 
@@ -302,10 +304,7 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
     # ── VBA macros: any vbaProject.bin is a CFB; hand it to the OLE analyzer. ──
     vba_parts = [n for n in names if n.lower().endswith("vbaproject.bin")]
     if vba_parts:
-        try:
-            vba_bytes = zf.read(vba_parts[0])[:_MAX_READ]
-        except Exception:                    # noqa: BLE001
-            vba_bytes = b""
+        vba_bytes = safe_zip_read(zf, vba_parts[0], _MAX_READ)
         macro = _analyze_ole(vba_bytes, target, _within="vbaProject.bin") if vba_bytes else {}
         mreport = macro.get("report", {}) if isinstance(macro, dict) else {}
         kws = mreport.get("macro_keywords") or []
@@ -336,11 +335,10 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
     for n in names:
         if not n.lower().endswith(".rels"):
             continue
-        try:
-            xml = zf.read(n).decode("utf-8", "replace")
-        except Exception:                    # noqa: BLE001
-            logger.debug("skipping unreadable .rels member %s", n, exc_info=True)
+        raw = safe_zip_read(zf, n, _PART_CAP)
+        if not raw:
             continue
+        xml = raw.decode("utf-8", "replace")
         for m in re.finditer(r"<Relationship\b[^>]*>", xml):
             tag = m.group(0)
             if 'targetmode="external"' not in tag.lower():
@@ -380,10 +378,8 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
     for n in names:
         if not (n.lower().endswith(".xml")):
             continue
-        try:
-            body = zf.read(n)
-        except Exception:                    # noqa: BLE001
-            logger.debug("skipping unreadable xml member %s", n, exc_info=True)
+        body = safe_zip_read(zf, n, _PART_CAP)
+        if not body:
             continue
         if b"DDEAUTO" in body or b"DDE " in body or b" DDE" in body:
             for dm in re.finditer(rb"(DDEAUTO|DDE)\s+([^<]{1,200})", body):
@@ -403,10 +399,8 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
         report["embedded_objects"] = embeds[:40]
         # Peek into embedded OLE for exploit markers.
         for n in embeds[:10]:
-            try:
-                ob = zf.read(n)[:2_000_000]
-            except Exception:                # noqa: BLE001
-                logger.debug("skipping unreadable embedded object %s", n, exc_info=True)
+            ob = safe_zip_read(zf, n, 2_000_000)
+            if not ob:
                 continue
             if b"Equation Native" in ob or b"\x01Ole10Native" in ob or b"Microsoft Equation 3.0" in ob:
                 add("ooxml_equation_object", "high",
@@ -425,11 +419,10 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
     # ── metadata ──
     for core in ("docProps/core.xml", "docProps/app.xml"):
         if core in names:
-            try:
-                cx = zf.read(core).decode("utf-8", "replace")
-            except Exception:                # noqa: BLE001
-                logger.debug("skipping unreadable core-props %s", core, exc_info=True)
+            raw = safe_zip_read(zf, core, _PART_CAP)
+            if not raw:
                 continue
+            cx = raw.decode("utf-8", "replace")
             md: dict[str, str] = {}
             for tag in ("dc:creator", "cp:lastModifiedBy", "Company", "Template",
                         "Application", "dcterms:created"):
@@ -439,7 +432,7 @@ def _analyze_ooxml(path: str, target: str) -> dict[str, Any]:
             if md:
                 report.setdefault("document_metadata", {}).update(md)
 
-    urls = _carve_urls(b"\n".join(zf.read(n)[:200000] for n in names[:200]
+    urls = _carve_urls(b"\n".join(safe_zip_read(zf, n, 200000) for n in names[:200]
                                   if n.lower().endswith((".xml", ".rels", ".bin"))))
     if urls:
         report["urls"] = urls

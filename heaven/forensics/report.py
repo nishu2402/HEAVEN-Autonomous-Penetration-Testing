@@ -277,7 +277,14 @@ def render_html(result: dict[str, Any]) -> str:
     if not findings:
         body.append("<p>No findings.</p>")
     for f in findings:
-        sev = f.get("severity", "info")
+        # Normalise severity to the known set before it is interpolated into a
+        # class attribute and element text. The HTML export can be driven by a
+        # client-supplied result (the /api/analyze/report endpoint), so an
+        # unconstrained severity string would otherwise be an HTML-injection
+        # sink in the generated report.
+        sev = str(f.get("severity", "info")).lower()
+        if sev not in ("critical", "high", "medium", "low", "info"):
+            sev = "info"
         meta = []
         if f.get("cwe"):
             meta.append(html.escape(f["cwe"]))
@@ -445,8 +452,13 @@ def render_pdf(result: dict[str, Any]) -> bytes:
         story.append(Paragraph("No security findings.", S["body"]))
     for f in findings:
         try:
-            sev = f.get("severity", "info")
-            fill, txt = _SEV_COLORS.get(sev, _SEV_COLORS["info"])
+            # Normalise to the known set: the result can be client-supplied
+            # (/api/analyze/report), so an arbitrary severity string must not be
+            # interpolated raw into the reportlab paragraph markup below.
+            sev = str(f.get("severity", "info")).lower()
+            if sev not in _SEV_COLORS:
+                sev = "info"
+            fill, txt = _SEV_COLORS[sev]
             meta = []
             if f.get("cwe"):
                 meta.append(esc(f["cwe"]))

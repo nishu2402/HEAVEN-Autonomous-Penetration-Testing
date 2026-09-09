@@ -390,6 +390,16 @@ class ComplianceReportGenerator:
         version = meta.get("version") or "1.0"
         assessor = meta.get("assessor") or "HEAVEN Autonomous Penetration-Testing Platform"
 
+        # Correlated findings: sets of findings that combine into a more critical
+        # issue. Computed once from the (enriched) finding set and surfaced as its
+        # own section plus a TOC entry, only when at least one combination exists.
+        try:
+            from heaven.vulnscan.correlation import CorrelationEngine
+            combos = CorrelationEngine().correlate(findings)
+            combo_dicts = [c.to_dict() for c in combos]
+        except Exception:  # noqa: BLE001 — a report must render even if this fails
+            combo_dicts = []
+
         inventory = _normalize_assets(assets) if assets else []
         dns_inv = _normalize_dns(dns_records) if dns_records else []
         has_api = self.has_api_findings(findings)
@@ -407,7 +417,8 @@ class ComplianceReportGenerator:
                       has_content=any(
                           (f.get("vuln_type") or f.get("type") or "") in
                           ("directory_listing", "sensitive_file") for f in findings),
-                      compliance_title=compliance_title),
+                      compliance_title=compliance_title,
+                      has_combined=bool(combo_dicts)),
             self._exec_summary(eng, counts, len(findings), overall, ordered,
                                len(scope), confirmed_counts, confirmed_total,
                                potential_total),
@@ -417,6 +428,7 @@ class ComplianceReportGenerator:
             self._dns_enumeration(dns_inv),
             self._risk_methodology(),
             self._findings_summary(ordered),
+            self._combined_risks(combo_dicts),
             self._detailed_findings(ordered),
             self._owasp_coverage(findings),
         ]
@@ -618,7 +630,7 @@ class ComplianceReportGenerator:
     def _toc(has_inventory: bool = False, has_api: bool = False,
              has_iot: bool = False, has_ot: bool = False,
              has_dns: bool = False, has_content: bool = False,
-             compliance_title: str = "") -> str:
+             compliance_title: str = "", has_combined: bool = False) -> str:
         items = [
             ("exec", "Executive Summary"),
             ("scope", "Scope & Methodology"),
@@ -632,6 +644,10 @@ class ComplianceReportGenerator:
         items += [
             ("risk", "Risk Rating Methodology"),
             ("summary", "Findings Summary"),
+        ]
+        if has_combined:
+            items.append(("combined", "Combined Risk (Correlated Findings)"))
+        items += [
             ("details", "Detailed Findings"),
             ("owasp", "OWASP Top 10 Coverage"),
         ]
@@ -964,6 +980,109 @@ class ComplianceReportGenerator:
                 <th>Target</th></tr>
             {rows}
           </table>
+        </div>"""
+
+    def _combined_risks(self, combos: list[dict]) -> str:
+        """Render the correlated-findings section: sets of findings that, taken
+        together, elevate to a more critical issue. Empty string when there are
+        none (the section and its TOC entry are then omitted)."""
+        if not combos:
+            return ""
+        cards = ""
+        for c in combos:
+            sev = str(c.get("combined_severity") or "info").lower()
+            m = SEVERITY_META.get(sev, SEVERITY_META["info"])
+            conf = str(c.get("confirmation") or "Potential")
+            conf_cls = "conf-confirmed" if conf == "Confirmed" else "conf-potential"
+            comp_items = ""
+            for comp in c.get("components", []):
+                csev = str(comp.get("severity") or "info").lower()
+                cm = SEVERITY_META.get(csev, SEVERITY_META["info"])
+                tgt = comp.get("target")
+                extra = []
+                if comp.get("param"):
+                    extra.append("param " + _esc(str(comp.get("param"))))
+                if comp.get("port"):
+                    extra.append("port " + _esc(str(comp.get("port"))))
+                if comp.get("cve"):
+                    extra.append(_esc(str(comp.get("cve"))))
+                extra_str = (f' <span class="muted small">[{" · ".join(extra)}]</span>'
+                             if extra else "")
+                comp_items += (
+                    f'<li><span class="pill" style="background:{cm["color"]}">{cm["label"]}</span> '
+                    f'{_esc(comp.get("title") or comp.get("vuln_type") or "Finding")}'
+                    + (f' <span class="muted small">({_esc(tgt)})</span>' if tgt else "")
+                    + extra_str
+                    + "</li>"
+                )
+            meta_bits = []
+            if c.get("cwe"):
+                meta_bits.append(_esc(c.get("cwe")))
+            if c.get("owasp"):
+                meta_bits.append(_esc(c.get("owasp")))
+            mitre = ", ".join(str(x) for x in (c.get("mitre") or []))
+            if mitre:
+                meta_bits.append("MITRE " + _esc(mitre))
+            scope = ", ".join(str(x) for x in (c.get("scope") or []))
+            try:
+                pct = int(round(float(c.get("confidence") or 0) * 100))
+            except (TypeError, ValueError):
+                pct = 0
+            try:
+                cvss = f'{float(c.get("representative_cvss") or 0):.1f}'
+            except (TypeError, ValueError):
+                cvss = "0.0"
+            metaline = f"Representative CVSS {cvss} · confidence {pct}%"
+            try:
+                prio = float(c.get("priority") or 0)
+            except (TypeError, ValueError):
+                prio = 0.0
+            if prio:
+                metaline += f" · priority {prio:.0f}/100"
+            if c.get("phase"):
+                metaline += f" · {_esc(str(c.get('phase')))}"
+            if scope:
+                metaline += f" · scope {_esc(scope)}"
+            if meta_bits:
+                metaline += " · " + " | ".join(meta_bits)
+
+            prereqs = [p for p in (c.get("prerequisites") or []) if p]
+            prereq_html = ""
+            if prereqs:
+                lis = "".join(f"<li>{_esc(str(p))}</li>" for p in prereqs)
+                prereq_html = ('<div class="small" style="margin:6px 0;"><b>Prerequisites for '
+                               f'the chain:</b><ul style="margin:4px 0;">{lis}</ul></div>')
+
+            steps = [s for s in (c.get("playbook") or []) if s]
+            play_html = ""
+            if steps:
+                heading = ("Reproduction steps" if conf == "Confirmed"
+                           else "Proof / validation steps")
+                lis = "".join(f"<li>{_esc(str(s))}</li>" for s in steps)
+                play_html = (f'<div class="small" style="margin:6px 0;"><b>{heading}:</b>'
+                             f'<ol style="margin:4px 0;">{lis}</ol></div>')
+
+            cards += f"""<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0;">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
+                <span class="pill" style="background:{m['color']}">{m['label']}</span>
+                <span class="confpill {conf_cls}">{_esc(conf)}</span>
+                <strong>{_esc(c.get('name') or 'Combined risk')}</strong>
+              </div>
+              <p class="muted small" style="margin:2px 0 8px;">{metaline}</p>
+              <div class="small"><b>Combines these findings:</b><ul style="margin:4px 0;">{comp_items}</ul></div>
+              <p class="small" style="margin:4px 0;"><b>Why it is worse together:</b> {_esc(c.get('rationale'))}</p>
+              <p class="small" style="margin:4px 0;"><b>Impact:</b> {_esc(c.get('impact'))}</p>
+              {prereq_html}
+              {play_html}
+              <p class="small" style="margin:4px 0;"><b>Recommendation:</b> {_esc(c.get('recommendation'))}</p>
+            </div>"""
+        return f"""<div class="page section" id="combined"><h2>Combined Risk (Correlated Findings)</h2>
+          <p class="muted small">Two or more of the findings above, although rated individually, form a
+          materially worse issue when combined. Each entry below is elevated to the severity the
+          combination warrants, names its constituent findings (which remain listed in their own
+          right), states the prerequisites that must hold, and gives the concrete, in-scope steps to
+          prove it against this target. Remediating any single constituent breaks the chain.</p>
+          {cards}
         </div>"""
 
     def _detailed_findings(self, ordered: list[dict]) -> str:

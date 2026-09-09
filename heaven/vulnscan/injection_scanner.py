@@ -352,6 +352,23 @@ def _diff_char_count(a: str, b: str, cap: int = 4000) -> int:
     return max(len(ra), len(rb)) - matched
 
 
+def _baseline_noise(baseline_a: str, baseline_b: str) -> int:
+    """Per-request jitter of the SAME url+value: two fetches of the baseline,
+    reflection-stripped and whitespace-collapsed, then char-diffed.
+
+    A stable page returns 0. A page that renders a rotating token, a timestamp,
+    an ad, or a one-shot session flash message (DVWA's ``dvwaMessage`` queue)
+    returns the size of that transient — the amount by which two identical
+    requests can differ for reasons that have nothing to do with the injected
+    condition. The boolean oracle must clear this floor to count.
+    """
+    if not (baseline_a and baseline_b):
+        return 0
+    a = _collapse_ws(_strip_reflection(baseline_a, ""))
+    b = _collapse_ws(_strip_reflection(baseline_b, ""))
+    return _diff_char_count(a, b)
+
+
 def _boolean_sqli_confirmed(
     baseline_body: str,
     body_true: str,
@@ -359,6 +376,7 @@ def _boolean_sqli_confirmed(
     true_payload: str,
     false_payload: str,
     min_delta: int = 12,
+    noise_floor: int = 0,
 ) -> bool:
     """True iff the TRUE/FALSE responses show a genuine boolean-blind SQLi oracle.
 
@@ -367,6 +385,15 @@ def _boolean_sqli_confirmed(
     is removed, TRUE and FALSE differ by the size of that row while TRUE stays
     close to the baseline. A reflective/echoing page collapses to near-identical
     TRUE and FALSE bodies after stripping and is rejected.
+
+    ``noise_floor`` is the page's own request-to-request jitter (see
+    :func:`_baseline_noise`): the TRUE/FALSE swing must EXCEED it, otherwise the
+    "difference" is just the page being non-deterministic (a session flash
+    message, a rotating token), not a SQL result. This is what stops an ignored
+    parameter on a page with a one-shot ``dvwaMessage`` from reading as an oracle
+    — the swing (81 chars in the live DVWA index.php?option= case) is no larger
+    than the baseline's own jitter, so it no longer counts. Default 0 keeps the
+    pure gate strict-positive, matching the original behaviour.
     """
     if not (baseline_body and body_true and body_false):
         return False
@@ -381,8 +408,11 @@ def _boolean_sqli_confirmed(
 
     # TRUE≈FALSE after stripping → the "difference" was reflection/noise, not a
     # SQL result. Require a real, sizable TRUE/FALSE divergence that is driven by
-    # the FALSE branch (TRUE must stay markedly closer to the baseline).
-    return delta_tf >= min_delta and delta_tf > delta_tb * 2
+    # the FALSE branch (TRUE must stay markedly closer to the baseline) AND that
+    # exceeds the page's own request-to-request jitter.
+    return (delta_tf >= min_delta
+            and delta_tf > delta_tb * 2
+            and delta_tf > noise_floor)
 
 
 def _time_blind_confirmed(
@@ -707,19 +737,39 @@ class InjectionScanner:
                                            true_pl, false_pl):
                 continue
 
-            # Co-confirmation: a real boolean-blind oracle is deterministic, so it
-            # must reproduce on a second independent round. A dynamic page that
-            # differed once by chance will not — this is the fix for the
-            # boolean-SQLi false positives seen live against reflective DVWA
-            # endpoints (xss_r / fi / brute).
+            # Co-confirmation: a real boolean-blind oracle is deterministic and
+            # order-independent, so it must survive a second round with the
+            # TRUE/FALSE fetch ORDER SWAPPED and clear the page's own jitter.
+            #
+            # A dynamic page that differed once by chance will not reproduce.
+            # More subtly, a one-shot session artifact reproduces *positionally*:
+            # TRUE is always fetched before FALSE, so if a concurrent probe keeps
+            # queueing a DVWA `dvwaMessage` flash, the FIRST read of each pair
+            # consumes it and the SECOND finds it gone — TRUE tracks the baseline
+            # and FALSE looks "hidden", a perfect fake oracle that even repeats.
+            # Swapping the order (fetch FALSE first this round) flips which read
+            # grabs the transient, so the fake collapses while a real oracle holds;
+            # and a fresh baseline re-fetch measures the jitter the swing must
+            # exceed. This is the fix for the live index.php?option= boolean-SQLi
+            # false positive, and it does not lower recall on real oracles
+            # (deterministic pages have zero jitter and are order-independent).
             reproduced = True
             if REQUIRE_BOOLEAN_REPRODUCTION:
                 async with self._sem:
-                    _, body_true2 = await self._get_rec(session, url_true, self._headers)
+                    _, baseline2 = await self._get_rec(session, url, self._headers)
                 async with self._sem:
                     _, body_false2 = await self._get_rec(session, url_false, self._headers)
-                reproduced = bool(body_true2 and body_false2 and _boolean_sqli_confirmed(
-                    baseline_body, body_true2, body_false2, true_pl, false_pl))
+                async with self._sem:
+                    _, body_true2 = await self._get_rec(session, url_true, self._headers)
+                noise = _baseline_noise(baseline_body, baseline2)
+                reproduced = bool(
+                    body_true2 and body_false2
+                    # first round must still hold once the jitter floor is known…
+                    and _boolean_sqli_confirmed(baseline_body, body_true, body_false,
+                                                true_pl, false_pl, noise_floor=noise)
+                    # …and the order-swapped round must hold too.
+                    and _boolean_sqli_confirmed(baseline_body, body_true2, body_false2,
+                                                true_pl, false_pl, noise_floor=noise))
             if not reproduced:
                 continue  # did not reproduce → treat as noise, try next probe
 

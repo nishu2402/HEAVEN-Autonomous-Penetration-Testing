@@ -30,6 +30,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from heaven.forensics.common import safe_zip_read
 from heaven.utils.logger import get_logger
 
 logger = get_logger("forensics.archive")
@@ -144,10 +145,11 @@ def _analyze_zip(path: str, target: str) -> dict[str, Any]:
         if Path(zi.filename).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif",
                                                 ".zip", ".gz", ".class", ".woff"}:
             continue
-        try:
-            blob = zf.read(zi)[:512 * 1024]
-        except Exception:                    # noqa: BLE001 (encrypted / bad member)
-            logger.debug("skipping unreadable archive member", exc_info=True)
+        # Bounded, incremental inflate: never materialise a whole member (a
+        # bomb entry could expand to gigabytes even though file_size claims to
+        # be small — read() does not enforce the declared size).
+        blob = safe_zip_read(zf, zi, 512 * 1024)
+        if not blob:
             continue
         secrets += _carve_secrets(blob, zi.filename)
         if len(secrets) >= 12:
@@ -217,12 +219,20 @@ def _analyze_tar(path: str, target: str) -> dict[str, Any]:
     devices = 0
     total = 0
     count = 0
+    bomb = False
     with tf:
         for m in tf:
             count += 1
             if count > _MAX_ENTRIES:
                 break
             total += m.size
+            # Stop before iterating into an implausibly large declared member:
+            # for a compressed tar, advancing past it would force tarfile to
+            # inflate that member's data just to reach the next header — a
+            # decompression-bomb DoS. We flag it and stop reading.
+            if total >= _BOMB_TOTAL:
+                bomb = True
+                break
             if _is_unsafe_path(m.name) or (m.issym() or m.islnk()) and _is_unsafe_path(m.linkname or ""):
                 unsafe.append(m.name)
             if m.issym() or m.islnk():
@@ -240,6 +250,12 @@ def _analyze_tar(path: str, target: str) -> dict[str, Any]:
     if executables:
         report["executables"] = executables[:60]
 
+    if bomb:
+        add("archive_decompression_bomb", "medium", "Possible decompression bomb",
+            f"The archive declares at least {total:,} uncompressed bytes and was "
+            "not fully enumerated. An archive that expands to an implausible size "
+            "is a DoS risk on extraction.", cwe="CWE-409", confidence=0.55,
+            evidence={"declared_uncompressed_at_least": total})
     if unsafe:
         add("archive_tar_slip", "high", "Path traversal / unsafe link in tar",
             f"{len(unsafe)} member(s) traverse outside the extraction root or link "

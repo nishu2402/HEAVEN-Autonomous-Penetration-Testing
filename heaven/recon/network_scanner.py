@@ -450,6 +450,52 @@ def _os_from_service_evidence(ostypes: list[str], os_cpes: list[str]) -> str:
     return Counter(names).most_common(1)[0][0]
 
 
+# OS-family signals that appear directly in a service *banner* (not an nmap -O
+# fingerprint). An SSH/HTTP/SMTP banner routinely carries the distribution
+# ("Debian", "Ubuntu"), which pins the OS family without raw sockets. Kept high-
+# signal and unambiguous; the SMB service *name* ("microsoft-ds") is deliberately
+# NOT a Windows token — Samba on Linux serves microsoft-ds too, and treating it
+# as Windows is exactly the false positive this guards against.
+_UNIX_BANNER_TOKENS: tuple[str, ...] = (
+    "debian", "ubuntu", "linux", "centos", "red hat", "redhat", "fedora",
+    "raspbian", "gentoo", "suse", "freebsd", "openbsd", "netbsd", "solaris",
+    "sunos", "unix", "-generic", "mandriva", "slackware", "alpine",
+)
+_WINDOWS_BANNER_TOKENS: tuple[str, ...] = (
+    "windows", "win32", "win64", "microsoft-iis", "microsoft-httpapi",
+    "microsoft windows", "windows server", "msrpc",
+)
+
+
+def _os_hint_from_banners(open_ports: list) -> str:
+    """Best-effort OS *family* from the banners already grabbed off open ports.
+
+    Returns ``"Linux"`` / ``"Unix"`` / ``"Windows"`` when a banner carries an
+    unambiguous OS token, else ``""``. This is a real observed signal (the
+    service told us its distribution), so callers treat it as a heuristic — but
+    crucially it is strong enough to VETO a NetBIOS "Windows" guess on a host
+    that is plainly a Unix box running Samba.
+    """
+    unix_hit = False
+    for p in open_ports or []:
+        blob = " ".join(str(getattr(p, attr, "") or "")
+                        for attr in ("banner", "product", "version",
+                                     "service_version", "extrainfo")).lower()
+        if not blob:
+            continue
+        if any(tok in blob for tok in _UNIX_BANNER_TOKENS):
+            unix_hit = True
+        elif any(tok in blob for tok in _WINDOWS_BANNER_TOKENS):
+            # A genuine Windows banner (IIS, "Windows", HTTPAPI) — but only trust
+            # it when nothing on the host contradicts it with a Unix token.
+            return "Windows"
+    if unix_hit:
+        # "Linux" is the safe family label; every token above is a Unix-family OS
+        # and the report/EOL layer only needs the family, not the exact distro.
+        return "Linux"
+    return ""
+
+
 # Conservative OUI-vendor → device-type map. Keyed on a lowercased fragment of
 # the vendor string nmap resolves from the MAC's OUI. The OUI is a real,
 # manufacturer-assigned identifier, but it names the *maker*, not a proven device
@@ -754,19 +800,27 @@ def _nmap_technique_args(scan_type: str, raw_capable: bool) -> Optional[list[str
 # opens — worth a short read to capture a version string in the pure-Python
 # (no-nmap) path. HTTP-family ports get a minimal HEAD request instead.
 _BANNER_READ_PORTS: frozenset[int] = frozenset({
-    21, 22, 23, 25, 110, 143, 587, 3306, 5432, 6379, 11211, 27017,
+    21, 22, 23, 25, 79, 110, 143, 465, 587, 990, 2121, 3306, 5432,
+    5900, 5901, 5902, 5903, 6379, 6660, 6667, 6697, 11211, 27017,
 })
 _HTTP_LIKE_PORTS: frozenset[int] = frozenset({
     80, 591, 2082, 2086, 2095, 8000, 8008, 8080, 8081, 8888,
 })
+# IRC ports where the daemon does NOT volunteer its build on connect (it sends a
+# hostname-lookup NOTICE first): a single benign, read-only ``VERSION`` query
+# pulls the "351 …" reply that names the server (e.g. "Unreal3.2.8.1"), which is
+# what maps a trojaned UnrealIRCd 3.2.8.1 to its backdoor CVE. VERSION is a
+# standard status command — it changes nothing on the target.
+_IRC_PORTS: frozenset[int] = frozenset({6660, 6667, 6697})
 
 
 async def _grab_banner(host: str, port: int, timeout: float) -> str:
     """Best-effort, READ-ONLY banner grab from a known-open TCP port.
 
     Returns a short, cleaned banner string, or '' when nothing was offered.
-    Never writes anything except a single benign HTTP ``HEAD`` on web-like
-    ports, so it's safe to run against any authorized target.
+    Writes nothing except a single benign HTTP ``HEAD`` on web-like ports and a
+    read-only ``VERSION`` status query on IRC ports (a standard command that
+    changes nothing), so it's safe to run against any authorized target.
     """
     read_timeout = min(3.0, max(1.0, timeout))
     try:
@@ -783,8 +837,28 @@ async def _grab_banner(host: str, port: int, timeout: float) -> str:
             )
             with contextlib.suppress(OSError, asyncio.TimeoutError):
                 await writer.drain()
+        # First read: most services (FTP/SSH/SMTP/VNC/POP/IMAP/…) greet the
+        # instant the socket opens. Read once, then — for services that either
+        # greet across several lines (FTP's multi-line 220) or need a nudge (IRC)
+        # — do a short follow-up read so the version-bearing line is not missed.
         with contextlib.suppress(OSError, asyncio.TimeoutError):
-            data = await asyncio.wait_for(reader.read(256), timeout=read_timeout)
+            data = await asyncio.wait_for(reader.read(512), timeout=read_timeout)
+        if port in _IRC_PORTS:
+            # The daemon opened with a hostname-lookup NOTICE, not its build. Ask
+            # for it: VERSION → a "351 <server> <version>" reply naming e.g.
+            # "Unreal3.2.8.1". Read-only status command.
+            with contextlib.suppress(OSError, asyncio.TimeoutError):
+                writer.write(b"VERSION\r\n")
+                await writer.drain()
+                more = await asyncio.wait_for(reader.read(1024), timeout=read_timeout)
+                if more:
+                    data += b"\n" + more
+        elif port in _BANNER_READ_PORTS and len(data) < 512:
+            # Grab any trailing greeting lines (e.g. FTP 220-continued banners).
+            with contextlib.suppress(OSError, asyncio.TimeoutError):
+                more = await asyncio.wait_for(reader.read(512), timeout=1.0)
+                if more:
+                    data += more
     finally:
         writer.close()
         with contextlib.suppress(OSError, asyncio.TimeoutError):
@@ -800,6 +874,16 @@ async def _grab_banner(host: str, port: int, timeout: float) -> str:
             elif line.upper().startswith("HTTP/") and not status:
                 status = line.strip()
         text = server or status or text.splitlines()[0]
+    elif port in _IRC_PORTS and text:
+        # Prefer the VERSION reply line ("351 …") — it carries the build — over
+        # the connect-time NOTICE noise.
+        for line in text.splitlines():
+            if " 351 " in line or line.strip().startswith("351") or "unreal" in line.lower():
+                text = line.strip()
+                break
+    # Collapse to a single clean line so downstream fingerprinting sees a tidy
+    # banner (and control bytes from binary greeters like VNC don't leak through).
+    text = " ".join(text.split())
     return text[:200]
 
 
@@ -1382,10 +1466,36 @@ async def _enrich_versionless_ports(
     if not needy:
         return
     needy_set = set(needy)
-    enriched = await _nmap_service_scan(
-        host, needy, stealth_level=stealth_level,
-        host_timeout=host_timeout, evade=evade,
-        connect_scan=connect_scan, context_ports=context_ports)
+    # A single `-sV` of every needy port on a slow / emulated host hits its
+    # host-timeout mid-sweep and returns versions only for whatever nmap happened
+    # to probe first — starving the CVE-bearing services (Samba, distccd, the IRC
+    # daemon) if they sort late. Split into PRIORITY batches (real CVE-surface
+    # ports first) and run them CONCURRENTLY, each with the full host-timeout, so
+    # the high-value services get a complete version probe. Concurrency keeps the
+    # wall time ≈ one host-timeout (no budget regression vs the old single scan),
+    # while giving the ports that can actually yield a finding their own deadline.
+    priority = [p for p in needy if p in _ENRICH_PRIORITY_PORTS]
+    rest = [p for p in needy if p not in _ENRICH_PRIORITY_PORTS]
+    batches: list[list[int]] = []
+    for group in (priority, rest):
+        for i in range(0, len(group), _ENRICH_BATCH_MAX):
+            batches.append(group[i:i + _ENRICH_BATCH_MAX])
+    if len(batches) <= 1:
+        enriched = await _nmap_service_scan(
+            host, needy, stealth_level=stealth_level,
+            host_timeout=host_timeout, evade=evade,
+            connect_scan=connect_scan, context_ports=context_ports)
+    else:
+        results = await asyncio.gather(*[
+            _nmap_service_scan(
+                host, batch, stealth_level=stealth_level,
+                host_timeout=host_timeout, evade=evade,
+                connect_scan=connect_scan, context_ports=context_ports)
+            for batch in batches], return_exceptions=True)
+        enriched = {}
+        for r in results:
+            if isinstance(r, dict):
+                enriched.update(r)
     filled = 0
     for pr in host_result.open_ports:
         if pr.port not in needy_set:
@@ -1843,9 +1953,12 @@ async def scan_host(
                 elif host_timed_out:
                     logger.warning(
                         "nmap hit its --host-timeout on %s (a full-range -sV -sC "
-                        "sweep can't finish on a slow / heavily-filtered host) — "
-                        "completing the inventory with the built-in TCP connect "
-                        "scanner.", host,
+                        "sweep did not finish in the per-host budget — typical of a "
+                        "slow, rate-limited or emulated host, or a heavily-filtered "
+                        "one) — completing the inventory with the built-in TCP "
+                        "connect scanner. If this is a fragile or emulated VM, "
+                        "re-run with --stealth stealth to pace the scan so it stays "
+                        "responsive.", host,
                     )
 
                 # ORDER MATTERS. Recover + `-sV`-ENRICH the SERVICE band FIRST, then
@@ -1990,18 +2103,43 @@ async def scan_host(
             host_result.device_name_source = "netbios"
         if nb.mac_address and not host_result.mac_address:
             host_result.mac_address = nb.mac_address
-        # NBSTAT is a Windows/SMB-stack protocol: a reply confirms Windows. Only
-        # UPGRADE from nothing / a bare TTL guess — never override a specific
-        # nmap -O or service-CPE OS (which may carry the exact release).
-        if not host_result.os_guess or host_result.os_source in ("", "heuristic"):
-            if "windows" not in host_result.os_guess.lower():
-                host_result.os_guess = "Windows"
-            if not host_result.os_source or host_result.os_source == "heuristic":
-                host_result.os_source = "netbios"
-        if not host_result.device_type:
-            host_result.device_type = ("domain controller"
-                                       if nb.is_domain_controller else "Windows host")
-            host_result.device_type_source = "netbios"
+        # An NBSTAT reply proves a NetBIOS/SMB stack is present — but that is
+        # Windows OR Samba-on-Unix: Linux Samba answers a node-status query
+        # identically. So a positive NBSTAT is NOT proof of Windows. Resolve it
+        # against the banners already grabbed: a Unix token anywhere (an SSH
+        # banner advertising "Debian", say) means this is a Samba file server on
+        # Linux, and we must never relabel it Windows. Only when nothing
+        # contradicts it does NBSTAT become the legitimate Windows signal it was
+        # added for (a firewalled Windows box with every TCP port filtered).
+        _os_hint = _os_hint_from_banners(host_result.open_ports)
+        _existing = host_result.os_guess.lower()
+        _existing_is_unix = any(
+            t in _existing for t in
+            ("linux", "unix", "bsd", "debian", "ubuntu", "centos", "red hat",
+             "fedora", "solaris", "mac os", "macos"))
+        if _os_hint == "Linux" or _existing_is_unix:
+            # Samba on a Unix host. Record the OS family (never Windows) and label
+            # the role for what it is, not "Windows host".
+            if not host_result.os_guess:
+                host_result.os_guess = "Linux"
+                host_result.os_source = "heuristic"
+            if not host_result.device_type:
+                host_result.device_type = "file server (SMB/Samba)"
+                host_result.device_type_source = "netbios"
+        else:
+            # No contradicting Unix evidence — treat NBSTAT as a Windows signal.
+            # Only UPGRADE from nothing / a bare TTL guess — never override a
+            # specific nmap -O or service-CPE OS (which may carry the exact
+            # release).
+            if not host_result.os_guess or host_result.os_source in ("", "heuristic"):
+                if "windows" not in host_result.os_guess.lower():
+                    host_result.os_guess = "Windows"
+                if not host_result.os_source or host_result.os_source == "heuristic":
+                    host_result.os_source = "netbios"
+            if not host_result.device_type:
+                host_result.device_type = ("domain controller"
+                                           if nb.is_domain_controller else "Windows host")
+                host_result.device_type_source = "netbios"
 
     # Honeypot heuristic: too many open ports is suspicious
     open_count = len(host_result.open_ports)
@@ -2181,6 +2319,21 @@ _SERVICE_PORT_CEILING = 10000
 # the starved first pass. This settle is paid only on the degraded path, and only
 # when the flood actually discovered new high ports worth fingerprinting.
 _ENRICH_SETTLE_SECONDS = 12.0
+
+# Ports with real CVE surface in the inline DB / a version-specific detector.
+# The version enrichment probes these FIRST, in their own nmap batch, so a slow
+# host that can only finish part of the sweep spends its budget on the services
+# that can actually yield a finding (Samba, distccd, the IRC daemon, DB servers,
+# RPC) instead of starving them behind low-value ports that sort earlier.
+_ENRICH_PRIORITY_PORTS: frozenset[int] = frozenset({
+    21, 22, 23, 25, 53, 79, 80, 110, 111, 135, 139, 143, 389, 443, 445, 465,
+    512, 513, 514, 587, 631, 990, 993, 995, 1099, 1433, 1521, 1524, 2049,
+    2121, 2181, 2375, 3306, 3389, 3632, 5060, 5432, 5900, 5901, 5985, 6000,
+    6379, 6667, 6697, 8009, 8080, 8180, 8443, 9200, 11211, 27017,
+})
+# Ceiling on ports per nmap `-sV` batch so each batch finishes inside its own
+# host-timeout on a slow host (a big single sweep otherwise times out wholesale).
+_ENRICH_BATCH_MAX = 14
 
 
 async def _nmap_ping_sweep(

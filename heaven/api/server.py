@@ -825,6 +825,47 @@ def create_app() -> FastAPI:
     # Security headers middleware — defense-in-depth for the API
     from starlette.middleware.base import BaseHTTPMiddleware
 
+    # Request-body ceiling — refuse an oversized body before any handler buffers
+    # it in memory (most handlers call request.json(), which reads the whole
+    # body). The ceiling is derived from the artifact-upload limit so raising
+    # HEAVEN_ANALYZE_MAX_MB never causes a legitimate upload to be rejected here:
+    # base64 inflates a JSON upload ~4/3, so 2x + slack always covers it.
+    try:
+        _analyze_max_mb = max(1, int(os.environ.get("HEAVEN_ANALYZE_MAX_MB", "512")))
+    except ValueError:
+        _analyze_max_mb = 512
+    try:
+        _req_env_mb = int(os.environ.get("HEAVEN_MAX_REQUEST_MB", "0"))
+    except ValueError:
+        _req_env_mb = 0
+    _max_request_bytes = max(_req_env_mb, _analyze_max_mb * 2 + 64) * 1024 * 1024
+
+    class _BodyLimitMiddleware(BaseHTTPMiddleware):
+        """Reject requests whose declared Content-Length exceeds the ceiling.
+
+        This is a cheap, early DoS guard for the common case (browsers and the
+        bundled UI always send Content-Length). A body sent with chunked
+        encoding and no length is still bounded by each endpoint's own streaming
+        caps (e.g. the artifact-upload route stops writing past its byte limit).
+        """
+
+        async def dispatch(self, request, call_next):
+            cl = request.headers.get("content-length")
+            if cl:
+                try:
+                    too_big = int(cl) > _max_request_bytes
+                except ValueError:
+                    too_big = False
+                if too_big:
+                    from starlette.responses import JSONResponse
+                    return JSONResponse(
+                        {"detail": "request body too large "
+                                   f"(limit {_max_request_bytes // (1024 * 1024)} MB)"},
+                        status_code=413)
+            return await call_next(request)
+
+    app.add_middleware(_BodyLimitMiddleware)
+
     # Strict CSP for the SPA + API. The bundled UI loads its own JS/CSS from
     # 'self' (Vite output, no inline <script>), so script-src can stay tight —
     # the main defence-in-depth win against injected script. Inline *styles* are
@@ -1921,6 +1962,47 @@ def create_app() -> FastAPI:
             "attack_path": analyzer.attack_path_summary(),
             "mermaid": analyzer.to_mermaid(),
         }
+
+    # ── Finding Correlation (combine 2+ findings → elevated risk) ──
+    @app.get("/api/correlations/{scan_id}")
+    async def get_correlations(
+        scan_id: str,
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """Suggest combinations of findings that together elevate to a more
+        critical issue, computed from the engagement's stored findings."""
+        from heaven.vulnscan.correlation import CorrelationEngine
+        actual_scan_id = None if scan_id == "latest" else scan_id
+        data = _get_latest_report_data(actual_scan_id)
+        findings = data.get("vulnerabilities", []) + data.get("findings", [])
+        summary = CorrelationEngine().summary(findings)
+        summary["scan_id"] = scan_id
+        return summary
+
+    @app.post("/api/correlate")
+    async def run_correlation(
+        request: Request,
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """Correlate an operator-supplied list of findings (no persistence).
+
+        Body: ``{"findings": [ {target, vuln_type, severity, confidence, ...}, ... ]}``.
+        Returns the same summary shape as ``GET /api/correlations``.
+        """
+        from heaven.vulnscan.correlation import CorrelationEngine
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            raise HTTPException(422, "expected a JSON object")
+        findings = body.get("findings", [])
+        if not isinstance(findings, list):
+            raise HTTPException(422, "'findings' must be a list")
+        # Bound the input so a huge submitted list can't tie up the worker; the
+        # body-size middleware already caps the raw request.
+        findings = [f for f in findings if isinstance(f, dict)][:2000]
+        return CorrelationEngine().summary(findings)
 
     # ── Engagement workflow ──
     @app.get("/api/engagement")
@@ -3954,8 +4036,10 @@ def create_app() -> FastAPI:
             filename = str(body.get("filename") or "artifact")
 
         # The on-disk name stays random; only the client's extension is reused, so
-        # the filename is never trusted as a path.
-        safe_suffix = Path(filename).suffix[:12]
+        # the filename is never trusted as a path. Strip anything but letters,
+        # digits and dots from the extension so a hostile filename can never
+        # smuggle a path separator or control byte into the temp path.
+        safe_suffix = re.sub(r"[^A-Za-z0-9.]", "", Path(filename).suffix)[:12]
         tmp = tempfile.NamedTemporaryFile(prefix="heaven_analyze_",
                                           suffix=safe_suffix, delete=False)
         wrote = 0

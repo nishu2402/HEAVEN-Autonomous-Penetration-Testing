@@ -23,7 +23,7 @@ from heaven.utils.logger import get_logger
 logger = get_logger("ai.chat")
 
 SECURITY_SYSTEM_PROMPT = (
-    "You are HEAVEN's security assistant — an expert offensive-security and "
+    "You are HEAVEN's security assistant, an expert offensive-security and "
     "vulnerability-management analyst embedded in an AUTHORIZED penetration-"
     "testing platform. Help the operator understand findings, prioritize "
     "remediation, plan next authorized testing steps, explain CVEs/CWEs/attack "
@@ -34,7 +34,7 @@ SECURITY_SYSTEM_PROMPT = (
     "practically.\n"
     "- Ground answers in the engagement context when it is provided; cite the "
     "specific finding/host/CVE you're referring to. If the context doesn't "
-    "contain something, say so — never fabricate findings, hosts, CVEs, CVSS "
+    "contain something, say so, never fabricate findings, hosts, CVEs, CVSS "
     "scores, or confirmation status.\n"
     "- Be concise and actionable. Prefer concrete commands, config, and code "
     "fixes over generic advice. Use Markdown.\n"
@@ -202,7 +202,7 @@ class ChatAssistant:
         if not gw.available:
             return LLMResponse(
                 text="", provider=gw.provider, model=gw.model,
-                error=gw._init_error or "no LLM configured — add a key or run `heaven ai setup`",
+                error=gw._init_error or "no LLM configured, add a key or run `heaven ai setup`",
             )
         req = LLMRequest(
             prompt=_messages_to_prompt(messages),

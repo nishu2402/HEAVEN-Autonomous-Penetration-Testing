@@ -71,11 +71,11 @@ Decide:
   - keep=false if it's a false positive (dynamic content, WAF noise,
     coincidental string match, baseline mismatch, etc.)
   - confidence_delta: a small adjustment (-0.4 to +0.4) reflecting how
-    sure you are. Don't swing wildly — the existing confidence already
+    sure you are. Don't swing wildly, the existing confidence already
     incorporates baseline-jitter analysis.
 
 Output one FPReviewVerdict JSON object. Be specific about the signals
-you saw — vague reasoning is unhelpful to the operator who reviews this
+you saw, vague reasoning is unhelpful to the operator who reviews this
 later. Authorization is established; no legal caveats needed.
 """
 

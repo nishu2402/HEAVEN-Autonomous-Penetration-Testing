@@ -42,7 +42,7 @@ KNOWN_FIXTURES = {
                        "broken_access_control", "ssrf", "deserialization"],
         "vendor_url": "https://owasp.org/www-project-juice-shop/",
         "license": "MIT",
-        "notes": "OWASP Juice Shop — primary integration test target",
+        "notes": "OWASP Juice Shop, primary integration test target",
     },
     "dvwa": {
         "image": "ghcr.io/digininja/dvwa:latest",
@@ -67,7 +67,7 @@ KNOWN_FIXTURES = {
         "categories": ["broken_auth", "excessive_data", "rate_limit", "bola"],
         "vendor_url": "https://github.com/erev0s/VAmPI",
         "license": "MIT",
-        "notes": "VAmPI — vulnerable API for testing OWASP API Top 10",
+        "notes": "VAmPI, vulnerable API for testing OWASP API Top 10",
     },
     "webgoat": {
         "image": "webgoat/webgoat:latest",
@@ -77,7 +77,7 @@ KNOWN_FIXTURES = {
         "categories": ["sqli", "xss", "auth_bypass", "csrf", "deserialization"],
         "vendor_url": "https://owasp.org/www-project-webgoat/",
         "license": "GPL-2.0",
-        "notes": "WebGoat — OWASP guided vulnerable training app",
+        "notes": "WebGoat: OWASP guided vulnerable training app",
     },
 }
 
@@ -207,10 +207,10 @@ def evaluate_against_truth(scan_findings: list[dict], truth: dict) -> AccuracyRe
             notes = "correctly detected"
         elif expected["present"] and not was_detected:
             report.false_negatives += 1
-            notes = "missed — vulnerability present but not flagged"
+            notes = "missed, vulnerability present but not flagged"
         elif not expected["present"] and was_detected:
             report.false_positives += 1
-            notes = "false alarm — flagged but vuln not present"
+            notes = "false alarm, flagged but vuln not present"
         else:
             report.true_negatives += 1
             notes = "correctly ignored"
@@ -232,7 +232,7 @@ def evaluate_against_truth(scan_findings: list[dict], truth: dict) -> AccuracyRe
                 expected_present=False,
                 detected=True,
                 confidence=conf,
-                notes="detected but not in ground-truth — likely false positive",
+                notes="detected but not in ground-truth, likely false positive",
             ))
 
     return report

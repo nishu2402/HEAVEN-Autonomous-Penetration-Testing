@@ -101,7 +101,7 @@ def show(name: str) -> None:
 @click.option("--engagement", "-e", default=None,
               help="Engagement to overlay (default: the active engagement).")
 @click.option("--standard", "-s", default=None,
-              help="Limit output to one standard — a doc stem (e.g. iso_27001) "
+              help="Limit output to one standard, a doc stem (e.g. iso_27001) "
                    "or a short alias (owasp, nist, ptes, ce, ce-plus, iso, pci, "
                    "cis, csf, soc2).")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")

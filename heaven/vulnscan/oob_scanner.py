@@ -145,7 +145,7 @@ async def _probe_ssrf(session: "aiohttp.ClientSession", url: str,
         if oast.hit(token):
             findings.append(_finding(
                 url, "ssrf", "high", f"Server-Side Request Forgery via '{param}'",
-                "The server fetched an attacker-controlled URL — proven by an "
+                "The server fetched an attacker-controlled URL, proven by an "
                 "out-of-band callback from the target to HEAVEN's collaborator. "
                 "SSRF can reach internal services and cloud metadata endpoints.",
                 0.95, {**_evidence_for(oast, token), "parameter": param}))
@@ -163,7 +163,7 @@ async def _probe_xxe(session: "aiohttp.ClientSession", url: str,
     if oast.hit(token):
         return [_finding(
             url, "xxe", "high", "XML External Entity (XXE) injection",
-            "The endpoint parsed XML with external entities enabled — proven by "
+            "The endpoint parsed XML with external entities enabled, proven by "
             "an out-of-band callback when a SYSTEM entity resolved. XXE enables "
             "local file disclosure and SSRF.",
             0.95, _evidence_for(oast, token))]
@@ -199,7 +199,7 @@ async def _probe_cmdi(session: "aiohttp.ClientSession", url: str,
             findings.append(_finding(
                 url, "command_injection", "critical",
                 f"Blind OS command injection via '{param}'",
-                "The server executed an injected shell command — proven by an "
+                "The server executed an injected shell command, proven by an "
                 "out-of-band callback from the target to HEAVEN's collaborator. "
                 "This is remote code execution.",
                 0.95, {**_evidence_for(oast, token), "parameter": param}))

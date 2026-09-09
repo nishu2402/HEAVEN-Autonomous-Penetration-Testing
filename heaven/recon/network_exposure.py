@@ -77,7 +77,7 @@ _CLEARTEXT_PORTS: dict[int, tuple[str, str, str, tuple[str, ...]]] = {
           ("ftp",)),
     513: ("rlogin", "high",
           "The BSD r-service rlogin trusts host-based authentication and sends "
-          "data in cleartext — trivially sniffed or spoofed.",
+          "data in cleartext, trivially sniffed or spoofed.",
           ("login", "rlogin")),
     514: ("rsh", "high",
           "The BSD r-service rsh executes remote commands over a cleartext, "
@@ -176,7 +176,7 @@ def _dangerous_service_findings(ip: str, host: dict) -> list[dict]:
                 f"Unauthenticated Backdoor Shell (port {port})",
                 "This port answers with an interactive command shell and no "
                 "authentication, giving any client on the network direct command "
-                "execution (typically as root). It is a bind shell / backdoor — "
+                "execution (typically as root). It is a bind shell / backdoor, "
                 "treat the host as fully compromised: remove the listener and "
                 "rebuild from a known-good image.",
                 confidence=0.9,
@@ -1257,7 +1257,7 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     f"{ip}:{real_port}", "database_exposed", sev,
                     f"Database Exposed to Untrusted Network: {label} (port {real_port})",
                     f"A {label} service is reachable on a public/routable address. "
-                    "Databases must never be directly exposed to untrusted networks — "
+                    "Databases must never be directly exposed to untrusted networks, "
                     "bind to localhost or a private management network, require "
                     "authentication and TLS, and firewall the port to known "
                     f"application hosts only.{extra}",
@@ -1342,7 +1342,7 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                     "the host to pre-authentication man-in-the-middle attacks and "
                     "lowering the cost of credential brute-forcing. Critically, NLA "
                     "is the front-line mitigation for the pre-auth RDP RCE BlueKeep "
-                    "(CVE-2019-0708) on Windows 7 / Server 2008 R2 and earlier — an "
+                    "(CVE-2019-0708) on Windows 7 / Server 2008 R2 and earlier, an "
                     "unpatched host of that vintage with NLA off is directly "
                     "wormable. Require NLA (CredSSP) via Group Policy / System "
                     "Properties, and confirm the RDP patch level.",

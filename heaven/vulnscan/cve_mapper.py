@@ -901,7 +901,7 @@ _PRODUCT_LABELS: dict[str, str] = {
 _VERSION_CONFIRM_HINTS: dict[str, str] = {
     "apache_http_server":
         "Confirm the exact build: `nmap -sV -p {port} {host}` (many hardened "
-        "servers, e.g. Bluehost, strip the version — then use authenticated "
+        "servers, e.g. Bluehost, strip the version, then use authenticated "
         "`httpd -v` / `apachectl -v`, or the hosting control panel / vendor "
         "advisory). Each CVE below applies ONLY to the affected-version range shown.",
     "nginx":
@@ -913,7 +913,7 @@ _VERSION_CONFIRM_HINTS: dict[str, str] = {
         "build (`ssh -V` / `dpkg -l openssh-server`) before treating any CVE as present.",
     "microsoft_iis":
         "Confirm the exact build: `nmap -sV -p {port} {host}` or the `Server:` "
-        "header; IIS versions map to Windows releases — verify the OS patch level.",
+        "header; IIS versions map to Windows releases, verify the OS patch level.",
     "postgresql":
         "Confirm the exact build: `nmap -sV -p {port} {host}` or authenticated "
         "`SELECT version();`. Each CVE below applies only to the range shown.",
@@ -1302,7 +1302,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                         "confidence":        0.9,
                         "evidence": {
                             "version_independent": True,
-                            "note": ("Exploitable regardless of release — the "
+                            "note": ("Exploitable regardless of release, the "
                                      "affected-version range is unconditional, so "
                                      "no running version is needed to establish "
                                      "applicability."),
@@ -1483,7 +1483,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
             "description": (
                 f"Shodan's public InternetDB associates {len(passive_new)} CVE(s) "
                 f"with this host's internet-facing IP (e.g. {', '.join(examples)}). "
-                "This is passive OSINT, UNVERIFIED from the scan origin — and the "
+                "This is passive OSINT, UNVERIFIED from the scan origin, and the "
                 "IP may be SHARED hosting, so a CVE listed here can belong to the "
                 "shared server rather than this site. Confirm the affected "
                 "component and version (authenticated check or active exploitation) "

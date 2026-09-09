@@ -63,7 +63,7 @@ class MetadataEndpoint:
 CLOUD_METADATA_ENDPOINTS: list[MetadataEndpoint] = [
     MetadataEndpoint(
         "aws", "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
-        {}, "", "AWS IMDSv1 role list — append the role name for temporary keys"),
+        {}, "", "AWS IMDSv1 role list, append the role name for temporary keys"),
     MetadataEndpoint(
         "aws",
         "http://169.254.169.254/latest/meta-data/iam/security-credentials/{role}",
@@ -308,7 +308,7 @@ def classify_bucket_response(provider: str, status: int, body: str) -> tuple[str
         if status in (200, 403) and ("accessdenied" in low or "access denied" in low):
             return "exists", "bucket exists but listing is denied (private)"
         if status == 403:
-            return "exists", "403 — bucket exists but is private"
+            return "exists", "403, bucket exists but is private"
         if status == 404 or "nosuchbucket" in low or "does not exist" in low:
             return "absent", "no such bucket"
         return "error", f"unclassified status {status}"

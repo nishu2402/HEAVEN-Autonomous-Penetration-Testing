@@ -217,7 +217,7 @@ def classify_perimeter(
     if not reachable and open_count == 0 and filtered_count == 0 and closed_count == 0:
         verdict.recommendation = (
             "No response on any probed port. If you know the host is up, it is "
-            "fully firewalled from this vantage point — scan from an in-scope "
+            "fully firewalled from this vantage point, scan from an in-scope "
             "network segment or confirm the allowed source with the firewall owner."
         )
         return verdict
@@ -249,7 +249,7 @@ def classify_perimeter(
         verdict.confidence = 0.7
         verdict.indicators = [
             "Ports answered early in the scan, then connections began timing out "
-            "— consistent with rate-based IPS blocking of the scanner."
+            ", consistent with rate-based IPS blocking of the scanner."
         ]
         verdict.recommendation = (
             "An IPS appears to be rate-blocking the scan. Re-run slower "
@@ -293,9 +293,9 @@ def classify_perimeter(
         ]
         verdict.recommendation = (
             "A packet-filtering firewall is dropping probes to most ports. Re-run "
-            "with evasion (`heaven scan --evade`, or `--stealth stealth`) — HEAVEN "
+            "with evasion (`heaven scan --evade`, or `--stealth stealth`), HEAVEN "
             "fragments packets, pads them, and sources from a trusted port (53) to "
-            "slip probes past simple filters — and scan from an in-scope segment "
+            "slip probes past simple filters, and scan from an in-scope segment "
             "closer to the target. Confirm the intended allowed ports with the "
             "firewall owner. HEAVEN's adaptive re-probe already retried the "
             "high-value ports with these techniques."

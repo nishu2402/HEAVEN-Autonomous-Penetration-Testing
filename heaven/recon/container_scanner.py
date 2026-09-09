@@ -168,7 +168,7 @@ class DockerScanner:
                         target=container.name, vuln_type="privileged_container",
                         severity="critical",
                         title=f"Privileged Container: {container.name}",
-                        description="Container running in privileged mode — full host access.",
+                        description="Container running in privileged mode, full host access.",
                         confidence=0.95,
                         evidence={"image": container.image.tags, "status": container.status},
                         remediation="Remove --privileged flag. Use specific capabilities.",
@@ -340,7 +340,7 @@ class KubernetesScanner:
                             target=host, vuln_type="cadvisor_exposed",
                             severity="medium",
                             title=f"cAdvisor Exposed on {host}:4194",
-                            description=("cAdvisor metrics API is publicly reachable — discloses "
+                            description=("cAdvisor metrics API is publicly reachable, discloses "
                                          "running containers, images and host resource layout."),
                             confidence=0.85,
                             remediation="Bind cAdvisor to localhost or require auth; do not expose 4194.",
@@ -450,7 +450,7 @@ class KubernetesScanner:
                         "A ClusterRoleBinding grants cluster-admin to an "
                         f"over-broad built-in principal: {who}. This makes "
                         "unauthenticated (or every authenticated) caller a full "
-                        "cluster administrator — total cluster compromise."),
+                        "cluster administrator, total cluster compromise."),
                     confidence=0.95,
                     remediation="Delete the binding immediately; never bind "
                                 "cluster-admin to system:anonymous, "

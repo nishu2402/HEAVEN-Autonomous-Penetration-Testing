@@ -168,7 +168,7 @@ def benchmark(tier: str, as_json: bool, no_report: bool, scorecard: str | None) 
         runner = _load_runner(t)
         if runner is None:
             msg = ("Benchmark harness not found. It ships in the source checkout under "
-                   "tests/benchmarks/ — run `heaven benchmark` from a git clone, or "
+                   "tests/benchmarks/, run `heaven benchmark` from a git clone, or "
                    "reproduce with:\n"
                    "  pip install -e \".[dev]\"\n"
                    "  pytest tests/benchmarks/test_native_benchmark.py -s")

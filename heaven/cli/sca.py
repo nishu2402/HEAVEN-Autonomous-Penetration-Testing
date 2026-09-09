@@ -27,7 +27,7 @@ from heaven.cli._helpers import _engagement_db_path, _print, json_output
 @click.command(name="sca")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--engagement", default=None,
-              help="Engagement to persist findings into (optional — without it, "
+              help="Engagement to persist findings into (optional, without it, "
                    "results print to stdout only).")
 @click.option("--output", "-o", type=click.Path(),
               help="Write the full JSON result to this path.")

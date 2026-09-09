@@ -91,7 +91,7 @@ def postex() -> None:
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
 @click.option("--i-have-authorization", is_flag=True, required=True,
-              help="Required — confirm written authorization for this host.")
+              help="Required, confirm written authorization for this host.")
 def enum_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
              os_kind: str, engagement: Optional[str], output: Optional[str],
              i_have_authorization: bool) -> None:
@@ -147,7 +147,7 @@ def enum_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
 @click.option("--i-have-authorization", is_flag=True, required=True,
-              help="Required — confirm written authorization for this host.")
+              help="Required, confirm written authorization for this host.")
 def loot_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
              engagement: Optional[str], output: Optional[str],
              i_have_authorization: bool) -> None:
@@ -193,7 +193,7 @@ def loot_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
 @click.option("--engagement", default=None, help="Persist findings to this engagement.")
 @click.option("--output", "-o", type=click.Path(), default=None, help="Write JSON result.")
 @click.option("--i-have-authorization", is_flag=True, required=True,
-              help="Required — confirm written authorization for this host.")
+              help="Required, confirm written authorization for this host.")
 def full_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
              os_kind: str, no_loot: bool, no_ai: bool, engagement: Optional[str],
              output: Optional[str], i_have_authorization: bool) -> None:

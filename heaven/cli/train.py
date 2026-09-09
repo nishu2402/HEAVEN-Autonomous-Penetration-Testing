@@ -76,7 +76,7 @@ def fetch_model(url: str, dest: Path, expected_sha: str | None) -> Path:
             got = _sha256_file(tmp)
             if got.lower() != expected_sha.lower():
                 raise click.ClickException(
-                    "checksum mismatch — refusing to install.\n"
+                    "checksum mismatch, refusing to install.\n"
                     f"  expected {expected_sha}\n  got      {got}\n"
                     "If you retrained the model, pass --sha256 <digest> or --no-verify."
                 )

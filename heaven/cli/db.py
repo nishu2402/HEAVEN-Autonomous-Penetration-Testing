@@ -29,7 +29,7 @@ def init_db_cmd() -> None:
             _print("[green]PostgreSQL schema initialised successfully.[/green]")
         else:
             _print(
-                "[yellow]PostgreSQL not available — HEAVEN will use SQLite for engagements.[/yellow]\n"
+                "[yellow]PostgreSQL not available, HEAVEN will use SQLite for engagements.[/yellow]\n"
                 "[dim]To enable PostgreSQL: set HEAVEN_DB_PASSWORD and run docker compose up -d postgres[/dim]"
             )
     except Exception as e:

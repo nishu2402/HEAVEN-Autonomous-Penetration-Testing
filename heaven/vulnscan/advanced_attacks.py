@@ -340,7 +340,7 @@ class SubdomainTakeoverDetector:
             return AdvancedFinding(
                 target=subdomain, vuln_type="subdomain_takeover", severity="high",
                 title=f"Potential Subdomain Takeover: {subdomain}",
-                description="DNS resolves to NXDOMAIN — may have dangling CNAME record",
+                description="DNS resolves to NXDOMAIN, may have dangling CNAME record",
                 confidence=0.5,
                 remediation="Remove the dangling DNS record or reclaim the external service.",
                 cwe="CWE-284",
@@ -453,13 +453,13 @@ class RequestSmugglingDetector:
         if probe_stalled and baseline_fast:
             return AdvancedFinding(
                 target=url, vuln_type="request_smuggling", severity="medium",
-                title="Possible HTTP Request Smuggling (CL.TE) — timing anomaly",
+                title="Possible HTTP Request Smuggling (CL.TE), timing anomaly",
                 description=(
                     "A CL.TE probe stalled while a well-formed request returned "
                     "promptly. This is a timing indicator only and MUST be "
                     "verified manually (e.g. a request-smuggling desync PoC through "
                     "the actual front-end/back-end chain) before being treated as "
-                    "exploitable — an origin that simply hangs on a malformed "
+                    "exploitable, an origin that simply hangs on a malformed "
                     "chunked body yields the same signal."
                 ),
                 confidence=0.4,

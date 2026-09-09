@@ -134,7 +134,7 @@ async def _fuzz_verb_tampering(session: "aiohttp.ClientSession",
                                     url,
                                     "xst_trace_enabled" if has_sensitive else "http_trace_enabled",
                                     "high" if has_sensitive else "medium",
-                                    "Cross-Site Tracing (XST) — HTTP TRACE Echoes Request Headers"
+                                    "Cross-Site Tracing (XST): HTTP TRACE Echoes Request Headers"
                                     if has_sensitive else "HTTP TRACE Method Enabled",
                                     (
                                         "TRACE method echoes request headers including Cookie/Authorization. "
@@ -530,7 +530,7 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
                     and _cacheable_for_deception(d_cache)):
                 findings.append(_finding(
                     url, "web_cache_deception", "high",
-                    "Web Cache Deception — Static Extension Bypass",
+                    "Web Cache Deception: Static Extension Bypass",
                     f"Appending a static extension ({decept_url}) returns the SAME "
                     f"dynamic page as {url} with cacheable headers, and an unrelated "
                     f"static path does not — a shared cache could store and serve this "
@@ -618,7 +618,7 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
                     and resp.status != baseline_status):
                 findings.append(_finding(
                     url, "http_smuggling_te_obfuscation", "low",
-                    "Possible HTTP Request Smuggling — TE Header Obfuscation",
+                    "Possible HTTP Request Smuggling: TE Header Obfuscation",
                     f"Duplicate Transfer-Encoding headers with different cases were "
                     f"answered differently (status {resp.status}) than a normal "
                     f"request (status {baseline_status}) — a weak TE.TE indicator "
@@ -776,7 +776,7 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
             f"(status: {item['status']}, len diff: {item['len_diff']}, "
             f"reflected: {item['reflected']}). "
             f"{'Reflected value may be injectable.' if item['reflected'] else ''}"
-            f"{'High-risk parameter name — investigate for access control bypass.' if high_risk else ''}",
+            f"{'High-risk parameter name, investigate for access control bypass.' if high_risk else ''}",
             confidence=0.72,
             evidence=item,
         ))
@@ -889,7 +889,7 @@ async def _fuzz_mail_header_injection(session: "aiohttp.ClientSession",
                     f"Mail (SMTP/IMAP) header injection via '{param}'",
                     "A CRLF-delimited mail header injected into a contact/mail "
                     "parameter was reflected unfiltered, indicating the value is "
-                    "used to build mail headers without sanitisation — enabling "
+                    "used to build mail headers without sanitisation, enabling "
                     "Bcc/recipient injection and mail relay (WSTG-INPV-10).",
                     confidence=0.7,
                     evidence={"parameter": param, "injected_header": "Bcc",
@@ -924,7 +924,7 @@ async def _fuzz_content_type(session: "aiohttp.ClientSession",
             if resp.status < 400 and "heaven_probe" in body:
                 findings.append(_finding(
                     url, "content_type_confusion", "medium",
-                    "Content-Type Confusion — JSON Accepted as Form Data",
+                    "Content-Type Confusion: JSON Accepted as Form Data",
                     "Server parsed JSON body submitted as form-urlencoded. "
                     "May enable parameter injection or type coercion.",
                     confidence=0.75,
@@ -949,7 +949,7 @@ async def _fuzz_content_type(session: "aiohttp.ClientSession",
                 if "heaven_probe" in body:
                     findings.append(_finding(
                         url, "xxe_entity_expansion", "critical",
-                        "XML External Entity (XXE) — Entity Expansion Confirmed",
+                        "XML External Entity (XXE): Entity Expansion Confirmed",
                         "Server processed XML and expanded our test entity. "
                         "External entities may allow reading server files and SSRF.",
                         confidence=0.90,

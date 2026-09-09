@@ -288,7 +288,7 @@ def _ui_rebuild(root: Path) -> tuple[bool, str]:
     if not ui.is_dir():
         return False, "heaven-ui/ not present"
     if shutil.which("npm") is None:
-        return (False, "npm not on PATH — rebuild later: "
+        return (False, "npm not on PATH, rebuild later: "
                        "cd heaven-ui && npm install --legacy-peer-deps && npm run build")
     try:
         inst = subprocess.run(  # nosec B603 B607 -- fixed npm argv, no shell
@@ -345,7 +345,7 @@ def apply_code_update(root: Path, check: UpdateCheck, *, force: bool = False,
         res.notes.append("already up to date")
         return res
     if check.dirty and not force:
-        res.error = "uncommitted local changes — refusing to overwrite them (use --force to auto-stash)"
+        res.error = "uncommitted local changes, refusing to overwrite them (use --force to auto-stash)"
         return res
 
     old_sha = check.current_sha or "HEAD"
@@ -378,11 +378,11 @@ def apply_code_update(root: Path, check: UpdateCheck, *, force: bool = False,
     if _needs_pip_reinstall(changed):
         ok, msg = _pip_reinstall(root)
         res.pip_reinstalled = ok
-        res.notes.append("dependencies changed — reinstalled"
+        res.notes.append("dependencies changed, reinstalled"
                          if ok else f"pip reinstall failed: {msg}")
     if _needs_ui_rebuild(changed):
         if skip_ui:
-            res.notes.append("web UI changed — skipped rebuild (--skip-ui); run: "
+            res.notes.append("web UI changed, skipped rebuild (--skip-ui); run: "
                              "cd heaven-ui && npm install --legacy-peer-deps && npm run build")
         else:
             ok, msg = _ui_rebuild(root)

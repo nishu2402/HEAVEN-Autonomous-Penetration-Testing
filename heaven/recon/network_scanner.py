@@ -14,6 +14,7 @@ import errno
 import functools
 import ipaddress
 import os
+import secrets
 import shutil
 import subprocess  # nosec B404 -- fixed argv, no shell (see _nmap_sudo_prefix)
 import sys
@@ -332,7 +333,7 @@ def scan_capability() -> dict:
         # nmap + HEAVEN_NMAP_SUDO=always is the no-per-run-prompt path, and
         # `sudo heaven …` is the zero-setup fallback.
         remedy = (
-            "macOS needs root for raw sockets — run `sudo heaven scan …`, or set "
+            "macOS needs root for raw sockets, run `sudo heaven scan …`, or set "
             "up passwordless sudo for nmap and export HEAVEN_NMAP_SUDO=always"
         )
     elif sys.platform.startswith("win"):
@@ -807,10 +808,12 @@ _HTTP_LIKE_PORTS: frozenset[int] = frozenset({
     80, 591, 2082, 2086, 2095, 8000, 8008, 8080, 8081, 8888,
 })
 # IRC ports where the daemon does NOT volunteer its build on connect (it sends a
-# hostname-lookup NOTICE first): a single benign, read-only ``VERSION`` query
-# pulls the "351 …" reply that names the server (e.g. "Unreal3.2.8.1"), which is
-# what maps a trojaned UnrealIRCd 3.2.8.1 to its backdoor CVE. VERSION is a
-# standard status command — it changes nothing on the target.
+# hostname-lookup NOTICE first) and, like UnrealIRCd, only answers VERSION with
+# the build-bearing 002/004/351 numerics AFTER the client registers. A benign
+# throwaway registration (NICK/USER) followed by a read-only ``VERSION`` query
+# pulls the line naming the server (e.g. "Unreal3.2.8.1"), which is what maps a
+# trojaned UnrealIRCd 3.2.8.1 to its backdoor CVE. Both are standard client
+# commands: they join no channel and change nothing on the target.
 _IRC_PORTS: frozenset[int] = frozenset({6660, 6667, 6697})
 
 
@@ -844,15 +847,36 @@ async def _grab_banner(host: str, port: int, timeout: float) -> str:
         with contextlib.suppress(OSError, asyncio.TimeoutError):
             data = await asyncio.wait_for(reader.read(512), timeout=read_timeout)
         if port in _IRC_PORTS:
-            # The daemon opened with a hostname-lookup NOTICE, not its build. Ask
-            # for it: VERSION → a "351 <server> <version>" reply naming e.g.
-            # "Unreal3.2.8.1". Read-only status command.
+            # The daemon opened with a hostname-lookup NOTICE, not its build, and
+            # (like UnrealIRCd) answers VERSION with the build-bearing 002/004/351
+            # numerics only once the client has registered. Send a benign,
+            # throwaway registration (a standard client handshake that joins no
+            # channel and changes nothing) then VERSION, and read the numeric
+            # burst that names e.g. "Unreal3.2.8.1" so the trojaned 3.2.8.1 maps
+            # to its backdoor CVE. Read-only in effect: we disconnect right after.
+            # A unique per-connection nick avoids a "433 nick in use" against a
+            # nick the daemon still holds from an earlier probe.
+            nick = f"hvn{secrets.token_hex(3)}".encode()
             with contextlib.suppress(OSError, asyncio.TimeoutError):
-                writer.write(b"VERSION\r\n")
+                writer.write(
+                    b"NICK " + nick + b"\r\nUSER " + nick + b" 0 * :heaven\r\n"
+                    b"VERSION\r\n"
+                )
                 await writer.drain()
-                more = await asyncio.wait_for(reader.read(1024), timeout=read_timeout)
-                if more:
+                # The reply arrives as several numerics over a moment; read a few
+                # short chunks, stopping as soon as the version line is in hand.
+                for _ in range(4):
+                    more = await asyncio.wait_for(reader.read(2048), timeout=read_timeout)
+                    if not more:
+                        break
                     data += b"\n" + more
+                    if b" 351 " in data or b" 004 " in data or b"unreal" in data.lower():
+                        break
+                # Release the nick/connection cleanly so a follow-up probe is not
+                # rejected as a lingering registration.
+                with contextlib.suppress(OSError, asyncio.TimeoutError):
+                    writer.write(b"QUIT :bye\r\n")
+                    await writer.drain()
         elif port in _BANNER_READ_PORTS and len(data) < 512:
             # Grab any trailing greeting lines (e.g. FTP 220-continued banners).
             with contextlib.suppress(OSError, asyncio.TimeoutError):
@@ -1525,6 +1549,52 @@ async def _enrich_versionless_ports(
             "the full-range sweep could not finish", filled, host)
 
 
+async def _enrich_irc_versions(
+    host_result: HostResult, host: str, timeout: float,
+) -> None:
+    """Capture the build of an IRC daemon that reports a product but no version.
+
+    UnrealIRCd (and kin) answer VERSION with the build-bearing 002/004/351
+    numerics only once the client has registered, so neither nmap's ``-sV`` nor a
+    bare-VERSION grab obtains the version. That leaves e.g. "UnrealIRCd" with an
+    empty version, which keeps the trojaned-3.2.8.1 backdoor (CVE-2010-2075) an
+    unconfirmable version-less "potential" even though the daemon will disclose
+    its exact build on request. A single benign registration + ``VERSION`` grab
+    (see :func:`_grab_banner`) recovers that build straight from the server's own
+    reply. Real observation only: the version is read live from the daemon, never
+    inferred. No-op unless an open IRC port is genuinely missing its version.
+    """
+    needy = [p for p in host_result.open_ports
+             if p.port in _IRC_PORTS and p.state == "open" and not p.version]
+    if not needy:
+        return
+    from heaven.vulnscan.cve_mapper import _fingerprint_from_banner
+    read_timeout = min(4.0, max(2.0, timeout))
+    # ONE gentle probe per port, sequentially. UnrealIRCd throttles an IP that
+    # reconnects too fast, and each extra reconnect only EXTENDS that block
+    # (measured on Metasploitable-2: retries never cleared it, they perpetuated
+    # it) — so retrying is both useless and needless load on the target, against
+    # the check-don't-harm rule. When the daemon is throttling (its own defence,
+    # often already tripped by the scan's own -sV probes to this port) the port
+    # honestly stays a version-less "potential" carrying the candidate CVE, which
+    # is exactly the ground truth: the build could not be confirmed.
+    for pr in needy:
+        banner = ""
+        with contextlib.suppress(Exception):
+            banner = await _grab_banner(host, pr.port, read_timeout)
+        fp = _fingerprint_from_banner(banner) if banner else None
+        if not fp or not fp[1]:
+            continue
+        product_key, version = fp
+        pr.version = version
+        pr.banner = banner
+        if not pr.product:
+            pr.product = product_key
+        logger.info(
+            "  ↳ IRC VERSION probe resolved %s %s on %s:%d",
+            product_key, version, host, pr.port)
+
+
 def _nmap_wait_budget(host_timeout: str, *, margin: float = 60.0) -> float:
     """Seconds to wait on an nmap subprocess before force-killing it.
 
@@ -1955,7 +2025,7 @@ async def scan_host(
                         "nmap hit its --host-timeout on %s (a full-range -sV -sC "
                         "sweep did not finish in the per-host budget — typical of a "
                         "slow, rate-limited or emulated host, or a heavily-filtered "
-                        "one) — completing the inventory with the built-in TCP "
+                        "one), completing the inventory with the built-in TCP "
                         "connect scanner. If this is a fragile or emulated VM, "
                         "re-run with --stealth stealth to pace the scan so it stays "
                         "responsive.", host,
@@ -2140,6 +2210,14 @@ async def scan_host(
                 host_result.device_type = ("domain controller"
                                            if nb.is_domain_controller else "Windows host")
                 host_result.device_type_source = "netbios"
+
+    # Capture the build of any IRC daemon that came back with a product but no
+    # version (nmap's -sV and a bare VERSION both stop short of the registration
+    # UnrealIRCd needs). Runs whether nmap succeeded or the connect-scan fallback
+    # recovered the port, so the trojaned 3.2.8.1 backdoor is confirmed from the
+    # daemon's own reply instead of staying a version-less "potential".
+    with contextlib.suppress(Exception):  # enrichment must never break a scan
+        await _enrich_irc_versions(host_result, host, timeout)
 
     # Honeypot heuristic: too many open ports is suspicious
     open_count = len(host_result.open_ports)
@@ -2820,7 +2898,7 @@ async def scan_network(
                     )
                     verdict.indicators.append(
                         f"Evasion re-probe recovered {len(added)} port(s) the initial "
-                        "scan could not see — the perimeter was filtering them."
+                        "scan could not see, the perimeter was filtering them."
                     )
                     verdict.evidence["recovered_ports"] = [p.port for p in added]
             h.perimeter = verdict.to_dict() if verdict.detected else {}

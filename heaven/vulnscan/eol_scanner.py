@@ -353,7 +353,7 @@ async def _dynamic_eol_finding(target: str, product: str, version: str,
         f"{display} release {cycle_label} reached end-of-life{when} according to "
         "endoflife.date and receives no further security patches. End-of-life "
         "software leaves any newly disclosed vulnerability permanently "
-        "exploitable — inventory and upgrade all affected instances to a "
+        "exploitable, inventory and upgrade all affected instances to a "
         "vendor-supported release.",
         0.8,
         {"product": display, "detected_version": detected,

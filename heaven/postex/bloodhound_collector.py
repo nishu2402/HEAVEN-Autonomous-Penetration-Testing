@@ -62,7 +62,7 @@ class BloodHoundCollector:
         except ImportError:
             return CollectionResult(
                 domain, False,
-                error="ldap3 not installed — pip install ldap3",
+                error="ldap3 not installed, pip install ldap3",
             )
 
         output_dir = output_dir or Path(f"data/bloodhound/{domain}/{int(time.time())}")

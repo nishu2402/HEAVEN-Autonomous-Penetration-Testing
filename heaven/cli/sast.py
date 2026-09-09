@@ -22,13 +22,13 @@ def sast() -> None:
 @sast.command("scan")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--engagement", default=None,
-              help="Engagement to persist findings into (optional — without "
+              help="Engagement to persist findings into (optional, without "
                    "it, results print to stdout only)")
 @click.option("--extra-config", multiple=True,
               help="Extra Semgrep config (registry pack or local .yml). "
                    "Repeatable. Default = HEAVEN curated rules.")
 @click.option("--no-builtin", is_flag=True,
-              help="Skip HEAVEN's built-in rule pack — rely on --extra-config only.")
+              help="Skip HEAVEN's built-in rule pack, rely on --extra-config only.")
 @click.option("--native", "native", is_flag=True,
               help="Use HEAVEN's dependency-free native SAST engine instead of "
                    "Semgrep (multi-language patterns + secret scanning).")

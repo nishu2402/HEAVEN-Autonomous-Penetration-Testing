@@ -586,7 +586,7 @@ class WindowsEnumEngine:
             import asyncssh  # type: ignore[import-not-found]  # noqa: F401 — import is the availability guard; connect() goes via ssh_safe
         except ImportError:
             return WinEnumResult(host=host, user=username, success=False,
-                                 error="asyncssh not installed — pip install asyncssh")
+                                 error="asyncssh not installed, pip install asyncssh")
         from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
 
         client_keys = [private_key] if private_key else None

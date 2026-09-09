@@ -131,11 +131,11 @@ class EmailSecurityScanner:
                 # what actually rejects spoofed mail. Google/Microsoft/PayPal all use
                 # '~all'. So it is a mild hardening note, not a medium finding.
                 issues.append("SPF uses '~all' (softfail) rather than '-all' (hardfail) "
-                              "— acceptable, but a hardfail is stricter where DMARC "
+                              ", acceptable, but a hardfail is stricter where DMARC "
                               "enforcement is not relied upon")
                 severity = "low"
             elif "?all" in spf_record:
-                issues.append("SPF uses '?all' (neutral) — provides no protection")
+                issues.append("SPF uses '?all' (neutral), provides no protection")
                 severity = "high"
             elif "-all" in spf_record:
                 severity = "info"
@@ -323,7 +323,7 @@ class EmailSecurityScanner:
 
             issues = []
             if policy == "none":
-                issues.append("DMARC policy is 'none' — no enforcement")
+                issues.append("DMARC policy is 'none', no enforcement")
             if "pct=" in dmarc_record:
                 pct_match = re.search(r"pct=(\d+)", dmarc_record)
                 if pct_match and int(pct_match.group(1)) < 100:
@@ -449,7 +449,7 @@ class EmailSecurityScanner:
         self._findings.append(EmailFinding(
             target=domain, vuln_type="dnssec_missing", severity="low",
             title=f"DNSSEC not enabled: {domain}",
-            description="No DNSKEY records — the zone is not DNSSEC-signed, so DNS "
+            description="No DNSKEY records, the zone is not DNSSEC-signed, so DNS "
                         "responses (incl. MX) are not cryptographically protected "
                         "against spoofing/cache poisoning. A hardening gap rather "
                         "than a directly exploitable email flaw.",
@@ -468,7 +468,7 @@ class EmailSecurityScanner:
                     self._findings.append(EmailFinding(
                         target=domain, vuln_type="mta_sts_enabled", severity="info",
                         title=f"MTA-STS configured: {domain}",
-                        description="MTA-STS policy record present — enforces TLS for "
+                        description="MTA-STS policy record present, enforces TLS for "
                                     "inbound mail.",
                         confidence=0.9, evidence={"record": str(rdata).strip('"')},
                     ))
@@ -481,7 +481,7 @@ class EmailSecurityScanner:
         self._findings.append(EmailFinding(
             target=domain, vuln_type="mta_sts_missing", severity="low",
             title=f"MTA-STS not configured: {domain}",
-            description="No MTA-STS policy — sending servers cannot enforce TLS and may "
+            description="No MTA-STS policy, sending servers cannot enforce TLS and may "
                         "be downgraded to cleartext by an on-path attacker.",
             confidence=0.8,
             remediation="Publish an MTA-STS policy (_mta-sts TXT + https policy file).",
@@ -555,7 +555,7 @@ class EmailSecurityScanner:
                     target=server, vuln_type="smtp_no_starttls",
                     severity="medium",
                     title=f"SMTP: No STARTTLS on {server}",
-                    description="Mail server does not advertise STARTTLS — inbound "
+                    description="Mail server does not advertise STARTTLS, inbound "
                                 "mail can be delivered in cleartext.",
                     confidence=0.85,
                     remediation="Enable STARTTLS on the mail server.",

@@ -150,7 +150,7 @@ def print_banner() -> None:
     try:
         from heaven import __banner__
     except (ImportError, AttributeError):
-        print("═══ HEAVEN — Autonomous Penetration-Testing Platform ═══")
+        print("═══ HEAVEN: Autonomous Penetration-Testing Platform ═══")
         return
 
     if console is None:

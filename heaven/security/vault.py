@@ -183,7 +183,7 @@ class CredentialVault:
               rotation_days: Optional[int] = None) -> None:
         """Store a credential in the vault."""
         if self.is_locked:
-            raise PermissionError("Vault is locked — unlock first")
+            raise PermissionError("Vault is locked, unlock first")
 
         if HAS_CRYPTO and self._master_key:
             encrypted = self._encrypt_value(value)
@@ -215,7 +215,7 @@ class CredentialVault:
     def retrieve(self, key: str) -> Optional[str]:
         """Retrieve a decrypted credential from the vault."""
         if self.is_locked:
-            raise PermissionError("Vault is locked — unlock first")
+            raise PermissionError("Vault is locked, unlock first")
 
         entry = self._entries.get(key)
         if not entry:
@@ -240,7 +240,7 @@ class CredentialVault:
     def delete(self, key: str) -> bool:
         """Delete a credential from the vault."""
         if self.is_locked:
-            raise PermissionError("Vault is locked — unlock first")
+            raise PermissionError("Vault is locked, unlock first")
 
         if key in self._entries:
             del self._entries[key]
@@ -252,7 +252,7 @@ class CredentialVault:
     def list_keys(self) -> list[dict]:
         """List all credential keys (without values)."""
         if self.is_locked:
-            raise PermissionError("Vault is locked — unlock first")
+            raise PermissionError("Vault is locked, unlock first")
 
         return [
             {
@@ -269,7 +269,7 @@ class CredentialVault:
     def rotate_key(self, new_master_password: str) -> None:
         """Rotate the master encryption key — re-encrypts all entries."""
         if self.is_locked:
-            raise PermissionError("Vault is locked — unlock first")
+            raise PermissionError("Vault is locked, unlock first")
 
         # Decrypt all values with old key
         decrypted: dict[str, str] = {}

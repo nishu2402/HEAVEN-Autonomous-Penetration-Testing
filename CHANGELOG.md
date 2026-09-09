@@ -484,6 +484,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **IRC service scanning now registers before asking for the daemon's version, so
+  a trojaned UnrealIRCd is confirmed instead of staying an unconfirmable
+  candidate.** UnrealIRCd (and kindred ircds) disclose their build (e.g.
+  `Unreal3.2.8.1`) only to a client that has completed the standard `NICK`/`USER`
+  registration, never to a bare `VERSION` query, so the version came back blank
+  and the backdoor (CVE-2010-2075, CVSS 10.0) could only be reported as a
+  version-less "potential". The banner probe now performs a benign, throwaway
+  registration (a unique nick and a clean `QUIT`; it joins no channel and changes
+  nothing) then reads the build from the server's own `002`/`004`/`351` reply, and
+  a post-scan pass fills any IRC port that nmap left with a product but no version.
+  With the exact build in hand, the version-aware mapper confirms the trojaned
+  3.2.8.1 as a critical RCE. The probe fires once per port and is never retried:
+  the daemon throttles an IP that reconnects too fast and every extra reconnect
+  only extends that block, so when the daemon is actively throttling (its own
+  defence, often already tripped by the scan's own version probes) the port
+  honestly stays a version-less "potential" carrying the CVE candidate rather than
+  the scanner hammering the target. Tests in `tests/test_msf2_network_accuracy.py`.
+
 - **OWASP Benchmark corpus is now fetched once into a persistent cache instead of
   re-cloned every run.** The live SAST benchmark's GPLv2 corpus is still never
   vendored into this (MIT) tree, but `get_or_fetch_corpus()` now keeps a

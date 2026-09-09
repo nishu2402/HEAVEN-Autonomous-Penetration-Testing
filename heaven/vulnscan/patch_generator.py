@@ -339,7 +339,7 @@ def safe_path(user_path: str) -> Path:
 # template = Template(user_input)
 # result = template.render()
 
-# AFTER (safe — use Jinja2 SandboxedEnvironment):
+# AFTER (safe, use Jinja2 SandboxedEnvironment):
 from jinja2.sandbox import SandboxedEnvironment
 env = SandboxedEnvironment()
 template = env.from_string(safe_template_string)
@@ -357,7 +357,7 @@ result = template.render(user_data=user_input)  # Pass as variable, not template
 
     def format_report(self, patches: list[Patch]) -> str:
         """Format patches as a readable report."""
-        lines = ["# HEAVEN — Auto-Generated Remediation Patches\n"]
+        lines = ["# HEAVEN: Auto-Generated Remediation Patches\n"]
         for i, p in enumerate(patches, 1):
             lines.append(f"## {i}. [{p.severity.upper()}] {p.title}")
             lines.append(f"**Vulnerability:** {p.vuln_id} ({p.vuln_type})")

@@ -112,8 +112,8 @@ For a multi-user or internet-exposed deployment, also:
 
 | Version | Supported |
 |---|---|
-| 1.0.x  | ✅ |
-| < 1.0  | ❌ please upgrade |
+| 4.0.x  | ✅ |
+| < 4.0  | ❌ please upgrade |
 
 ## Security release process
 

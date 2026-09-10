@@ -94,7 +94,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API**: 99 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v3.1.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -317,9 +317,9 @@ Prefer to do it by hand? Only the admin password is needed to start:
 # Web UI login (admin/admin on first run → forced change). Set this to skip that.
 export HEAVEN_ADMIN_PASSWORD="your-strong-password"
 
-# Optional: turn on the AI layers (Gemini has a generous free tier):
+# Optional: turn on the AI layers (Gemini has a generous free tier). The Gemini
+# SDK already ships in the base install, so a key is all you need:
 export GEMINI_API_KEY="your-gemini-key"     # from https://aistudio.google.com/apikey
-pip install -e ".[gemini]"                    # install the Gemini SDK
 ```
 
 > **No LLM key needed.** Every AI feature falls back to a deterministic
@@ -463,7 +463,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 62 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard: module status + live command reference (v3.1.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.0.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">

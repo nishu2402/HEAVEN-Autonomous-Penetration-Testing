@@ -2,7 +2,7 @@
 <#
 ==============================================================================
   HEAVEN - Autonomous Penetration Testing Framework
-  Windows installer (PowerShell) v3.1.0
+  Windows installer (PowerShell) v4.0.0
 
   ONE command sets up everything, the same as scripts/install.sh does on
   macOS / Linux:

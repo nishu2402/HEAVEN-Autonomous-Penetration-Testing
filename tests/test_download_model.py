@@ -131,6 +131,55 @@ def test_download_cmd_bad_checksum_exits_nonzero(tmp_path):
     assert not dest.exists()
 
 
+# ── candidate-tag fallback ───────────────────────────────────────────────────
+
+def test_candidate_tags_prefers_version_then_known():
+    from heaven import __version__
+    import heaven.cli.train as train
+
+    tags = train._candidate_tags()
+    assert tags[0] == f"v{__version__}"          # running version's tag first
+    for known in train._MODEL_KNOWN_TAGS:        # every known-good fallback present
+        assert known in tags
+    assert len(tags) == len(set(tags))           # de-duplicated
+
+
+def test_download_cmd_falls_back_when_newest_release_lacks_asset(tmp_path, monkeypatch):
+    """With no --tag/--url, a version bump whose release has no model asset still
+    installs: the command tries the running version's tag, then the known-good
+    fallback that actually carries the (identical) asset."""
+    from click.testing import CliRunner
+
+    import heaven.cli.train as train
+
+    data = b"FALLBACK-MODEL"
+    dest = tmp_path / "cache" / "NVD_model.pkl"
+    known = train._MODEL_KNOWN_TAGS[0]
+    calls: list[str] = []
+
+    def fake_fetch(url, target, expected):
+        calls.append(url)
+        if f"/{known}/" not in url:      # newest release: asset not attached (404-like)
+            raise RuntimeError("HTTP Error 404: Not Found")
+        target = Path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        return target
+
+    monkeypatch.setattr(train, "fetch_model", fake_fetch)
+
+    r = CliRunner().invoke(
+        train.download_model_cmd, ["--dest", str(dest), "--no-verify"],
+    )
+    assert r.exit_code == 0, r.output
+    assert dest.read_bytes() == data
+    cands = train._candidate_tags()
+    assert calls[0] == train._default_model_url(cands[0])   # newest tag tried first
+    if len(cands) > 1:                                       # and it fell back
+        assert "trying the next release" in r.output.lower()
+        assert f"from {known}" in r.output
+
+
 # ── loader search path ───────────────────────────────────────────────────────
 
 def test_model_search_path_includes_cache_dir():

@@ -24,7 +24,15 @@ from heaven.cli._helpers import _print
 # release so `download-model` matches what `train-model` produces locally.
 _MODEL_REPO = "nishu2402/HEAVEN-Autonomous-Penetration-Testing"
 _MODEL_ASSET = "NVD_model.pkl"
-_MODEL_DEFAULT_TAG = "v3.1.0"
+# Release tags known to carry the SHA-256-matching model asset, newest first.
+# With no explicit --tag/--url, `download-model` tries the running version's own
+# tag first and then each of these, installing the first asset whose digest
+# matches _MODEL_SHA256. The model is identical between releases, so if it hasn't
+# been re-attached to the newest release the fetch transparently falls back to a
+# release that has it, and the checksum pin guarantees every candidate is the
+# exact expected model. Prepend a tag here only after attaching the matching
+# NVD_model.pkl to that release.
+_MODEL_KNOWN_TAGS = ("v3.1.0",)
 _MODEL_SHA256 = "b6dba49ad45e271a609521ae1292b16734e30e0806ad5350c72225b6149bc525"
 _MODEL_SIZE_BYTES = 5912225
 
@@ -47,6 +55,21 @@ def _sha256_file(path: Path) -> str:
 
 def _default_model_url(tag: str) -> str:
     return f"https://github.com/{_MODEL_REPO}/releases/download/{tag}/{_MODEL_ASSET}"
+
+
+def _candidate_tags() -> list[str]:
+    """Ordered, de-duplicated release tags to try for the model asset: the running
+    version's own tag first (so a release that re-attaches the model is preferred
+    automatically), then the known-good fallbacks in `_MODEL_KNOWN_TAGS`."""
+    from heaven import __version__
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for tag in (f"v{__version__}", *_MODEL_KNOWN_TAGS):
+        if tag not in seen:
+            seen.add(tag)
+            out.append(tag)
+    return out
 
 
 def fetch_model(url: str, dest: Path, expected_sha: str | None) -> Path:
@@ -88,8 +111,9 @@ def fetch_model(url: str, dest: Path, expected_sha: str | None) -> Path:
 
 
 @click.command(name="download-model")
-@click.option("--tag", default=_MODEL_DEFAULT_TAG, show_default=True,
-              help="Release tag to fetch the model from.")
+@click.option("--tag", default=None,
+              help="Release tag to fetch the model from. Default: the running "
+                   "version's tag, then known-good fallbacks.")
 @click.option("--url", default=None,
               help="Full model URL (overrides --tag; supports file:// for testing).")
 @click.option("--dest", default=None, type=click.Path(),
@@ -123,37 +147,72 @@ def download_model_cmd(tag: str, url: str | None, dest: str | None,
             return
         _print("[yellow]Existing model failed verification · re-downloading.[/yellow]")
 
-    src = url or _default_model_url(tag)
-    _print(f"[cyan]Downloading NVD model[/cyan] (~{_MODEL_SIZE_BYTES // (1 << 20)} MB) "
-           f"from {src}")
-    try:
-        fetch_model(src, target, expected)
-    except click.ClickException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        # 404 usually means the maintainer hasn't attached the asset to the
-        # release yet — say so instead of a raw traceback.
-        raise click.ClickException(
-            f"download failed: {e}\n"
-            "If this is a 404, the model asset may not be attached to the release "
-            f"'{tag}' yet. See docs/BENCHMARK_HOWTO.md, or train locally with "
-            "`heaven train-model`."
-        ) from e
+    # Build the ordered sources to try. An explicit --url or --tag is a single,
+    # authoritative source (fail loudly if it doesn't serve the asset). The
+    # default fans out across the candidate tags and installs the first asset
+    # that verifies, so bumping the app version never breaks the fetch.
+    if url:
+        sources: list[tuple[str | None, str]] = [(None, url)]
+    elif tag:
+        sources = [(tag, _default_model_url(tag))]
+    else:
+        sources = [(t, _default_model_url(t)) for t in _candidate_tags()]
 
-    _print(f"[green]✓ Model installed[/green] → {target}"
+    _print(f"[cyan]Fetching pre-trained NVD model[/cyan] "
+           f"(~{_MODEL_SIZE_BYTES // (1 << 20)} MB)…")
+    installed = False
+    used_tag: str | None = None
+    last_err: Exception | None = None
+    for cand_tag, src in sources:
+        try:
+            fetch_model(src, target, expected)
+            installed, used_tag = True, cand_tag
+            break
+        except click.ClickException:
+            # A verification/scheme failure from a single explicit source is
+            # authoritative — surface it exactly (preserves --url/--tag behaviour
+            # and exit code). In a fallback chain, treat it as a miss and move on.
+            if len(sources) == 1:
+                raise
+            _print(f"[dim]· {cand_tag}: asset did not verify, trying the next release…[/dim]")
+        except Exception as e:  # noqa: BLE001 — network/404: try the next source
+            if len(sources) == 1:
+                where = f"the release '{cand_tag}'" if cand_tag else "that URL"
+                raise click.ClickException(
+                    f"download failed: {e}\n"
+                    f"If this is a 404, the model asset may not be attached to "
+                    f"{where} yet. See docs/BENCHMARK_HOWTO.md, or train locally "
+                    "with `heaven train-model`."
+                ) from e
+            last_err = e
+            _print(f"[dim]· {cand_tag}: not available here, trying the next release…[/dim]")
+
+    if not installed:
+        tried = ", ".join(t or "url" for t, _ in sources)
+        raise click.ClickException(
+            f"download failed from every candidate release ({tried}).\n"
+            f"Last error: {last_err}\n"
+            "The model asset isn't attached to any of these releases yet. See "
+            "docs/BENCHMARK_HOWTO.md, or train locally with `heaven train-model`."
+        )
+
+    where = f" from {used_tag}" if used_tag else ""
+    _print(f"[green]✓ Model installed[/green]{where} → {target}"
            + ("" if no_verify else "  [dim](SHA-256 verified)[/dim]"))
 
-    # Best-effort: also fetch the description/type fallback model. Older releases
-    # won't have it, so a 404 (or any failure) is a soft skip — the hybrid falls
-    # back to the vector model for every finding, which is the pre-hybrid behaviour.
-    if not url:  # only when using the release layout; a custom --url is vector-only
+    # Best-effort: also fetch the description/type fallback model from the same
+    # release the vector model came from. Older releases won't have it, so a 404
+    # (or any failure) is a soft skip — the hybrid falls back to the vector model
+    # for every finding, which is the pre-hybrid behaviour.
+    if not url and used_tag:  # a custom --url is vector-only
+        desc_base = _default_model_url(used_tag)
         desc_target = target.parent / _DESC_ASSET
         desc_expected = None if no_verify else _DESC_SHA256
         try:
-            fetch_model(_default_model_url(tag).replace(_MODEL_ASSET, _DESC_ASSET),
+            fetch_model(desc_base.replace(_MODEL_ASSET, _DESC_ASSET),
                         desc_target, desc_expected)
             with contextlib.suppress(Exception):
-                fetch_model(_default_model_url(tag).replace(_MODEL_ASSET, _DESC_META_ASSET),
+                fetch_model(desc_base.replace(_MODEL_ASSET, _DESC_META_ASSET),
                             desc_target.parent / _DESC_META_ASSET, None)
             _print(f"[green]✓ Description model installed[/green] → {desc_target}")
         except Exception:  # noqa: BLE001 — optional asset; hybrid works without it

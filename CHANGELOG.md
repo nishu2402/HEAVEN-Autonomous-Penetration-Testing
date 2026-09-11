@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A scan can no longer hang indefinitely at a fixed percentage.** Each pipeline
+  phase now runs under a hard deadline (its slowest task's own scope/stealth-scaled
+  timeout, plus generous headroom). A task whose cancellation stalls, for example an
+  HTTP request whose TLS teardown never completes against an unresponsive target, is
+  force-finalised as failed, its dependents are released, and the scan moves on with
+  the partial results it already has, instead of freezing the whole run. Previously a
+  per-task timeout could be silently defeated by that stall and there was no
+  higher-level watchdog to recover.
+- **Web and vulnerability task timeouts now fit the scope.** The fixed per-task caps
+  were sized for a single fast host, so a slow or rate-limiting real-world target, a
+  full-range or UDP sweep, or a quieter stealth profile tripped them mid-scan and
+  discarded the task's partial work. Those timeouts now scale with the stealth level
+  and scan breadth (a quieter or wider scan gets proportionally longer), while the
+  network task keeps its own separate scaling. New
+  `tests/test_phase_deadline_and_timeout_scale.py`.
+
 ## [4.0.0]: 2026-09-10
 
 ### Added

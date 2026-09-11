@@ -320,6 +320,19 @@ class ScanOrchestrator:
         # Initialised lazily from build_full_scan (needs the targets dict).
         self.feedback: Optional[FeedbackEngine] = None
         self._followup_hosts: set[str] = set()  # hosts already given a follow-on task
+        # Web/vuln task timeouts scale up for slower / quieter / wider scans, so a
+        # rate-limiting real-world host does not trip the old fixed caps mid-scan
+        # and lose the task's partial work. Set from stealth + scope in
+        # build_full_scan; 1.0 means no change. The per-phase deadline in
+        # _execute_phase reads the SAME effective timeout, so the two never drift.
+        self._web_timeout_scale: float = 1.0
+        # Per-phase hard ceiling = slowest effective task timeout * factor + margin.
+        # This is the backstop that guarantees a scan can never hang forever, even
+        # when a task's own cancellation stalls (e.g. aiohttp/TLS teardown against
+        # an unresponsive target). Generous by design — it force-finalises stuck
+        # work, it does not curtail healthy work. Tunable so tests can drive it fast.
+        self._phase_deadline_factor: float = 1.5
+        self._phase_deadline_margin: float = 180.0
 
         self._checkpoint_store = checkpoint_store
         self._resumed_checkpoints: dict[str, dict] = {}
@@ -392,6 +405,23 @@ class ScanOrchestrator:
         self.progress.total_weight += ScanProgress.task_weight(timeout)
         logger.debug(f"Task registered: {name} (id={task.id}, phase={phase.value})")
         return task.id
+
+    def _effective_timeout(self, task: "OrchestratorTask") -> float:
+        """The task's real deadline after scope/stealth scaling.
+
+        Web-facing tasks (crawl/fuzz/injection/auth/…) get more wall-clock on a
+        slow or rate-limiting host or a wide scan (``_web_timeout_scale``). The
+        network task self-scales its own timeout already, so it is left alone.
+        Both ``_run_task`` (the per-task cap) and ``_execute_phase`` (the phase
+        ceiling) call this, so a scaled task can never outrun its phase.
+        """
+        base = float(task.timeout or 0.0)
+        scale = getattr(self, "_web_timeout_scale", 1.0) or 1.0
+        if scale != 1.0 and task.id != self.net_task_id and (
+            task.concurrency_group == "web" or task.phase == ScanPhase.VULN_SCAN
+        ):
+            return base * scale
+        return base
 
     def on_progress(self, callback: Callable[[ScanProgress], Any]) -> None:
         """Register a progress callback (fired on task start, task completion,
@@ -469,9 +499,12 @@ class ScanOrchestrator:
             task.state = TaskState.RUNNING
             self.progress.current_task = task.name
             start = time.time()
+            # Effective (scope/stealth-scaled) deadline — the same value the phase
+            # ceiling uses, so a scaled task never outruns its phase.
+            eff_timeout = self._effective_timeout(task)
             # Register as in-flight so it earns time-based partial progress, and
             # push an immediate update so the bar reacts the moment work starts.
-            self.progress.running[task.id] = (start, task.timeout)
+            self.progress.running[task.id] = (start, eff_timeout)
             await self._emit_progress()
 
             MAX_RETRIES = 2
@@ -486,12 +519,12 @@ class ScanOrchestrator:
                         raise RuntimeError(f"Task '{task.name}' has no coro_factory")
                     result_data = await asyncio.wait_for(
                         task.coro_factory(**task.kwargs),
-                        timeout=task.timeout,
+                        timeout=eff_timeout,
                     )
                     last_error = None
                     break
                 except asyncio.TimeoutError:
-                    last_error = f"Timeout after {task.timeout}s"
+                    last_error = f"Timeout after {eff_timeout:.0f}s"
                     timed_out = True
                     break  # Don't retry timeouts
                 except Exception as e:
@@ -524,7 +557,7 @@ class ScanOrchestrator:
                 )
                 task.state = TaskState.FAILED
                 if timed_out:
-                    logger.error(f"✗ {task.name} timed out after {task.timeout}s")
+                    logger.error(f"✗ {task.name} timed out after {eff_timeout:.0f}s")
                 else:
                     logger.error(f"✗ {task.name} failed after {retry_count} attempt(s): {last_error}")
 
@@ -1063,19 +1096,70 @@ class ScanOrchestrator:
 
             return result
 
-        # Run all phase tasks concurrently (semaphores control actual parallelism)
-        results = await asyncio.gather(
-            *[run_with_deps(t) for t in phase_tasks],
-            return_exceptions=True,
-        )
+        # Run all phase tasks concurrently (semaphores control actual parallelism),
+        # but NEVER without a ceiling. A phase's deadline is its slowest task's own
+        # (scope/stealth-scaled) timeout plus generous headroom for dependency
+        # waits, retry backoff and cleanup. Without this, a single web request
+        # whose cancellation stalls in aiohttp/TLS teardown against an
+        # unresponsive target could (and did) freeze the whole scan indefinitely
+        # at a fixed percentage. We use asyncio.wait (not gather) so we can walk
+        # away from a task that refuses to die, instead of blocking forever on its
+        # cancellation.
+        slowest = max((self._effective_timeout(t) for t in phase_tasks), default=60.0)
+        phase_deadline = slowest * self._phase_deadline_factor + self._phase_deadline_margin
 
-        # Handle any exceptions from gather
-        processed = []
-        for r in results:
-            if isinstance(r, Exception):
-                logger.error(f"Unexpected task error: {r}")
-            elif isinstance(r, TaskResult):
+        futures = {asyncio.ensure_future(run_with_deps(t)): t for t in phase_tasks}
+        done, pending = await asyncio.wait(futures.keys(), timeout=phase_deadline)
+
+        processed: list[TaskResult] = []
+        for fut in done:
+            if fut.cancelled():
+                continue
+            exc = fut.exception()
+            if exc is not None:
+                logger.error(f"Unexpected task error: {exc}")
+                continue
+            r = fut.result()
+            if isinstance(r, TaskResult):
                 processed.append(r)
+
+        if pending:
+            stuck = [futures[f].name for f in pending]
+            logger.error(
+                f"⏰ Phase {phase.value.upper()} hit its {phase_deadline:.0f}s deadline "
+                f"with {len(pending)} task(s) still running; force-finalising and "
+                f"moving on: {stuck[:6]}"
+            )
+            for f in pending:
+                t = futures[f]
+                # Request cancellation but DO NOT await it — a task hung in
+                # aiohttp/TLS teardown can stall its own cancellation, and awaiting
+                # would reintroduce the very freeze we are fixing. Swallow the
+                # eventual outcome so asyncio does not warn about an unretrieved
+                # exception on the abandoned task.
+                f.cancel()
+                f.add_done_callback(lambda fin: fin.cancelled() or fin.exception())
+                if t.state not in (TaskState.COMPLETED, TaskState.FAILED,
+                                   TaskState.SKIPPED, TaskState.CANCELLED):
+                    res = TaskResult(
+                        task_id=t.id, name=t.name, state=TaskState.FAILED,
+                        error=f"Phase deadline exceeded ({phase_deadline:.0f}s)",
+                    )
+                    t.state = TaskState.FAILED
+                    t.result = res
+                    self.results[t.id] = res
+                    processed.append(res)
+                    # Keep progress accounting whole so the bar can still reach 100.
+                    self.progress.running.pop(t.id, None)
+                    self.progress.failed_tasks += 1
+                    self.progress.completed_tasks += 1
+                    self.progress.completed_weight += ScanProgress.task_weight(t.timeout)
+                    self._maybe_checkpoint(t, res)
+                # Release anything waiting on this task as a dependency.
+                evt = self._task_done_events.get(t.id)
+                if evt:
+                    evt.set()
+            await self._emit_progress()
 
         return processed
 
@@ -1466,6 +1550,23 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # "take the time you need" choice, so give it real head-room: mark it so the
     # cap below lifts to 60 min even at normal stealth.
     _is_full_range = _port_count >= 60000
+
+    # Right-size the WEB/VULN task timeouts to the same scope + stealth reality.
+    # The old fixed caps (300-900s) were set for one fast host; against a slow or
+    # rate-limiting real-world target — or a wide/UDP scan, or a quiet profile
+    # that sends fewer req/s by design — they fired mid-scan and the task's
+    # partial work was discarded ("timeout too fast"). A quieter profile needs
+    # proportionally longer; a full-range or UDP sweep covers more surface per
+    # task. Aggressive/loud on a common range keep the original caps (factor 1.0).
+    # The per-phase deadline in _execute_phase still bounds the total, so this
+    # widens headroom without ever letting a phase run unbounded.
+    _web_factor = {
+        "paranoid": 3.0, "stealth": 2.0, "normal": 1.25,
+        "aggressive": 1.0, "loud": 1.0,
+    }.get(str(stealth).strip().lower(), 1.25)
+    if _is_full_range or scan_udp:
+        _web_factor *= 1.5
+    orch._web_timeout_scale = _web_factor
 
     # Scale the deadline to the STEALTH level too. A quieter profile sends far
     # fewer packets/sec by design (paranoid -T1, stealth -T2), so the very same

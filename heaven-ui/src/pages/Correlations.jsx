@@ -303,7 +303,15 @@ export default function Correlations() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, []);
+  // Reload on mount and whenever the active engagement changes — otherwise
+  // switching engagement (which fires no route change) would leave Combined Risk
+  // showing the previous engagement's combinations until a full page reload.
+  useEffect(() => {
+    load();
+    const onEngChange = () => load();
+    window.addEventListener("heaven:engagement-changed", onEngChange);
+    return () => window.removeEventListener("heaven:engagement-changed", onEngChange);
+  }, []);
 
   async function loadFromEngagement() {
     setError(null);

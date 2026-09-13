@@ -142,3 +142,32 @@ def test_network_fetch_failure_is_still_rfi() -> None:
     assert not any(g.search(_RFI_CAPABLE) for g in RFI_BLOCKED_PATTERNS)
     found = _rfi_findings(_RFI_CAPABLE)
     assert len(found) == 1 and found[0]["vuln_type"] == "rfi"
+
+
+def test_rfi_finding_evidence_shows_the_real_proof() -> None:
+    """A true RFI must carry the actual PHP stream-open warning (which names our
+    probe host) as proof, not the bare regex pattern, and must point at the
+    request that triggered it. Regression guard: the finding used to store
+    ``pat.pattern`` and attach the untouched baseline response, so a genuine RFI
+    looked like a false positive on review."""
+    found = _rfi_findings(_RFI_CAPABLE)
+    ev = found[0]["evidence"]
+    assert _RFI_HOST in ev["match"], f"match must be the real text, got {ev['match']!r}"
+    assert "failed to open stream" in ev["response_snippet"].lower(), ev
+    assert _RFI_HOST in found[0]["target"], found[0]["target"]  # reproducing PoC URL
+
+
+def test_lfi_finding_evidence_shows_leaked_content() -> None:
+    """A true LFI must carry the leaked file content (an /etc/passwd line) as
+    proof, not a regex-pattern name, and point at the triggering request."""
+    body = "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/bin/sh\n"
+    scanner = InjectionScanner(concurrency=2)
+    asyncio.run(scanner._test_inclusion_param(
+        _FakeSession(body), "http://t/dvwa/vulnerabilities/fi/?page=file1.php",
+        "page", baseline_body=""))
+    lfi = [f for f in scanner._findings if f.get("vuln_type") == "lfi"]
+    assert len(lfi) == 1, lfi
+    ev = lfi[0]["evidence"]
+    assert "root:x:0:0" in ev["match"], ev["match"]
+    assert "root:x:0:0" in ev["response_snippet"], ev
+    assert "page=" in lfi[0]["target"]  # reproducing PoC URL, not the bare base

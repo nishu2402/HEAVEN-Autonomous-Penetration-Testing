@@ -16,7 +16,10 @@
 
 services:
   minio:
-    image: minio/minio:latest
+    # Pulled from quay.io: MinIO deprecated the Docker Hub `minio/minio` mirror,
+    # so `docker pull minio/minio:latest` now fails with "pull access denied" on
+    # a fresh host. quay.io/minio/minio is MinIO's still-published registry.
+    image: quay.io/minio/minio:latest
     container_name: heaven-lab-minio
     command: ["server", "/data", "--address", ":9000"]
     environment:
@@ -28,7 +31,7 @@ services:
 
   # One-shot: create a public bucket with a benign object, then exit.
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: heaven-lab-minio-init
     depends_on:
       - minio

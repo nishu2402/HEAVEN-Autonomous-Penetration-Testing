@@ -1,10 +1,13 @@
 """Tests for the vulnerability correlation / combination advisor.
 
 Covers the honesty contract: combinations are built only from distinct real
-findings, only surfaced when they genuinely elevate above the strongest
-constituent, scoped to a shared host unless the rule is cross-host, confidence
-tracks the weakest link, and a combination is Confirmed only when every
-constituent is confirmed.
+findings (never from a finding paired with a duplicate of itself, and never from
+info-severity observations or rejected findings), scoped to a shared host unless
+the rule is cross-host. A combination's severity is the higher of the rule's
+rating and the strongest constituent, so it is never understated below a real
+part nor overstated above the rule; a chain whose parts are already critical is
+still reported at critical. Confidence tracks the weakest link, and a
+combination is Confirmed only when every constituent is confirmed.
 """
 
 from __future__ import annotations
@@ -60,18 +63,40 @@ def test_convenience_wrapper_returns_summary_shape():
     assert out["combinations"][0]["rule_id"] == "lfi_upload_rce"
 
 
-# ── Honesty gate: no elevation when the strongest constituent already tops it ─
+# ── Severity floor: a chain is never rated below its strongest part ──────────
 
 
-def test_no_combo_when_severity_would_not_elevate():
-    # sqli is already critical; the sqli+admin rule is also critical, so there is
-    # nothing to elevate and it must not be reported.
+def test_ceiling_chain_reported_at_critical_not_dropped():
+    # sqli is already critical and the sqli+admin rule is critical, so there is
+    # no numeric elevation left (critical is the ceiling). The chain is still a
+    # distinct, materially worse issue (full takeover), so it IS reported, at
+    # critical, never above it.
     findings = [
         _f(id="a", vuln_type="sqli", severity="critical"),
         _f(id="b", vuln_type="admin_panel", severity="medium"),
     ]
     combos = CorrelationEngine().correlate(findings)
-    assert combos == []
+    combo = next((c for c in combos if c.rule_id == "sqli_admin_rce"), None)
+    assert combo is not None
+    assert combo.combined_severity == "critical"
+
+
+def test_combined_severity_floors_at_strongest_constituent():
+    # A rule that declares "high" must still report "critical" when one of its
+    # real constituents is already critical: a chain is never less severe than
+    # one of its parts. secret_reuse_lateral declares high; a critical leaked
+    # private key + a reachable service => critical.
+    findings = [
+        _f(id="a", vuln_type="private_key", title="Leaked private key",
+           severity="critical", target="http://a.example.com/.ssh/id_rsa"),
+        _f(id="b", vuln_type="ssh", title="SSH exposed", severity="medium",
+           target="10.0.0.9"),
+    ]
+    combo = next((c for c in CorrelationEngine().correlate(findings)
+                  if c.rule_id == "secret_reuse_lateral"), None)
+    assert combo is not None
+    assert combo.combined_severity == "critical"      # floored up from declared "high"
+    assert combo.representative_cvss >= 9.0
 
 
 def test_sqli_high_plus_admin_elevates_to_critical():
@@ -303,16 +328,33 @@ def test_jwt_forge_plus_privileged_endpoint_elevates_to_critical():
                for c in combos)
 
 
-def test_cleartext_creds_plus_login_form_elevates():
+def test_cleartext_transport_plus_insecure_cookie_elevates():
+    # The real sslstrip-style chain HEAVEN can observe: a downgradable/cleartext
+    # channel plus a session cookie that is not bound to TLS.
     findings = [
-        _f(id="c", vuln_type="cleartext_transmission", title="Credentials over HTTP",
-           severity="medium", target="http://legacy/login"),
-        _f(id="l", vuln_type="login_form", title="Login form", severity="low",
-           target="http://legacy/login"),
+        _f(id="t", vuln_type="no_hsts", title="HSTS not enabled",
+           severity="medium", target="http://legacy.example/"),
+        _f(id="c", vuln_type="cookie_no_secure", title="Session cookie missing Secure flag",
+           severity="medium", target="http://legacy.example/login"),
     ]
     combos = CorrelationEngine().correlate(findings)
     assert any(c.rule_id == "cleartext_creds_mitm" and c.combined_severity == "high"
                for c in combos)
+
+
+def test_cleartext_rule_ignores_autocomplete_best_practice_note():
+    # Regression: "password field has autocomplete enabled" is a best-practice
+    # note, not a credential-in-transit exposure. It must NOT fill the
+    # session/credential slot (the old generic "password_field" keyword did).
+    findings = [
+        _f(id="t", vuln_type="no_hsts", title="HSTS not enabled",
+           severity="medium", target="http://legacy.example/"),
+        _f(id="p", vuln_type="password_autocomplete_enabled",
+           title="Password field has autocomplete enabled", severity="low",
+           target="http://legacy.example/login"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert all(c.rule_id != "cleartext_creds_mitm" for c in combos)
 
 
 def test_enumeration_plus_no_ratelimit_elevates():
@@ -458,6 +500,44 @@ def test_get_correlations_latest_ok(client):
     assert d["scan_id"] == "latest"
 
 
+# ── Routing hardening: the SPA static mount at "/" must never swallow /api/* ──
+# Regression for the operator-reported "API /correlate failed: Method Not
+# Allowed". A StaticFiles mount at "/" full-matches every path for every method,
+# so a stray trailing slash (or a stale server missing a route) used to surface
+# as a bare 405/404 from the static server instead of a real API response. The
+# /api/* fallback registered before the mount now answers these correctly.
+
+
+def test_post_correlate_trailing_slash_still_works(client):
+    # POST /api/correlate/ used to hit the static mount and return 405. It must
+    # now reach the real route (via a method-preserving redirect) and succeed.
+    r = client.post("/api/correlate/", json={"findings": [
+        {"id": "a", "vuln_type": "path_traversal", "severity": "high", "target": "http://x/"},
+        {"id": "b", "vuln_type": "file_upload", "severity": "high", "target": "http://x/"},
+    ]})
+    assert r.status_code == 200, r.text
+    assert r.json()["total_combinations"] == 1
+
+
+def test_wrong_method_on_api_route_is_clean_405(client):
+    # GET on a POST-only route returns a JSON 405 with an Allow header naming the
+    # real method, not the static server's opaque error.
+    r = client.get("/api/correlate")
+    assert r.status_code == 405, r.text
+    assert "POST" in (r.headers.get("allow") or "")
+    assert r.headers["content-type"].startswith("application/json")
+    assert "detail" in r.json()
+
+
+def test_unknown_api_path_returns_json_404_not_html(client):
+    # An unknown /api/* path must return a clean JSON 404, never the SPA HTML
+    # shell (which is what a mount-swallowed request would produce).
+    r = client.post("/api/does-not-exist", json={})
+    assert r.status_code == 404, r.text
+    assert r.headers["content-type"].startswith("application/json")
+    assert "Unknown API endpoint" in r.json()["detail"]
+
+
 # ── Operator-submitted, natural-language findings (the real user scenario) ────
 # A tester pastes their OWN findings, worded the way a human writes them
 # ("SQL Injection in login form"), not HEAVEN's internal slugs ("sqli"). The
@@ -565,3 +645,303 @@ def test_cwe_numeric_tail_guard_prevents_prefix_false_match():
     ]
     combos = CorrelationEngine().correlate(findings)
     assert all(c.rule_id != "sqli_admin_rce" for c in combos)
+
+
+# ── Duplicate / info / rejected findings must never manufacture a chain ──────
+
+
+def test_duplicate_findings_do_not_self_pair():
+    # A report carries the same finding in both its "vulnerabilities" and
+    # "findings" arrays, so it arrives twice with no id. The engine must treat
+    # the two identical rows as ONE finding and never combine it with its copy.
+    dup = dict(vuln_type="default_credentials",
+               title="SSH Default Credentials: user:user", severity="critical",
+               target="10.0.0.5", confidence=0.9)
+    findings = [dict(dup), dict(dup)]      # exact duplicates, no id
+    assert CorrelationEngine().correlate(findings) == []
+
+
+def test_duplicate_findings_by_id_do_not_self_pair():
+    same = _f(id="dup-1", vuln_type="cmdi",
+              title="Command injection", severity="critical")
+    assert CorrelationEngine().correlate([dict(same), dict(same)]) == []
+
+
+def test_info_severity_findings_are_excluded():
+    # An informational observation is not a weakness and must not fill a slot.
+    # A healthy SPF/DMARC posture (reported at info) must not read as spoofable.
+    findings = [
+        _f(id="s", vuln_type="spf_analysis", title="SPF record valid",
+           severity="info", target="good.example.com"),
+        _f(id="d", vuln_type="dmarc_analysis", title="DMARC p=reject",
+           severity="info", target="good.example.com"),
+    ]
+    assert CorrelationEngine().correlate(findings) == []
+
+
+def test_email_spoofing_rule_fires_on_spf_and_dmarc_gaps():
+    # The common external-scan chain: no enforceable SPF + no DMARC enforcement
+    # => the domain is practically spoofable. Domain-level, so cross-host.
+    findings = [
+        _f(id="s", vuln_type="spf_analysis", title="SPF Issues: acme.test",
+           severity="high", target="acme.test"),
+        _f(id="d", vuln_type="dmarc_missing", title="DMARC Record Missing",
+           severity="high", target="acme.test"),
+    ]
+    combo = next((c for c in CorrelationEngine().correlate(findings)
+                  if c.rule_id == "email_spoofing_capable"), None)
+    assert combo is not None
+    assert combo.combined_severity == "high"
+    assert combo.cross_host is True
+
+
+def test_jwt_signing_flaw_is_not_treated_as_oauth_token_theft():
+    # Regression: a standalone weak-JWT signing finding is not a redirectable
+    # OAuth/SSO flow. Open redirect + jwt_weak_secret must NOT fabricate the
+    # open-redirect token-theft chain (the bare "jwt" keyword used to match it).
+    findings = [
+        _f(id="r", vuln_type="open_redirect", title="Open redirect in url param",
+           severity="medium", target="http://acme.test/go?url=x"),
+        _f(id="j", vuln_type="jwt_weak_secret", title="JWT signed with weak secret",
+           severity="critical", target="http://acme.test/api"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert all(c.rule_id != "open_redirect_oauth_ato" for c in combos)
+
+
+def test_default_creds_not_treated_as_leaked_secret():
+    # default/guessable credentials are a weak-cred issue (chained by
+    # defaultcreds_exposed_service), not a leaked secret. They must not fill the
+    # "exposed secret" slot of secret_reuse_lateral and duplicate the chain.
+    findings = [
+        _f(id="a", vuln_type="default_credentials",
+           title="SSH Default Credentials: user:user", severity="critical",
+           target="10.0.0.5"),
+        _f(id="b", vuln_type="vulnerable_service", title="Exposed FTP service",
+           severity="high", target="10.0.0.5"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert all(c.rule_id != "secret_reuse_lateral" for c in combos)
+
+
+def test_open_redirect_plus_real_oauth_flow_still_elevates():
+    # The legitimate case the jwt fix must preserve: an OAuth flow finding still
+    # pairs with an open redirect into the token-theft chain.
+    findings = [
+        _f(id="r", vuln_type="open_redirect", title="Open redirect",
+           severity="medium", target="http://acme.test/go?url=x"),
+        _f(id="o", vuln_type="oauth_state_reflected", title="OAuth state reflected",
+           severity="medium", target="http://acme.test/oauth/callback"),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert any(c.rule_id == "open_redirect_oauth_ato" for c in combos)
+
+
+def test_every_rule_can_fire_on_real_heaven_findings():
+    # Guard against a rule going dead: a slot whose keywords match no real
+    # HEAVEN finding vocabulary (as happened when cleartext_creds_mitm shipped
+    # keywords no detector emitted). Each slot must match at least one real slug.
+    from heaven.devsecops import vuln_kb
+    kb = getattr(vuln_kb, "_KB")
+    aliases = getattr(vuln_kb, "_ALIASES")
+    slugs = sorted(set(list(kb.keys()) + list(aliases.keys())))
+    for rule in AMPLIFICATION_RULES:
+        for comp in rule.components:
+            matched = [s for s in slugs
+                       if comp.matches({"vuln_type": s, "title": s.replace("_", " ")})]
+            assert matched, f"{rule.rule_id} slot '{comp.slot}' matches no real finding slug"
+
+
+# ── Attack paths (multi-step chaining) ───────────────────────────────────────
+
+
+from heaven.vulnscan.correlation import (  # noqa: E402
+    _CAP_TOKENS, _RULE_GRANTS, _RULE_NEEDS, _host_role, _path_business_impact,
+    _grants_of, _needs_of, AttackPath,
+)
+
+
+def _ssrf_defaultcreds_findings():
+    """SSRF + exposed internal service on web01, default creds on an SSH host —
+    the classic 'SSRF gives internal reach, default creds take the box' chain."""
+    return [
+        _f(id="s1", vuln_type="ssrf", title="Server-side request forgery",
+           severity="high", confidence=0.9, status="confirmed",
+           target="http://web01/fetch?url="),
+        _f(id="s2", vuln_type="exposed_database", title="Exposed Redis",
+           severity="high", confidence=0.9, status="confirmed",
+           target="http://web01:6379/"),
+        _f(id="s3", vuln_type="default_credentials", title="Default SSH credentials",
+           severity="high", confidence=0.9, status="confirmed",
+           target="ssh://db02:22"),
+        _f(id="s4", vuln_type="ssh", title="SSH service exposed",
+           severity="high", confidence=0.9, status="confirmed",
+           target="ssh://db02:22"),
+    ]
+
+
+def test_capability_tables_are_well_formed():
+    rule_ids = {r.rule_id for r in AMPLIFICATION_RULES}
+    for rid, caps in {**_RULE_GRANTS, **_RULE_NEEDS}.items():
+        assert rid in rule_ids, f"capability table references unknown rule {rid}"
+        assert set(caps) <= _CAP_TOKENS, f"{rid} uses an unknown capability token"
+    # Every rule resolves a (possibly empty) grants/needs set without error.
+    for r in AMPLIFICATION_RULES:
+        assert isinstance(_grants_of(r.rule_id), frozenset)
+        assert isinstance(_needs_of(r.rule_id), frozenset)
+
+
+def test_multi_step_attack_path_forms_across_hosts():
+    eng = CorrelationEngine()
+    combos = eng.correlate(_ssrf_defaultcreds_findings())
+    paths = eng.attack_paths(combos)
+    assert len(paths) == 1
+    p = paths[0]
+    assert isinstance(p, AttackPath)
+    assert p.length == 2
+    assert p.severity == "critical"
+    # Ordered: SSRF pivot first (grants internal reach), then default-cred takeover.
+    assert p.steps[0]["rule_id"] == "ssrf_internal_pivot"
+    assert p.steps[1]["rule_id"] == "defaultcreds_exposed_service"
+    # The cross-host hop is labelled with HOW the attacker moves.
+    assert "internal network reach" in p.steps[1]["via"].lower()
+    assert p.hosts == ["web01", "db02"]
+    assert p.business_impact  # a concrete terminal impact
+    assert p.id.startswith("HEAVEN-PATH-")
+
+
+def test_attack_path_id_is_stable_across_runs():
+    eng = CorrelationEngine()
+    findings = _ssrf_defaultcreds_findings()
+    a = eng.attack_paths(eng.correlate(findings))[0]
+    b = eng.attack_paths(eng.correlate(list(reversed(findings))))[0]
+    assert a.id == b.id
+
+
+def test_credentials_handoff_links_two_combos():
+    # A captured-credential step (cleartext transport + insecure cookie) feeds a
+    # default-credential takeover: reuse the credentials on the reachable service.
+    findings = [
+        _f(id="c1", vuln_type="no_hsts", title="HSTS not set",
+           severity="medium", confidence=0.9, status="confirmed",
+           target="http://portal.acme.test/"),
+        _f(id="c2", vuln_type="cookie_no_secure", title="Session cookie missing Secure",
+           severity="medium", confidence=0.9, status="confirmed",
+           target="http://portal.acme.test/login"),
+        _f(id="c3", vuln_type="default_credentials", title="Default RDP credentials",
+           severity="high", confidence=0.9, status="confirmed",
+           target="rdp://jump.acme.test:3389"),
+        _f(id="c4", vuln_type="rdp", title="RDP exposed",
+           severity="high", confidence=0.9, status="confirmed",
+           target="rdp://jump.acme.test:3389"),
+    ]
+    eng = CorrelationEngine()
+    paths = eng.attack_paths(eng.correlate(findings))
+    assert len(paths) == 1
+    p = paths[0]
+    assert p.steps[0]["rule_id"] == "cleartext_creds_mitm"
+    assert p.steps[1]["rule_id"] == "defaultcreds_exposed_service"
+    assert "credential" in p.steps[1]["via"].lower()
+
+
+def test_unrelated_combos_do_not_chain_into_a_path():
+    # Two genuine combinations (XSS+CSRF account takeover, IDOR+enum mass data)
+    # that share no capability handoff must NOT be fabricated into a path.
+    findings = [
+        _f(id="u1", vuln_type="xss", severity="high", target="http://h/x"),
+        _f(id="u2", vuln_type="csrf", severity="medium", target="http://h/y"),
+        _f(id="u3", vuln_type="idor", severity="high", target="http://h/api"),
+        _f(id="u4", vuln_type="user_enumeration", severity="medium", target="http://h/login"),
+    ]
+    eng = CorrelationEngine()
+    combos = eng.correlate(findings)
+    assert len(combos) >= 2
+    assert eng.attack_paths(combos) == []
+
+
+def test_longer_path_suppresses_its_contained_subpaths():
+    # SSRF -> default creds -> credential reuse lateral is a 3-step chain; the
+    # contained 2-step chains must not also be emitted as separate paths.
+    findings = _ssrf_defaultcreds_findings() + [
+        _f(id="s5", vuln_type="hardcoded_secret", title="Hardcoded API key",
+           severity="medium", confidence=0.9, status="confirmed",
+           target="http://db02/config.php"),
+    ]
+    eng = CorrelationEngine()
+    paths = eng.attack_paths(eng.correlate(findings))
+    assert len(paths) == 1
+    assert paths[0].length == 3
+    assert paths[0].steps[-1]["rule_id"] == "secret_reuse_lateral"
+
+
+def test_attack_paths_empty_when_fewer_than_two_combos():
+    findings = [
+        _f(id="a", vuln_type="lfi", severity="high"),
+        _f(id="b", vuln_type="file_upload", severity="high"),
+    ]
+    eng = CorrelationEngine()
+    combos = eng.correlate(findings)
+    assert len(combos) == 1
+    assert eng.attack_paths(combos) == []
+
+
+def test_host_role_inference():
+    assert _host_role([{"vuln_type": "exposed_database", "target": "http://x:3306"}]) == "database server"
+    assert _host_role([{"vuln_type": "mysql", "title": "MySQL server"}]) == "database server"
+    assert _host_role([{"vuln_type": "ldap_anonymous", "target": "ldap://dc:389"}]) == "directory / domain controller"
+    assert _host_role([{"vuln_type": "kerberos", "title": "Kerberos KDC"}]) == "directory / domain controller"
+    assert _host_role([{"vuln_type": "xss", "target": "http://web/x"}]) == "host"
+
+
+def test_path_business_impact_labels():
+    dc = _path_business_impact({"admin"}, {"directory / domain controller"})[0]
+    assert dc == "Domain / directory compromise"
+    db = _path_business_impact({"foothold"}, {"database server"})[0]
+    assert db == "Database server compromise"
+    host = _path_business_impact({"foothold"}, {"host"})[0]
+    assert host == "Full host compromise"
+    assert _path_business_impact({"data"}, {"host"})[0] == "Sensitive data exposure"
+    assert _path_business_impact({"credentials"}, {"host"})[0] == "Credential compromise"
+
+
+def test_remediation_leverage_ranks_shared_finding_first():
+    # One admin panel is the pivot for both an SQLi takeover and a JWT-forge
+    # escalation: fixing it breaks two combined risks, so it is the top fix.
+    findings = [
+        _f(id="q", vuln_type="sqli", severity="high", target="http://app/",
+           confidence=0.9, status="confirmed"),
+        _f(id="p", vuln_type="admin_panel", title="Exposed admin panel",
+           severity="high", target="http://app/admin", confidence=0.9, status="confirmed"),
+        _f(id="j", vuln_type="jwt_none", title="JWT alg:none accepted",
+           severity="high", target="http://app/api", confidence=0.9, status="confirmed"),
+    ]
+    out = correlate_findings(findings)
+    top = out["remediation"]["top_fix"]
+    assert top["title"] == "Exposed admin panel"
+    assert top["chains_broken"] == 2
+
+
+def test_remediation_cut_severs_every_attack_path():
+    out = correlate_findings(_ssrf_defaultcreds_findings())
+    rem = out["remediation"]
+    assert out["total_attack_paths"] == 1
+    assert rem["path_cut"], "a cut set should exist when paths exist"
+    assert rem["paths_cut"] == rem["total_paths"] == 1
+
+
+def test_summary_exposes_attack_paths_and_remediation():
+    out = correlate_findings(_ssrf_defaultcreds_findings())
+    assert "attack_paths" in out and "total_attack_paths" in out
+    assert "remediation" in out
+    assert isinstance(out["attack_paths"], list) and out["attack_paths"]
+    assert set(out["remediation"]) >= {"by_finding", "top_fix", "path_cut",
+                                       "total_paths", "paths_cut"}
+
+
+def test_report_renders_attack_paths_and_break_the_chain():
+    from heaven.devsecops.compliance_report import ComplianceReportGenerator
+    html = ComplianceReportGenerator().generate_html_report(
+        _ssrf_defaultcreds_findings(), "Path Eng")
+    assert "Attack paths" in html
+    assert "Break the chain" in html
+    assert "Sever every attack path" in html

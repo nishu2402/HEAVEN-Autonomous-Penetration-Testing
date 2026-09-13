@@ -11,7 +11,7 @@ import re
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Optional, cast
-from urllib.parse import parse_qsl, urljoin, urlparse, urlsplit
+from urllib.parse import parse_qsl, urldefrag, urljoin, urlparse, urlsplit
 
 from heaven.recon.evasion_engine import EvasionEngine, profile_for
 from heaven.utils.logger import get_logger
@@ -50,6 +50,36 @@ _SESSION_KILL_VALUES = {
     "logout", "log_out", "log-out", "logoff", "log_off", "signout",
     "sign_out", "sign-out", "signoff", "deauth", "disconnect",
 }
+
+
+def _canonical_link(url: str) -> str:
+    """Drop the ``#fragment`` from a link (for the HTTP crawler).
+
+    A fragment is a client-side anchor: the browser never sends it to the server,
+    so ``page.php#section-a`` and ``page.php#section-b`` are the SAME server
+    resource. Without stripping it, a page whose body links to many in-page
+    anchors (phpinfo's ~40 ``#module_*`` table-of-contents links are the classic
+    case) is crawled — and then fully re-scanned by every downstream web audit —
+    once per fragment, burning the scan budget and risking duplicate findings
+    keyed on the fragmented URL. The HTTP crawler cannot render a client-side
+    route anyway, so it strips every fragment, hash-routes included.
+    """
+    return urldefrag(url).url
+
+
+def _canonical_link_spa(url: str) -> str:
+    """Fragment stripping for the browser (Playwright) crawler.
+
+    Same as :func:`_canonical_link`, but PRESERVES a client-side route fragment
+    (``#/path`` or ``#!path``): a rendering crawler navigates those to genuinely
+    distinct SPA views (``#/admin`` vs ``#/search`` are different pages), so
+    collapsing them would lose coverage. A plain same-page anchor (``#section``)
+    renders nothing new, so it still collapses — the phpinfo dedup still applies.
+    """
+    frag = urldefrag(url).fragment
+    if frag.startswith("/") or frag.startswith("!"):
+        return url
+    return urldefrag(url).url
 
 
 def _is_session_destroying(url: str) -> bool:
@@ -138,6 +168,7 @@ async def crawl_url(
     ) as session:
         while queue and len(visited) < max_pages:
             current_url, depth = queue.popleft()
+            current_url = _canonical_link(current_url)  # a seed may carry a #fragment
             if current_url in visited or depth > max_depth:
                 continue
             if _is_session_destroying(current_url):
@@ -168,7 +199,7 @@ async def crawl_url(
                             # Extract links for BFS
                             for a in soup.find_all("a", href=True):
                                 href = a.get("href")
-                                link = urljoin(current_url, str(href or ""))
+                                link = _canonical_link(urljoin(current_url, str(href or "")))
                                 if _is_session_destroying(link):
                                     continue  # don't log ourselves out mid-crawl
                                 if urlparse(link).netloc == base_domain and link not in visited:
@@ -259,7 +290,7 @@ async def extract_js_endpoints(js_urls: list[str], timeout: float = 10.0) -> lis
                         for raw in re.findall(pattern, content):
                             resolved = resolve_js_endpoint(raw, js_url)
                             if resolved:
-                                discovered.add(resolved)
+                                discovered.add(_canonical_link(resolved))
             except Exception as e:
                 logger.debug(f"JS endpoint extraction error for {js_url}: {e}")
                 continue
@@ -424,6 +455,8 @@ async def crawl_url_js(
             queue = [(url, 0)]
             while queue and len(visited) < max_pages:
                 current_url, depth = queue.pop(0)
+                # Browser crawler: collapse same-page anchors but keep SPA routes.
+                current_url = _canonical_link_spa(current_url)
                 if current_url in visited or depth > max_depth:
                     continue
                 if _is_session_destroying(current_url):
@@ -440,6 +473,7 @@ async def crawl_url_js(
                     # Extract links from rendered DOM
                     links = await page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
                     for link in links:
+                        link = _canonical_link_spa(link)  # keep SPA routes, drop anchors
                         if _is_session_destroying(link):
                             continue  # don't log ourselves out mid-crawl
                         parsed = urlparse(link)

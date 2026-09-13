@@ -32,6 +32,11 @@ def _registered_domain(host: str) -> Optional[str]:
     host = (host or "").strip().rstrip(".").lower()
     if not host or host == "localhost":
         return None
+    # A CIDR / slash-bearing token is a network range, not a hostname; reject it
+    # before the eTLD+1 fallback that would mangle it into a fake domain. (Kept
+    # in step with heaven.orchestrator._registered_domain.)
+    if "/" in host:
+        return None
     if host.count(":") == 1 and "]" not in host:
         host = host.split(":", 1)[0]
     try:

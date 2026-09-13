@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the latest report. The Combined Risk and Kill Chain pages also refresh
   immediately when the engagement changes instead of waiting for a full reload.
   Covered by `tests/test_correlations_engagement_scope.py`.
+- **A network range scanned by CIDR no longer invents a bogus email domain.**
+  Domain-level DNS and email-posture checks (SPF, DMARC, DKIM, DNSSEC) resolve a
+  target to its registered domain first, and only skipped plain IP literals, not
+  CIDR notation. A target like `192.168.2.0/24` is not an IP address, so it fell
+  through to the eTLD+1 fallback and became the fake domain `2.0` (`10.0.0.0/8`
+  became `0.0`), against which those lookups then fired guaranteed
+  false-positive "record missing" findings. Those phantom findings surfaced in
+  Combined Risk as a nonsense host. The shared registered-domain helper now
+  rejects CIDR ranges and bare network addresses the same way it already rejected
+  IP literals, localhost and single-label hosts, so an internal-network
+  engagement contributes no email-posture findings unless a real domain is also
+  in scope. Covered by `tests/test_orchestrator_domain.py`.
 - **A missing security header is reported once, not two or three times.** Two
   scanners legitimately probe response headers: one emits a single bundle naming
   every header it found absent, the other emits a granular finding per header. On a

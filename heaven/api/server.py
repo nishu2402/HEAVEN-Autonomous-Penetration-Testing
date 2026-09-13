@@ -2016,11 +2016,25 @@ def create_app() -> FastAPI:
     ):
         """Suggest combinations of findings that together elevate to a more
         critical issue, computed from the engagement's stored findings."""
-        from heaven.vulnscan.correlation import CorrelationEngine
+        from heaven.vulnscan.correlation import (
+            CorrelationEngine, _finding_identity,
+        )
         actual_scan_id = None if scan_id == "latest" else scan_id
         data = _get_latest_report_data(actual_scan_id)
-        findings = data.get("vulnerabilities", []) + data.get("findings", [])
-        summary = CorrelationEngine().summary(findings)
+        # A report carries the same finding set under both "vulnerabilities" and
+        # "findings"; concatenating them blindly doubles every finding, inflating
+        # the count and manufacturing self-pairings. Merge and dedup by identity.
+        merged: list[dict] = []
+        seen: set = set()
+        for f in list(data.get("vulnerabilities", [])) + list(data.get("findings", [])):
+            if not isinstance(f, dict):
+                continue
+            ident = _finding_identity(f)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            merged.append(f)
+        summary = CorrelationEngine().summary(merged)
         summary["scan_id"] = scan_id
         return summary
 
@@ -5520,6 +5534,53 @@ def create_app() -> FastAPI:
     ws_handler = WebSocketLogHandler()
     ws_handler.setFormatter(logging.Formatter("%(message)s"))
     logging.getLogger("heaven").addHandler(ws_handler)
+
+    # ── API fallback — must sit AFTER every real API route and BEFORE the SPA
+    # static mount below. A StaticFiles mount at "/" full-matches every path for
+    # every method, so without this guard any /api/* request that no route above
+    # claimed gets swallowed by the static server and comes back as a bare 404
+    # (GET) or "Method Not Allowed" (POST/PUT/…). That is exactly how a stale
+    # server missing a newly added route, or a stray trailing slash, surfaced to
+    # the operator as an unexplained error. Every real route is registered above,
+    # so first-full-match still routes real traffic; only genuinely unmatched
+    # /api/* paths reach here, and they get a correct, self-explaining answer.
+    @app.api_route(
+        "/api/{rest:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        include_in_schema=False,
+    )
+    async def _api_fallback(rest: str, request: Request):
+        from fastapi.responses import RedirectResponse
+
+        path = request.url.path
+        trimmed = path.rstrip("/") or "/"
+        # Which methods do the real routes at the slash-trimmed path accept?
+        allowed: set[str] = set()
+        for route in request.app.router.routes:
+            if getattr(route, "path", None) == trimmed:
+                allowed |= getattr(route, "methods", None) or set()
+        allowed.discard("HEAD")
+
+        # Trailing-slash tolerance: redirect to the canonical path, preserving
+        # method and body (307). Mirrors FastAPI's own redirect_slashes, which
+        # the "/" mount would otherwise defeat.
+        if trimmed != path and request.method in allowed:
+            query = request.url.query
+            return RedirectResponse(
+                trimmed + (f"?{query}" if query else ""), status_code=307
+            )
+        # Path exists but not for this method → a proper 405 with an Allow header.
+        if allowed:
+            return JSONResponse(
+                {"detail": f"Method {request.method} not allowed on {path}"},
+                status_code=405,
+                headers={"Allow": ", ".join(sorted(allowed))},
+            )
+        # Genuinely no such endpoint → a clear JSON 404, never the SPA HTML.
+        return JSONResponse(
+            {"detail": f"Unknown API endpoint: {request.method} {path}"},
+            status_code=404,
+        )
 
     # Serve static frontend.
     # ui_dist may be missing for two reasons: (1) pip/site-packages install where

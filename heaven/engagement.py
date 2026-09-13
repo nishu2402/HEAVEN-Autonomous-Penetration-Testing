@@ -760,6 +760,86 @@ def _richer_finding(a: dict, b: dict) -> dict:
     return b if len(str(b.get("evidence", ""))) >= len(str(a.get("evidence", ""))) else a
 
 
+# ── security-header family consolidation ────────────────────────────────────
+#
+# Two scanners legitimately probe response headers. misconfig_scanner emits ONE
+# ``missing_security_headers`` *bundle* (its evidence names the headers it found
+# absent) plus a ``clickjacking`` finding. auth_scanner emits one *granular*
+# finding per header (``csp_missing``, ``no_x_content_type``,
+# ``no_referrer_policy``, ``no_permissions_policy``, ``clickjacking_no_xfo``). On
+# a host where BOTH run, the same missing header is reported two or three times
+# under different vuln_types — and the identity-based dedup cannot merge them,
+# because different vuln_types are different identities by design (that
+# separation is what keeps a per-endpoint XSS distinct from an SQLi).
+#
+# This post-pass drops the misconfig *redundancies* for a host ONLY when the
+# auth granular equivalents are present for that same host, so a scan mode that
+# runs only ONE of the two scanners never loses coverage. HSTS is deliberately
+# out of scope here: the bundle never names it (it is emitted separately as
+# ``no_hsts`` by ssl_scanner), so nothing about HSTS is dropped.
+
+# The granular per-header vuln_types auth_scanner (and its aliases) emit.
+_GRANULAR_HEADER_TYPES = frozenset({
+    "csp_missing", "missing_csp",
+    "no_x_content_type", "x_content_type_missing",
+    "no_referrer_policy", "referrer_policy_missing",
+    "no_permissions_policy", "permissions_policy_missing",
+    "clickjacking_no_xfo", "x_frame_options_missing",
+})
+
+# Each header the bundle can name (lower-cased) → the granular vuln_types that,
+# if present for the host, individually report that same missing header. The
+# bundle is dropped only when EVERY header it names is covered here, so
+# consolidation can never silently drop a header nothing else reports.
+_HEADER_BUNDLE_COVERAGE = {
+    "content-security-policy": ("csp_missing", "missing_csp"),
+    "x-frame-options": ("clickjacking_no_xfo", "x_frame_options_missing",
+                        "clickjacking"),
+    "x-content-type-options": ("no_x_content_type", "x_content_type_missing"),
+}
+
+
+def _consolidate_header_family(findings: list) -> list:
+    """Drop the misconfig header *bundle* / duplicate clickjacking for a host
+    when auth_scanner's granular per-header findings already cover it.
+
+    Conservative by construction: a redundant finding is removed only when its
+    granular equivalent is present for the SAME host, so nothing is lost on a
+    mode that runs a single scanner. Operates on the already-deduped list, where
+    host-level targets are normalised to :func:`_host_key`."""
+    granular_by_host: dict[str, set[str]] = {}
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        vt = str(f.get("vuln_type", ""))
+        if vt in _GRANULAR_HEADER_TYPES:
+            host = _host_key(str(f.get("target", "")))
+            granular_by_host.setdefault(host, set()).add(vt)
+
+    if not granular_by_host:
+        return findings  # auth_scanner did not run here — keep everything
+
+    out: list = []
+    for f in findings:
+        if not isinstance(f, dict):
+            out.append(f)
+            continue
+        vt = str(f.get("vuln_type", ""))
+        present = granular_by_host.get(_host_key(str(f.get("target", ""))), frozenset())
+        if vt == "missing_security_headers":
+            ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+            named = [str(h).lower() for h in (ev.get("missing_headers") or [])]
+            if not named:  # evidence lost the list → require the full set it can name
+                named = list(_HEADER_BUNDLE_COVERAGE)
+            if all(any(g in present for g in _HEADER_BUNDLE_COVERAGE.get(h, ()))
+                   for h in named):
+                continue  # every header it names is individually reported → drop
+        elif vt == "clickjacking" and "clickjacking_no_xfo" in present:
+            continue  # auth's granular clickjacking_no_xfo covers this host → drop
+        out.append(f)
+    return out
+
+
 def dedup_findings(findings: list) -> list:
     """
     Collapse findings that refer to the same vulnerability.
@@ -796,7 +876,8 @@ def dedup_findings(findings: list) -> list:
             best[key] = _richer_finding(best[key], dict(f))
         if is_host_level(vuln_type):
             best[key]["target"] = _host_key(target)
-    return [best[k] for k in order if k not in suppressed_keys]
+    deduped = [best[k] for k in order if k not in suppressed_keys]
+    return _consolidate_header_family(deduped)
 
 
 @dataclass

@@ -384,8 +384,14 @@ async def _check_clickjacking(session: "aiohttp.ClientSession", url: str) -> lis
         return []
     p = urlparse(url)
     origin = f"{p.scheme}://{p.netloc}"
+    # Severity is medium, not low: this maps to the KB's canonical "clickjacking"
+    # class (CWE-1021), whose curated CVSS vector
+    # (AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N) scores 4.7 — squarely in the medium
+    # band — and it agrees with auth_scanner's granular clickjacking_no_xfo. A
+    # hand-set "low" here disagreed with both, so the same root cause showed two
+    # different severities before consolidation.
     return [_finding(
-        origin, "clickjacking", "low",
+        origin, "clickjacking", "medium",
         "Page is framable, clickjacking possible",
         "The HTML response sets neither X-Frame-Options (DENY/SAMEORIGIN) nor a CSP "
         "frame-ancestors directive, so the page can be embedded in a hostile iframe "

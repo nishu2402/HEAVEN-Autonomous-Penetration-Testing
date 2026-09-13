@@ -57,6 +57,13 @@ class LabStack:
         proc = subprocess.run(self._cmd(*args), capture_output=True, text=True,
                               timeout=600)
         if proc.returncode != 0:
+            # A failed bring-up (a published port already in use, an image that
+            # won't start) can leave a half-created container and network behind.
+            # Because this runs from ``__enter__``, raising here means ``__exit__``
+            # never runs, so nothing would tear that partial stack down — and the
+            # stale container then breaks the NEXT run's bring-up. Clean up before
+            # raising so a failure can't cascade into the following test.
+            self.down()
             raise RuntimeError(
                 f"docker compose up failed for {self.compose_path.name}: "
                 f"{(proc.stderr or proc.stdout).strip()}")

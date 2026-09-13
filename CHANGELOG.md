@@ -34,6 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Combined Risk now follows the engagement you are viewing.** Switching the
+  active engagement left the Combined Risk page (and the `/api/correlations`,
+  `/api/kill-chain`, `/api/attack-tree`, `/api/risk-scores` and
+  `/api/vulnerabilities` endpoints behind it) showing the same combinations, even
+  after a refresh. Those endpoints read whichever `report_*.json` was newest on
+  disk across every engagement, so with more than one engagement they all resolved
+  to a single global report regardless of which one was selected. They now read the
+  active engagement's stored findings, exactly as the dashboard and the
+  `heaven correlate` CLI already did: a specific scan id still loads that scan's
+  report, an engagement with no findings shows nothing rather than another
+  engagement's data, and only a fresh install with no active engagement falls back
+  to the latest report. The Combined Risk and Kill Chain pages also refresh
+  immediately when the engagement changes instead of waiting for a full reload.
+  Covered by `tests/test_correlations_engagement_scope.py`.
 - **A missing security header is reported once, not two or three times.** Two
   scanners legitimately probe response headers: one emits a single bundle naming
   every header it found absent, the other emits a granular finding per header. On a

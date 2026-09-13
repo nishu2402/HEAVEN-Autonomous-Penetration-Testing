@@ -32,12 +32,19 @@ export default function KillChain() {
   const [selected, setSelected] = useState(null)
 
   useEffect(() => {
-    Engagement.findings({ limit: 1000, status: '' })
-      .then(d => {
-        if (d.no_engagement) { setNoEng(true); return }
-        setFindings(d.findings || [])
-      })
-      .catch(() => setNoEng(true))
+    const load = () => {
+      Engagement.findings({ limit: 1000, status: '' })
+        .then(d => {
+          if (d.no_engagement) { setNoEng(true); setFindings([]); return }
+          setNoEng(false)
+          setFindings(d.findings || [])
+        })
+        .catch(() => setNoEng(true))
+    }
+    load()
+    // Refetch when the active engagement changes (no route change fires here).
+    window.addEventListener('heaven:engagement-changed', load)
+    return () => window.removeEventListener('heaven:engagement-changed', load)
   }, [])
 
   // Bucket findings by phase

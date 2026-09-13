@@ -1024,6 +1024,44 @@ def create_app() -> FastAPI:
             logger.error(f"Failed to read latest report {latest_file}: {e}")
             return {}
 
+    def _engagement_findings(scan_id: Optional[str] = None) -> list[dict]:
+        """Findings for the engagement the operator is CURRENTLY viewing.
+
+        Report-derived analytics (Combined Risk, kill chain, attack tree, risk
+        scores) must reflect the active engagement, not whichever scan happened
+        to write the newest ``report_*.json`` across ALL engagements. Reading the
+        latest report blindly is why "I change engagement and Combined Risk shows
+        the same thing, even after a refresh" — every engagement resolved to the
+        one globally newest report file. This mirrors the dashboard's source
+        selection exactly (see get_dashboard), so the two never disagree:
+
+          * a concrete ``scan_id`` -> that scan's persisted report (history view);
+          * otherwise the active engagement store's findings;
+          * an engagement is active but has no findings -> ``[]`` (never fall
+            through to some other engagement's report);
+          * only with NO active engagement (fresh / CLI-only install) fall back
+            to the latest report JSON.
+        """
+        if scan_id and scan_id != "latest":
+            data = _get_latest_report_data(scan_id)
+            return list(data.get("vulnerabilities", []) or data.get("findings", []))
+        eng_findings: list[dict] = []
+        store = _read_store()
+        if store:
+            try:
+                eng_findings = [f.__dict__ for f in store.list_findings(limit=2000)]
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+        if eng_findings:
+            return eng_findings
+        # No findings in the resolved store. If an engagement is actively
+        # selected, show ONLY its (empty) data rather than another engagement's
+        # report — matching the dashboard's has_active_engagement guard.
+        if _get_active_engagement() is not None:
+            return []
+        data = _get_latest_report_data(None)
+        return list(data.get("vulnerabilities", []) or data.get("findings", []))
+
     def _collect_raw_assets(engagement: Optional[str] = None,
                             scan_id: Optional[str] = None) -> list[dict]:
         """Gather raw network-scan host assets (open ports / service / OS).
@@ -1811,8 +1849,7 @@ def create_app() -> FastAPI:
         scan_id: Optional[str] = None,
         user: User = Depends(require_permission("vuln.view")),
     ):
-        data = _get_latest_report_data(scan_id)
-        vulns = data.get("vulnerabilities", [])
+        vulns = _engagement_findings(scan_id)
 
         if severity:
             vulns = [v for v in vulns if v.get("severity") == severity.lower()]
@@ -1939,9 +1976,7 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("vuln.view")),
     ):
         """Generate Mermaid diagram data for attack paths."""
-        actual_scan_id = None if scan_id == "latest" else scan_id
-        data = _get_latest_report_data(actual_scan_id)
-        vulns = data.get("vulnerabilities", [])
+        vulns = _engagement_findings(None if scan_id == "latest" else scan_id)
 
         if not vulns:
             return {
@@ -1995,9 +2030,7 @@ def create_app() -> FastAPI:
     ):
         """Map findings to Lockheed Cyber Kill Chain phases."""
         from heaven.mitre.kill_chain import KillChainAnalyzer
-        actual_scan_id = None if scan_id == "latest" else scan_id
-        data = _get_latest_report_data(actual_scan_id)
-        findings = data.get("vulnerabilities", []) + data.get("findings", [])
+        findings = _engagement_findings(None if scan_id == "latest" else scan_id)
 
         analyzer = KillChainAnalyzer()
         analyzer.ingest(findings)
@@ -2015,18 +2048,21 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("vuln.view")),
     ):
         """Suggest combinations of findings that together elevate to a more
-        critical issue, computed from the engagement's stored findings."""
+        critical issue, computed from the active engagement's stored findings."""
         from heaven.vulnscan.correlation import (
             CorrelationEngine, _finding_identity,
         )
-        actual_scan_id = None if scan_id == "latest" else scan_id
-        data = _get_latest_report_data(actual_scan_id)
+        # Engagement-scoped: the active engagement's findings, or a specific
+        # scan's report when a concrete scan_id is asked for. Fixes Combined Risk
+        # showing the same combinations regardless of the selected engagement.
+        raw = _engagement_findings(None if scan_id == "latest" else scan_id)
         # A report carries the same finding set under both "vulnerabilities" and
-        # "findings"; concatenating them blindly doubles every finding, inflating
-        # the count and manufacturing self-pairings. Merge and dedup by identity.
+        # "findings"; the helper already collapses that, but a defensive dedup by
+        # identity keeps any historical/duplicated input from manufacturing
+        # self-pairings.
         merged: list[dict] = []
         seen: set = set()
-        for f in list(data.get("vulnerabilities", [])) + list(data.get("findings", [])):
+        for f in raw:
             if not isinstance(f, dict):
                 continue
             ident = _finding_identity(f)
@@ -2500,8 +2536,7 @@ def create_app() -> FastAPI:
     # ── Risk Scores ──
     @app.get("/api/risk-scores")
     async def get_risk_scores(user: User = Depends(require_permission("vuln.view"))):
-        data = _get_latest_report_data()
-        vulns = data.get("vulnerabilities", [])
+        vulns = _engagement_findings(None)
         scores = [
             {"id": v.get("cve_id") or v.get("title", ""), "score": v.get("risk_score", 0)}
             for v in vulns

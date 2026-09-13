@@ -852,8 +852,18 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
                 k: ("<redacted>" if k.lower() == "set-cookie" else v)
                 for k, v in hdrs.items()
             }
+            # A CSP frame-ancestors directive is the modern, equivalent
+            # anti-framing control (RFC 7034 deprecated X-Frame-Options in its
+            # favour). If it is present the page is NOT framable, so reporting
+            # "X-Frame-Options missing" is a false positive — and it would
+            # disagree with the misconfig clickjacking probe, which already checks
+            # both. Skip the XFO finding when frame-ancestors is set.
+            frame_ancestors_set = "frame-ancestors" in \
+                hdrs.get("Content-Security-Policy", "").lower()
             for header, (vuln_type, severity, title, desc) in required.items():
                 if header not in hdrs:
+                    if header == "X-Frame-Options" and frame_ancestors_set:
+                        continue
                     findings.append(_make_finding(
                         url, vuln_type, severity, title, desc,
                         confidence=0.98,

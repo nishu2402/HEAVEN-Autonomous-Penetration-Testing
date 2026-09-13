@@ -9,8 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Combined Risk now builds end-to-end attack paths, not just pairs.** The
+  correlation engine chains its individual combinations into ordered walks where
+  each step hands the attacker a capability the next step consumes (code execution,
+  reusable credentials, internal network reach, a hijacked account, administrative
+  control), ending in a concrete business impact (full host, database, or domain
+  compromise, data exposure, account takeover). A link is only drawn where one step
+  genuinely produces what the next requires, and a cross-host hop only where the
+  attacker actually gained a way to move (reused credentials or internal reach), so
+  nothing is fabricated. The Combined Risk page renders each path as a visual graph
+  of severity-coloured step nodes joined by labelled hops and a final impact node,
+  with the plain-language narrative beneath it; the CLI and the HTML report render
+  the same paths.
+- **"Break the chain" tells you the single fixes with the most leverage.** Because a
+  combined risk needs all of its parts, fixing any one constituent breaks it. The
+  engine now ranks every constituent finding by how many combined risks (and attack
+  paths) it breaks, names the highest-leverage fix, and computes the smallest set of
+  fixes that severs every attack path to your crown jewels. Surfaced in the page, the
+  `heaven correlate` output, and the report. New coverage in
+  `tests/test_correlation.py` (attack-path chaining, host-role and impact labelling,
+  the no-false-chain guard, subpath suppression, and remediation leverage).
+
 ### Fixed
 
+- **A missing security header is reported once, not two or three times.** Two
+  scanners legitimately probe response headers: one emits a single bundle naming
+  every header it found absent, the other emits a granular finding per header. On a
+  host where both ran, the same missing header (Content-Security-Policy,
+  X-Frame-Options, X-Content-Type-Options) surfaced under two or three different
+  finding names, which the identity-based dedup could not merge because different
+  finding types are distinct identities by design. A conservative consolidation pass
+  now drops the redundant bundle, and the duplicate clickjacking finding, for a host
+  only when the granular per-header equivalents are present for that same host, so a
+  scan mode that runs a single scanner never loses coverage. HSTS is reported
+  separately and is untouched. Clickjacking severity is reconciled to medium across
+  both scanners, matching its CWE-1021 CVSS score, and the granular X-Frame-Options
+  check no longer fires when a CSP frame-ancestors directive already blocks framing.
+  Covered by `tests/test_security_header_consolidation.py`.
+- **The web crawler no longer re-scans one page once per in-page anchor.** A URL
+  fragment (the `#section` part) is client-side only and never reaches the server,
+  so `page.php#a` and `page.php#b` are the same resource. The crawler used to
+  dedupe on the full URL including the fragment, so a page that links to many of
+  its own anchors (phpinfo's roughly forty `#module_*` table-of-contents links are
+  the classic case) was crawled, and then fully re-scanned by every downstream web
+  audit, once per fragment. It now strips the fragment before deduping, which on a
+  DVWA target cut the crawl from 99 endpoints to 51 real ones (phpinfo fetched once
+  instead of about forty times), cutting scan time and removing duplicate findings
+  keyed on the fragmented URL. Covered by `tests/test_crawler_url_normalization.py`.
 - **A scan can no longer hang indefinitely at a fixed percentage.** Each pipeline
   phase now runs under a hard deadline (its slowest task's own scope/stealth-scaled
   timeout, plus generous headroom). A task whose cancellation stalls, for example an
@@ -26,6 +73,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and scan breadth (a quieter or wider scan gets proportionally longer), while the
   network task keeps its own separate scaling. New
   `tests/test_phase_deadline_and_timeout_scale.py`.
+- **Combined Risk "Method Not Allowed" on Correlate is fixed, and no API call can
+  be swallowed by the web UI again.** The built UI is served from a catch-all mount
+  at the site root, which matched every path for every method. So any `/api/` request
+  that no route answered, a call to a server started before that route existed, or a
+  stray trailing slash, was handled by the static file server and came back as a bare
+  "Method Not Allowed" instead of a real API response. That is what the Correlate
+  button hit. An API fallback now sits ahead of the static mount: real routes still
+  win, a trailing slash is redirected to the canonical path with its method and body
+  intact, an unsupported method returns a proper 405 with an `Allow` header, and an
+  unknown endpoint returns a clear JSON 404 rather than the app's HTML shell. Added
+  live routing regression tests in `tests/test_correlation.py`.
+- **Combined Risk now surfaces the chains it was hiding.** Across a large sample of
+  real scans, most showed zero combined risks even when genuine attack chains were
+  present. The cause was the engine only reporting a combination when its rating came
+  out strictly higher than its strongest constituent, so the most dangerous chains,
+  built from findings that are already high or critical on their own (SQL injection
+  plus an exposed admin panel, default credentials plus an exposed service, a leaked
+  key plus a reachable service), were discarded precisely because there was no number
+  left above critical. A combination is now reported whenever distinct real findings
+  fill it, and its severity is the higher of the rule's rating and the strongest part,
+  so it is never rated below one of its parts and never above what the rule warrants; a
+  chain whose parts are already critical stays critical but is shown, with its concrete
+  exploitation path. Nothing is invented: every slot is still filled by a distinct real
+  finding.
+- **Combined Risk no longer double-counts or self-pairs findings.** A scan report
+  carries the same finding set under both its `vulnerabilities` and `findings` fields,
+  and the correlation endpoint concatenated them, so every finding was counted twice
+  and a finding could be "combined" with a duplicate of itself (for example one SSH
+  default-credential finding paired with its own copy). The endpoint now merges and
+  dedupes by identity, and the engine also dedupes defensively, so the input count is
+  honest and a chain is only ever built from genuinely distinct findings.
+- **Combined Risk correlation rules corrected against the real finding vocabulary.**
+  Informational observations (a healthy SPF or DMARC record, a benign note) are no
+  longer eligible to form a chain. The cleartext-transport rule, whose keywords matched
+  no finding any detector actually emits, was retargeted to the real sslstrip-style
+  chain (a downgradable or cleartext channel plus a session cookie or credential not
+  bound to TLS). A weak-JWT signing finding is no longer mistaken for a redirectable
+  OAuth flow, and default or guessable credentials are no longer treated as a leaked
+  secret. A new rule reports a practically spoofable email domain when it has neither an
+  enforceable SPF nor DMARC. Extended `tests/test_correlation.py` (duplicate and
+  info-severity exclusion, the severity floor, the retargeted and corrected rules, the
+  new email rule, and a guard that every rule can still match real findings).
 
 ## [4.0.0]: 2026-09-10
 

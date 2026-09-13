@@ -110,6 +110,45 @@ def correlate(engagement: Optional[str], input_path: Optional[str],
                     _print(f"      {i}. {step}")
         _print(f"    [dim]Fix: {c['recommendation']}[/dim]\n")
 
+    # End-to-end attack paths: chains where each step yields a capability the
+    # next consumes, ending in a concrete business impact.
+    paths = summary.get("attack_paths") or []
+    if paths:
+        _print(f"[bold]{len(paths)} attack path(s)[/bold] "
+               f"[dim](each step feeds the next):[/dim]")
+        for p in paths:
+            col = sev_color.get(p.get("severity"), "yellow")
+            hosts = " → ".join(p.get("hosts") or [])
+            _print(f"  [{col}]{str(p.get('severity','')).upper():8}[/{col}] "
+                   f"{p.get('business_impact')} "
+                   f"[dim]({p.get('length')} steps · conf "
+                   f"{int(round((p.get('confidence') or 0) * 100))}%"
+                   f"{(' · ' + hosts) if hosts else ''})[/dim]")
+            for st in p.get("steps") or []:
+                via = f"  [dim]{st['via']}[/dim]" if st.get("via") else ""
+                _print(f"      {st.get('position')}. {st.get('name')}{via}")
+        _print("")
+
+    # "Break the chain" — highest-leverage single fixes.
+    rem = summary.get("remediation") or {}
+    top = rem.get("top_fix") or {}
+    if top.get("chains_broken"):
+        _print(f"[bold]Break the chain[/bold] [dim](fixing "
+               f"{top.get('title')} alone breaks {top.get('chains_broken')} "
+               f"combined risk(s)):[/dim]")
+        for r in (rem.get("by_finding") or [])[:5]:
+            if not r.get("chains_broken"):
+                continue
+            pb = (f", {r['paths_broken']} attack path(s)"
+                  if r.get("paths_broken") else "")
+            tgt = f" [dim]({r['target']})[/dim]" if r.get("target") else ""
+            _print(f"  · {r['title']}{tgt} [dim]breaks {r['chains_broken']} "
+                   f"combined risk(s){pb}[/dim]")
+        cut = rem.get("path_cut") or []
+        if cut:
+            _print(f"  [dim]Sever every attack path by fixing: "
+                   f"{', '.join(str(c.get('title')) for c in cut)}[/dim]")
+
 
 def register(cli: click.Group) -> None:
     cli.add_command(correlate)

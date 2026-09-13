@@ -276,10 +276,14 @@ CMDI_TIME_PROBES: list[tuple[str, int, str]] = [
 
 
 def _inclusion_hit(body: str) -> Optional[str]:
-    """Return the matched LFI pattern (proof the included file leaked), else None."""
+    """Return the leaked-file content that proves LFI (the actual matched text,
+    e.g. an ``/etc/passwd`` line), else None. Returning the matched text rather
+    than the bare regex pattern gives the finding real proof to show, instead of
+    a rule name over a baseline response."""
     for pat in LFI_PATTERNS:
-        if pat.search(body):
-            return pat.pattern
+        m = pat.search(body)
+        if m:
+            return m.group(0)[:200]
     return None
 
 
@@ -1142,12 +1146,20 @@ class InjectionScanner:
             body = await _probe(payload)
             hit = _inclusion_hit(body) if body else None
             if hit and not _inclusion_hit(baseline_body):
+                # Point the finding at the exact request that proved it (as the
+                # error-based SQLi check does), so the attached proof transaction
+                # is the leaking response — not the untouched baseline — and add a
+                # focused snippet anchored on the leaked content.
+                poc = _inject_param(url, param, payload) if not post else url
+                _i = body.find(hit)
+                snippet = body[max(0, _i - 40):_i + 200] if _i >= 0 else body[:240]
                 self._add_finding(
-                    target=url, vuln_type="lfi",
+                    target=poc, vuln_type="lfi",
                     title=f"Local File Inclusion / Path Traversal — param '{param}'",
                     severity="critical", confidence=0.9,
                     evidence={"param": param, "payload": payload, "probe": probe,
-                              "match": hit, "method": "POST" if post else "GET", "url": url},
+                              "match": hit, "response_snippet": snippet,
+                              "method": "POST" if post else "GET", "url": url},
                     remediation="Never pass user input to file/include calls; allow-list file IDs.",
                     cwe="CWE-98",
                 )
@@ -1165,13 +1177,21 @@ class InjectionScanner:
             if any(b.search(body) for b in RFI_BLOCKED_PATTERNS):
                 continue
             for pat in RFI_PATTERNS:
-                if pat.search(body) and not pat.search(baseline_body):
+                m = pat.search(body)
+                if m and not pat.search(baseline_body):
+                    # The proof is the PHP stream-open warning that names our probe
+                    # host; store that actual text (not the regex) and point the
+                    # finding at the request that triggered it, so the attached
+                    # response is the warning page rather than the baseline.
+                    poc = _inject_param(url, param, payload) if not post else url
+                    snippet = body[max(0, m.start() - 80):m.end() + 160]
                     self._add_finding(
-                        target=url, vuln_type="rfi",
+                        target=poc, vuln_type="rfi",
                         title=f"Remote File Inclusion (attempted remote fetch) — param '{param}'",
                         severity="high", confidence=0.6,
                         evidence={"param": param, "payload": payload, "probe": probe,
-                                  "match": pat.pattern, "method": "POST" if post else "GET", "url": url},
+                                  "match": m.group(0)[:200], "response_snippet": snippet,
+                                  "method": "POST" if post else "GET", "url": url},
                         remediation="Disable allow_url_include; never include user-supplied URLs.",
                         cwe="CWE-98",
                     )

@@ -423,10 +423,14 @@ class ComplianceReportGenerator:
         # own section plus a TOC entry, only when at least one combination exists.
         try:
             from heaven.vulnscan.correlation import CorrelationEngine
-            combos = CorrelationEngine().correlate(findings)
-            combo_dicts = [c.to_dict() for c in combos]
+            _corr = CorrelationEngine().summary(findings)
+            combo_dicts = _corr.get("combinations", [])
+            attack_paths = _corr.get("attack_paths", [])
+            remediation = _corr.get("remediation", {}) or {}
         except Exception:  # noqa: BLE001 — a report must render even if this fails
             combo_dicts = []
+            attack_paths = []
+            remediation = {}
 
         inventory = _normalize_assets(assets) if assets else []
         dns_inv = _normalize_dns(dns_records) if dns_records else []
@@ -456,7 +460,7 @@ class ComplianceReportGenerator:
             self._dns_enumeration(dns_inv),
             self._risk_methodology(),
             self._findings_summary(ordered),
-            self._combined_risks(combo_dicts),
+            self._combined_risks(combo_dicts, attack_paths, remediation),
             self._detailed_findings(ordered),
             self._owasp_coverage(findings),
         ]
@@ -1010,12 +1014,17 @@ class ComplianceReportGenerator:
           </table>
         </div>"""
 
-    def _combined_risks(self, combos: list[dict]) -> str:
+    def _combined_risks(self, combos: list[dict],
+                        attack_paths: list[dict] | None = None,
+                        remediation: dict | None = None) -> str:
         """Render the correlated-findings section: sets of findings that, taken
-        together, elevate to a more critical issue. Empty string when there are
-        none (the section and its TOC entry are then omitted)."""
+        together, elevate to a more critical issue, the end-to-end attack paths
+        they chain into, and the single fixes that break the most chains. Empty
+        string when there are no combinations (section and TOC entry omitted)."""
         if not combos:
             return ""
+        attack_paths = attack_paths or []
+        remediation = remediation or {}
         cards = ""
         for c in combos:
             sev = str(c.get("combined_severity") or "info").lower()
@@ -1104,13 +1113,87 @@ class ComplianceReportGenerator:
               {play_html}
               <p class="small" style="margin:4px 0;"><b>Recommendation:</b> {_esc(c.get('recommendation'))}</p>
             </div>"""
+        # "Break the chain" — the single fixes with the most leverage. A combined
+        # risk needs all of its parts, so fixing any one constituent breaks it.
+        lever_html = ""
+        by_finding = [r for r in (remediation.get("by_finding") or [])
+                      if r.get("chains_broken")]
+        top = remediation.get("top_fix") or {}
+        if top.get("chains_broken"):
+            rows = ""
+            for r in by_finding[:6]:
+                pb = (f' · breaks {r["paths_broken"]} attack path(s)'
+                      if r.get("paths_broken") else "")
+                tgt = f' <span class="muted small">({_esc(str(r.get("target")))})</span>' if r.get("target") else ""
+                rows += (f'<li><b>{_esc(str(r.get("title")))}</b>{tgt} '
+                         f'<span class="muted small">breaks {r["chains_broken"]} '
+                         f'combined risk(s){pb}</span></li>')
+            cut = remediation.get("path_cut") or []
+            cut_html = ""
+            if cut:
+                names = ", ".join(_esc(str(c.get("title"))) for c in cut)
+                cut_html = (f'<p class="small" style="margin:6px 0 0;"><b>Sever every attack '
+                            f'path</b> by fixing: {names}.</p>')
+            lever_html = (
+                '<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;'
+                'margin:12px 0;background:rgba(0,0,0,0.02);">'
+                f'<b>Break the chain: highest-leverage fixes.</b> Fixing '
+                f'<b>{_esc(str(top.get("title")))}</b> alone breaks '
+                f'{top.get("chains_broken")} combined risk(s).'
+                f'<ul style="margin:6px 0 0;">{rows}</ul>{cut_html}</div>')
+
+        # End-to-end attack paths: chains where each step hands the attacker a
+        # capability the next step consumes.
+        paths_html = ""
+        if attack_paths:
+            path_cards = ""
+            for p in attack_paths:
+                psev = str(p.get("severity") or "info").lower()
+                pm = SEVERITY_META.get(psev, SEVERITY_META["info"])
+                try:
+                    pconf = int(round(float(p.get("confidence") or 0) * 100))
+                except (TypeError, ValueError):
+                    pconf = 0
+                hosts = " → ".join(_esc(str(h)) for h in (p.get("hosts") or []))
+                step_lis = ""
+                for st in p.get("steps") or []:
+                    ssev = str(st.get("combined_severity") or "info").lower()
+                    sm = SEVERITY_META.get(ssev, SEVERITY_META["info"])
+                    via = (f' <span class="muted small">· {_esc(str(st.get("via")))}</span>'
+                           if st.get("via") else "")
+                    where = ", ".join(_esc(str(h)) for h in (st.get("hosts") or []))
+                    step_lis += (
+                        f'<li style="margin:3px 0;"><span class="pill" '
+                        f'style="background:{sm["color"]}">{sm["label"]}</span> '
+                        f'{_esc(str(st.get("name")))}'
+                        + (f' <span class="muted small">[{where}]</span>' if where else "")
+                        + via + '</li>')
+                path_cards += f"""<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0;border-left:4px solid {pm['color']};">
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
+                    <span class="pill" style="background:{pm['color']}">{pm['label']}</span>
+                    <strong>{_esc(str(p.get('business_impact') or 'Attack path'))}</strong>
+                    <span class="muted small">{p.get('length')} steps · confidence {pconf}%{(' · ' + hosts) if hosts else ''}</span>
+                  </div>
+                  <p class="muted small" style="margin:2px 0 6px;">{_esc(str(p.get('impact_detail') or ''))}</p>
+                  <ol style="margin:4px 0;">{step_lis}</ol>
+                </div>"""
+            paths_html = (
+                '<h3 style="margin-top:18px;">Attack paths</h3>'
+                '<p class="muted small">Each path is an ordered walk where every step hands the '
+                'attacker a capability the next step consumes, ending in the business impact shown. '
+                'Same-host steps are marked; cross-host hops are labelled with how the attacker '
+                'moves (reused credentials or internal network reach gained earlier).</p>'
+                f'{path_cards}')
+
         return f"""<div class="page section" id="combined"><h2>Combined Risk (Correlated Findings)</h2>
           <p class="muted small">Two or more of the findings above, although rated individually, form a
           materially worse issue when combined. Each entry below is elevated to the severity the
           combination warrants, names its constituent findings (which remain listed in their own
           right), states the prerequisites that must hold, and gives the concrete, in-scope steps to
           prove it against this target. Remediating any single constituent breaks the chain.</p>
+          {lever_html}
           {cards}
+          {paths_html}
         </div>"""
 
     def _detailed_findings(self, ordered: list[dict]) -> str:

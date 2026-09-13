@@ -1,10 +1,12 @@
 // HEAVEN — Combined Risk (finding correlation) page.
 //
 // Surfaces combinations of findings that, individually rated, together form a
-// more critical issue (e.g. local file inclusion + file upload -> RCE). Loads
-// the active engagement's combinations from GET /api/correlations/latest, and
-// lets an operator paste their own findings list to correlate on demand
-// (POST /api/correlate).
+// more critical issue (e.g. local file inclusion + file upload -> RCE), the
+// end-to-end attack paths those combinations chain into (each step hands the
+// attacker a capability the next consumes), and the single fixes that break the
+// most chains. Loads the active engagement's combinations from
+// GET /api/correlations/latest, and lets an operator paste their own findings
+// list to correlate on demand (POST /api/correlate).
 
 import React, { useEffect, useState } from "react";
 import { Correlate, Engagement } from "../api";
@@ -29,6 +31,168 @@ function SevPill({ sev }) {
     >
       {s}
     </span>
+  );
+}
+
+// ── Attack path graph ───────────────────────────────────────────────────────
+// One path renders as a horizontal walk of step nodes joined by labelled
+// arrows, ending in a filled impact node. It scrolls horizontally on narrow
+// screens rather than forcing the page sideways.
+
+function StepNode({ step }) {
+  const sev = (step.combined_severity || "info").toLowerCase();
+  const color = SEV_COLORS[sev] || "#666";
+  return (
+    <div
+      style={{
+        flex: "0 0 auto", width: 190, borderRadius: 8,
+        border: "1px solid var(--line, #333)", borderTop: `3px solid ${color}`,
+        background: "var(--surface-1, rgba(255,255,255,0.02))",
+        padding: "8px 10px",
+      }}
+    >
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+        <span
+          style={{
+            flex: "0 0 auto", width: 18, height: 18, borderRadius: "50%",
+            background: color, color: "#fff", fontSize: 11, fontWeight: 700,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          {step.position}
+        </span>
+        <SevPill sev={sev} />
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-0)", lineHeight: 1.25 }}>
+        {step.name}
+      </div>
+      {(step.hosts || []).length ? (
+        <div className="dim" style={{ fontSize: 10.5, marginTop: 4 }}>
+          {step.hosts.join(", ")}
+        </div>
+      ) : null}
+      {(step.grants || []).length ? (
+        <div style={{ fontSize: 10, marginTop: 4, color: color }}>
+          gains: {step.grants.join(", ").replace(/_/g, " ")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HopArrow({ via }) {
+  return (
+    <div
+      style={{
+        flex: "0 0 auto", width: 118, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", padding: "0 4px",
+      }}
+    >
+      <div style={{ fontSize: 20, color: "var(--text-1, #999)", lineHeight: 1 }}>→</div>
+      {via ? (
+        <div className="dim" style={{ fontSize: 10, textAlign: "center", marginTop: 2, lineHeight: 1.2 }}>
+          {via}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ImpactNode({ label, sev }) {
+  const color = SEV_COLORS[(sev || "critical").toLowerCase()] || "var(--crit)";
+  return (
+    <div
+      style={{
+        flex: "0 0 auto", minWidth: 170, maxWidth: 220, borderRadius: 8,
+        background: color, color: "#fff", padding: "10px 12px",
+        display: "flex", flexDirection: "column", justifyContent: "center",
+      }}
+    >
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, opacity: 0.85 }}>
+        Impact
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.25 }}>{label}</div>
+    </div>
+  );
+}
+
+function AttackPathCard({ p }) {
+  const color = SEV_COLORS[(p.severity || "info").toLowerCase()] || "#666";
+  const hosts = (p.hosts || []).join(" → ");
+  return (
+    <div className="card" style={{ marginTop: 12, borderLeft: `4px solid ${color}` }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <SevPill sev={p.severity} />
+        <strong style={{ color: "var(--text-0)" }}>{p.business_impact}</strong>
+        <span className="dim" style={{ fontSize: 11 }}>
+          {p.length} steps · confidence {Math.round((p.confidence || 0) * 100)}%
+          {hosts ? ` · ${hosts}` : ""}
+          {p.confirmation ? ` · ${p.confirmation}` : ""}
+        </span>
+      </div>
+      {p.impact_detail ? (
+        <p className="dim" style={{ fontSize: 12, margin: "6px 0 8px" }}>{p.impact_detail}</p>
+      ) : null}
+
+      <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "stretch", minWidth: "min-content" }}>
+          {(p.steps || []).map((st, i) => (
+            <React.Fragment key={st.id || i}>
+              {i > 0 ? <HopArrow via={st.via} /> : null}
+              <StepNode step={st} />
+            </React.Fragment>
+          ))}
+          <HopArrow via="" />
+          <ImpactNode label={p.business_impact} sev={p.severity} />
+        </div>
+      </div>
+
+      {(p.narrative || []).length ? (
+        <ol style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12 }}>
+          {p.narrative.map((line, i) => (
+            <li key={i} style={{ marginBottom: 2, color: "var(--text-1, inherit)" }}>{line}</li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Break the chain (remediation leverage) ────────────────────────────────────
+
+function LeveragePanel({ rem }) {
+  const top = rem?.top_fix;
+  const byFinding = (rem?.by_finding || []).filter((r) => r.chains_broken);
+  if (!top || !top.chains_broken) return null;
+  const cut = rem?.path_cut || [];
+  return (
+    <div
+      className="card"
+      style={{ marginTop: 12, borderLeft: "4px solid var(--green, #12b981)" }}
+    >
+      <strong style={{ color: "var(--text-0)" }}>Break the chain</strong>
+      <p style={{ fontSize: 13, margin: "6px 0" }}>
+        A combined risk needs all of its parts, so fixing any one constituent breaks it.
+        Fixing <b>{top.title}</b> alone breaks {top.chains_broken} combined risk(s).
+      </p>
+      <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 13 }}>
+        {byFinding.slice(0, 6).map((r, i) => (
+          <li key={i} style={{ marginBottom: 3 }}>
+            <b>{r.title}</b>
+            {r.target ? <span className="dim" style={{ fontSize: 11 }}> ({r.target})</span> : null}
+            <span className="dim" style={{ fontSize: 11 }}>
+              {" "}breaks {r.chains_broken} combined risk(s)
+              {r.paths_broken ? ` · ${r.paths_broken} attack path(s)` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {cut.length ? (
+        <p style={{ fontSize: 13, margin: "6px 0 0" }}>
+          <b>Sever every attack path</b> by fixing: {cut.map((c) => c.title).join(", ")}.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -182,6 +346,8 @@ export default function Correlations() {
   }
 
   const combos = summary?.combinations || [];
+  const paths = summary?.attack_paths || [];
+  const rem = summary?.remediation || {};
 
   return (
     <div className="page">
@@ -198,10 +364,13 @@ export default function Correlations() {
           </div>
         </div>
         <p className="page-lead">
-          Suggests where two or more findings, although rated individually, combine into a more
-          critical issue, and elevates them accordingly. Every combination names its constituent
-          findings and the single fix that breaks the chain. Nothing is invented: a combination shows
-          only when each part is a real, distinct finding and the pairing genuinely raises the severity.
+          Suggests where two or more findings, although rated individually, combine into a single
+          materially worse issue, and rates the combination accordingly. It then chains those
+          combinations into end-to-end attack paths, where each step hands the attacker a capability
+          the next step uses, and points out the single fixes that break the most chains. Nothing is
+          invented: a combination shows only when each part is a real, distinct finding, its severity
+          is never rated below any of its parts, and a path link is drawn only where one step
+          genuinely produces what the next requires.
         </p>
 
         {summary && !noEng && (
@@ -209,6 +378,7 @@ export default function Correlations() {
             {summary.total_combinations} combined risk(s) from {summary.total_input_findings} finding(s)
             {" · "}<span style={{ color: "var(--crit)" }}>{summary.critical_combinations} critical</span>
             {" · "}{summary.confirmed_combinations} confirmed
+            {summary.total_attack_paths ? ` · ${summary.total_attack_paths} attack path(s)` : ""}
           </div>
         )}
 
@@ -254,12 +424,29 @@ export default function Correlations() {
         <div style={{ marginTop: 12 }}>
           <EmptyState
             icon="✓"
-            headline="No elevating combinations found"
-            body="None of the current findings combine into a higher-severity issue. This is a good sign."
+            headline="No combined risks found"
+            body="None of the current findings form a known amplification chain. This is a good sign."
           />
         </div>
       )}
 
+      {!loading && combos.length > 0 && <LeveragePanel rem={rem} />}
+
+      {!loading && paths.length > 0 && (
+        <>
+          <h3 style={{ color: "var(--text-0)", margin: "18px 0 0" }}>Attack paths</h3>
+          <p className="dim" style={{ fontSize: 12, margin: "4px 0 0" }}>
+            Each path is an ordered walk that ends in the business impact shown. Same-host steps are
+            marked; cross-host hops are labelled with how the attacker moves (reused credentials or
+            internal network reach gained earlier).
+          </p>
+          {paths.map((p) => <AttackPathCard key={p.id} p={p} />)}
+        </>
+      )}
+
+      {!loading && combos.length > 0 && (
+        <h3 style={{ color: "var(--text-0)", margin: "18px 0 0" }}>Combined risks</h3>
+      )}
       {combos.map((c) => <ComboCard key={c.id} c={c} />)}
     </div>
   );

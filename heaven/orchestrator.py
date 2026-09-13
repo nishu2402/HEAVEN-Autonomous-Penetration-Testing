@@ -42,6 +42,19 @@ def _registered_domain(host: str) -> Optional[str]:
     host = (host or "").strip().rstrip(".").lower()
     if not host or host == "localhost":
         return None
+    # A CIDR / slash-bearing token is a network range, never a hostname. It must
+    # be rejected before the eTLD+1 fallback below, which would otherwise mangle
+    # "192.168.2.0/24" into a fake domain ("2.0/24") and fire guaranteed
+    # false-positive SPF/DMARC/DKIM/DNSSEC "record missing" findings at it.
+    # ipaddress.ip_address() does not recognise CIDR notation, so try the
+    # network form too rather than relying only on the slash test.
+    if "/" in host:
+        return None
+    try:
+        ipaddress.ip_network(host, strict=False)
+        return None  # bare network address — no domain to check
+    except ValueError:
+        pass
     # Strip a port if one slipped through (e.g. "example.com:8443").
     if host.count(":") == 1 and "]" not in host:
         host = host.split(":", 1)[0]

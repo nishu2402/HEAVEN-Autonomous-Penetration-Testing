@@ -18,36 +18,15 @@ try:
 except ImportError:
     HAS_AIOHTTP = False
 
+from heaven.utils.domains import registered_domain as _registered_domain
 from heaven.utils.logger import get_logger
 from heaven.vulnscan import proof_capture
 
 logger = get_logger("auth_scanner")
 
-
-def _registered_domain(host: str) -> Optional[str]:
-    """Best-effort registered domain (eTLD+1) for a hostname, or ``None`` for IP
-    literals / localhost / single-label hosts. Used to decide whether a redirect
-    stayed on the in-scope site."""
-    import ipaddress
-    host = (host or "").strip().rstrip(".").lower()
-    if not host or host == "localhost":
-        return None
-    # A CIDR / slash-bearing token is a network range, not a hostname; reject it
-    # before the eTLD+1 fallback that would mangle it into a fake domain. (Kept
-    # in step with heaven.orchestrator._registered_domain.)
-    if "/" in host:
-        return None
-    if host.count(":") == 1 and "]" not in host:
-        host = host.split(":", 1)[0]
-    try:
-        ipaddress.ip_address(host)
-        return None
-    except ValueError:
-        pass
-    parts = host.split(".")
-    if len(parts) < 2:
-        return None
-    return ".".join(parts[-2:])
+# ``_registered_domain`` (imported above) is the eTLD+1 helper shared with the
+# orchestrator via one module so the two can never drift. Used here to decide
+# whether a redirect stayed on the in-scope site (see _same_site).
 
 
 def _same_site(requested_url: str, final_url: str) -> bool:

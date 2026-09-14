@@ -17,6 +17,8 @@ from heaven.config import HeavenConfig, ScanMode, get_config
 from heaven.feedback import HOST, URL, FeedbackEngine
 from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 from heaven.ml.ai_brain import BayesianPrioritiser
+# eTLD+1 extraction, shared with auth_scanner via one module so they never drift.
+from heaven.utils.domains import registered_domain as _registered_domain
 from heaven.utils.logger import get_logger
 
 logger = get_logger("orchestrator")
@@ -25,48 +27,6 @@ logger = get_logger("orchestrator")
 # deadline at 90% of this so it returns partial findings before the hard cancel
 # (see _injection_scan / scan_for_injections time_budget).
 _INJECTION_TIMEOUT_S = 600
-
-
-def _registered_domain(host: str) -> Optional[str]:
-    """Best-effort registered domain (eTLD+1) for a *hostname*, or ``None``.
-
-    DNS/email-posture checks (SPF, DMARC, DKIM, DNSSEC) are domain-level DNS
-    record lookups and only make sense against a real domain name. Returns
-    ``None`` for IP literals (v4/v6), ``localhost``, and bare single-label hosts
-    so the orchestrator skips those targets instead of (a) firing guaranteed
-    false-positive "record missing" findings and (b) mangling an IP like
-    ``127.0.0.1`` into ``0.1`` via a naive ``split('.')[-2:]``.
-    """
-    import ipaddress
-
-    host = (host or "").strip().rstrip(".").lower()
-    if not host or host == "localhost":
-        return None
-    # A CIDR / slash-bearing token is a network range, never a hostname. It must
-    # be rejected before the eTLD+1 fallback below, which would otherwise mangle
-    # "192.168.2.0/24" into a fake domain ("2.0/24") and fire guaranteed
-    # false-positive SPF/DMARC/DKIM/DNSSEC "record missing" findings at it.
-    # ipaddress.ip_address() does not recognise CIDR notation, so try the
-    # network form too rather than relying only on the slash test.
-    if "/" in host:
-        return None
-    try:
-        ipaddress.ip_network(host, strict=False)
-        return None  # bare network address — no domain to check
-    except ValueError:
-        pass
-    # Strip a port if one slipped through (e.g. "example.com:8443").
-    if host.count(":") == 1 and "]" not in host:
-        host = host.split(":", 1)[0]
-    try:
-        ipaddress.ip_address(host)
-        return None  # IPv4/IPv6 literal — no domain to check
-    except ValueError:
-        pass
-    parts = host.split(".")
-    if len(parts) < 2:
-        return None  # single-label host (intranet name) — not a public domain
-    return ".".join(parts[-2:])
 
 
 def _scan_domains(targets: dict) -> list[str]:

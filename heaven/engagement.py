@@ -825,7 +825,8 @@ def _consolidate_header_family(findings: list) -> list:
             out.append(f)
             continue
         vt = str(f.get("vuln_type", ""))
-        present = granular_by_host.get(_host_key(str(f.get("target", ""))), frozenset())
+        present: set[str] | frozenset[str] = granular_by_host.get(
+            _host_key(str(f.get("target", ""))), frozenset())
         if vt == "missing_security_headers":
             ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
             named = [str(h).lower() for h in (ev.get("missing_headers") or [])]

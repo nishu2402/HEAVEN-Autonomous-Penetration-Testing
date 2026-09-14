@@ -60,6 +60,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   IP literals, localhost and single-label hosts, so an internal-network
   engagement contributes no email-posture findings unless a real domain is also
   in scope. Covered by `tests/test_orchestrator_domain.py`.
+- **A `.co.uk` (or other multi-part ccTLD) domain no longer reports email posture
+  against the wrong name.** The registered-domain helper took the last two labels,
+  so `nehemiah.co.uk` collapsed to the bare public suffix `co.uk`. SPF, DMARC, DKIM
+  and DNSSEC were then checked against `co.uk`, a suffix nobody can send mail as,
+  producing guaranteed "record missing" findings and a spurious "Practical Email
+  Spoofing" combined risk, while the real domain was never checked. The same
+  collapse also let a redirect from the target to a different organisation on the
+  same suffix (say `attacker.co.uk`) count as on-site. The helper now recognises
+  common multi-part suffixes and resolves `a.b.nehemiah.co.uk` to `nehemiah.co.uk`,
+  returning nothing for a bare suffix. The eTLD+1 logic, previously duplicated in
+  two files that had already drifted, now lives in one module
+  (`heaven/utils/domains.py`) that both the orchestrator and the auth scanner
+  import, so they cannot diverge again. Covered by `tests/test_orchestrator_domain.py`.
 - **A missing security header is reported once, not two or three times.** Two
   scanners legitimately probe response headers: one emits a single bundle naming
   every header it found absent, the other emits a granular finding per header. On a

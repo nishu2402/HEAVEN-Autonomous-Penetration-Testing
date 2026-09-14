@@ -145,6 +145,11 @@ def test_same_site_redirect_gate():
     # Cross-registered-domain redirects (CDN / parking / SSO) are NOT the target.
     assert not _same_site("http://certifiedhacker.com", "https://parking.bluehost-cdn.net/x")
     assert not _same_site("http://certifiedhacker.com", "https://login.microsoftonline.com/")
+    # Multi-part ccTLD: an apex/www hop stays same-site, but a different org on the
+    # same public suffix does NOT. (The old split('.')[-2:] collapsed both sides to
+    # "co.uk" and wrongly called attacker.co.uk same-site.)
+    assert _same_site("http://nehemiah.co.uk", "https://www.nehemiah.co.uk/home")
+    assert not _same_site("http://nehemiah.co.uk", "https://attacker.co.uk/")
 
 
 @pytest.mark.asyncio

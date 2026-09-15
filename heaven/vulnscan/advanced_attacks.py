@@ -285,7 +285,7 @@ class RaceConditionDetector:
                     f"{len(succ_hashes)} different successful responses "
                     f"(statuses {sorted(succ_statuses)}). If this endpoint performs a "
                     f"state change that should occur at most once, this may be an "
-                    f"exploitable race — verify manually with a single-packet attack."
+                    f"exploitable race: verify manually with a single-packet attack."
                 ),
                 confidence=0.4,
                 evidence={"method": method, "concurrent_requests": concurrent_requests,
@@ -624,7 +624,7 @@ class CredentialSprayer:
         try:
             import asyncssh  # optional dependency  # noqa: F401
         except ImportError:
-            logger.debug("asyncssh not installed — SSH spray skipped")
+            logger.debug("asyncssh not installed: SSH spray skipped")
             return findings
         from heaven.utils import ssh_safe  # drops crash-prone UMAC/Nettle MACs
 
@@ -753,8 +753,16 @@ class CredentialSprayer:
 # ═══════════════════════════════════════════
 
 async def run_advanced_tests(session: aiohttp.ClientSession, url: str,
-                              scan_data: Optional[dict[Any, Any]] = None) -> list[AdvancedFinding]:
-    """Run all advanced exploitation tests on a target."""
+                              scan_data: Optional[dict[Any, Any]] = None,
+                              include_smuggling: bool = True) -> list[AdvancedFinding]:
+    """Run all advanced exploitation tests on a target.
+
+    ``include_smuggling`` gates the CL.TE request-smuggling probe. Smuggling is
+    an origin-level property (a front-end/back-end desync of the connection, not
+    of any one path), and the probe deliberately stalls to its timeout on a
+    normal server, so the caller runs it once per origin — passing False for the
+    rest of an origin's URLs — instead of paying that timeout on every path.
+    """
     all_findings = []
 
     logger.info(f"🔥 Running advanced exploitation tests on {url}")
@@ -786,10 +794,13 @@ async def run_advanced_tests(session: aiohttp.ClientSession, url: str,
     cred_findings = await CredentialSprayer.spray_web_login(session, url)
     all_findings.extend(cred_findings)
 
-    # Request smuggling
-    smuggling = await RequestSmugglingDetector.detect_clte(url)
-    if smuggling:
-        all_findings.append(smuggling)
+    # Request smuggling — origin-level, so only when the caller asks (once per
+    # origin). The CL.TE probe stalls to its timeout on any normal server, so
+    # running it per-path would add that wait to every discovered URL.
+    if include_smuggling:
+        smuggling = await RequestSmugglingDetector.detect_clte(url)
+        if smuggling:
+            all_findings.append(smuggling)
 
     logger.info(f"Advanced tests complete: {len(all_findings)} findings on {url}")
     return all_findings

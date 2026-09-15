@@ -1257,7 +1257,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                                 f"the {len(cand)} candidate CVEs (e.g. "
                                 f"{', '.join(examples)}) lists only a fixed-in ceiling "
                                 f"with no introduced-version floor in NVD, so the range "
-                                f"cannot confirm this specific build is affected — a "
+                                f"cannot confirm this specific build is affected: a "
                                 f"CVE fixed in a later release often does not reach a "
                                 f"much older one. UNVERIFIED candidates: confirm against "
                                 f"the vendor advisory or an authenticated check (the "
@@ -1271,9 +1271,9 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                                 f"affected range, so applicability cannot be established "
                                 f"from the outside. {len(cand)} CVEs name this product "
                                 f"in public feeds (e.g. {', '.join(examples)}). These "
-                                f"are UNVERIFIED candidates — a public CVE for a product "
+                                f"are UNVERIFIED candidates: a public CVE for a product "
                                 f"name may refer to a different implementation or "
-                                f"platform — confirm the exact product and version "
+                                f"platform: confirm the exact product and version "
                                 f"before treating any as present."
                             )
                         all_vulns.append({

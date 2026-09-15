@@ -4,7 +4,7 @@ rules:
 
   - id: heaven.go.sqli-fmt-sprintf
     message: |
-      SQL query built with fmt.Sprintf and a variable — use parameterised
+      SQL query built with fmt.Sprintf and a variable: use parameterised
       query (db.Query("SELECT ... WHERE id = ?", id)).
     severity: ERROR
     languages: [go]
@@ -23,7 +23,7 @@ rules:
 
   - id: heaven.go.cmd-injection-exec
     message: |
-      exec.Command with a user-supplied first argument — only the first
+      exec.Command with a user-supplied first argument: only the first
       arg is the binary (no shell), but operator controlling that arg can
       run any binary on PATH. Validate against an allow-list.
     severity: WARNING
@@ -38,7 +38,7 @@ rules:
 
   - id: heaven.go.weak-random-for-crypto
     message: |
-      math/rand is deterministic — never use for tokens, IDs, or crypto.
+      math/rand is deterministic: never use for tokens, IDs, or crypto.
       Use crypto/rand.Read or crypto/rand.Int.
     severity: WARNING
     languages: [go]

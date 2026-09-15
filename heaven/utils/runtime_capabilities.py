@@ -127,7 +127,7 @@ def _chromium_via_api() -> Optional[tuple[bool, str]]:
         return None
     ok = bool(box.get("ok"))
     detail = ("Chromium browser installed" if ok
-              else f"browser bundle not downloaded — run `{_INSTALL_HINT}`")
+              else f"browser bundle not downloaded: run `{_INSTALL_HINT}`")
     return ok, detail
 
 
@@ -139,7 +139,7 @@ def _chromium_via_filesystem() -> tuple[bool, str]:
     if env == "0":
         # Browsers live next to the package — not reliably locatable by path;
         # leave this to the authoritative API probe.
-        return False, f"browser bundle not found — run `{_INSTALL_HINT}`"
+        return False, f"browser bundle not found: run `{_INSTALL_HINT}`"
     if env:
         # When set, this is Playwright's *only* browser location (no fallback to
         # the default cache dir), so honour that exactly.
@@ -156,7 +156,7 @@ def _chromium_via_filesystem() -> tuple[bool, str]:
             or glob.glob(os.path.join(r, "chromium_headless_shell-*"))
         ):
             return True, "Chromium browser present"
-    return False, f"browser bundle not found — run `{_INSTALL_HINT}`"
+    return False, f"browser bundle not found: run `{_INSTALL_HINT}`"
 
 
 def _chromium_status() -> tuple[bool, str]:
@@ -210,7 +210,7 @@ def runtime_capabilities(use_cache: bool = True) -> list[dict]:
         elif not reachable:
             local_detail = "installed, server not running (ollama serve)"
         elif not models:
-            local_detail = f"server up, no models — heaven ai pull {local_llm.DEFAULT_OLLAMA_MODEL}"
+            local_detail = f"server up, no models: heaven ai pull {local_llm.DEFAULT_OLLAMA_MODEL}"
         else:
             local_detail = "ready: " + ", ".join(models[:3])
         caps.append({

@@ -472,7 +472,7 @@ class HoneypotEvasionEngine:
         if score >= self.threshold:
             self.skipped_count += 1
             logger.warning(
-                f"🛡️ EVASION: Skipping {host} (honeypot score={score:.2f}) — "
+                f"🛡️ EVASION: Skipping {host} (honeypot score={score:.2f}): "
                 f"indicators: {', '.join(indicators[:3])}"
             )
 

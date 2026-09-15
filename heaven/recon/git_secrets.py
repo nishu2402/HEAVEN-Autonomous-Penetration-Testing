@@ -162,7 +162,7 @@ async def scan_repository(repo_path: str, include_history: bool = True) -> list[
     # 'git' is an external binary — without this guard a missing git raises an
     # uncaught FileNotFoundError on clone and aborts the whole scan pipeline.
     if (is_remote or include_history) and _shutil.which("git") is None:
-        logger.warning("git binary not found on PATH — git-secrets scan skipped")
+        logger.warning("git binary not found on PATH: git-secrets scan skipped")
         return []
 
     try:
@@ -209,7 +209,7 @@ async def scan_repository(repo_path: str, include_history: bool = True) -> list[
 async def scan_repositories(repos: Optional[list[str]] = None, **kwargs) -> dict[str, Any]:
     """Main entry point (called by orchestrator)."""
     if not repos:
-        logger.info("No repositories specified — skipping secret scan")
+        logger.info("No repositories specified: skipping secret scan")
         return {"secrets": [], "total": 0}
 
     all_findings: list[SecretFinding] = []

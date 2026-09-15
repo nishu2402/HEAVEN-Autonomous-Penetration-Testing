@@ -174,7 +174,7 @@ class CredentialValidator:
                     if r.status < 400:
                         return CredentialHit(
                             host=host, port=port, service=service, username=user,
-                            notes=f"HTTP {r.status} — auth accepted",
+                            notes=f"HTTP {r.status}: auth accepted",
                             evidence={
                                 "status": r.status,
                                 "auth_header_sent": (

@@ -156,7 +156,7 @@ class ReconAgent:
     async def parse(self, recon: dict) -> AssetProfile:
         """Main entry. Returns the agent's AssetProfile (or a rules-based fallback)."""
         if not self.available:
-            logger.debug("ReconAgent unavailable — emitting rules-based fallback profile")
+            logger.debug("ReconAgent unavailable: emitting rules-based fallback profile")
             return self._fallback_profile(recon)
 
         tool_results: list[dict] = []

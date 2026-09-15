@@ -281,7 +281,7 @@ async def check_honeypots(
             })
 
     logger.info(
-        f"Honeypot analysis: {analyzed} host(s) analyzed — "
+        f"Honeypot analysis: {analyzed} host(s) analyzed: "
         f"{honeypots} honeypot(s), {ctfs} CTF target(s)"
     )
     return {

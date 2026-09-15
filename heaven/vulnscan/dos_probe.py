@@ -296,7 +296,7 @@ def _reflector_finding(host: str, refl: _Reflector,
         target=f"{host}:{refl.port}",
         vuln_type="dos_amplification",
         severity=severity,
-        title=f"DDoS Amplification Reflector — {refl.name}{cve_note}",
+        title=f"DDoS Amplification Reflector: {refl.name}{cve_note}",
         description=(
             f"The {refl.name} service on UDP/{refl.port} answered a single small, "
             f"spoofable request with a reply {factor:.1f}× larger "
@@ -395,7 +395,7 @@ def _slow_http_finding(host: str, port: int, use_tls: bool, held: float) -> dict
             f"without enforcing a header-read timeout. A Slowloris / slow-read "
             f"attacker can hold many connections open with trickled partial "
             f"headers, exhausting the server's connection pool and denying service "
-            f"to legitimate users — all from a single low-bandwidth host."
+            f"to legitimate users: all from a single low-bandwidth host."
         ),
         confidence=0.75,
         evidence={

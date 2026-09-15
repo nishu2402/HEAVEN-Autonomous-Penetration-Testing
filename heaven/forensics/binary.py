@@ -664,7 +664,7 @@ def _build_findings(rep: BinaryReport) -> None:
             "A PT_LOAD segment is mapped read/write/execute, allowing runtime "
             "code injection.", cwe="CWE-119")
     if rep.packed:
-        add("packed_binary", "low", f"High entropy ({rep.entropy}) — likely packed/encrypted",
+        add("packed_binary", "low", f"High entropy ({rep.entropy}): likely packed/encrypted",
             "The file's byte entropy is very high, typical of a packed or "
             "encrypted binary. Static review is limited until it is unpacked; "
             "this is common in malware.", cwe="CWE-506")

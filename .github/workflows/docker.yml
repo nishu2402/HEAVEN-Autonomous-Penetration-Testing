@@ -62,7 +62,34 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
 
+      # First attempt. The arm64 half runs under QEMU emulation, so a transient
+      # network / buildkit / registry hiccup can abort an otherwise-fine build.
+      # continue-on-error lets the retry below take over instead of failing the
+      # job on a one-off blip.
       - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        continue-on-error: true
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Pause before retry
+        if: steps.build.outcome == 'failure'
+        run: sleep 20
+
+      # Retry once. buildx reuses the GHA layer cache, so the second attempt
+      # only redoes the layer that failed and finishes fast. This step has no
+      # continue-on-error, so a genuine, repeatable failure still surfaces as a
+      # red build. Keep its inputs identical to the first attempt.
+      - name: Build and push (retry)
+        if: steps.build.outcome == 'failure'
         uses: docker/build-push-action@v7
         with:
           context: .

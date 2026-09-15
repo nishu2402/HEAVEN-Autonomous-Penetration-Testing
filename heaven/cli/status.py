@@ -243,7 +243,7 @@ def _next_steps(report: dict) -> list[str]:
     missing = [t for t, present in (report.get("external_tools") or {}).items() if not present]
     if missing:
         shown = ", ".join(missing[:3]) + ("…" if len(missing) > 3 else "")
-        steps.append(f"[cyan]heaven install-tools[/cyan]  — install missing scanners ({shown})")
+        steps.append(f"[cyan]heaven install-tools[/cyan]: install missing scanners ({shown})")
     # The Playwright browser gates the headless-browser XSS execution proof; if
     # it isn't downloaded, offer the one-liner that arms it.
     caps = report.get("runtime_capabilities") or []
@@ -261,7 +261,7 @@ def _next_steps(report: dict) -> list[str]:
             ", run your first scan"
         )
     else:
-        steps.append(f"[cyan]heaven report --engagement {name}[/cyan]  — generate a deliverable")
+        steps.append(f"[cyan]heaven report --engagement {name}[/cyan]: generate a deliverable")
         steps.append("[cyan]heaven serve[/cyan], open the web dashboard")
     return steps
 

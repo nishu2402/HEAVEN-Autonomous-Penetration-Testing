@@ -254,7 +254,7 @@ async def _check_subdomain_takeover(subdomain: str) -> Optional[dict]:
                 if pattern.lower() in body.lower():
                     return _finding(
                         subdomain, "subdomain_takeover", "critical",
-                        f"Subdomain Takeover — {service}",
+                        f"Subdomain Takeover: {service}",
                         f"{subdomain} → CNAME → {final_cname} ({service}) shows "
                         f"unclaimed resource indicator: '{pattern}'. "
                         f"An attacker can register this resource and serve malicious content "
@@ -325,7 +325,7 @@ async def _scan_email_security(domain: str) -> list[dict]:
             domain, "spf_neutral", "medium",
             "SPF Uses Neutral (?all): No Sender Enforcement",
             f"SPF record for {domain} ends with '?all' (neutral), so receivers "
-            "treat every sender as unspecified — the same as having no SPF policy "
+            "treat every sender as unspecified: the same as having no SPF policy "
             "for enforcement. Combined with a missing or non-enforcing DMARC "
             "policy this leaves the domain spoofable. Use '-all' (hardfail).",
             confidence=0.95,
@@ -520,7 +520,7 @@ def _analyze_mx(domain: str) -> list[dict]:
         if not a_records:
             findings.append(_finding(
                 domain, "mx_dangling", "high",
-                f"Dangling MX Record — {mx_host} Does Not Resolve",
+                f"Dangling MX Record: {mx_host} Does Not Resolve",
                 f"MX record points to '{mx_host}' which has no A/AAAA record. "
                 f"If an attacker registers '{mx_host}', they receive all email for {domain}.",
                 confidence=0.92,
@@ -546,7 +546,7 @@ async def dns_recon(domain: str, enumerate_subdomains: bool = False,
         Standard findings dict with 'findings', 'vulnerabilities', 'dns_data' keys.
     """
     if not HAS_DNSPYTHON:
-        logger.warning("dnspython not installed — DNS recon degraded")
+        logger.warning("dnspython not installed: DNS recon degraded")
 
     all_findings: list[dict] = []
     dns_data: dict[str, Any] = {"domain": domain, "records": {}}

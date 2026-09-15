@@ -122,7 +122,7 @@ class ThreatIntelEngine:
                             }
                     logger.info(f"KEV catalog updated: {len(self._kev_cache)} entries")
         except Exception as e:
-            logger.warning(f"KEV fetch failed: {e} — using snapshot ({len(self._kev_cache)} entries)")
+            logger.warning(f"KEV fetch failed: {e}: using snapshot ({len(self._kev_cache)} entries)")
 
     def enrich_finding(self, finding: dict) -> ThreatContext:
         """Enrich a vulnerability finding with threat intelligence."""

@@ -184,7 +184,7 @@ class ADScanner:
     async def connect(self) -> bool:
         """Establish LDAP connection to Domain Controller."""
         if not HAS_LDAP:
-            logger.error("ldap3 not installed — AD scanning unavailable")
+            logger.error("ldap3 not installed: AD scanning unavailable")
             return False
         try:
             port = 636 if self.use_ssl else 389
@@ -812,7 +812,7 @@ class ADScanner:
         ready for hashcat/john. Requires impacket and valid credentials.
         """
         if not HAS_IMPACKET:
-            logger.warning("impacket not installed — cannot extract Kerberoast hashes")
+            logger.warning("impacket not installed: cannot extract Kerberoast hashes")
             return []
         if not self._domain_info.spn_accounts:
             await self.check_kerberoasting()
@@ -880,7 +880,7 @@ class ADScanner:
         No credentials required.
         """
         if not HAS_IMPACKET:
-            logger.warning("impacket not installed — cannot extract AS-REP hashes")
+            logger.warning("impacket not installed: cannot extract AS-REP hashes")
             return []
         if not self._domain_info.asrep_accounts:
             await self.check_asrep_roasting()
@@ -1375,7 +1375,7 @@ class ADScanner:
         else:
             logger.info(
                 f"AD scan: pre-auth layer produced {len(self._findings)} finding(s) "
-                "(no authenticated bind — supply creds for full depth)"
+                "(no authenticated bind: supply creds for full depth)"
             )
         return self.summary()
 
@@ -1428,7 +1428,7 @@ async def scan_active_directory(domain: str = "", dc_host: str = "",
         if domain:
             dc_host = domain  # try resolving the domain name as the DC endpoint
         else:
-            logger.info("No AD domain/DC specified — skipping AD scan")
+            logger.info("No AD domain/DC specified: skipping AD scan")
             return {"skipped": True, "reason": "No AD domain or DC host configured"}
 
     scanner = ADScanner(domain, dc_host, username, password)

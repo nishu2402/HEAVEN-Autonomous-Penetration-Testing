@@ -351,7 +351,7 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
                         auth_config: Optional[dict] = None, **kwargs) -> dict[str, Any]:
     """Main entry point for web crawling (called by orchestrator)."""
     if not urls:
-        logger.info("No URLs specified — skipping web crawl")
+        logger.info("No URLs specified: skipping web crawl")
         return {"endpoints": [], "js_endpoints": [], "input_vectors": 0}
 
     # Resolve the FULL profile for this level (timing + concurrency), not a bare
@@ -421,7 +421,7 @@ async def crawl_url_js(
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        logger.debug("Playwright not installed — falling back to aiohttp crawler")
+        logger.debug("Playwright not installed: falling back to aiohttp crawler")
         return await crawl_url(url, max_depth=max_depth, max_pages=max_pages,
                                evasion_headers=evasion_headers, auth_config=auth_config)
 
@@ -505,7 +505,7 @@ async def crawl_url_js(
 
             await browser.close()
     except Exception as exc:
-        logger.warning(f"Playwright crawl failed for {url}: {exc} — falling back to aiohttp")
+        logger.warning(f"Playwright crawl failed for {url}: {exc}: falling back to aiohttp")
         return await crawl_url(url, max_depth=max_depth, max_pages=max_pages,
                                evasion_headers=evasion_headers, auth_config=auth_config)
 

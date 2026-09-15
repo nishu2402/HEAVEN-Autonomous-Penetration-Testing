@@ -612,7 +612,7 @@ class IoTScanner:
                 target=host, protocol="HTTP", severity="critical", port=port,
                 title=f"{vendor} panel accepts default credentials on {host}:{port}",
                 description=f"Logged in to the {vendor} web panel with the default "
-                            f"credentials {creds[0]}/{creds[1] or '(empty)'} — "
+                            f"credentials {creds[0]}/{creds[1] or '(empty)'}: "
                             "confirmed by a successful authenticated response.",
                 device_info={"vendor": vendor, "server": server,
                              "verified_login": True},

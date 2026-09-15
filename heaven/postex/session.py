@@ -253,7 +253,7 @@ class PostExSession:
                     return "linux"
                 return "windows"
         except Exception as e:
-            logger.debug("OS detection failed (%s) — defaulting to linux", e)
+            logger.debug("OS detection failed (%s): defaulting to linux", e)
             return "linux"
 
     async def _ai_prioritize(
@@ -261,7 +261,7 @@ class PostExSession:
     ) -> dict[str, Any]:
         """Ask the LLM to rank/explain the *already-found* vectors. Advice only."""
         vector_lines = "\n".join(
-            f"- [{v['severity']}] {v['title']} — {v.get('abuse', '')}"
+            f"- [{v['severity']}] {v['title']}: {v.get('abuse', '')}"
             for v in enum.vectors)
         facts = enum.facts
         # HostFacts (Linux) and WinHostFacts differ in a couple of fields.

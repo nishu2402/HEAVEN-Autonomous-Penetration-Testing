@@ -3170,6 +3170,25 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             return {"skipped": True, "reason": "no hosts from network recon"}
 
         proof_cmd = str(targets.get("exploit_proof_command") or "id; uname -a")
+        # HTTP ports the WEB layer already knows about — operator-supplied URLs
+        # plus any origins bridged from discovered open HTTP ports. Network recon
+        # can fail to fingerprint a minimal/embedded HTTP server on a non-standard
+        # port (busybox httpd shows up as service 'unknown' with no banner), so a
+        # web exploit like Shellshock would never be attempted against it. Marking
+        # these ports as HTTP here restores that — the exploit's own marker/callback
+        # gate keeps it false-positive-free regardless.
+        from urllib.parse import urlparse as _urlparse_x
+        http_ports_by_host: dict[str, set[int]] = {}
+        for _u in (orch.scan_targets.get("urls") or []):
+            try:
+                _pu = _urlparse_x(_u if "://" in str(_u) else "http://" + str(_u))
+                _h = (_pu.hostname or "").lower()
+                _pt = _pu.port or (443 if _pu.scheme == "https" else 80)
+                if _h:
+                    http_ports_by_host.setdefault(_h, set()).add(int(_pt))
+            except Exception:  # noqa: BLE001 - a malformed URL just yields no hint
+                continue
+
         all_findings: list[dict] = []
         all_outcomes: list[dict] = []
         attempted = proved = 0
@@ -3177,12 +3196,24 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             hostname = host.get("ip") or host.get("host") or host.get("hostname")
             if not hostname:
                 continue
-            services = [
-                {"port": p.get("port"),
-                 "banner": (p.get("banner") or p.get("service_version")
-                            or p.get("product") or p.get("service") or "")}
-                for p in host.get("open_ports", []) if p.get("port")
-            ]
+            _known_http: set[int] = set()
+            for _hk in {str(hostname).lower(), str(host.get("host") or "").lower(),
+                        str(host.get("ip") or "").lower()}:
+                _known_http |= http_ports_by_host.get(_hk, set())
+            services = []
+            for p in host.get("open_ports", []):
+                if not p.get("port"):
+                    continue
+                banner = (p.get("banner") or p.get("service_version")
+                          or p.get("product") or p.get("service") or "")
+                # Tag a known-HTTP port so web-exploit applicability sees it even
+                # when recon left the service 'unknown'.
+                try:
+                    if int(p.get("port")) in _known_http and "http" not in banner.lower():
+                        banner = (banner + " http").strip()
+                except (TypeError, ValueError):
+                    pass
+                services.append({"port": p.get("port"), "banner": banner})
             if not services:
                 continue
             try:

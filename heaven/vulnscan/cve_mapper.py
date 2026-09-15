@@ -125,6 +125,14 @@ class CVERecord:
     references: list[str] = field(default_factory=list)
     cwe: str = ""
     exploit_available: bool = False
+    # True when the vulnerable range spans CURRENTLY-MAINTAINED distro releases
+    # that fix this flaw by BACKPORT — the distro patches it inside the SAME
+    # upstream version, so an upstream version-range match cannot establish
+    # exposure for a distro-packaged build and is almost always a false positive.
+    # (regreSSHion is the archetype: 8.5p1-9.7p1 covers current Ubuntu/Debian
+    # OpenSSH, which was backport-fixed within days of disclosure.) Such records
+    # are dropped for distro-packaged banners; see ``_is_distro_packaged``.
+    distro_backport_fixed: bool = False
 
 
 # Format: version string may be:
@@ -141,7 +149,10 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   # bare "<=9.3p1" would falsely flag them.
                   "critical", 9.8, [">=5.4", "<=9.3p1"], exploit_available=True, cwe="CWE-78"),
         CVERecord("CVE-2023-51385", "OpenSSH shell metacharacter injection in ProxyCommand",
-                  "high", 7.5, ["<=9.6"], cwe="CWE-78"),
+                  # Fixed IN OpenSSH 9.6 (NVD: "before 9.6"), so 9.6/9.6p1 are
+                  # patched — the ceiling is strict "<9.6", not "<=9.6" which
+                  # over-matched the fixed release.
+                  "high", 7.5, ["<9.6"], cwe="CWE-78"),
         # Terrapin is an SSH *transport-protocol* weakness (prefix truncation of
         # the binary packet stream), so it belongs to the SSH server, not to
         # unrelated services that merely speak another protocol. It only affects a
@@ -153,7 +164,8 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
         CVERecord("CVE-2023-48795", "Terrapin attack: SSH prefix truncation weakens channel integrity",
                   "medium", 5.9, [">=6.2", "<9.6"], cwe="CWE-222"),
         CVERecord("CVE-2024-6387", "OpenSSH regreSSHion RCE (signal handler race condition)",
-                  "critical", 8.1, ["<=9.7p1", ">=8.5p1"], exploit_available=True, cwe="CWE-364"),
+                  "critical", 8.1, ["<=9.7p1", ">=8.5p1"], exploit_available=True, cwe="CWE-364",
+                  distro_backport_fixed=True),
         CVERecord("CVE-2021-41617", "OpenSSH privilege escalation via AuthorizedKeysCommand",
                   "high", 7.0, [">=6.2", "<=8.8"], cwe="CWE-269"),
         CVERecord("CVE-2020-15778", "OpenSSH scp shell injection via filenames",
@@ -662,6 +674,16 @@ _BANNER_FINGERPRINTS: list[tuple[str, str]] = [
     (r"log4j",                               "log4j"),
     (r"shiro",                               "apache_shiro"),
     (r"rabbitmq",                            "rabbitmq"),
+    # The Docker REGISTRY / distribution is a DISTINCT product from the Docker
+    # Engine: its version ("2.0") is the registry API version, not an engine
+    # release, so it must not inherit Docker-Engine CVEs. Without this, nmap's
+    # "Docker Registry 2.0" fingerprint collapsed onto the "docker" engine key
+    # and "2.0" over-matched engine ceilings like "<20.10.14" (CVE-2022-0492
+    # cgroup escape) — a false positive on any exposed registry:2. Match it FIRST
+    # to a key with no engine CVEs; the registry's real exposure is reported
+    # separately by the container scanner (``registry_exposed``).
+    (r"docker[\s_/-]*(?:registry|distribution)|distribution[\s_/-]*registry",
+     "docker_registry"),
     (r"docker",                              "docker"),
     (r"kubernetes|k8s",                      "kubernetes"),
 ]
@@ -983,6 +1005,39 @@ def published_cvss_for(cve_id: Optional[str]) -> Optional[float]:
     return rec.cvss if rec and 0.0 < rec.cvss <= 10.0 else None
 
 
+# A banner is a DISTRIBUTION-PACKAGED build when it carries a distro/OS token
+# (optionally with a package revision such as "3ubuntu13.16", "-Debian",
+# "+deb12u3", "el9"). Distributions backport security fixes into the SAME
+# upstream version, so for these builds the distro's patch level — not the
+# upstream version string — determines exposure to a backport-fixed CVE.
+_DISTRO_PKG_RE = re.compile(
+    r"\b(?:ubuntu|debian|raspbian|centos|rhel|red\s?hat|fedora|rocky|alma|"
+    r"suse|sles|amzn|amazon\s+linux|oracle\s+linux)\b"
+    r"|[-+~](?:ubuntu|deb|el|rhel|amzn)\d",
+    re.IGNORECASE)
+
+
+def _is_distro_packaged(text: str) -> bool:
+    """True when a service banner/version string shows a distribution-packaged
+    build (Ubuntu/Debian/RHEL/…). Such builds receive backported security fixes
+    without an upstream version bump, so a version-range match against a CVE the
+    distro routinely backport-fixes is unreliable (see ``distro_backport_fixed``)."""
+    return bool(_DISTRO_PKG_RE.search(text or ""))
+
+
+def _drop_distro_backport_fixed(cves: list[CVERecord], banner: str) -> list[CVERecord]:
+    """Remove records flagged ``distro_backport_fixed`` when *banner* is a
+    distro-packaged build. regreSSHion (CVE-2024-6387) on a current Ubuntu/Debian
+    OpenSSH 9.6p1 is the archetypal false positive this suppresses: the upstream
+    9.6p1 is in the vulnerable range, but the distro backported the fix within
+    days, so a version-based claim is almost always wrong. A genuinely-unpatched
+    host is still catchable by the active verifier. Non-distro builds (a bare or
+    from-source ``OpenSSH 9.6p1``) are untouched, so the upstream match stands."""
+    if not cves or not _is_distro_packaged(banner):
+        return cves
+    return [c for c in cves if not c.distro_backport_fixed]
+
+
 def lookup_inline_cves(product_key: str, version: str) -> list[CVERecord]:
     """Return CVEs from INLINE_CVE_DB matching product and version.
 
@@ -1037,7 +1092,8 @@ def detect_zero_day_indicators(service: str, version: str, banner: str) -> list[
     product_key = fp[0] if fp else service.lower()
     version_str = (fp[1] if fp else "") or version
 
-    inline_hits = lookup_inline_cves(product_key, version_str)
+    inline_hits = _drop_distro_backport_fixed(
+        lookup_inline_cves(product_key, version_str), banner)
     for cve_rec in inline_hits:
         indicators.append({
             "type": "known_vulnerable_version",
@@ -1103,6 +1159,12 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
             version_str  = (fp[1] if fp else "") or version
 
             inline_cves = lookup_inline_cves(product_key, version_str)
+            # A distro-packaged build backports fixes into the same upstream
+            # version, so drop CVEs the distro routinely backport-fixes (e.g.
+            # regreSSHion on a current Ubuntu/Debian OpenSSH 9.6p1) — the upstream
+            # version cannot establish exposure and the match is near-always a FP.
+            inline_cves = _drop_distro_backport_fixed(
+                inline_cves, f"{banner} {nmap_product} {version}")
 
             # 3a. Dynamic fallback — fire when the inline DB produced NO
             #     version-matched CVE for this service. That covers two cases:

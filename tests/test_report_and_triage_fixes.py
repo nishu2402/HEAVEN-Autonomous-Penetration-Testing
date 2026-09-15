@@ -224,3 +224,69 @@ def test_pdf_one_bad_finding_does_not_abort(tmp_path, monkeypatch):
     gen._build_pdf({"engagement": "E", "findings": findings,
                     "vulnerabilities": findings, "assets": [], "dns_records": []}, out)
     assert os.path.getsize(out) > 0   # PDF still produced despite the bad finding
+
+
+# ── Combined Risk & Attack Paths in the PDF (parity with the HTML report/UI) ──
+
+# Two findings on one host that the correlation engine elevates to the
+# "Default/Weak Credentials + Exposed Admin or Service -> Full Compromise" combo.
+_CORRELATING_FINDINGS = [
+    {"vuln_type": "default_credentials", "title": "SSH default credentials (root:root)",
+     "severity": "high", "target": "10.13.37.5:22", "confidence": 0.9, "status": "open",
+     "evidence": {"description": "root:root accepted"}},
+    {"vuln_type": "ssh", "title": "SSH service exposed", "severity": "medium",
+     "target": "10.13.37.5:22", "confidence": 0.9, "status": "open",
+     "evidence": {"description": "OpenSSH reachable"}},
+]
+
+
+def _pdf_text(path: str) -> str:
+    reader = pytest.importorskip("pypdf").PdfReader(path)
+    return "\n".join((pg.extract_text() or "") for pg in reader.pages)
+
+
+def test_pdf_includes_combined_risk_when_correlations_exist(tmp_path):
+    """When findings correlate, the PDF grows a real 'Combined Risk & Attack
+    Paths' section with the 'break the chain' leverage analysis — the flagship
+    feature the web UI and HTML report already show, now in the PDF deliverable."""
+    from heaven.devsecops.pdf_report import PDFReportGenerator
+    from heaven.vulnscan.correlation import CorrelationEngine
+
+    # Precondition: these inputs really do correlate (guards against a silent
+    # rule change making the test vacuous).
+    assert CorrelationEngine().summary(_CORRELATING_FINDINGS)["total_combinations"] >= 1
+
+    gen = PDFReportGenerator()
+    if not gen.available:
+        pytest.skip("reportlab not installed")
+    out = str(tmp_path / "combined.pdf")
+    gen._build_pdf({"engagement": "E", "findings": _CORRELATING_FINDINGS,
+                    "vulnerabilities": _CORRELATING_FINDINGS,
+                    "assets": [], "dns_records": []}, out)
+    text = _pdf_text(out)
+    assert "Combined Risk & Attack Paths" in text
+    assert "Break the chain" in text
+    # The section is inserted as #5, so Detailed Findings shifts to #6.
+    assert "6. Detailed Findings" in text.replace("  ", " ")
+
+
+def test_pdf_omits_combined_risk_without_correlations(tmp_path):
+    """With a single uncorrelated finding there is no combined risk, so the
+    section is omitted and the later section numbers do NOT shift (no gap)."""
+    from heaven.devsecops.pdf_report import PDFReportGenerator
+    from heaven.vulnscan.correlation import CorrelationEngine
+
+    lone = [{"vuln_type": "missing_security_header", "title": "Missing X-Frame-Options",
+             "severity": "low", "target": "10.13.37.9", "confidence": 0.9, "status": "open",
+             "evidence": {"description": "no XFO header"}}]
+    assert CorrelationEngine().summary(lone)["total_combinations"] == 0
+
+    gen = PDFReportGenerator()
+    if not gen.available:
+        pytest.skip("reportlab not installed")
+    out = str(tmp_path / "nocombined.pdf")
+    gen._build_pdf({"engagement": "E", "findings": lone, "vulnerabilities": lone,
+                    "assets": [], "dns_records": []}, out)
+    text = _pdf_text(out)
+    assert "Combined Risk & Attack Paths" not in text
+    assert "5. Detailed Findings" in text.replace("  ", " ")

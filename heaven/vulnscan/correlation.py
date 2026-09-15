@@ -63,6 +63,23 @@ from heaven.utils.logger import get_logger
 
 logger = get_logger("vulnscan.correlation")
 
+
+def _owasp_2025(label: str) -> str:
+    """Render an OWASP tag in the report's current Top 10:2025 taxonomy.
+
+    The amplification rules below carry OWASP 2021 category ids for historical
+    reasons, but the rest of the platform (the report's OWASP coverage section,
+    per-finding tags, and the UI) migrated to Top 10:2025. Crosswalking here, at
+    the single point every combined risk is built, keeps a combined-risk card
+    from showing a stale ``A07:2021`` edition beside 2025 findings in the same
+    deliverable. Falls back to the original label when the string carries no
+    recognisable web-OWASP id (OT/ICS or empty tags are preserved unchanged)."""
+    if not label:
+        return label
+    from heaven.devsecops.frameworks import normalize_owasp
+    return normalize_owasp(label) or label
+
+
 # Canonical qualitative severity ranking. Kept local so this module does not
 # depend on a private constant elsewhere; identical ordering to the rest of the
 # platform (info < low < medium < high < critical).
@@ -1439,7 +1456,7 @@ class CorrelationEngine:
             playbook=playbook,
             mitre=list(rule.mitre),
             cwe=rule.cwe,
-            owasp=rule.owasp,
+            owasp=_owasp_2025(rule.owasp),
             cross_host=rule.cross_host,
         )
 

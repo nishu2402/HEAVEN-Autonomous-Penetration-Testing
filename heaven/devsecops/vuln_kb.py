@@ -3578,6 +3578,7 @@ _ALIASES: dict[str, str] = {
     "smtp_open_relay": "open_mail_relay",
     "spf_open_relay": "spf_missing",
     "spf_soft_fail": "spf_missing",
+    "spf_neutral": "spf_missing",
     "spf_too_many_lookups": "spf_missing",
     "dmarc_policy_none": "dmarc_missing",
     "dmarc_partial_rollout": "dmarc_missing",

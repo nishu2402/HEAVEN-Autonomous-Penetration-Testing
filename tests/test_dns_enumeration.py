@@ -277,3 +277,34 @@ def test_dns_cli_persist_auto_creates_engagement(monkeypatch, tmp_path):
     monkeypatch.setenv("HEAVEN_ENGAGEMENT", str(db))
     inv = normalize_dns(_collect_engagement_dns(None))
     assert inv and inv[0]["domain"] == "example.com"
+
+
+# ── SPF qualifier classification (?all neutral vs ~all softfail) ──────────────
+
+def _spf_types(spf_record, monkeypatch):
+    """Run the email-security analyzer with one SPF TXT record, return vuln_types."""
+    from heaven.recon import dns_recon
+
+    def fake_resolve(name, rtype, nameservers=None, timeout=5.0):
+        # Only the base domain carries the SPF TXT; _dmarc / selectors resolve empty.
+        if rtype == "TXT" and name == "example.com":
+            return [spf_record]
+        return []
+
+    monkeypatch.setattr(dns_recon, "_resolve", fake_resolve)
+    findings = asyncio.run(dns_recon._scan_email_security("example.com"))
+    return {f["vuln_type"] for f in findings}
+
+
+def test_spf_neutral_all_is_flagged(monkeypatch):
+    # '?all' (neutral) gives no sender enforcement — weaker than softfail and
+    # previously unhandled, so a real '?all' record was silently missed.
+    types = _spf_types("v=spf1 a mx include:example.net ?all", monkeypatch)
+    assert "spf_neutral" in types
+    assert "spf_soft_fail" not in types
+
+
+def test_spf_softfail_still_distinct_from_neutral(monkeypatch):
+    types = _spf_types("v=spf1 a ~all", monkeypatch)
+    assert "spf_soft_fail" in types
+    assert "spf_neutral" not in types

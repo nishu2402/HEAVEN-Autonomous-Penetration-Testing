@@ -314,6 +314,23 @@ async def _scan_email_security(domain: str) -> list[dict]:
             confidence=0.95,
             evidence={"spf": spf},
         ))
+    elif "?all" in spf:
+        # '?all' is the NEUTRAL qualifier: receivers must treat the result as if
+        # no SPF assertion was made, so it provides no sender enforcement at all —
+        # weaker than softfail (which at least marks mail suspicious). Previously
+        # unhandled, so a '?all' record (e.g. a Bluehost default) was silently
+        # treated as fine. It is a real spoofing-enabler, especially with no
+        # enforcing DMARC policy.
+        findings.append(_finding(
+            domain, "spf_neutral", "medium",
+            "SPF Uses Neutral (?all): No Sender Enforcement",
+            f"SPF record for {domain} ends with '?all' (neutral), so receivers "
+            "treat every sender as unspecified — the same as having no SPF policy "
+            "for enforcement. Combined with a missing or non-enforcing DMARC "
+            "policy this leaves the domain spoofable. Use '-all' (hardfail).",
+            confidence=0.95,
+            evidence={"spf": spf},
+        ))
 
     # Check for too many DNS lookups (>10 = SPF PermError)
     lookup_count = spf.count("include:") + spf.count("a:") + spf.count("mx") + spf.count("ptr")

@@ -91,6 +91,59 @@ def test_openssh_47_not_flagged_with_62plus_cve():
     assert "CVE-2018-15473" in ids                # through 7.7 — real positive
 
 
+# ── regreSSHion (CVE-2024-6387) on a distro-packaged build is backport-fixed ──
+# The vulnerable range 8.5p1-9.7p1 spans CURRENT Ubuntu/Debian OpenSSH (9.6p1),
+# which the distros patched within days without bumping the upstream version, so
+# an upstream version-range match on a distro banner is almost always a FP.
+
+def test_regresshion_suppressed_on_distro_packaged_openssh():
+    banner = "OpenSSH 9.6p1 Ubuntu 3ubuntu13.16 (Ubuntu Linux; protocol 2.0)"
+    raw = lookup_inline_cves("openssh", "9.6p1")
+    assert "CVE-2024-6387" in {r.cve_id for r in raw}          # upstream 9.6p1 is in range
+    kept = {r.cve_id for r in CM._drop_distro_backport_fixed(raw, banner)}
+    assert "CVE-2024-6387" not in kept                          # ...but the distro backport-fixed it
+
+
+def test_regresshion_kept_for_non_distro_build():
+    # A bare / from-source build carries no distro token, so the backport does
+    # not apply and the upstream version-range match must stand.
+    raw = lookup_inline_cves("openssh", "9.6p1")
+    kept = {r.cve_id for r in CM._drop_distro_backport_fixed(raw, "OpenSSH_9.6p1")}
+    assert "CVE-2024-6387" in kept
+
+
+def test_distro_suppression_only_touches_flagged_cves():
+    # scanme.nmap.org's genuinely-EOL OpenSSH 6.6.1p1 Ubuntu is below the
+    # regreSSHion range, so nothing is suppressed and its real CVEs are intact.
+    banner = "OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13"
+    raw = lookup_inline_cves("openssh", "6.6.1p1")
+    kept = {r.cve_id for r in CM._drop_distro_backport_fixed(raw, banner)}
+    assert kept == {r.cve_id for r in raw}                       # unchanged
+    assert "CVE-2018-15473" in kept                              # real EOL positives remain
+
+
+def test_proxycommand_51385_fixed_in_96_not_flagged():
+    # CVE-2023-51385 was fixed IN OpenSSH 9.6 ("before 9.6"), so 9.6 / 9.6p1 are
+    # patched — the ceiling is strict <9.6, and 9.5p1 still matches.
+    assert "CVE-2023-51385" not in {r.cve_id for r in lookup_inline_cves("openssh", "9.6p1")}
+    assert "CVE-2023-51385" not in {r.cve_id for r in lookup_inline_cves("openssh", "9.6")}
+    assert "CVE-2023-51385" in {r.cve_id for r in lookup_inline_cves("openssh", "9.5p1")}
+
+
+def test_docker_registry_not_flagged_with_engine_cves():
+    # nmap fingerprints a registry:2 service as "Docker Registry 2.0"; that "2.0"
+    # is the registry API version, NOT a Docker Engine release, so it must not
+    # inherit Docker-Engine CVEs — CVE-2022-0492 (cgroup escape) over-matched the
+    # engine ceiling "<20.10.14" and produced a false positive on any registry.
+    key, ver = CM._fingerprint_from_banner("Docker Registry 2.0")
+    assert key == "docker_registry"
+    assert lookup_inline_cves(key, ver) == []
+    # a genuine old Docker Engine still gets its real CVEs (regression guard).
+    ek, ev = CM._fingerprint_from_banner("Docker Engine 19.03.5")
+    assert ek == "docker"
+    assert "CVE-2022-0492" in {r.cve_id for r in lookup_inline_cves(ek, ev)}
+
+
 # ── 3. Live-feed unconfirmed hits collapse instead of misattributing ──────────
 class _FakeLiveCVE:
     def __init__(self, cve_id, cvss, version_confirmed):

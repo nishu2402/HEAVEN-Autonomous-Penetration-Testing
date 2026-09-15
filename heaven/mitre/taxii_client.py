@@ -118,7 +118,7 @@ class TAXIIClient:
                 self._save_cache(cache_file, data)
                 return data
             except Exception as e:
-                logger.warning(f"TAXII fetch failed: {e} — using cache/fallback")
+                logger.warning(f"TAXII fetch failed: {e}: using cache/fallback")
                 if cache_file.exists():
                     return self._load_cache(cache_file)
 
@@ -234,7 +234,7 @@ class TAXIIClient:
 
     def _get_offline_fallback(self) -> dict:
         """Minimal offline ATT&CK dataset for when TAXII is unreachable."""
-        logger.warning("Using offline ATT&CK fallback — data may be stale")
+        logger.warning("Using offline ATT&CK fallback: data may be stale")
         return {"objects": [], "fetched_at": 0, "offline": True}
 
     def summary(self) -> dict:

@@ -805,7 +805,7 @@ def render_coverage_html(std: dict[str, Any], eng_name: str = "") -> str:
 
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(title)} — Coverage · {_esc(eng_name)}</title>
+<title>{_esc(title)}: Coverage · {_esc(eng_name)}</title>
 <style>
  body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
    color:#1a1f29;background:#f4f6f9;margin:0;line-height:1.55;font-size:14px;}}
@@ -829,7 +829,7 @@ def render_coverage_html(std: dict[str, Any], eng_name: str = "") -> str:
 </style></head><body>
  <div class="toolbar no-print"><button class="btn" onclick="window.print()">🖨 Print / Save as PDF</button></div>
  <div class="page">
-  <h1>{_esc(title)} — Coverage</h1>
+  <h1>{_esc(title)}: Coverage</h1>
   <p class="muted">{_esc(sub)} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng_name or '—')}</strong>
      &nbsp;·&nbsp; Generated {_esc(generated)}</p>
   <p>{_esc(_coverage_intro(std, eng_name))}</p>
@@ -850,7 +850,7 @@ def render_coverage_markdown(std: dict[str, Any], eng_name: str = "") -> str:
     su = std.get("summary", {})
     title = std.get("meta_title") or std.get("title") or std.get("name", "")
     lines = [
-        f"# {title} — Coverage",
+        f"# {title}: Coverage",
         "",
         f"*{std.get('subtitle', '')}* · Engagement: **{eng_name or '—'}** · Generated {_now_utc()}",
         "",
@@ -947,7 +947,7 @@ def render_coverage_pdf(std: dict[str, Any], eng_name: str = "") -> bytes:
             col_ratios=[0.14, 0.24, 0.24, 0.10, 0.28]))
 
     return render_matrix_pdf(
-        title=f"{title} — Coverage",
+        title=f"{title}: Coverage",
         subtitle=sub,
         meta_lines=[f"Engagement: {eng_name or '—'}  ·  Generated {_now_utc()}"],
         intro=_coverage_intro(std, eng_name),

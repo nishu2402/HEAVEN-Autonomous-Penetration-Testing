@@ -143,7 +143,7 @@ class HeavenRiskModel:
                 self._regression_mode = False
         else:
             logger.warning(
-                "No NVD CVSS model found — CVSS scores fall back to each finding's "
+                "No NVD CVSS model found: CVSS scores fall back to each finding's "
                 "own base score. Fetch the trained model with `heaven download-model` "
                 "(or train one with `heaven train-model`)."
             )

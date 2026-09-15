@@ -129,7 +129,7 @@ def pull_model(model: str, on_output: Optional[Callable[[str], None]] = None,
         return False
     if not is_ollama_installed():
         if on_output:
-            on_output(f"ollama not installed — {install_hint()}")
+            on_output(f"ollama not installed: {install_hint()}")
         return False
     try:
         proc = subprocess.Popen(  # nosec B603 B607 -- fixed argv, vetted tool, no shell

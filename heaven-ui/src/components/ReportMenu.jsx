@@ -18,7 +18,9 @@ export default function ReportMenu({ engagement }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const [frameworks, setFrameworks] = useState([]);
-  const [fw, setFw] = useState("hipaa");
+  // "" is the None choice: standard report, no compliance-control section
+  // (OWASP Top 10 coverage is always in the report either way).
+  const [fw, setFw] = useState("");
   const ref = useRef(null);
   const toast = useToast();
 
@@ -35,7 +37,8 @@ export default function ReportMenu({ engagement }) {
       .then((r) => {
         const list = r?.frameworks || [];
         setFrameworks(list);
-        if (list.length) setFw((c) => (list.some((f) => f.id === c) ? c : list[0].id));
+        // Keep None ("") and any real framework id; otherwise fall back to None.
+        if (list.length) setFw((c) => (c === "" || list.some((f) => f.id === c) ? c : ""));
       })
       .catch(() => { /* compliance picker is optional */ });
   }, [open, frameworks.length]);
@@ -106,6 +109,7 @@ export default function ReportMenu({ engagement }) {
               <select value={fw} onChange={(e) => setFw(e.target.value)}
                 className="form-select"
                 style={{ width: "calc(100% - 20px)", margin: "0 10px 8px", fontSize: 12 }}>
+                <option value="">None (OWASP Top 10 always in report)</option>
                 {frameworks.map((f) => (
                   <option key={f.id} value={f.id}>{f.title}</option>
                 ))}
@@ -119,7 +123,7 @@ export default function ReportMenu({ engagement }) {
                       border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
                       cursor: busy ? "wait" : "pointer", fontFamily: "var(--font-ui)",
                     }}>
-                    {busy === `compliance-${f}` ? "…" : `⬇ ${f.toUpperCase()}`}
+                    {busy === (fw ? `compliance-${f}` : f) ? "…" : `⬇ ${f.toUpperCase()}`}
                   </button>
                 ))}
               </div>

@@ -298,7 +298,7 @@ def _egress_port_scan_blocked() -> bool:
             if not _egress_block_warned:
                 _egress_block_warned = True
                 logger.warning(
-                    "Egress kill-switch: proxy/Tor mode without proxychains — "
+                    "Egress kill-switch: proxy/Tor mode without proxychains: "
                     "SKIPPING the network port scan so it can't leak your real "
                     "IP. Install proxychains-ng, or use WireGuard tunnel mode, "
                     "or disable the kill-switch to allow a direct port scan.")
@@ -1682,7 +1682,7 @@ async def _nmap_udp_scan(
     except asyncio.TimeoutError:
         # nmap ignored its own --host-timeout (wedged) — kill it and fall back.
         await _terminate_proc(proc)
-        logger.debug("nmap -sU exceeded its wall-clock budget for %s — "
+        logger.debug("nmap -sU exceeded its wall-clock budget for %s: "
                      "falling back to pure-Python UDP probes", host)
         return None, True
     parsed = _parse_nmap_xml(stdout, host)
@@ -1723,7 +1723,7 @@ async def _udp_service_scan(
         except FileNotFoundError:
             nmap_ports, timed_out = None, False  # no nmap on PATH
         except Exception:  # noqa: BLE001
-            logger.debug("nmap -sU failed for %s — using pure-Python UDP probes",
+            logger.debug("nmap -sU failed for %s: using pure-Python UDP probes",
                          host, exc_info=True)
             nmap_ports, timed_out = None, False
         if nmap_ports is not None and not timed_out:
@@ -1931,7 +1931,7 @@ async def scan_host(
                 # ports. Retry the next (no -sC) attempt if one remains.
                 if idx + 1 < len(attempts):
                     logger.warning(
-                        "nmap exited %s for %s with no parseable results — likely "
+                        "nmap exited %s for %s with no parseable results: likely "
                         "the -sC/NSE crash on this nmap build; retrying with service "
                         "detection only (-sV, no -sC).", rc, host,
                     )
@@ -2017,13 +2017,13 @@ async def scan_host(
                 if parsed is None:
                     logger.warning(
                         "nmap produced no usable output for %s (crash / parse "
-                        "failure) — recovering with the built-in TCP connect "
+                        "failure): recovering with the built-in TCP connect "
                         "scanner.", host,
                     )
                 elif host_timed_out:
                     logger.warning(
                         "nmap hit its --host-timeout on %s (a full-range -sV -sC "
-                        "sweep did not finish in the per-host budget — typical of a "
+                        "sweep did not finish in the per-host budget: typical of a "
                         "slow, rate-limited or emulated host, or a heavily-filtered "
                         "one), completing the inventory with the built-in TCP "
                         "connect scanner. If this is a fragile or emulated VM, "
@@ -2110,7 +2110,7 @@ async def scan_host(
             # port (real handshakes only) instead of returning nothing. Service
             # versions / OS fingerprinting need nmap; install it for that depth.
             logger.warning(
-                "nmap not found — using the built-in TCP connect scanner for %s "
+                "nmap not found: using the built-in TCP connect scanner for %s "
                 "(install nmap for -sV/-sC/-O depth: apt install nmap / brew install nmap)",
                 host,
             )
@@ -2320,7 +2320,7 @@ def expand_targets(targets: list[str]) -> list[str]:
             if network.num_addresses <= 65536:  # Safety limit
                 expanded.extend(str(ip) for ip in network.hosts())
             else:
-                logger.warning(f"Network too large: {target} ({network.num_addresses} hosts) — skipping")
+                logger.warning(f"Network too large: {target} ({network.num_addresses} hosts): skipping")
         except ValueError:
             expanded.append(target)  # Hostname or single IP
     return expanded
@@ -2585,7 +2585,7 @@ async def scan_network(
     sweep yields partial results instead of being hard-cancelled with nothing.
     """
     if not targets:
-        logger.info("No network targets specified — skipping network scan")
+        logger.info("No network targets specified: skipping network scan")
         return {"hosts": [], "total_open_ports": 0}
 
     # Resolve the FULL evasion profile (timing + concurrency) for this level up
@@ -2606,7 +2606,7 @@ async def scan_network(
         hp_engine = HoneypotEvasionEngine(threshold=profile.honeypot_threshold)
         ctf = CTFFlagExtractor()
     except Exception as e:
-        logger.warning(f"Honeypot/CTF evasion modules unavailable — continuing without: {e}")
+        logger.warning(f"Honeypot/CTF evasion modules unavailable: continuing without: {e}")
 
     # Expand CIDR targets → individual addresses.
     expanded_targets = expand_targets(targets)
@@ -2633,7 +2633,7 @@ async def scan_network(
         _udp_cap = 4096 if _have_raw_udp() else 1024
         udp_port_list = resolve_udp_ports(udp_ports, ports, max_ports=_udp_cap)
         logger.info(
-            "UDP scan enabled — probing %d UDP port(s) per host (%s)",
+            "UDP scan enabled: probing %d UDP port(s) per host (%s)",
             len(udp_port_list),
             "nmap -sU" if _have_raw_udp() else "pure-Python service probes",
         )
@@ -2715,7 +2715,7 @@ async def scan_network(
                                           mac_out=discovered_macs)
         discovery = {"range_size": _range_size, "hosts_up": len(live)}
         logger.info(
-            f"Host discovery: {len(live)}/{_range_size} address(es) responded — "
+            f"Host discovery: {len(live)}/{_range_size} address(es) responded: "
             f"deep-scanning the live host(s)"
         )
         expanded_targets = live
@@ -2812,7 +2812,7 @@ async def scan_network(
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
                 logger.warning(
-                    f"Network deep-scan time budget ({time_budget:.0f}s) reached — "
+                    f"Network deep-scan time budget ({time_budget:.0f}s) reached: "
                     f"returning {len(done)} finished host(s); {len(pending)} still in "
                     f"flight were stopped. Narrow the port range or target fewer hosts."
                 )
@@ -2867,7 +2867,7 @@ async def scan_network(
                     and time.time() < reprobe_deadline and reprobe_ports):
                 reprobed += 1
                 logger.info(
-                    "🧱 Perimeter defence on %s (%s) — evasion re-probing %d "
+                    "🧱 Perimeter defence on %s (%s): evasion re-probing %d "
                     "high-value port(s) [fragmented / trusted source-port / decoys].",
                     h.host, verdict.posture, len(reprobe_ports),
                 )
@@ -2968,7 +2968,7 @@ async def scan_network(
                 )
             except asyncio.TimeoutError:
                 logger.warning(
-                    "Passive OSINT enrichment hit its time backstop — keeping "
+                    "Passive OSINT enrichment hit its time backstop: keeping "
                     "whatever merged so far and continuing.")
             # Recompute totals unconditionally: the host dicts were mutated in
             # place, so this is correct whether enrichment finished or was bounded.

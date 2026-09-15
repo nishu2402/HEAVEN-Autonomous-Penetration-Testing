@@ -71,7 +71,7 @@ def test_render_coverage_html_and_markdown():
     assert "<table" in html and "Coverage" in html
     assert "SQLi in login" in html  # aligned finding is surfaced
     md = M.render_coverage_markdown(std, "demo-eng")
-    assert md.startswith("# OWASP Testing Guide — Coverage")
+    assert md.startswith("# OWASP Testing Guide: Coverage")
     assert "| Test |" in md
 
 

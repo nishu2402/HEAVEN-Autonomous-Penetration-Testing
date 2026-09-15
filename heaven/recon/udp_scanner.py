@@ -116,7 +116,7 @@ def resolve_udp_ports(spec: Optional[str], tcp_ports: Optional[list[int]] = None
         try:
             ports = parse_port_range(s)
         except ValueError:
-            logger.warning("invalid UDP port spec %r — falling back to common set", spec)
+            logger.warning("invalid UDP port spec %r: falling back to common set", spec)
             ports = list(COMMON_UDP_PORTS)
     return sorted(set(ports))[:max_ports]
 

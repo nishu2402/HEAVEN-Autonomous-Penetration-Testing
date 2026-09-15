@@ -174,7 +174,7 @@ def findings_to_sarif(findings: list[dict[str, Any]], *,
             },
         })
 
-    driver_name = "HEAVEN" + (f" — {engagement_name}" if engagement_name else "")
+    driver_name = "HEAVEN" + (f": {engagement_name}" if engagement_name else "")
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -240,7 +240,7 @@ def findings_to_junit(findings: list[dict[str, Any]], *,
                 f'  <testcase classname={quoteattr(classname)} name={quoteattr(name)}/>'
             )
 
-    suite_name = "HEAVEN" + (f" — {engagement_name}" if engagement_name else "")
+    suite_name = "HEAVEN" + (f": {engagement_name}" if engagement_name else "")
     header = ('<?xml version="1.0" encoding="UTF-8"?>\n'
               f'<testsuites tests="{len(findings)}" failures="{failures}">\n'
               f'  <testsuite name={quoteattr(suite_name)} tests="{len(findings)}" '

@@ -195,7 +195,7 @@ class DockerScanner:
                         cwe="CWE-269", mitre="T1611",
                     ))
         except ImportError:
-            logger.debug("docker library not installed — skipping local container checks")
+            logger.debug("docker library not installed: skipping local container checks")
         except Exception as e:
             logger.debug(f"Docker check failed: {e}")
         return findings
@@ -267,7 +267,7 @@ class KubernetesScanner:
                                 target=host, vuln_type="etcd_exposed",
                                 severity="critical",
                                 title=f"Etcd Exposed on {host}:{etcd_port}",
-                                description=f"Etcd v{data.get('etcdserver', '?')} accessible — contains all cluster state.",
+                                description=f"Etcd v{data.get('etcdserver', '?')} accessible: contains all cluster state.",
                                 confidence=0.95,
                                 evidence=data,
                                 remediation="Restrict etcd to localhost. Enable TLS client auth.",
@@ -292,7 +292,7 @@ class KubernetesScanner:
                                 target=host, vuln_type="kubelet_exposed",
                                 severity="high",
                                 title=f"Kubelet API Exposed on {host}:{kubelet_port}",
-                                description=f"Kubelet API accessible — {pod_count} pods visible.",
+                                description=f"Kubelet API accessible: {pod_count} pods visible.",
                                 confidence=0.90,
                                 evidence={"pods": pod_count, "scheme": kscheme},
                                 remediation="Disable anonymous kubelet access. Enable webhook auth. "
@@ -318,7 +318,7 @@ class KubernetesScanner:
                             severity="critical",
                             title=f"K8s API insecure port open on {host}:8080",
                             description=("The legacy kube-apiserver insecure port (8080) serves the "
-                                         f"API with no authentication or authorization — {ns} "
+                                         f"API with no authentication or authorization: {ns} "
                                          "namespaces readable."),
                             confidence=0.95, evidence={"namespaces": ns},
                             remediation="Set --insecure-port=0 (default on modern k8s). Never expose 8080.",
@@ -366,7 +366,7 @@ class KubernetesScanner:
                                     severity="high",
                                     title=f"Open Container Registry on {host}:5000",
                                     description=("Docker Registry v2 catalog is readable without "
-                                                 f"authentication — {len(repos)} repositories exposed "
+                                                 f"authentication: {len(repos)} repositories exposed "
                                                  "(image pull / poisoning risk)."),
                                     confidence=0.9, evidence={"repositories": repos[:20]},
                                     remediation="Require registry authentication (htpasswd/token); "

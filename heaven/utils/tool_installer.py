@@ -378,7 +378,7 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
     if timed_out.is_set():
         return InstallResult(
             spec.name, "failed", command=cmd,
-            detail=f"timed out after {timeout}s — install manually: {install_hint(spec)}")
+            detail=f"timed out after {timeout}s: install manually: {install_hint(spec)}")
 
     # `brew` can exit non-zero on benign keg-link conflicts while still pouring
     # the binary, so trust PATH presence over the return code as the final word.
@@ -387,6 +387,6 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
     if run_cmd[:2] == ["sudo", "-n"]:
         return InstallResult(
             spec.name, "failed", command=cmd,
-            detail=f"needs sudo (no interactive terminal) — run: {install_hint(spec)}")
+            detail=f"needs sudo (no interactive terminal): run: {install_hint(spec)}")
     detail = f"exit {rc}" if rc else "not found on PATH after install"
     return InstallResult(spec.name, "failed", command=cmd, detail=detail)

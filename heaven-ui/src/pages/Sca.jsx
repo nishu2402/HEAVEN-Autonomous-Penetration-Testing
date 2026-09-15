@@ -74,7 +74,8 @@ export default function ScaPage() {
 
         <EngagementPicker value={engagement} onChange={setEngagement}
                           id="sca-engagement"
-                          label="Save findings to engagement" />
+                          label="Save findings to engagement"
+                          style={{ marginBottom: 12 }} />
 
         <button className="btn btn-primary" disabled={loading} onClick={run}>
           {loading ? "Auditing…" : "Run SCA"}

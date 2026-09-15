@@ -130,7 +130,7 @@ async def _probe_host(session, host: str) -> list[dict[str, Any]]:
                 title=f"Wireless management interface exposed: {vendor}",
                 description=(
                     f"The {vendor} web management interface is reachable on the network "
-                    f"at {url} (authentication is enforced — HTTP {status}). Wireless "
+                    f"at {url} (authentication is enforced: HTTP {status}). Wireless "
                     "controller/AP admin planes should not be exposed to untrusted "
                     "networks even when authenticated; combined with weak or default "
                     "credentials this is a full-network-takeover path."),
@@ -192,7 +192,7 @@ async def scan_wireless_posture(targets: Optional[list[str]] = None,
     if not norm:
         return {"skipped": True, "reason": "no host targets"}
     if not HAS_AIOHTTP:
-        logger.warning("aiohttp not installed — wireless posture review unavailable")
+        logger.warning("aiohttp not installed: wireless posture review unavailable")
         return {"skipped": True, "reason": "aiohttp unavailable"}
 
     findings: list[dict[str, Any]] = []

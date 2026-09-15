@@ -180,7 +180,7 @@ def resolve_egress(refresh: bool = False) -> EgressConfig:
     if mode in ("", "none", "direct", "disabled"):
         mode = "off"
     if mode not in _VALID_MODES:
-        logger.warning("Unknown HEAVEN_EGRESS_MODE=%r — treating as 'off'", mode)
+        logger.warning("Unknown HEAVEN_EGRESS_MODE=%r: treating as 'off'", mode)
         _cache = EgressConfig(error=f"unknown mode {mode!r}")
         return _cache
 
@@ -884,7 +884,7 @@ async def confirm_egress(timeout: float = 10.0) -> dict:
     changed = bool(ip and base and ip != base)
     ok = bool(ip and (changed or base is None))
     if ip is None:
-        detail = f"proxy {cfg.proxy_url} did not return an IP — is it reachable?"
+        detail = f"proxy {cfg.proxy_url} did not return an IP: is it reachable?"
     elif base and not changed:
         detail = "proxy reachable but exit IP == baseline (not actually anonymising)"
     else:
@@ -906,7 +906,7 @@ async def assert_ready(timeout: float = 10.0) -> dict:
         return result
     if not result.get("ok"):
         raise EgressError(
-            f"egress kill-switch: {cfg.mode} path not confirmed — {result.get('detail')}. "
+            f"egress kill-switch: {cfg.mode} path not confirmed: {result.get('detail')}. "
             "Fix the egress or disable the kill-switch to scan directly.")
     return result
 

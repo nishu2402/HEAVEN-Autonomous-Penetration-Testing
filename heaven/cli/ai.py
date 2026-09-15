@@ -104,7 +104,7 @@ def ai_models(provider: Optional[str]) -> None:
     for m in models:
         star = "[green]★[/green] " if m.get("recommended") else "  "
         is_default = " [dim](default)[/dim]" if m["id"] == default else ""
-        note = f" [dim]— {m['note']}[/dim]" if m.get("note") else ""
+        note = f" [dim]: {m['note']}[/dim]" if m.get("note") else ""
         _print(f"  {star}{m['id']}{is_default}{note}")
     # If we're on the offline catalog because no key is set, say how to go live.
     if source == "catalog" and gw.PROVIDER_KEY_ENVS.get(p) and not key:
@@ -214,7 +214,7 @@ def ai_setup(provider: str, model: Optional[str], base_url: Optional[str],
 
     have = set(local_llm.list_models())
     if model not in have and not any(m.split(":")[0] == model.split(":")[0] for m in have):
-        if yes or click.confirm(f"Pull model [{model}] now? (a few hundred MB–GB)", default=True):
+        if yes or click.confirm(f"Pull model [{model}] now? (a few hundred MB-GB)", default=True):
             _print(f"[cyan]Pulling {model}…[/cyan]")
             if not local_llm.pull_model(model, on_output=lambda ln: _print(f"[dim]{ln}[/dim]")):
                 _print(f"[yellow]Could not pull {model}. You can pull it later with "

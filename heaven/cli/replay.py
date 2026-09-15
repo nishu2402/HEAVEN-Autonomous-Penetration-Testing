@@ -102,7 +102,7 @@ def replay(scan_id: str, engagement: Optional[str],
 
     def progress_callback(progress):
         _print(
-            f"  [{progress.phase.value}] {progress.progress_pct:.0f}% — {progress.current_task}"
+            f"  [{progress.phase.value}] {progress.progress_pct:.0f}% · {progress.current_task}"
         )
 
     orch.on_progress(progress_callback)

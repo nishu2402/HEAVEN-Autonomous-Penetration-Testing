@@ -74,7 +74,7 @@ class EmailSecurityScanner:
     async def check_mx(self, domain: str) -> None:
         """Enumerate MX records."""
         if not HAS_DNS:
-            logger.warning("dnspython not installed — DNS lookups unavailable")
+            logger.warning("dnspython not installed: DNS lookups unavailable")
             return
         try:
             answers = dns.resolver.resolve(domain, "MX")

@@ -415,7 +415,7 @@ def grade_engagement_rule_based(engagement_store) -> CoverageReport:
     # Rule-based recommendations
     if report.scope_coverage_pct < 80:
         report.recommendations.append(
-            f"Scope coverage is {report.scope_coverage_pct:.0f}% — "
+            f"Scope coverage is {report.scope_coverage_pct:.0f}%: "
             f"{len(untested)} target(s) have zero findings recorded. Re-scan or "
             f"validate they exist."
         )

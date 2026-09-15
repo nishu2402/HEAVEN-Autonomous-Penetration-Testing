@@ -706,7 +706,7 @@ class InjectionScanner:
                     self._add_finding(
                         target=injected_url,
                         vuln_type="sqli",
-                        title=f"SQL Injection (error-based) — param '{param}'",
+                        title=f"SQL Injection (error-based): param '{param}'",
                         severity="critical",
                         confidence=0.85,
                         evidence={
@@ -780,7 +780,7 @@ class InjectionScanner:
             self._add_finding(
                 target=url_true,
                 vuln_type="sqli",
-                title=f"SQL Injection (boolean-based blind) — param '{param}'",
+                title=f"SQL Injection (boolean-based blind): param '{param}'",
                 severity="critical",
                 confidence=0.80,
                 evidence={
@@ -831,7 +831,7 @@ class InjectionScanner:
                     self._add_finding(
                         target=injected_url,
                         vuln_type="sqli",
-                        title=f"SQL Injection (UNION-based) — param '{param}'",
+                        title=f"SQL Injection (UNION-based): param '{param}'",
                         severity="critical",
                         confidence=0.9,
                         evidence={
@@ -890,7 +890,7 @@ class InjectionScanner:
                 self._add_finding(
                     target=_inject_param(url, param, payload),
                     vuln_type="sqli",
-                    title=f"SQL Injection (time-based blind) — param '{param}'",
+                    title=f"SQL Injection (time-based blind): param '{param}'",
                     severity="critical",
                     confidence=0.88,
                     evidence={
@@ -931,7 +931,7 @@ class InjectionScanner:
                     self._add_finding(
                         target=url,
                         vuln_type="sqli",
-                        title=f"SQL Injection (POST, error-based) — param '{param}'",
+                        title=f"SQL Injection (POST, error-based): param '{param}'",
                         severity="critical",
                         confidence=0.85,
                         evidence={
@@ -978,7 +978,7 @@ class InjectionScanner:
                 self._add_finding(
                     target=url,
                     vuln_type="sqli",
-                    title=f"SQL Injection (POST, time-based blind) — param '{param}'",
+                    title=f"SQL Injection (POST, time-based blind): param '{param}'",
                     severity="critical",
                     confidence=0.88,
                     evidence={
@@ -1015,7 +1015,7 @@ class InjectionScanner:
                 self._add_finding(
                     target=injected_url,
                     vuln_type="xss",
-                    title=f"Reflected XSS — param '{param}'",
+                    title=f"Reflected XSS: param '{param}'",
                     severity="high",
                     confidence=0.80,
                     evidence={
@@ -1043,7 +1043,7 @@ class InjectionScanner:
                 self._add_finding(
                     target=url,
                     vuln_type="xss",
-                    title=f"Reflected XSS (POST) — param '{param}'",
+                    title=f"Reflected XSS (POST): param '{param}'",
                     severity="high",
                     confidence=0.80,
                     evidence={
@@ -1082,7 +1082,7 @@ class InjectionScanner:
             self._add_finding(
                 target=url,
                 vuln_type="xss_stored",
-                title=f"Stored XSS — param '{param}'",
+                title=f"Stored XSS: param '{param}'",
                 severity="critical",
                 confidence=0.85,
                 evidence={
@@ -1155,7 +1155,7 @@ class InjectionScanner:
                 snippet = body[max(0, _i - 40):_i + 200] if _i >= 0 else body[:240]
                 self._add_finding(
                     target=poc, vuln_type="lfi",
-                    title=f"Local File Inclusion / Path Traversal — param '{param}'",
+                    title=f"Local File Inclusion / Path Traversal: param '{param}'",
                     severity="critical", confidence=0.9,
                     evidence={"param": param, "payload": payload, "probe": probe,
                               "match": hit, "response_snippet": snippet,
@@ -1187,7 +1187,7 @@ class InjectionScanner:
                     snippet = body[max(0, m.start() - 80):m.end() + 160]
                     self._add_finding(
                         target=poc, vuln_type="rfi",
-                        title=f"Remote File Inclusion (attempted remote fetch) — param '{param}'",
+                        title=f"Remote File Inclusion (attempted remote fetch): param '{param}'",
                         severity="high", confidence=0.6,
                         evidence={"param": param, "payload": payload, "probe": probe,
                                   "match": m.group(0)[:200], "response_snippet": snippet,
@@ -1240,7 +1240,7 @@ class InjectionScanner:
             if CMDI_UID_PATTERN.search(probed) and not CMDI_UID_PATTERN.search(baseline_body):
                 self._add_finding(
                     target=url, vuln_type="cmdi",
-                    title=f"OS Command Injection — param '{param}'",
+                    title=f"OS Command Injection: param '{param}'",
                     severity="critical", confidence=0.9,
                     evidence={"param": param, "payload": payload, "probe": probe,
                               "match": CMDI_UID_PATTERN.pattern,
@@ -1268,7 +1268,7 @@ class InjectionScanner:
             if mark in cleaned and mark not in baseline_body:
                 self._add_finding(
                     target=url, vuln_type="cmdi",
-                    title=f"OS Command Injection — param '{param}'",
+                    title=f"OS Command Injection: param '{param}'",
                     severity="critical", confidence=0.9,
                     evidence={"param": param, "payload": payload, "probe": probe,
                               "match": mark, "method": "POST" if post else "GET", "url": url},
@@ -1297,7 +1297,7 @@ class InjectionScanner:
             if el2 >= el1 + margin:
                 self._add_finding(
                     target=url, vuln_type="cmdi",
-                    title=f"OS Command Injection (time-based blind) — param '{param}'",
+                    title=f"OS Command Injection (time-based blind): param '{param}'",
                     severity="critical", confidence=0.85,
                     evidence={"param": param, "payload": payload, "probe": probe,
                               "technique": "time_blind_differential",
@@ -1442,7 +1442,7 @@ class InjectionScanner:
                     # timeout cancel this coroutine and drop them all.
                     partial = True
                     logger.warning(
-                        "InjectionScanner: %.0fs soft deadline reached — returning "
+                        "InjectionScanner: %.0fs soft deadline reached: returning "
                         "%d finding(s) gathered so far across %d URL(s) (partial)",
                         self._deadline_s, len(self._findings), len(unique_targets),
                     )

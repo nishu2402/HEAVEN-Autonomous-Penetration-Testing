@@ -94,7 +94,7 @@ def build_engagement_context(store: Any, *, max_findings: int = 40) -> str:
             s = scans[0]
             tgt = s.get("target") or s.get("targets") or ""
             st = s.get("status") or ""
-            lines.append(f"Last scan: {tgt} — {st}".rstrip(" —"))
+            lines.append(f"Last scan: {tgt}: {st}".rstrip(" —"))
     except Exception:  # noqa: BLE001
         logger.debug("engagement grounding: list_scans failed", exc_info=True)
 

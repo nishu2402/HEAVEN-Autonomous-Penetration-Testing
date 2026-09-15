@@ -240,14 +240,14 @@ class CTFFlagExtractor:
 
             # Unusually many services = lab/CTF
             if len(ports) > 20:
-                indicators.append(f"Unusually high port count ({len(ports)}) — possible lab")
+                indicators.append(f"Unusually high port count ({len(ports)}): possible lab")
 
         analysis.ctf_indicators = indicators
         analysis.is_ctf_environment = len(indicators) >= 2
         analysis.flags = self.captured_flags
 
         if analysis.is_ctf_environment:
-            logger.info(f"🎯 CTF environment detected — {len(indicators)} indicators, {len(self.captured_flags)} flags captured")
+            logger.info(f"🎯 CTF environment detected: {len(indicators)} indicators, {len(self.captured_flags)} flags captured")
 
         return analysis
 

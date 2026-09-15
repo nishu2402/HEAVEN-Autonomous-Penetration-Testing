@@ -788,7 +788,7 @@ def scan(
         def _plain_progress_callback(progress: Any) -> None:
             _print(
                 f"  [{progress.phase.value}] {progress.progress_pct:.0f}% "
-                f"({progress.completed_tasks}/{progress.total_tasks}) — {progress.current_task}"
+                f"({progress.completed_tasks}/{progress.total_tasks}): {progress.current_task}"
             )
 
         orch.on_progress(_plain_progress_callback)

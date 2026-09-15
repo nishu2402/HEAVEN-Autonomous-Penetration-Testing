@@ -344,9 +344,9 @@ def _warn_about_generated_secrets() -> None:
         from heaven.utils.logger import get_logger
         log = get_logger("config")
         for k in _GENERATED_SECRETS:
-            log.debug(f"{k} not set — generated a random value for this run only. "
+            log.debug(f"{k} not set: generated a random value for this run only. "
                       "Set it explicitly (or run `heaven init`) for persistent installs.")
     except Exception:
         if os.environ.get("HEAVEN_DEBUG"):
             for k in _GENERATED_SECRETS:
-                print(f"[heaven config] {k} not set — random value generated for this run only.")
+                print(f"[heaven config] {k} not set: random value generated for this run only.")

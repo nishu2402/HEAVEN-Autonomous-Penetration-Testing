@@ -43,9 +43,12 @@ export default function Reports() {
   // be able to choose WHICH one to export, not just the active one.
   const [engList, setEngList] = useState([]);      // [{name, display_name, findings, scans, active}]
   const [selected, setSelected] = useState("");    // DB-stem name, the export selector
-  // Compliance-framework mapped reports (HIPAA / GDPR / PCI / …).
+  // Compliance-framework mapped reports (HIPAA / GDPR / PCI / …). "" is the
+  // "None" choice: the standard report with no compliance-control section. It's
+  // the default because compliance mapping is opt-in, and the report keeps its
+  // OWASP Top 10 coverage either way.
   const [frameworks, setFrameworks] = useState([]);
-  const [fw, setFw] = useState("hipaa");
+  const [fw, setFw] = useState("");
   const toast = useToast();
 
   useEffect(() => {
@@ -63,7 +66,8 @@ export default function Reports() {
       .then((r) => {
         const list = r?.frameworks || [];
         setFrameworks(list);
-        if (list.length) setFw((cur) => (list.some((f) => f.id === cur) ? cur : list[0].id));
+        // Keep None ("") and any real framework id; otherwise fall back to None.
+        if (list.length) setFw((cur) => (cur === "" || list.some((f) => f.id === cur) ? cur : ""));
       })
       .catch(() => { /* compliance card is optional */ });
   }, []);
@@ -314,6 +318,7 @@ export default function Reports() {
             </label>
             <select id="compliance-fw" className="form-select" value={fw}
                     onChange={(e) => setFw(e.target.value)} style={{ minWidth: 0, maxWidth: 360 }}>
+              <option value="">None · standard report (OWASP Top 10 always included)</option>
               {frameworks.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.title}, {f.controls_total} controls
@@ -322,6 +327,15 @@ export default function Reports() {
             </select>
           </div>
           {(() => {
+            if (!fw) {
+              return (
+                <div className="dim" style={{ fontSize: 11.5, marginBottom: 12 }}>
+                  No compliance framework mapped. The report keeps its standard sections,
+                  including <strong style={{ color: "var(--text-0)" }}>OWASP Top 10 coverage</strong>,
+                  which is always included regardless of this choice.
+                </div>
+              );
+            }
             const cur = frameworks.find((f) => f.id === fw);
             return cur ? (
               <div className="dim" style={{ fontSize: 11.5, marginBottom: 12 }}>

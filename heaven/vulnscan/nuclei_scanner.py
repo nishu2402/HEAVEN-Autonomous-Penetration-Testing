@@ -123,7 +123,7 @@ async def scan_nuclei(targets: list[str], severity: str = "low,medium,high,criti
     import shutil
     if shutil.which("nuclei") is None:
         logger.warning(
-            "Nuclei binary not found on PATH — skipping Nuclei scan. "
+            "Nuclei binary not found on PATH: skipping Nuclei scan. "
             "Install: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
         )
         return {"findings": [], "total": 0, "skipped": "nuclei not installed"}

@@ -206,7 +206,7 @@ class AdaptiveIntelligence:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
 
         if best_match and best_match.confidence >= 0.3:
-            logger.info(f"🛡️ WAF detected: {best_match.name} (confidence={best_match.confidence:.0%}) — "
+            logger.info(f"🛡️ WAF detected: {best_match.name} (confidence={best_match.confidence:.0%}): "
                         f"bypass techniques: {', '.join(best_match.bypass_techniques[:3])}")
             return best_match
 
@@ -293,7 +293,7 @@ class AdaptiveIntelligence:
         profile.recommended_attacks = self._recommend_attacks(profile)
 
         self.profiles[url] = profile
-        logger.info(f"🎯 Target profiled: {url} — server={profile.server}, "
+        logger.info(f"🎯 Target profiled: {url}: server={profile.server}, "
                      f"tech={profile.technologies}, waf={profile.waf.name if profile.waf else 'none'}")
         return profile
 

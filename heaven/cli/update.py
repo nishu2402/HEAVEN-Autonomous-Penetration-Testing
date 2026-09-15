@@ -579,7 +579,7 @@ def _self_update(summary: UpdateSummary, *, force: bool, skip_ui: bool) -> None:
         return
     if c.dirty and not force:
         _print(f"  [yellow]⚠ Code:[/yellow] v{c.latest_version or '?'} is available, but you have "
-               f"{len(c.dirty_files)} uncommitted change(s) — not overwriting them.")
+               f"{len(c.dirty_files)} uncommitted change(s): not overwriting them.")
         for f_ in c.dirty_files[:8]:
             _print(f"      [dim]· {f_}[/dim]")
         if len(c.dirty_files) > 8:
@@ -590,7 +590,7 @@ def _self_update(summary: UpdateSummary, *, force: bool, skip_ui: bool) -> None:
         return
 
     _print(f"  HEAVEN code: v{c.current_version or '?'} → v{c.latest_version or '?'} "
-           f"({c.behind} commit(s)) — updating…")
+           f"({c.behind} commit(s)): updating…")
     res = apply_code_update(root, c, force=force, skip_ui=skip_ui)
     summary.from_version = res.from_version
     summary.to_version = res.to_version

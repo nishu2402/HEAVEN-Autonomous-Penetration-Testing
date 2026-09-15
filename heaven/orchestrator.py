@@ -1167,7 +1167,7 @@ class ScanOrchestrator:
                     logger.info(
                         f"🛡  Egress {_egc.mode}: exit "
                         f"{_eres.get('public_ip') or '?'} via {_eres.get('via')} "
-                        f"— {_eres.get('detail')}")
+                        f": {_eres.get('detail')}")
                 except _egress.EgressError as _ee:
                     logger.error(f"✗ Egress kill-switch aborted the scan: {_ee}")
                     return {
@@ -1212,7 +1212,7 @@ class ScanOrchestrator:
 
         for phase in phase_order:
             if self._cancelled:
-                logger.warning("Scan cancelled — stopping pipeline")
+                logger.warning("Scan cancelled: stopping pipeline")
                 break
 
             phase_results = await self._execute_phase(phase)
@@ -1983,6 +1983,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _anomaly_probe(**kw):
         try:
             from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
+            from heaven.vulnscan.url_surface import has_injectable_surface
             import aiohttp
             import time
             scanner = WebAnomalyProbe()
@@ -2007,10 +2008,17 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     if time.monotonic() - _started > _budget_s:
                         logger.warning(
                             "Anomaly Probe: %.0fs wall-budget reached (target likely "
-                            "throttling) — stopping the sweep early with %d candidate(s) "
+                            "throttling): stopping the sweep early with %d candidate(s) "
                             "instead of stalling on unanswered requests.",
                             _budget_s, len(candidates))
                         break
+                    # A parameter-less static document (.md/.pdf/.png …) has no
+                    # server-side surface for the anomaly payloads (cmdi/SSTI/
+                    # traversal all need a param), so skip it rather than spend
+                    # the per-URL battery — several payloads are time-based — on a
+                    # URL that categorically cannot yield a candidate.
+                    if not has_injectable_surface(url):
+                        continue
                     try:
                         found = await scanner.scan_endpoint(
                             session, url, ["id", "q", "page", "file", "url"])
@@ -2021,7 +2029,7 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                         _stalls += 1
                         if _stalls >= 3:
                             logger.warning(
-                                "Anomaly Probe: %d consecutive unanswered targets — "
+                                "Anomaly Probe: %d consecutive unanswered targets: "
                                 "target appears to be dropping our connections; "
                                 "stopping early.", _stalls)
                             break
@@ -2058,7 +2066,9 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _advanced_attacks(**kw):
         try:
             from heaven.vulnscan.advanced_attacks import run_advanced_tests
+            from heaven.vulnscan.url_surface import has_injectable_surface, origin_of
             import aiohttp
+            import time
             findings = []
             # Build scan_data from completed recon results so JWT + race tests fire
             scan_data: dict = {"jwt_tokens": [], "critical_endpoints": []}
@@ -2087,10 +2097,34 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     u = _endpoint_url(ep)
                     if u:
                         scan_data["critical_endpoints"].append(u)
+            # The per-URL battery (default-cred spray, race, CL.TE smuggling) is
+            # the heaviest web task, so bound it two ways, mirroring the anomaly
+            # probe: skip URLs with no injectable surface (a parameter-less
+            # static .md/.pdf/.png can't carry any of these), and run the
+            # origin-level smuggling probe once per origin (it stalls to its
+            # timeout on a normal server, so paying that per-path dominated the
+            # scan). A monotonic wall-budget is the final backstop so one slow
+            # sweep can never run away — the phase deadline still bounds it above.
+            _budget_s = 180.0
+            _started = time.monotonic()
+            _seen_origins: set[str] = set()
             async with _egress_cs(
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
-                    found = await run_advanced_tests(session, url, scan_data=scan_data)
+                    if time.monotonic() - _started > _budget_s:
+                        logger.warning(
+                            "Advanced Exploitation: %.0fs wall-budget reached; "
+                            "stopping the sweep early with %d finding(s).",
+                            _budget_s, len(findings))
+                        break
+                    if not has_injectable_surface(url):
+                        continue
+                    origin = origin_of(url)
+                    first_for_origin = origin not in _seen_origins
+                    _seen_origins.add(origin)
+                    found = await run_advanced_tests(
+                        session, url, scan_data=scan_data,
+                        include_smuggling=first_for_origin)
                     findings.extend([{
                         "target": f.target, "vuln_type": f.vuln_type,
                         "severity": f.severity, "title": f.title,
@@ -2468,6 +2502,14 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     ep_url = ep if isinstance(ep, str) else ep.get("url", "")
                     if ep_url and ep_url not in urls:
                         urls.append(ep_url)
+            # Skip parameter-less static documents/assets: method fuzzing, CORS,
+            # cache-poisoning and hidden-param probes have no server-side surface
+            # to act on there, so a target that ships many static files (e.g. a
+            # set of localized README.*.md) would otherwise stretch this task for
+            # no finding. The origin root and every dynamic/extension-less route
+            # are kept.
+            from heaven.vulnscan.url_surface import has_injectable_surface
+            urls = [u for u in urls if has_injectable_surface(u)]
             if not urls:
                 return {"skipped": True, "reason": "no URLs to fuzz"}
             # Pass the stealth level through — fuzz_targets derives concurrency,
@@ -2564,6 +2606,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 ep_url = ep if isinstance(ep, str) else ep.get("url", "")
                 if ep_url and ep_url not in urls:
                     urls.append(ep_url)
+        # OOB (SSRF/XXE/blind-cmdi) needs an injectable parameter and the in-band
+        # misconfig checks add nothing on a parameter-less static document, so
+        # skip those URLs rather than pay a per-URL probe on each localized
+        # README / manual a target ships. Dynamic routes and the root are kept.
+        from heaven.vulnscan.url_surface import has_injectable_surface
+        urls = [u for u in urls if has_injectable_surface(u)]
         if not urls:
             return {"skipped": True, "reason": "no URLs for misconfig/OOB scan"}
 

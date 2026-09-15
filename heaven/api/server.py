@@ -388,7 +388,7 @@ async def require_user(
     """FastAPI dependency: extract user from Authorization: Bearer <token> or X-API-Key header."""
     if _auth_disabled():
         # Test/dev mode only — log loudly so it can't be missed in prod
-        logger.warning("HEAVEN_DISABLE_AUTH set — request bypassing auth")
+        logger.warning("HEAVEN_DISABLE_AUTH set: request bypassing auth")
         admin = next((u for u in get_auth_manager()._users.values() if u.role == Role.ADMIN), None)
         if admin:
             return admin
@@ -718,13 +718,13 @@ def create_app() -> FastAPI:
         admin_pwd_set = bool(os.environ.get("HEAVEN_ADMIN_PASSWORD"))
         if not admin_pwd_set:
             logger.warning(
-                "HEAVEN_ADMIN_PASSWORD not set — a random admin password was generated "
+                "HEAVEN_ADMIN_PASSWORD not set: a random admin password was generated "
                 "at startup (see the boxed 'first-run admin credentials' log line above) "
                 "and a password change is forced on first login. Set HEAVEN_ADMIN_PASSWORD "
                 "in your .env (or run `heaven init`) to pin a persistent password."
             )
         if _auth_disabled():
-            logger.error("HEAVEN_DISABLE_AUTH is enabled — DO NOT USE IN PRODUCTION")
+            logger.error("HEAVEN_DISABLE_AUTH is enabled: DO NOT USE IN PRODUCTION")
         # One-time self-heal: older builds let the demo seeder write a
         # "demo (sample data)" engagement row + demo scope into whatever
         # engagement was active, which then leaked "demo" into the dashboard
@@ -842,7 +842,7 @@ def create_app() -> FastAPI:
     else:
         limiter = None
         rate_login = None
-        logger.warning("slowapi not installed — API rate limiting is disabled")
+        logger.warning("slowapi not installed: API rate limiting is disabled")
 
     # CORS — explicit origins only. Wildcard + credentials is invalid per spec.
     cors_origins_raw = os.environ.get("HEAVEN_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
@@ -857,7 +857,7 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-        logger.warning("CORS wildcard configured via HEAVEN_CORS_ORIGINS — credentials disabled")
+        logger.warning("CORS wildcard configured via HEAVEN_CORS_ORIGINS: credentials disabled")
     else:
         app.add_middleware(
             CORSMiddleware,
@@ -1786,7 +1786,7 @@ def create_app() -> FastAPI:
         if not row:
             raise HTTPException(404, "Scan not found")
         if row.get("status") not in ("running", "pending", "paused", "interrupted"):
-            raise HTTPException(409, f"Scan is {row.get('status')} — not resumable")
+            raise HTTPException(409, f"Scan is {row.get('status')}: not resumable")
 
         try:
             cfg = json.loads(row.get("config_json") or "{}")
@@ -2832,7 +2832,7 @@ def create_app() -> FastAPI:
             ))
             if resp.ok():
                 return {"provider": gw.provider, "model": gw.model, "available": True,
-                        "reason": f"ready — live reply in {resp.latency_ms:.0f}ms"}
+                        "reason": f"ready: live reply in {resp.latency_ms:.0f}ms"}
             return {"provider": gw.provider, "model": gw.model, "available": False,
                     "reason": f"configured but the live call failed: {resp.error or 'empty response'}"}
         except Exception as e:  # noqa: BLE001
@@ -2948,7 +2948,7 @@ def create_app() -> FastAPI:
             raise HTTPException(409, f"already up to date (v{check.current_version or '?'})")
         if check.dirty and not force:
             raise HTTPException(
-                409, f"{len(check.dirty_files)} uncommitted change(s) on the server — "
+                409, f"{len(check.dirty_files)} uncommitted change(s) on the server: "
                 "refusing to overwrite them. Commit/stash them, or retry with force.")
 
         job_id = uuid.uuid4().hex[:12]
@@ -3228,7 +3228,7 @@ def create_app() -> FastAPI:
             with contextlib.suppress(Exception):
                 await websocket.send_json({
                     "type": "error",
-                    "error": f"Ollama not reachable at {host} — is it running? "
+                    "error": f"Ollama not reachable at {host}: is it running? "
                              "(open the Ollama app, or run `ollama serve`)"})
         except Exception as e:  # noqa: BLE001 — never crash the socket worker
             with contextlib.suppress(Exception):
@@ -4842,7 +4842,7 @@ def create_app() -> FastAPI:
                                      "persists every run into an engagement")
         db_path = _engagement_db_path(engagement)
         if not db_path.exists():
-            raise HTTPException(404, f"engagement '{engagement}' not found — "
+            raise HTTPException(404, f"engagement '{engagement}' not found: "
                                      f"create it first (Dashboard → New engagement)")
 
         ips = [str(x).strip() for x in (body.get("ips") or []) if str(x).strip()]
@@ -5395,7 +5395,7 @@ def create_app() -> FastAPI:
         except ValueError as e:
             raise HTTPException(
                 400,
-                f"{e}. Both scans must belong to the engagement you're viewing — "
+                f"{e}. Both scans must belong to the engagement you're viewing: "
                 "switch to that engagement, or pick two scans from the same one.",
             )
         out = report.to_dict()
@@ -5637,7 +5637,7 @@ def create_app() -> FastAPI:
             return FileResponse(ui_dist / "index.html")
     else:
         logger.warning(
-            "Web UI not built (heaven-ui/dist missing) — serving placeholder at '/'. "
+            "Web UI not built (heaven-ui/dist missing): serving placeholder at '/'. "
             "Build it with: cd heaven-ui && npm install && npm run build"
         )
 

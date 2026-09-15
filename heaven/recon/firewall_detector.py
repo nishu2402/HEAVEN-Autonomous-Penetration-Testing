@@ -267,7 +267,7 @@ def classify_perimeter(
         verdict.confidence = 0.55
         verdict.indicators = [
             f"{open_count} ports 'open' but responding very slowly "
-            f"(median {median(rts):.0f} ms) — consistent with a tarpit/sinkhole."
+            f"(median {median(rts):.0f} ms): consistent with a tarpit/sinkhole."
         ]
         verdict.recommendation = (
             "The host answers slowly and uniformly on many ports, a tarpit pattern "

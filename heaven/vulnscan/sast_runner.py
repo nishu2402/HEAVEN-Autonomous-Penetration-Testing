@@ -154,7 +154,7 @@ async def run_sast(
     if not has_semgrep():
         if fallback_native:
             from heaven.vulnscan.native_sast import run_native_sast
-            logger.info("semgrep unavailable — using HEAVEN's native SAST engine")
+            logger.info("semgrep unavailable: using HEAVEN's native SAST engine")
             return await asyncio.get_event_loop().run_in_executor(
                 None, run_native_sast, str(src))
         result.error = "semgrep not installed; pip install semgrep"

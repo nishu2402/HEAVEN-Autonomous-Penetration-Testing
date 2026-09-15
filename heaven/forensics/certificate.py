@@ -115,7 +115,7 @@ def _analyze_cert(cert: Any, path: str) -> tuple[dict[str, Any], list[dict[str, 
             remediation="Reissue and deploy a current certificate; automate renewal.")
     elif not_before > now:
         add("certificate_not_yet_valid", "low", "Certificate not yet valid",
-            f"notBefore is {not_before.date()}, in the future — the certificate "
+            f"notBefore is {not_before.date()}, in the future: the certificate "
             "is not valid yet and strict clients will reject it.",
             cwe="CWE-298",
             remediation="Check the issuing system clock and reissue if needed.")

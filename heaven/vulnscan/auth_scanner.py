@@ -216,7 +216,7 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                     findings.append(_make_finding(
                         url, "weak_session_id", "high",
                         f"Short Session ID for Cookie '{name}'",
-                        f"Session ID '{val[:8]}…' is only {len(val)} chars — may be brute-forceable.",
+                        f"Session ID '{val[:8]}…' is only {len(val)} chars: may be brute-forceable.",
                         confidence=0.80,
                         evidence={"cookie_name": name, "id_length": len(val)},
                     ))
@@ -811,7 +811,7 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
             final_url = str(resp.url)
             if not _same_site(url, final_url):
                 logger.debug(
-                    "security headers: %s redirected off-site to %s — skipping "
+                    "security headers: %s redirected off-site to %s: skipping "
                     "header findings (they describe a different host)",
                     url, final_url)
                 return findings
@@ -825,7 +825,7 @@ async def _audit_security_headers(session: "aiohttp.ClientSession",
             # is assessed on its normal response elsewhere in the crawl.
             if status >= 500:
                 logger.debug(
-                    "security headers: %s returned %d — skipping header findings "
+                    "security headers: %s returned %d: skipping header findings "
                     "(server-error page is unrepresentative)", url, status)
                 return findings
             # Response headers double as the proof that a header is absent — so

@@ -88,7 +88,8 @@ export default function SastPage() {
 
         <EngagementPicker value={engagement} onChange={setEngagement}
                           id="sast-engagement"
-                          label="Save findings to engagement" />
+                          label="Save findings to engagement"
+                          style={{ marginBottom: 12 }} />
 
         <label className="form-group" style={{ marginBottom: 12 }}>
           <span className="form-label">Extra Semgrep configs (one per line or comma-sep)</span>

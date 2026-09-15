@@ -630,7 +630,7 @@ class DirectoryFuzzer:
 
         # ffuf exited non-zero (bad flag, connection error, …) → signal fallback.
         if rc not in (0, None):
-            logger.debug("ffuf exited %s — falling back to native dir engine", rc)
+            logger.debug("ffuf exited %s: falling back to native dir engine", rc)
             Path(out_file).unlink(missing_ok=True)
             Path(wf_path).unlink(missing_ok=True)
             return None
@@ -704,10 +704,10 @@ class DirectoryFuzzer:
                 await self._capture_responses(deduped_ffuf)
                 return {"findings": deduped_ffuf,
                         "urls_tested": len(targets), "error": None}
-            logger.info("DirFuzzer: ffuf unavailable/failed for %d/%d target(s) — "
+            logger.info("DirFuzzer: ffuf unavailable/failed for %d/%d target(s): "
                         "native engine covers them", len(native_targets), len(targets))
 
-        logger.info(f"DirFuzzer: async engine — {len(native_targets)} targets, "
+        logger.info(f"DirFuzzer: async engine: {len(native_targets)} targets, "
                     f"{len(WORDLIST)} paths each")
         if aiohttp is None:
             if all_findings:
@@ -875,12 +875,12 @@ def _path_title(path: str, status: int, served: bool = True) -> str:
     # title them "Exposed …". Report them honestly as discovery instead.
     if not served:
         if status == 403:
-            return f"Access-controlled resource (403) — {path}"
+            return f"Access-controlled resource (403): {path}"
         if status == 401:
-            return f"Authentication-required resource (401) — {path}"
+            return f"Authentication-required resource (401): {path}"
         if 300 <= status < 400:
-            return f"Path exists (redirects, {status}) — {path}"
-        return f"Path discovered — {path} ({status})"
+            return f"Path exists (redirects, {status}): {path}"
+        return f"Path discovered: {path} ({status})"
     if _is_git_vcs_path(p):
         return f"Exposed .git directory ({status})"
     if ".env" in p:
@@ -901,7 +901,7 @@ def _path_title(path: str, status: int, served: bool = True) -> str:
         return f"Backup/dump file exposed ({status})"
     if "phpinfo" in p:
         return f"phpinfo() page exposed ({status})"
-    return f"Sensitive path discovered — {path} ({status})"
+    return f"Sensitive path discovered: {path} ({status})"
 
 
 def _remediation(path: str, status: int) -> str:

@@ -272,7 +272,7 @@ class GraphQLScanner:
                         try:
                             data = await resp.json(content_type=None)
                         except Exception:
-                            logger.debug("non-JSON GraphQL reply — no complexity evidence",
+                            logger.debug("non-JSON GraphQL reply: no complexity evidence",
                                          exc_info=True)
                             continue
                         # A depth/cost-limited server answers 200 + an errors
@@ -518,7 +518,7 @@ class RESTAPIScanner:
                     target=url, vuln_type="no_rate_limit",
                     severity="medium", endpoint=endpoint,
                     title="API: No Rate Limiting Detected",
-                    description=(f"Sent 50 requests to a live endpoint — {len(processed)} "
+                    description=(f"Sent 50 requests to a live endpoint: {len(processed)} "
                                  f"were processed with no 429 (rate-limit) responses."),
                     confidence=0.75,
                     evidence={"requests_sent": 50, "processed": len(processed)},
@@ -899,7 +899,7 @@ class APISecurityScanner:
 
     async def scan(self, url: str) -> list[APIFinding]:
         if not HAS_AIOHTTP:
-            logger.warning("aiohttp not installed — API scanning unavailable")
+            logger.warning("aiohttp not installed: API scanning unavailable")
             return []
 
         logger.info(f"🔍 API Security Scan: {url}")

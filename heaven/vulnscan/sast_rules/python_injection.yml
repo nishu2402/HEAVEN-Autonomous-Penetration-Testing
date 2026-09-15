@@ -8,7 +8,7 @@ rules:
     message: |
       SQL query built with %, .format(), an f-string, or string concatenation
       from a variable. Use parameterised queries (cursor.execute(query, params))
-      — the DB driver will escape inputs and the same query plan is cached.
+      The DB driver will escape inputs and the same query plan is cached.
     severity: ERROR
     languages: [python]
     metadata:
@@ -37,7 +37,7 @@ rules:
 
   - id: heaven.python.cmd-injection-shell-true
     message: |
-      subprocess called with shell=True and a variable in the command — the
+      subprocess called with shell=True and a variable in the command: the
       shell will tokenise the variable, allowing operators like `;` and `|`.
       Pass a list of args (shell=False, the default) so each token is literal.
     severity: ERROR
@@ -79,7 +79,7 @@ rules:
     message: |
       MD5 / SHA-1 used for security-relevant hashing. Both have practical
       collisions; use SHA-256 or BLAKE2 for signatures / fingerprinting.
-      (OK for non-security uses like cache keys — gate with `usedforsecurity=False`
+      (OK for non-security uses like cache keys: gate with `usedforsecurity=False`
       on hashlib.new to silence this rule when intentional.)
     severity: WARNING
     languages: [python]
@@ -96,7 +96,7 @@ rules:
 
   - id: heaven.python.weak-random-for-crypto
     message: |
-      random.random / random.choice are deterministic PRNGs — fine for
+      random.random / random.choice are deterministic PRNGs: fine for
       simulations, NEVER for tokens / passwords / cryptographic material.
       Use `secrets.token_urlsafe()` or `secrets.choice()` instead.
     severity: WARNING
@@ -151,7 +151,7 @@ rules:
   - id: heaven.python.ssrf-requests-from-input
     message: |
       `requests.get` / `httpx.get` called with a URL built from request
-      data — classic SSRF vector. Validate the URL against an allow-list
+      data: classic SSRF vector. Validate the URL against an allow-list
       of hosts before fetching.
     severity: WARNING
     languages: [python]

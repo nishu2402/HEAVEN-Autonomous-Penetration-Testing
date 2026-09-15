@@ -126,7 +126,7 @@ if HAS_CLICK:
                 load_dotenv(target, override=True)
         except ImportError:
             if config_file:
-                logger.warning("python-dotenv not installed — .env file ignored")
+                logger.warning("python-dotenv not installed: .env file ignored")
         reload_config()
 
         # Turn any *native* (C-level) crash into a Python traceback instead of a

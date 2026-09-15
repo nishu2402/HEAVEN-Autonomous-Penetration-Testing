@@ -28,7 +28,7 @@ try:
     HAS_CRYPTO = True
 except ImportError:
     HAS_CRYPTO = False
-    logger.warning("cryptography not installed — vault operates in plaintext fallback mode")
+    logger.warning("cryptography not installed: vault operates in plaintext fallback mode")
 
 
 # ═══════════════════════════════════════════
@@ -117,7 +117,7 @@ class CredentialVault:
     def initialize(self, master_password: str) -> None:
         """Initialize a new vault with a master password."""
         if not HAS_CRYPTO:
-            logger.warning("Vault initialized in plaintext mode — install cryptography for encryption")
+            logger.warning("Vault initialized in plaintext mode: install cryptography for encryption")
             self._is_locked = False
             self._unlocked_at = time.time()
             return
@@ -132,7 +132,7 @@ class CredentialVault:
     def unlock(self, master_password: str) -> bool:
         """Unlock the vault with the master password."""
         if not self._vault_path.exists():
-            logger.error("Vault file not found — initialize first")
+            logger.error("Vault file not found: initialize first")
             return False
 
         try:
@@ -151,7 +151,7 @@ class CredentialVault:
             computed_hash = hashlib.sha256(entries_json.encode()).hexdigest()
 
             if stored_hash and stored_hash != computed_hash:
-                logger.error("VAULT INTEGRITY VIOLATION — data may be tampered")
+                logger.error("VAULT INTEGRITY VIOLATION: data may be tampered")
                 return False
 
             # Load entries
@@ -161,7 +161,7 @@ class CredentialVault:
             }
             self._is_locked = False
             self._unlocked_at = time.time()
-            logger.info(f"Vault unlocked — {len(self._entries)} credentials loaded")
+            logger.info(f"Vault unlocked: {len(self._entries)} credentials loaded")
             return True
 
         except Exception as e:
@@ -177,7 +177,7 @@ class CredentialVault:
         self._master_key = None
         self._is_locked = True
         self._unlocked_at = 0.0
-        logger.info("Vault locked — encryption keys wiped from memory")
+        logger.info("Vault locked: encryption keys wiped from memory")
 
     def store(self, key: str, value: str, metadata: Optional[dict] = None,
               rotation_days: Optional[int] = None) -> None:
@@ -191,7 +191,7 @@ class CredentialVault:
             # Loud warning every store: a pentester must never assume a
             # credential is encrypted when it is being written as plaintext.
             logger.warning(
-                f"PLAINTEXT vault write for '{key}' — 'cryptography' not installed "
+                f"PLAINTEXT vault write for '{key}': 'cryptography' not installed "
                 f"or vault not initialized. Credential is NOT encrypted on disk. "
                 f"Install: pip install cryptography"
             )
@@ -291,7 +291,7 @@ class CredentialVault:
             )
 
         self._save()
-        logger.info(f"Master key rotated — {len(self._entries)} credentials re-encrypted")
+        logger.info(f"Master key rotated: {len(self._entries)} credentials re-encrypted")
 
     def check_rotation_status(self) -> list[dict]:
         """Check which credentials need rotation."""

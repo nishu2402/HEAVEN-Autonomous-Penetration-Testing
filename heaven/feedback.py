@@ -289,7 +289,7 @@ class FeedbackEngine:
                 # ``target`` and in the network result's ``hosts``, was re-queued
                 # for a full DYNAMIC_FOLLOWUP re-scan (the ~90s "stuck at 44%,
                 # nothing new" symptom).
-                logger.debug(f"feedback: host {host} already scanned — no re-scan")
+                logger.debug(f"feedback: host {host} already scanned: no re-scan")
                 return None
             if self._host_count >= self.MAX_HOSTS:
                 return None

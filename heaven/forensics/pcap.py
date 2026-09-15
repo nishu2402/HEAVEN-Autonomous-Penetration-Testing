@@ -810,7 +810,7 @@ class _PcapAnalyzer:
             if len(hosts) >= 25:
                 f.append(_finding(
                     "host_sweep", "low", f"Host sweep from {s} ({len(hosts)} hosts)",
-                    f"{s} initiated connections to {len(hosts)} distinct hosts — "
+                    f"{s} initiated connections to {len(hosts)} distinct hosts: "
                     "a network sweep / discovery scan.", cwe="CWE-200",
                     evidence={"src": s, "hosts_contacted": len(hosts)}))
                 break
@@ -847,7 +847,7 @@ class _PcapAnalyzer:
         if self.icmp_tunnel >= 10:
             f.append(_finding(
                 "icmp_tunneling", "medium",
-                f"Large ICMP payloads ({self.icmp_tunnel} packets) — possible tunneling",
+                f"Large ICMP payloads ({self.icmp_tunnel} packets): possible tunneling",
                 "Many ICMP packets carried unusually large payloads, a pattern used "
                 "for ICMP tunneling / covert channels.", cwe="CWE-200"))
         elif self.icmp_count >= 1000:
@@ -860,7 +860,7 @@ class _PcapAnalyzer:
         if beacons:
             f.append(_finding(
                 "c2_beaconing", "medium",
-                f"Periodic beaconing on {len(beacons)} flow(s) — possible C2",
+                f"Periodic beaconing on {len(beacons)} flow(s): possible C2",
                 "One or more conversations exchanged packets at a highly regular "
                 "interval, the classic signature of malware command-and-control "
                 "beaconing.", cwe="CWE-506", confidence=0.55,

@@ -20,6 +20,7 @@ export default function EngagementPicker({
   id = "eng-picker",
   label = "Save findings to engagement",
   help = "The engagement this run's findings are saved into. Defaults to the one you're viewing, change it so a run never lands in the wrong engagement. Pick '＋ New engagement…' to start a fresh one.",
+  style,
 }) {
   const [engList, setEngList] = useState([]);
   const [choice, setChoice] = useState("");   // name | "__new__" | ""
@@ -59,7 +60,7 @@ export default function EngagementPicker({
   )), [engList]);
 
   return (
-    <label className="form-group form-full" htmlFor={id}>
+    <label className="form-group form-full" htmlFor={id} style={style}>
       <span className="form-label">
         {label}
         <HelpTip text={help} />

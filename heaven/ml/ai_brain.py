@@ -117,9 +117,9 @@ def _load_priors() -> dict[str, Any]:
                 logger.info(f"loaded bootstrap priors from {path}")
             return merged
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"priors file at {path} is invalid ({e}) — trying next")
+            logger.warning(f"priors file at {path} is invalid ({e}): trying next")
 
-    logger.info("no priors file on disk — using in-code bootstrap defaults")
+    logger.info("no priors file on disk: using in-code bootstrap defaults")
     return _PRIORS_DEFAULTS
 
 

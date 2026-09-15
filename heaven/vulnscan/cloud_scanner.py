@@ -405,7 +405,7 @@ class CloudStorageScanner:
                         # the endpoint denies everything; 403 is not a hit here.
                         blanket_deny.add(provider)
                         logger.debug("cloud calibrate: %s treats a nonexistent "
-                                     "bucket as 'exists' — suppressing 403-only "
+                                     "bucket as 'exists': suppressing 403-only "
                                      "existence findings", provider)
                 except Exception as e:
                     logger.debug("bucket calibrate %s failed: %s", url, e)

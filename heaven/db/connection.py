@@ -142,7 +142,7 @@ async def get_pool(retry: int = 3, delay: float = 2.0) -> Any:
             )
             _backend = "postgres"
             logger.info(
-                "PostgreSQL pool ready — %s:%s/%s (min=3, max=20)",
+                "PostgreSQL pool ready: %s: %s/%s (min=3, max=20)",
                 cfg.host, cfg.port, cfg.name,
             )
             return _pg_pool
@@ -151,7 +151,7 @@ async def get_pool(retry: int = 3, delay: float = 2.0) -> Any:
             if attempt < retry:
                 wait = delay * (2 ** (attempt - 1))
                 logger.warning(
-                    "DB connect attempt %d/%d failed: %s — retrying in %.1fs",
+                    "DB connect attempt %d/%d failed: %s: retrying in %.1fs",
                     attempt, retry, exc, wait,
                 )
                 await asyncio.sleep(wait)
@@ -326,7 +326,7 @@ async def init_db(force: bool = False) -> bool:
     """
     if not HAS_ASYNCPG:
         logger.warning(
-            "asyncpg not installed — PostgreSQL init skipped. "
+            "asyncpg not installed: PostgreSQL init skipped. "
             "Install: pip install asyncpg"
         )
         return False
@@ -347,7 +347,7 @@ async def init_db(force: bool = False) -> bool:
         return True
     except (ConnectionRefusedError, ConnectionError, OSError) as exc:
         logger.warning(
-            "PostgreSQL unavailable (%s) — falling back to SQLite mode.\n"
+            "PostgreSQL unavailable (%s): falling back to SQLite mode.\n"
             "  To enable PostgreSQL: docker compose up -d postgres && heaven init-db",
             exc,
         )

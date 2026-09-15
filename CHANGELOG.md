@@ -34,6 +34,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A web scan no longer spends minutes fuzzing static documents or re-probing one
+  host for request smuggling.** The heaviest active web tasks (advanced exploitation
+  and the anomaly probe) fire a per-URL battery of payloads, several of them
+  time-based, so on a target that ships many parameter-less static files (DVWA's
+  official image alone serves 14 localized `README.*.md` files, plus a PDF manual,
+  `robots.txt` and `security.txt`) they spent seconds each on URLs that cannot carry
+  an injection. They now skip any parameter-less static document or asset, as do the
+  web fuzzer and the misconfiguration / out-of-band scan. The CL.TE request-smuggling
+  probe, whose desync is a property of the origin rather than any one path and which
+  stalls to its own timeout on a normal server, now runs once per origin instead of
+  once per discovered URL, and advanced exploitation gained the same monotonic
+  wall-budget the anomaly probe already carried. Recall is unchanged (every
+  detection-required vector is a parameterised endpoint, still fuzzed): on live DVWA
+  the authenticated scan drops from over 15 minutes back to a few, so the weekly
+  `Benchmark — HEAVEN vs. DVWA` run no longer trips its per-scan timeout. New
+  `heaven/vulnscan/url_surface.py` and `tests/test_url_surface_and_advanced_scope.py`.
 - **Combined Risk now follows the engagement you are viewing.** Switching the
   active engagement left the Combined Risk page (and the `/api/correlations`,
   `/api/kill-chain`, `/api/attack-tree`, `/api/risk-scores` and

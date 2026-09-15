@@ -24,6 +24,19 @@ FROM python:3.12-slim AS py-builder
 # finder pointing at a directory that no longer exists → ModuleNotFoundError).
 WORKDIR /app
 
+# Make pip resilient to transient PyPI/network hiccups. The multi-arch image
+# builds the arm64 stage under QEMU emulation, where downloads stall more
+# easily and pip's default 15s read timeout is too tight — a single slow
+# response from files.pythonhosted.org would otherwise abort the whole build.
+# Raise the read timeout, retry downloads several times, and prefer prebuilt
+# wheels so the emulated build doesn't recompile packages from source. Applies
+# to every pip step in this stage.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_PREFER_BINARY=1 \
+    PIP_NO_INPUT=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc \
     && rm -rf /var/lib/apt/lists/*

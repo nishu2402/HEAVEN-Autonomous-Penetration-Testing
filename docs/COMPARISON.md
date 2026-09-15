@@ -1,10 +1,13 @@
 # HEAVEN vs Other Vulnerability Scanners
 
-Head-to-head matrix against the tools every pen-tester already has on
-their laptop. **The numbers below are placeholders**, fill them in by
-running the benchmark suite ([tests/benchmarks/README.md](../tests/benchmarks/README.md))
-against the same target with each tool. HEAVEN ships the adapters for
-all three competitors so the comparison is a one-command diff.
+How HEAVEN compares to the tools every pen-tester already has on their
+laptop. HEAVEN's own numbers on this page are measured and reproducible;
+the competitor cells in the head-to-head table are left blank on purpose,
+because HEAVEN does not publish invented competitor numbers. You fill them
+in by running the benchmark suite
+([tests/benchmarks/README.md](../tests/benchmarks/README.md)) against the
+same target with each tool. HEAVEN ships the adapters for all three
+competitors, so that comparison is a one-command diff.
 
 ---
 
@@ -89,7 +92,7 @@ get an apples-to-apples table:
 
 The HEAVEN column is the measured native-benchmark result above; the competitor
 columns are left for you to fill by exporting each tool's results and feeding the
-adapter (see "How to reproduce" below). That keeps the comparison honest, 
+adapter (see "How to reproduce" below). That keeps the comparison honest:
 every number in this repo comes from a run you can reproduce.
 
 ---
@@ -145,7 +148,7 @@ every number in this repo comes from a run you can reproduce.
    ```
 
 5. Open the resulting `gt_coverage.csv` files in a spreadsheet and pivot
-   on the `detected` column. The interesting cells are the asymmetries, 
+   on the `detected` column. The interesting cells are the asymmetries:
    "HEAVEN found this and Burp didn't" or vice versa.
 
 ---

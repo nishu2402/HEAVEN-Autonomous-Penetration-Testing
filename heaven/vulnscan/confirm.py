@@ -338,7 +338,7 @@ async def _confirm_http_header(session: Any, finding: dict[str, Any]) -> Confirm
     if status == 0:
         return ConfirmResult(UNCONFIRMED, method="http-recheck", reprobed=True,
                              summary="Target did not respond to the re-check request.",
-                             detail=f"GET {url} returned no response — it may be down "
+                             detail=f"GET {url} returned no response: it may be down "
                                     "or unreachable from the scan origin right now.")
     header = _which_header(finding)
     if header:
@@ -359,8 +359,8 @@ async def _confirm_http_header(session: Any, finding: dict[str, Any]) -> Confirm
         return ConfirmResult(
             CONFIRMED if proved else UNCONFIRMED, proved=proved,
             method="http-recheck", technique="header_recheck", reprobed=True,
-            summary=(f"The '{header}' header is absent on the live response — confirmed."
-                     if proved else f"The '{header}' header is present now — could not confirm."),
+            summary=(f"The '{header}' header is absent on the live response: confirmed."
+                     if proved else f"The '{header}' header is present now: could not confirm."),
             detail=(f"GET {url} → no {header} header." if proved
                     else f"GET {url} → {header}: {hdrs.get(header)!r} (may have been remediated)."),
             evidence=[{"request": f"GET {url}", "header": header,
@@ -457,13 +457,13 @@ async def _confirm_http_endpoint(session: Any, finding: dict[str, Any]) -> Confi
         return ConfirmResult(
             UNCONFIRMED, method="http-recheck", technique="endpoint_recheck", reprobed=True,
             summary="Target did not respond to the re-check request.",
-            detail=f"GET {url} returned no response — it may be down or unreachable now.",
+            detail=f"GET {url} returned no response: it may be down or unreachable now.",
             evidence=[{"request": f"GET {url}", "response_status": status}])
     if status != 200:
         return ConfirmResult(
             UNCONFIRMED, method="http-recheck", technique="endpoint_recheck", reprobed=True,
             summary=f"Endpoint returned HTTP {status} on the live re-check (not 200).",
-            detail=f"GET {url} → HTTP {status} — the resource is not being served now "
+            detail=f"GET {url} → HTTP {status}: the resource is not being served now "
                    "(access may have been restricted, or it never was this host).",
             evidence=[{"request": f"GET {url}", "response_status": status}])
 
@@ -515,7 +515,7 @@ async def _confirm_http_endpoint(session: Any, finding: dict[str, Any]) -> Confi
     if signature_missing:
         return ConfirmResult(
             UNCONFIRMED, method="http-recheck", technique=tech, reprobed=True,
-            summary=f"Served a 200 but the body is not {label} (no signature match) — "
+            summary=f"Served a 200 but the body is not {label} (no signature match): "
                     "this looks like a catch-all page, not the tool/file itself.",
             detail=f"GET {url} → HTTP 200, {len(body)} bytes, but none of the expected "
                    f"{label} content markers are present, so it is not actually exposed.",
@@ -609,7 +609,7 @@ async def _confirm_tls(finding: dict[str, Any]) -> ConfirmResult:
         logger.debug("confirm TLS scan failed for %s:%s: %s", host, port, exc)
         return ConfirmResult(UNCONFIRMED, method="tls-recheck", reprobed=True,
                              summary="TLS handshake failed on the re-check.",
-                             detail=f"Could not complete a TLS handshake with {host}:{port} — "
+                             detail=f"Could not complete a TLS handshake with {host}:{port}: "
                                     "the service may be down or no longer speaks TLS here.")
     fresh_types = {str(f.get("vuln_type") or "").lower() for f in fresh.get("findings", [])}
     vt = _vt(finding)
@@ -617,7 +617,7 @@ async def _confirm_tls(finding: dict[str, Any]) -> ConfirmResult:
     return ConfirmResult(
         CONFIRMED if proved else UNCONFIRMED, proved=proved,
         method="tls-recheck", technique="tls_rehandshake", reprobed=True,
-        summary=(f"A fresh TLS handshake with {host}:{port} still shows '{vt}' — confirmed."
+        summary=(f"A fresh TLS handshake with {host}:{port} still shows '{vt}': confirmed."
                  if proved else
                  f"A fresh TLS handshake with {host}:{port} no longer shows '{vt}'."),
         detail="Re-ran the SSL/TLS scanner against the live service. Live issues: "
@@ -635,9 +635,9 @@ async def _confirm_tcp(finding: dict[str, Any]) -> ConfirmResult:
     return ConfirmResult(
         CONFIRMED if reachable else UNCONFIRMED, proved=reachable,
         method="tcp-connect", technique="tcp_connect", reprobed=True,
-        summary=(f"TCP connect to {host}:{port} succeeded — the service is reachable, confirmed."
+        summary=(f"TCP connect to {host}:{port} succeeded: the service is reachable, confirmed."
                  if reachable else
-                 f"TCP connect to {host}:{port} failed — not reachable from the scan origin now."),
+                 f"TCP connect to {host}:{port} failed: not reachable from the scan origin now."),
         detail=f"Opened a TCP connection to {host}:{port} and closed it immediately "
                "(no data sent). A successful connect proves the port is exposed.",
         evidence=[{"host": host, "port": port, "tcp_connect": reachable}])
@@ -853,9 +853,9 @@ async def _confirm_via_cve_probe(finding: dict[str, Any], *, authorized: bool) -
     proved = bool(rec.get("proved"))
     probed = bool(rec.get("probed"))
     if proved:
-        summary = f"Safe read-only probe confirmed {cve} — promoted to Confirmed."
+        summary = f"Safe read-only probe confirmed {cve}: promoted to Confirmed."
     elif probed:
-        summary = f"Probe for {cve} ran but produced no observable — remains Potential."
+        summary = f"Probe for {cve} ran but produced no observable: remains Potential."
     else:
         summary = rec.get("reason") or f"No probe outcome for {cve}."
     return ConfirmResult(

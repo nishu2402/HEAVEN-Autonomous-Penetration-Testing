@@ -442,7 +442,7 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
                     if confirmed:
                         findings.append(_finding(
                             url, "cache_poisoning_unkeyed_header", "high",
-                            f"Web Cache Poisoning via Unkeyed Header ({hdr}) — confirmed",
+                            f"Web Cache Poisoning via Unkeyed Header ({hdr}): confirmed",
                             f"Header '{hdr}' is unkeyed and cached: a clean follow-up "
                             f"request with no attacker header was served the injected "
                             f"canary from cache. An attacker can poison the cache to "
@@ -463,11 +463,11 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
                         findings.append(_finding(
                             url, "cache_poisoning_unkeyed_header",
                             "medium" if cacheable else "low",
-                            f"Unkeyed Header Reflection ({hdr}) — potential cache poisoning",
+                            f"Unkeyed Header Reflection ({hdr}): potential cache poisoning",
                             f"Header '{hdr}' value is reflected in the response"
                             f"{' and the response appears cacheable' if cacheable else ''}. "
                             f"A clean cache-busted request did not return the canary, so "
-                            f"cache poisoning is unconfirmed — verify the cache key manually.",
+                            f"cache poisoning is unconfirmed: verify the cache key manually.",
                             confidence=0.5,
                             evidence={
                                 "header": hdr, "canary": canary,
@@ -533,7 +533,7 @@ async def _fuzz_cache_poisoning(session: "aiohttp.ClientSession",
                     "Web Cache Deception: Static Extension Bypass",
                     f"Appending a static extension ({decept_url}) returns the SAME "
                     f"dynamic page as {url} with cacheable headers, and an unrelated "
-                    f"static path does not — a shared cache could store and serve this "
+                    f"static path does not: a shared cache could store and serve this "
                     f"private page to other users.",
                     confidence=0.80,
                     evidence={"deception_url": decept_url, "cache_control": d_cache},
@@ -621,7 +621,7 @@ async def _fuzz_request_smuggling(session: "aiohttp.ClientSession",
                     "Possible HTTP Request Smuggling: TE Header Obfuscation",
                     f"Duplicate Transfer-Encoding headers with different cases were "
                     f"answered differently (status {resp.status}) than a normal "
-                    f"request (status {baseline_status}) — a weak TE.TE indicator "
+                    f"request (status {baseline_status}): a weak TE.TE indicator "
                     f"that requires manual verification via a proxy chain.",
                     confidence=0.30,
                     evidence={"status": resp.status, "baseline_status": baseline_status,
@@ -792,7 +792,7 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
                 if "HEAVEN_PP_PROBE" in body or r.status != base_status:
                     findings.append(_finding(
                         url, "http_parameter_pollution", "medium",
-                        f"HTTP Parameter Pollution — Duplicate '{param}'",
+                        f"HTTP Parameter Pollution: Duplicate '{param}'",
                         f"Duplicate '{param}' parameter causes a different response. "
                         f"May bypass WAF rules, input validation, or produce unexpected behavior.",
                         confidence=0.70,

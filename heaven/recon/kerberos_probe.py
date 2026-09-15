@@ -177,7 +177,7 @@ async def kerberos_preauth_probe(domain: str, dc_host: str,
     unreachable.
     """
     if not HAS_KRB:
-        logger.debug("impacket/pyasn1 unavailable — Kerberos pre-auth probe skipped")
+        logger.debug("impacket/pyasn1 unavailable: Kerberos pre-auth probe skipped")
         return []
     if not domain or not dc_host:
         return []

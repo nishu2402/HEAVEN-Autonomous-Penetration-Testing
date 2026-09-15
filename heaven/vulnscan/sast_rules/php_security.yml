@@ -11,7 +11,7 @@ rules:
       OS command injection: attacker-controlled request data ($_GET / $_POST /
       $_REQUEST / $_COOKIE) reaches a shell/exec sink. An attacker can run
       arbitrary commands with `;`, `|` or `$(...)`. Never pass request data to a
-      shell — use escapeshellarg()/escapeshellcmd() at minimum, or avoid the
+      shell: use escapeshellarg()/escapeshellcmd() at minimum, or avoid the
       shell entirely.
     severity: ERROR
     languages: [php]
@@ -72,7 +72,7 @@ rules:
   - id: heaven.php.unsafe-deserialization
     message: >-
       Unsafe deserialization: unserialize() on request data ($_GET / $_POST /
-      $_REQUEST / $_COOKIE) enables PHP object injection — a gadget chain can
+      $_REQUEST / $_COOKIE) enables PHP object injection: a gadget chain can
       lead to code execution or file operations. Use json_decode() for
       untrusted data, or unserialize($x, ['allowed_classes' => false]).
     severity: ERROR
@@ -135,7 +135,7 @@ rules:
   - id: heaven.php.eval-injection
     message: >-
       Code injection: eval() / assert() on request data executes attacker PHP.
-      There is no safe way to eval request data — remove it and use a explicit
+      There is no safe way to eval request data: remove it and use a explicit
       dispatch table for the intended behaviour.
     severity: ERROR
     languages: [php]

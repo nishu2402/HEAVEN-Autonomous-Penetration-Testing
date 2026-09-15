@@ -137,7 +137,7 @@ class NVDClient:
                 if self.api_key and not self._warned_invalid_key:
                     self._warned_invalid_key = True
                     logger.warning(
-                        "NVD returned 404 with an API key set — the key is likely "
+                        "NVD returned 404 with an API key set: the key is likely "
                         "invalid or malformed. Verify NVD_API_KEY (Settings → "
                         "Recon enrichment, or `heaven config get NVD_API_KEY`)."
                     )
@@ -145,7 +145,7 @@ class NVDClient:
                 return []
 
             if resp.status_code == 429:
-                logger.warning("NVD API rate-limited (429) — add NVD_API_KEY to raise the limit")
+                logger.warning("NVD API rate-limited (429): add NVD_API_KEY to raise the limit")
                 return []
 
             if resp.status_code != 200:

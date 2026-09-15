@@ -226,7 +226,7 @@ async def review_borderline_findings(
     if not reviewer.available:
         if in_band:
             logger.warning(
-                "AI false-positive review skipped: no LLM provider available — "
+                "AI false-positive review skipped: no LLM provider available: "
                 f"{len(in_band)} borderline finding(s) kept their deterministic "
                 "score. Enable a second opinion with `heaven ai setup` (a local "
                 "model needs no key) or by setting a provider API key."

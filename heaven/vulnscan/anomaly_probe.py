@@ -485,7 +485,7 @@ class WebAnomalyProbe:
                                 target=url, category="ssti",
                                 confidence=0.96, severity="critical",
                                 description=(
-                                    f"SSTI confirmed on param '{param}' — Jinja2/Nunjucks/Twig. "
+                                    f"SSTI confirmed on param '{param}': Jinja2/Nunjucks/Twig. "
                                     f"Two-round math: {p1}={_SSTI_R1} AND {p2}={_SSTI_R2} both "
                                     "evaluated server-side. RCE is achievable via this template engine."
                                 ),
@@ -538,7 +538,7 @@ class WebAnomalyProbe:
                                 target=url, category="ssti",
                                 confidence=0.90, severity="critical",
                                 description=(
-                                    f"SSTI on param '{param}' — engine: {engine}. "
+                                    f"SSTI on param '{param}': engine: {engine}. "
                                     f"Indicator '{expected}' appeared after payload injection "
                                     f"but was absent from baseline. RCE likely achievable."
                                 ),
@@ -595,7 +595,7 @@ class WebAnomalyProbe:
                                 target=url, category="ldap_injection",
                                 confidence=0.85, severity="high",
                                 description=(
-                                    f"LDAP Injection on param '{param}' — error: '{err}'. "
+                                    f"LDAP Injection on param '{param}': error: '{err}'. "
                                     f"May allow authentication bypass and directory enumeration."
                                 ),
                                 evidence={"param": param, "payload": payload, "error": err},
@@ -639,7 +639,7 @@ class WebAnomalyProbe:
                         f"Boolean LDAP Injection on param '{param}': wildcard (*) "
                         f"returns {wild_len - false_len} more bytes than an impossible "
                         f"value, both at HTTP {wild_status} and both differing from the "
-                        f"baseline — the filter logic is attacker-controlled."
+                        f"baseline: the filter logic is attacker-controlled."
                     ),
                     evidence={"param": param, "wildcard_len": wild_len,
                               "false_len": false_len, "base_len": base_len,
@@ -687,7 +687,7 @@ class WebAnomalyProbe:
                             target=url, category="xpath_injection",
                             confidence=0.86, severity="high",
                             description=(
-                                f"XPath Injection on param '{param}' — engine error "
+                                f"XPath Injection on param '{param}': engine error "
                                 f"'{err}' surfaced for a malformed XPath expression. "
                                 f"Enables authentication bypass and XML data extraction."
                             ),
@@ -721,7 +721,7 @@ class WebAnomalyProbe:
                     description=(
                         f"Boolean XPath Injection on param '{param}': tautology "
                         f"(' or '1'='1) returns {true_len - false_len} more bytes "
-                        f"than a contradiction — the query logic is attacker-controlled."
+                        f"than a contradiction: the query logic is attacker-controlled."
                     ),
                     evidence={"param": param, "true_len": true_len,
                               "false_len": false_len, "baseline_len": len(base_stripped)},
@@ -768,7 +768,7 @@ class WebAnomalyProbe:
                                 target=url, category="nosql_injection",
                                 confidence=0.80, severity="critical",
                                 description=(
-                                    f"MongoDB NoSQL Injection on '{param}' — "
+                                    f"MongoDB NoSQL Injection on '{param}': "
                                     f"operator '{list(payload_dict.keys())[0]}' "
                                     f"returned {len(body) - base_len} more bytes. "
                                     f"Authentication bypass or data exfiltration possible."
@@ -808,7 +808,7 @@ class WebAnomalyProbe:
                                     target=url, category="nosql_injection",
                                     confidence=0.82, severity="critical",
                                     description=(
-                                        f"MongoDB NoSQL Injection (JSON body) on '{param}' — "
+                                        f"MongoDB NoSQL Injection (JSON body) on '{param}': "
                                         f"operator injection returned excess data."
                                     ),
                                     evidence={"param": param, "payload": json_body},
@@ -871,7 +871,7 @@ class WebAnomalyProbe:
                                 target=url, category="prototype_pollution",
                                 confidence=0.88, severity="high",
                                 description=(
-                                    f"Server-Side Prototype Pollution on '{param}' — "
+                                    f"Server-Side Prototype Pollution on '{param}': "
                                     f"polluted property reflected in response. "
                                     f"May allow RCE via gadget chains in Express/Lodash/etc."
                                 ),
@@ -974,7 +974,7 @@ class WebAnomalyProbe:
                             target=url, category="xxe",
                             confidence=0.95, severity="critical",
                             description=(
-                                f"XML External Entity (XXE) Injection — {technique}. "
+                                f"XML External Entity (XXE) Injection: {technique}. "
                                 f"Indicator '{indicator}' found in response. "
                                 f"Allows reading server files and internal SSRF."
                             ),
@@ -1050,7 +1050,7 @@ class WebAnomalyProbe:
                     target=ws_url, category="websocket_cleartext",
                     confidence=0.9, severity="medium",
                     description=(
-                        f"WebSocket endpoint '{ws_url}' is served over cleartext ws:// — "
+                        f"WebSocket endpoint '{ws_url}' is served over cleartext ws: //: "
                         f"messages (including any session token) are transmitted "
                         f"unencrypted and can be read or tampered with on-path."
                     ),
@@ -1134,7 +1134,7 @@ class WebAnomalyProbe:
                         return AnomalyCandidate(
                             target=url, category="path_traversal",
                             confidence=0.9, severity="high",
-                            description=f"Path traversal on param '{param}' — file contents exposed",
+                            description=f"Path traversal on param '{param}': file contents exposed",
                             evidence={"param": param, "payload": payload,
                                       "indicator": signal},
                             remediation="Validate and sanitise file paths. Use chroot or path canonicalisation.",
@@ -1280,7 +1280,7 @@ class WebAnomalyProbe:
                     candidates.append(AnomalyCandidate(
                         target=url, category="host_header_injection",
                         confidence=0.85, severity="medium",
-                        description=(f"Host-header injection — injected host '{canary}' "
+                        description=(f"Host-header injection: injected host '{canary}' "
                                      f"was used to build a redirect or link via the {hdr} header"),
                         evidence={"header": hdr, "canary": canary,
                                   "reflected_in": "location" if in_location else "body_url",
@@ -1309,7 +1309,7 @@ class WebAnomalyProbe:
                         candidates.append(AnomalyCandidate(
                             target=url, category="ip_restriction_bypass",
                             confidence=0.8, severity="high",
-                            description=(f"IP restriction bypass — {hdr}: 127.0.0.1 turned a "
+                            description=(f"IP restriction bypass: {hdr}: 127.0.0.1 turned a "
                                          f"{baseline_status} deny into a 200 allow"),
                             evidence={"header": hdr, "value": "127.0.0.1",
                                       "baseline_status": baseline_status, "bypass_status": status,

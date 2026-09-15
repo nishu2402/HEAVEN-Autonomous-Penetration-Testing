@@ -913,7 +913,7 @@ class LLMGateway:
                 f"(install with: pip install {pkg})"
             )
             logger.warning(
-                f"LLM provider '{self.provider}' selected but SDK not installed — "
+                f"LLM provider '{self.provider}' selected but SDK not installed: "
                 f"install with: pip install {pkg}"
             )
         except Exception as e:
@@ -1238,9 +1238,9 @@ class LLMGateway:
         on the shared OpenAI-compatible path. Always contains the word
         'unreachable' so the connection-error classifier recognizes it."""
         if self.provider in LOCAL_PROVIDERS:
-            return (f"local LLM unreachable at {self._local_base} — is the server "
+            return (f"local LLM unreachable at {self._local_base}: is the server "
                     f"running? (start Ollama, or run `heaven ai setup`): {exc}")
-        return (f"{self.provider} endpoint unreachable at {self._local_base} — "
+        return (f"{self.provider} endpoint unreachable at {self._local_base}: "
                 f"check the network / DEEPSEEK_BASE_URL and the API key: {exc}")
 
     # ── internals ────────────────────────────────────────────────────────
@@ -1763,7 +1763,7 @@ class LLMGateway:
             self._ratelimited_until = deadline
             self._ratelimit_reason = reason
         logger.warning(
-            f"LLM {label} — pausing LLM calls for {window:.0f}s "
+            f"LLM {label}: pausing LLM calls for {window:.0f}s "
             f"(further calls fall back to non-LLM paths): {exc}"
         )
 

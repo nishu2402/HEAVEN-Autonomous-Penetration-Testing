@@ -323,7 +323,7 @@ def render_html(result: dict[str, Any]) -> str:
                 "Every finding reflects real bytes read from the file.</div>")
     return (f"<!doctype html><html><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<title>HEAVEN artifact report — {html.escape(kind)}</title>"
+            f"<title>HEAVEN artifact report: {html.escape(kind)}</title>"
             f"<style>{_HTML_CSS}</style></head><body><div class='wrap'>"
             + "".join(body) + "</div></body></html>")
 

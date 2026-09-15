@@ -6,7 +6,7 @@ rules:
   - id: heaven.js.sqli-template-string
     message: |
       SQL query built from a template literal containing a request variable.
-      Use parameterised queries — every Node ORM and driver supports them.
+      Use parameterised queries: every Node ORM and driver supports them.
     severity: ERROR
     languages: [javascript, typescript]
     metadata:
@@ -25,7 +25,7 @@ rules:
   - id: heaven.js.cmd-injection-exec
     message: |
       child_process.exec / execSync with shell=true (the default) and a
-      variable in the command — RCE vector. Use execFile / spawn with an
+      variable in the command: RCE vector. Use execFile / spawn with an
       args array so the shell can't interpret metacharacters.
     severity: ERROR
     languages: [javascript, typescript]
@@ -59,7 +59,7 @@ rules:
   - id: heaven.js.eval-on-input
     message: |
       eval / Function() on dynamic data executes arbitrary JS. Almost never
-      necessary — replace with JSON.parse / explicit dispatch.
+      necessary: replace with JSON.parse / explicit dispatch.
     severity: ERROR
     languages: [javascript, typescript]
     metadata:
@@ -92,7 +92,7 @@ rules:
 
   - id: heaven.js.cookie-no-secure-flag
     message: |
-      Cookie set without secure flag — will be sent over plain HTTP if any
+      Cookie set without secure flag: will be sent over plain HTTP if any
       part of the site permits it. Always set { secure: true, httpOnly: true,
       sameSite: 'lax' or 'strict' } on session cookies.
     severity: WARNING

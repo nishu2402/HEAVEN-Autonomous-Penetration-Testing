@@ -174,7 +174,7 @@ async def enumerate_aws() -> list[CloudAsset]:
             _enum_security_groups(), _enum_rds(), return_exceptions=True)
 
     except ImportError:
-        logger.warning("boto3 not available — skipping AWS enumeration")
+        logger.warning("boto3 not available: skipping AWS enumeration")
     except Exception as e:
         logger.error(f"AWS enumeration error: {e}")
 
@@ -206,7 +206,7 @@ async def enumerate_gcp() -> list[CloudAsset]:
                 assets.append(a)
 
     except ImportError:
-        logger.info("GCP SDKs not available — skipping GCP enumeration")
+        logger.info("GCP SDKs not available: skipping GCP enumeration")
     except Exception as e:
         logger.error(f"GCP enumeration error: {e}")
 
@@ -238,7 +238,7 @@ async def enumerate_azure() -> list[CloudAsset]:
                 assets.append(a)
 
     except ImportError:
-        logger.info("Azure SDKs not available — skipping Azure enumeration")
+        logger.info("Azure SDKs not available: skipping Azure enumeration")
     except Exception as e:
         logger.error(f"Azure enumeration error: {e}")
 
@@ -248,7 +248,7 @@ async def enumerate_azure() -> list[CloudAsset]:
 async def enumerate_cloud(providers: Optional[list[str]] = None, **kwargs) -> dict[str, Any]:
     """Main entry point for cloud enumeration (called by orchestrator)."""
     if not providers:
-        logger.info("No cloud providers specified — skipping cloud enumeration")
+        logger.info("No cloud providers specified: skipping cloud enumeration")
         return {"assets": [], "total": 0}
 
     all_assets: list[CloudAsset] = []

@@ -294,9 +294,9 @@ class IDORScanner:
                 verdict = _idor_verdict(orig_status, orig_body, test_status, test_body)
                 if verdict:
                     vt, sev, conf, extra = verdict
-                    title = (f"IDOR — path ID enumeration (/{seg}/ → /{candidate}/)"
+                    title = (f"IDOR: path ID enumeration (/{seg}/ → /{candidate}/)"
                              if vt == "idor" else
-                             f"Enumerable object reference — path /{seg}/ → /{candidate}/")
+                             f"Enumerable object reference: path /{seg}/ → /{candidate}/")
                     self._add(
                         target=test_url,
                         vuln_type=vt,
@@ -346,9 +346,9 @@ class IDORScanner:
                     verdict = _idor_verdict(orig_status, orig_body, test_status, test_body)
                     if verdict:
                         vt, sev, conf, extra = verdict
-                        title = (f"IDOR — parameter enumeration (?{param}={candidate})"
+                        title = (f"IDOR: parameter enumeration (?{param}={candidate})"
                                  if vt == "idor" else
-                                 f"Enumerable object reference — ?{param}={candidate}")
+                                 f"Enumerable object reference: ?{param}={candidate}")
                         self._add(
                             target=test_url,
                             vuln_type=vt,
@@ -387,8 +387,8 @@ class IDORScanner:
                     verdict = _idor_verdict(orig_status, orig_body, test_status, test_body)
                     if verdict:
                         vt, sev, conf, extra = verdict
-                        title = (f"IDOR — UUID enumeration (?{param})" if vt == "idor"
-                                 else f"Enumerable object reference — UUID ?{param}")
+                        title = (f"IDOR: UUID enumeration (?{param})" if vt == "idor"
+                                 else f"Enumerable object reference: UUID ?{param}")
                         self._add(
                             target=test_url,
                             vuln_type=vt,
@@ -488,7 +488,7 @@ class IDORScanner:
                     self._add(
                         target=action,
                         vuln_type="mass_assignment",
-                        title=f"Mass Assignment — field '{extra_field}' reflected",
+                        title=f"Mass Assignment: field '{extra_field}' reflected",
                         severity="high",
                         confidence=0.75,
                         evidence={

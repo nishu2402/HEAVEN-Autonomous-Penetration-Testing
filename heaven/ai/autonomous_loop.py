@@ -238,7 +238,7 @@ def _rule_based_next_action(
         return AutonomousAction(
             kind="exploit_proof",
             rationale=f"{len(exploitable)} exploitable high-confidence finding(s) "
-                      f"— run read-only exploitation proof",
+                      f": run read-only exploitation proof",
             estimated_value=0.85,
         )
 
@@ -680,7 +680,7 @@ def _executive_summary(s: AutonomousRunSummary) -> str:
             f"Given the severity profile, {headline}."
         )
     if s.objective_met and s.target_objective:
-        body += f" The stated objective — \"{s.target_objective}\" — was met."
+        body += f" The stated objective \"{s.target_objective}\" was met."
     return body
 
 
@@ -689,7 +689,7 @@ def _recommendations(s: AutonomousRunSummary) -> list[str]:
     recs: list[str] = []
     if s.total_critical:
         recs.append(
-            f"Triage and remediate the {s.total_critical} critical finding(s) first — "
+            f"Triage and remediate the {s.total_critical} critical finding(s) first: "
             f"these are directly exploitable and should block release."
         )
     if s.total_high:

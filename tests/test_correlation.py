@@ -261,6 +261,39 @@ def test_empty_input_is_safe():
     assert correlate_findings([])["total_combinations"] == 0
 
 
+def test_combined_risk_owasp_is_rendered_in_2025_taxonomy():
+    """A combined risk must never show a stale OWASP 2021 edition beside the
+    2025 findings in the same report. The rules carry 2021 category ids for
+    historical reasons; they are crosswalked to Top 10:2025 at build time, so
+    every emitted combination (and every rule that carries an OWASP tag) exposes
+    only a 2025 id."""
+    from heaven.devsecops.frameworks import owasp_2025_id
+    from heaven.vulnscan.correlation import _owasp_2025
+
+    # Every rule that carries a web-OWASP tag crosswalks to a valid 2025 id, and
+    # the crosswalk never emits a 2021 edition (an unrecognised tag is preserved
+    # verbatim rather than dropped).
+    tagged = [r for r in AMPLIFICATION_RULES if r.owasp]
+    assert tagged, "expected some rules to carry an OWASP tag"
+    for rule in tagged:
+        rendered = _owasp_2025(rule.owasp)
+        assert ":2021" not in rendered, f"{rule.rule_id} still 2021: {rendered}"
+        if owasp_2025_id(rule.owasp):          # a recognised web-OWASP tag
+            assert ":2025" in rendered
+
+    # A real emitted combination exposes a 2025 label end to end (dataclass +
+    # the serialized dict the report / UI / API consume).
+    findings = [
+        _f(id="a", vuln_type="path_traversal", title="LFI", severity="high",
+           target="http://t/fi?page=1", parameter="page"),
+        _f(id="b", vuln_type="file_upload", title="Upload", severity="high",
+           target="http://t/up"),
+    ]
+    combo = CorrelationEngine().correlate(findings)[0]
+    assert combo.owasp and ":2025" in combo.owasp and ":2021" not in combo.owasp
+    assert ":2021" not in str(combo.to_dict()["owasp"])
+
+
 # ── Advanced output: playbook, prerequisites, priority, phase, new rules ─────
 
 

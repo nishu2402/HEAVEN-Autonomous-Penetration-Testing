@@ -747,6 +747,24 @@ def scan(
             ft.add_column("Priority")
             sev_style = {"critical": "bold red", "high": "red",
                          "medium": "yellow", "low": "cyan"}
+            # CVSS column shows the objective per-finding base score (published
+            # CVE/NVD/OSV → KB class typical → vector-derived) via the SAME
+            # resolver the report and UI use, so a critical CVE reads its true 9.8
+            # rather than the ML text model's severity-anchored guess (which
+            # collapses every vulnerable_service row onto one flat number). Falls
+            # back to the ML score only when nothing objective is scoreable.
+            from heaven.utils.cvss import objective_base_score as _obj_cvss
+
+            def _cvss_cell(fnd: dict) -> str:
+                s = _obj_cvss(fnd)
+                if s > 0:
+                    return f"{s:.1f}"
+                try:
+                    v = float(fnd.get("predicted_cvss_score") or 0)
+                except (TypeError, ValueError):
+                    v = 0.0
+                return f"{v:.1f}" if 0.0 < v <= 10.0 else "—"
+
             for f in sorted(all_findings,
                             key=lambda x: x.get("priority_score", 0), reverse=True):
                 sev = f.get("severity", "info").lower()
@@ -754,7 +772,7 @@ def scan(
                     f"[{sev_style.get(sev,'dim')}]{sev.upper()}[/]",
                     str(f.get("vuln_type", ""))[:25],
                     str(f.get("target", ""))[:40],
-                    str(round(f.get("predicted_cvss_score", 0), 1)),
+                    _cvss_cell(f),
                     str(round(f.get("priority_score", 0), 1)),
                 )
             if HAS_RICH:

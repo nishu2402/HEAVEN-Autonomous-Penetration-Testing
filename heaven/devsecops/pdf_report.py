@@ -207,6 +207,183 @@ class PDFReportGenerator:
         return sorted(enriched, key=lambda f: (_SEV_ORDER.get(_sev_of(f), 4),
                                                -float(f.get("risk_score") or 0)))
 
+    def _combined_risk_section(self, findings, cw, styles, table, pill, heading):
+        """Section: Combined Risk & Attack Paths.
+
+        Renders the correlation engine's output — findings that, taken together,
+        form a materially worse issue than any one alone; the single fixes that
+        break the most chains ("break the chain"); and the end-to-end attack
+        paths that chain those combinations into a business impact. Returns a
+        list of flowables, or ``[]`` when there are no correlations, so the
+        section (and its number) are omitted exactly as the HTML report does.
+
+        This introduces NO new finding and NO false positive: it only
+        re-expresses findings already reported in their own right, elevated to
+        the severity their combination warrants. It reaches parity with the web
+        UI and the HTML report, which already surface this analysis.
+        """
+        from reportlab.lib.units import mm
+        from reportlab.platypus import KeepTogether, PageBreak, Paragraph, Spacer, Table, TableStyle
+
+        try:
+            from heaven.vulnscan.correlation import CorrelationEngine
+            summary = CorrelationEngine().summary(findings)
+        except Exception:  # noqa: BLE001 — correlation is additive; never abort the report
+            logger.exception("combined-risk section: correlation failed; omitting")
+            return []
+        combos = summary.get("combinations") or []
+        if not combos:
+            return []
+        paths = summary.get("attack_paths") or []
+        rem = summary.get("remediation") or {}
+
+        def _sev(s: Any) -> str:
+            s = str(s or "info").lower()
+            return s if s in SEVERITY_META else "info"
+
+        def _num(v: Any, default: float = 0.0) -> float:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        def _hdr(sev: str, title_html: str) -> Table:
+            t = Table([[pill(sev), Paragraph(title_html, styles["cell"])]],
+                      colWidths=[22 * mm, cw - 22 * mm])
+            t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                   ("LEFTPADDING", (0, 0), (0, 0), 0),
+                                   ("TOPPADDING", (0, 0), (-1, -1), 1),
+                                   ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+            return t
+
+        muted_hex = "#5b6472"
+        out: list[Any] = [heading("5.", "Combined Risk & Attack Paths")]
+        out.append(Paragraph(
+            "Findings rated individually above that, in combination, form a materially "
+            "worse issue. Each combined risk is elevated to the severity the combination "
+            "warrants, names its constituent findings (still listed in their own right), "
+            "and gives the concrete in-scope steps to prove it. Remediating any single "
+            "constituent breaks the chain.", styles["body"]))
+        n_crit = sum(1 for c in combos if _sev(c.get("combined_severity")) == "critical")
+        headline = f"{len(combos)} combined risk(s)" + (f", {n_crit} critical" if n_crit else "")
+        if paths:
+            headline += f"; {len(paths)} end-to-end attack path(s)"
+        out.append(Paragraph(_esc(headline + "."), styles["small"]))
+
+        # ── Break the chain: highest-leverage fixes (the headline value) ──
+        by_finding = [r for r in (rem.get("by_finding") or []) if r.get("chains_broken")]
+        top = rem.get("top_fix") or {}
+        if top.get("chains_broken"):
+            out.append(Paragraph("Break the chain: highest-leverage fixes", styles["h3"]))
+            out.append(Paragraph(
+                f"Fixing <b>{_esc(str(top.get('title')))}</b> alone breaks "
+                f"{int(_num(top.get('chains_broken')))} combined risk(s). Address the "
+                "constituent fixes below in order to collapse the most risk with the least "
+                "work.", styles["body"]))
+            rows = [[Paragraph(h, styles["th"]) for h in ("Fix", "Target", "Breaks")]]
+            for r in by_finding[:8]:
+                breaks = f"{int(_num(r.get('chains_broken')))} combined risk(s)"
+                if r.get("paths_broken"):
+                    breaks += f" · {int(_num(r['paths_broken']))} attack path(s)"
+                rows.append([Paragraph(_esc(str(r.get("title") or "")), styles["cell"]),
+                             Paragraph(_esc(str(r.get("target") or "—")), styles["small"]),
+                             Paragraph(_esc(breaks), styles["small"])])
+            out.append(table(rows, [cw - 116 * mm, 56 * mm, 60 * mm]))
+            cut = rem.get("path_cut") or []
+            if cut:
+                names = ", ".join(_esc(str(c.get("title"))) for c in cut)
+                out.append(Spacer(1, 3))
+                out.append(Paragraph(
+                    f"<b>Sever every attack path</b> by fixing: {names}.", styles["small"]))
+
+        # ── Each combined risk ──
+        out.append(Paragraph("Combined risks", styles["h3"]))
+        for c in combos:
+            sev = _sev(c.get("combined_severity"))
+            conf = str(c.get("confirmation") or "Potential")
+            block: list[Any] = [_hdr(
+                sev, f"<b>{_esc(str(c.get('name') or 'Combined risk'))}</b> "
+                     f"<font size=8 color='{muted_hex}'>[{_esc(conf)}]</font>")]
+            cvss = _num(c.get("representative_cvss"))
+            pct = int(round(_num(c.get("confidence")) * 100))
+            prio = _num(c.get("priority"))
+            meta = f"Representative CVSS {cvss:.1f} · confidence {pct}%"
+            if prio:
+                meta += f" · priority {prio:.0f}/100"
+            metabits = []
+            if c.get("cwe"):
+                metabits.append(str(c.get("cwe")))
+            if c.get("owasp"):
+                metabits.append(str(c.get("owasp")))
+            mitre = ", ".join(str(x) for x in (c.get("mitre") or []))
+            if mitre:
+                metabits.append("MITRE " + mitre)
+            if metabits:
+                meta += " · " + " | ".join(metabits)
+            block.append(Paragraph(_esc(meta), styles["small"]))
+            block.append(Paragraph("Combines these findings:", styles["label"]))
+            for comp in c.get("components", []):
+                csev = _sev(comp.get("severity"))
+                line = (f"<b>[{SEVERITY_META[csev]['label']}]</b> "
+                        f"{_esc(str(comp.get('title') or comp.get('vuln_type') or 'Finding'))}")
+                if comp.get("target"):
+                    line += f" <font color='{muted_hex}'>({_esc(str(comp.get('target')))})</font>"
+                block.append(Paragraph("• " + line, styles["small"]))
+            if c.get("rationale"):
+                block.append(Paragraph(
+                    f"<b>Why it is worse together:</b> {_esc(str(c.get('rationale')))}", styles["small"]))
+            if c.get("impact"):
+                block.append(Paragraph(f"<b>Impact:</b> {_esc(str(c.get('impact')))}", styles["small"]))
+            prereqs = [p for p in (c.get("prerequisites") or []) if p]
+            if prereqs:
+                block.append(Paragraph(
+                    "<b>Prerequisites:</b> " + _esc("; ".join(str(p) for p in prereqs)), styles["small"]))
+            steps = [s for s in (c.get("playbook") or []) if s]
+            if steps:
+                label = "Reproduction steps:" if conf == "Confirmed" else "Proof / validation steps:"
+                block.append(Paragraph(f"<b>{label}</b>", styles["small"]))
+                for i, s in enumerate(steps, 1):
+                    block.append(Paragraph(f"{i}. {_esc(str(s))}", styles["small"]))
+            if c.get("recommendation"):
+                block.append(Paragraph(
+                    f"<b>Recommendation:</b> {_esc(str(c.get('recommendation')))}", styles["small"]))
+            block.append(Spacer(1, 5 * mm))
+            out.append(KeepTogether(block))
+
+        # ── End-to-end attack paths ──
+        if paths:
+            out.append(Paragraph("Attack paths", styles["h3"]))
+            out.append(Paragraph(
+                "Each path is an ordered walk where every step hands the attacker a capability "
+                "the next step consumes, ending in the business impact shown. Same-host steps and "
+                "cross-host hops (reused credentials or internal reach gained earlier) are both "
+                "labelled.", styles["small"]))
+            for p in paths:
+                psev = _sev(p.get("severity"))
+                pconf = int(round(_num(p.get("confidence")) * 100))
+                hosts = " → ".join(str(h) for h in (p.get("hosts") or []))
+                pblock: list[Any] = [_hdr(
+                    psev, f"<b>{_esc(str(p.get('business_impact') or 'Attack path'))}</b> "
+                          f"<font size=8 color='{muted_hex}'>{int(_num(p.get('length')))} steps · "
+                          f"confidence {pconf}%{(' · ' + _esc(hosts)) if hosts else ''}</font>")]
+                if p.get("impact_detail"):
+                    pblock.append(Paragraph(_esc(str(p.get("impact_detail"))), styles["small"]))
+                for i, st in enumerate(p.get("steps") or [], 1):
+                    ssev = _sev(st.get("combined_severity"))
+                    txt = (f"{i}. <b>[{SEVERITY_META[ssev]['label']}]</b> "
+                           f"{_esc(str(st.get('name') or ''))}")
+                    where = ", ".join(str(h) for h in (st.get("hosts") or []))
+                    if where:
+                        txt += f" <font color='{muted_hex}'>[{_esc(where)}]</font>"
+                    if st.get("via"):
+                        txt += f" <font color='{muted_hex}'>· {_esc(str(st.get('via')))}</font>"
+                    pblock.append(Paragraph(txt, styles["small"]))
+                pblock.append(Spacer(1, 5 * mm))
+                out.append(KeepTogether(pblock))
+
+        out.append(PageBreak())
+        return out
+
     # ── PDF construction ────────────────────────────────────────────
 
     def _build_pdf(self, data: dict[str, Any], output_path: str) -> None:
@@ -658,8 +835,16 @@ class PDFReportGenerator:
             story.append(Paragraph("No findings recorded.", styles["small"]))
         story.append(PageBreak())
 
-        # ── 9. Detailed findings ──
-        story.append(heading("5.", "Detailed Findings"))
+        # ── 5. Combined Risk & Attack Paths (only when correlations exist) ──
+        # Parity with the web UI and the HTML report. When there are no
+        # correlations the section is omitted, so the later section numbers only
+        # shift by one when it is actually present (``off``).
+        cr_flowables = self._combined_risk_section(findings, cw, styles, table, pill, heading)
+        story.extend(cr_flowables)
+        off = 1 if cr_flowables else 0
+
+        # ── 6. Detailed findings ──
+        story.append(heading(f"{5 + off}.", "Detailed Findings"))
         if not findings:
             story.append(Paragraph("No findings recorded.", styles["small"]))
         for i, f in enumerate(findings, 1):
@@ -672,8 +857,8 @@ class PDFReportGenerator:
                 story.extend(self._finding_block_fallback(i, f, cw, styles))
         story.append(PageBreak())
 
-        # ── 10. OWASP coverage ──
-        story.append(heading("6.", "OWASP Top 10 (2025) Coverage"))
+        # ── 7. OWASP coverage ──
+        story.append(heading(f"{6 + off}.", "OWASP Top 10 (2025) Coverage"))
         story.append(self._owasp_table(findings, cw, styles, table))
         story.append(PageBreak())
 
@@ -726,8 +911,8 @@ class PDFReportGenerator:
             story.append(self._compliance_table(findings, _fw_obj, cw, styles, table))
             story.append(PageBreak())
 
-        # ── 11. Roadmap ──
-        story.append(heading("7.", "Remediation Roadmap"))
+        # ── 8. Roadmap ──
+        story.append(heading(f"{7 + off}.", "Remediation Roadmap"))
         story.append(Paragraph(
             f"Recommended remediation order, prioritised by severity, covering all "
             f"{len(findings)} findings. Address higher-severity items first; SLAs "
@@ -749,8 +934,8 @@ class PDFReportGenerator:
             story.append(table(rr, [8 * mm, 24 * mm, 48 * mm, cw - 110 * mm, 30 * mm]))
         story.append(PageBreak())
 
-        # ── 12. Appendix ──
-        story.append(heading("8.", "Appendix"))
+        # ── 9. Appendix ──
+        story.append(heading(f"{8 + off}.", "Appendix"))
         story.append(Paragraph("Tooling", styles["h3"]))
         story.append(Paragraph(
             "Assessment performed with the HEAVEN Autonomous Penetration-Testing Platform, which "

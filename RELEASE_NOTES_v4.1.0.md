@@ -1,8 +1,8 @@
 <p align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/v4.1.0/docs/assets/heaven-poster.svg"/>
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/v4.1.0/docs/assets/heaven-poster-light.svg"/>
-  <img src="https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/v4.1.0/docs/assets/heaven-release-banner.png" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework v4.1.0 · Recon -> ML Risk Scoring -> Verified Exploitation -> Reporting"/>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/main/docs/assets/heaven-poster.svg"/>
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/main/docs/assets/heaven-poster-light.svg"/>
+  <img src="https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/main/docs/assets/heaven-release-banner.png" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework v4.1.0 · Recon -> ML Risk Scoring -> Verified Exploitation -> Reporting"/>
 </picture>
 </p>
 
@@ -20,7 +20,7 @@
     <img src="https://img.shields.io/github/v/release/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=flat-square&logo=github&logoColor=white&label=Release&color=FF36AB" alt="Release"/>
     <img src="https://img.shields.io/badge/Modules-219-7400B8?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-62-B8FF00?style=flat-square&logo=gnubash&logoColor=black" alt="CLI"/>
-    <img src="https://img.shields.io/badge/UI_Pages-25-00D2FF?style=flat-square&logo=react&logoColor=black" alt="UI"/>
+    <img src="https://img.shields.io/badge/UI_Pages-30-00D2FF?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.91-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
   </p>
 

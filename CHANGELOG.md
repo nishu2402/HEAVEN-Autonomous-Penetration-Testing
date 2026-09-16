@@ -34,6 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Three web-fuzzer false positives that a live DVWA scan surfaced are suppressed
+  at the emitter.** An authenticated benchmark scan produced five findings that were
+  not real, each traced to a specific over-broad check. The "403 bypass via path
+  manipulation" test appended path tricks to a forbidden URL and flagged any 200 in
+  response, but two of its suffixes (`/../`, `/.%2e/`) normalize to the parent
+  directory, so on `/server-status`, `/docs` and `/config` the "bypass" simply
+  fetched the site's home page (a different resource) and reported access that never
+  happened. Those parent-escaping suffixes are removed, and a candidate bypass whose
+  body matches the origin root is now rejected. The hidden-parameter probe reported
+  `redirect` as a "discovered" parameter on a page where it was already part of the
+  request, so the discovery step now skips names already present in the query. The
+  parameter-pollution check fired whenever duplicating a parameter changed the
+  response at all, which is ordinary last-value behaviour for any working parameter;
+  it now requires a genuine desync, where the duplicate smuggles a value into the
+  response that a single occurrence does not. No detection changed: each suppressed
+  finding was confirmed false against live DVWA, the genuine cases still fire (with
+  new positive-control coverage), and the `Benchmark — HEAVEN vs. DVWA` precision is
+  now a true 100% with recall already at 100%. New
+  `tests/test_web_fuzzer_fp_hardening.py`.
 - **A web scan no longer spends minutes fuzzing static documents or re-probing one
   host for request smuggling.** The heaviest active web tasks (advanced exploitation
   and the anomaly probe) fire a per-URL battery of payloads, several of them

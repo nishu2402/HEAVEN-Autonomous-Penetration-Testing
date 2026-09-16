@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "heaven-pentest"
-version = "4.0.0"
-description = "HEAVEN — autonomous penetration-testing framework with AI-driven attack-chain planning, continuous monitoring, SAST/DAST, and 55 CLI commands"
+version = "4.1.0"
+description = "HEAVEN — autonomous penetration-testing framework with AI-driven attack-chain planning, continuous monitoring, SAST/DAST, and 62 CLI commands"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"

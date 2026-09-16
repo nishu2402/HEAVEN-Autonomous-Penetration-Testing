@@ -94,7 +94,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API**: 99 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.0.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.1.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -463,7 +463,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 62 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.0.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.1.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">

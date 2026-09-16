@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2877 tests · 62 CLI commands · 99 API routes · 25 UI pages · 16 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2877 tests · 62 CLI commands · 99 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -23,7 +23,7 @@
   <p>
     <img src="https://img.shields.io/badge/Modules-219-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-62-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
-    <img src="https://img.shields.io/badge/UI_Pages-25-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
+    <img src="https://img.shields.io/badge/UI_Pages-30-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.91-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
   </p>
@@ -90,7 +90,7 @@ HEAVEN is a **production-grade penetration-testing platform** that automates the
 It runs three ways from the **same engagement dataset**:
 
 - **CLI**: 62 commands for scriptable, CI-friendly workflows.
-- **Web UI**: a 25-page React command centre (scan launcher, live findings, kill-chain, reports).
+- **Web UI**: a 30-page React command centre (scan launcher, live findings, combined risk, kill-chain, reports).
 - **REST + WebSocket API**: 99 RBAC-protected routes for automation and integration.
 
 <div align="center">
@@ -115,7 +115,7 @@ It runs three ways from the **same engagement dataset**:
 | 🧩 **Modules** | 219 |
 | ⌨️ **CLI Commands** | 62 |
 | 🌐 **API Routes** | 99 RBAC-protected routes |
-| 🖥️ **UI Pages** | 25 (React + Vite, dark glassmorphic) |
+| 🖥️ **UI Pages** | 30 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
 | 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · DeepSeek · local (Ollama / any OpenAI-compatible server) · **deterministic fallback (no API key needed)** |
@@ -155,6 +155,7 @@ It runs three ways from the **same engagement dataset**:
 | 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini / DeepSeek / local) · **deterministic fallback needs no API key** |
 | 📊 **Risk Scoring** | CVSS v4.0 (current standard) scored alongside CVSS v3.1 · the score a client sees is computed **exactly** from each finding's CVSS vector via the reference formula; the hybrid ML predictor (13-feature ExtraTrees vector model R²=0.91 + TF-IDF text description/type model on 316k real NVD CVEs, R²=0.63 on the findings it actually scores, right band 99% within one level) only ranks findings with no published score · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
+| 🔗 **Combined Risk** | Correlates individually-rated findings into materially worse combined issues, then chains them into end-to-end attack paths where each step yields a capability the next one uses · ranks the single "break the chain" fixes that collapse the most paths · OWASP Top 10:2025 crosswalk · rendered in the web UI, the CLI, and the PDF/HTML reports |
 | 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA: dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
 | 📄 **Reporting** | 8 formats from CLI and web UI: PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · Burp XML · proxy-JSONL |
 | 🔇 **FP Suppression** | Two-stage confirmation pass · sub-0.40-confidence results discarded · optional LLM second opinion |
@@ -533,7 +534,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 <img width="900" alt="HEAVEN web UI Dashboard: 3D attack-surface topology, severity distribution, and Fix-This-First priorities" src="docs/screenshots/web-app_dashboard.png" />
 </div>
 
-**25 pages:**
+**30 pages:**
 
 <div align="center">
 
@@ -546,18 +547,23 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 | **Findings** | Filter · triage · **download report** |
 | **Finding Detail** | Description · impact · remediation · CWE/OWASP/MITRE · evidence · curl repro |
 | **Reports** | Severity snapshot · one-click download in all 8 formats |
+| **Combined Risk** | Correlates two or more findings into a single higher-severity issue · chains them into end-to-end attack paths (each step yields a capability the next uses) · ranks the single "break the chain" fixes with the most leverage · OWASP Top 10:2025 crosswalk |
 | **Kill Chain** | Lockheed phase coverage · attack-path summary |
 | **Watch** | Continuous monitoring · differential alert feed |
 | **Scan Diff** | New / resolved / regressed / unchanged findings |
 | **SAST** | Semgrep results + OWASP rule pack |
 | **SCA · Deps** | Dependency audit vs. OSV.dev: vulnerable packages + fix versions |
 | **CVE Lookup** | Dynamic live CVE search (NVD + CIRCL) for any product/version: version-confirmed, KEV-flagged, EPSS-scored, Exploit-DB PoC links |
+| **Analyze** | Offline artifact analysis: pcap · firmware · binary · documents · archives · audio/video · steganography · mobile apps (Android APK / iOS IPA vs OWASP Mobile Top 10) |
 | **Autonomous** | LLM observe→plan→act loop with bounded budget |
 | **AI Plans** | Saved attack plans from autonomous sessions |
 | **Assistant** | Engagement-grounded AI chat assistant (also a floating widget on every page) |
 | **Coverage** | OWASP coverage grade per engagement |
+| **Compliance** | Live control-by-control coverage per framework, downloadable per framework (maps evidence of gaps to controls, not an attestation) |
+| **Exploit** | Authorized active exploitation: confirms RCE with a benign proof command · read-only, no persistence · admin-gated |
 | **Post-Ex** | linPEAS + BloodHound results |
 | **Lateral** | SSH/SMB/PsExec lateral movement paths |
+| **Pivot** | Tunnel through an authorized SSH foothold to connect-scan subnets your host cannot route to · double-pivot chaining · read-only |
 | **Knowledge** | Cross-engagement knowledge graph |
 | **Tickets** | Jira / Linear sync status |
 | **Benchmark** | DVWA precision/recall numbers |
@@ -664,6 +670,8 @@ heaven report --framework OWASP_TOP10 -o compliance.html
 heaven report --framework NIST_CSF    -o nist.html
 ```
 
+The PDF and HTML client deliverables also carry a **Combined Risk & Attack Paths** section: findings that combine into a materially worse issue, the end-to-end attack-path narrative, and the single "break the chain" fixes that collapse the most paths.
+
 Every finding carries a defensible **evidence package**: request/response, copy-pasteable curl repro, detection rationale, remediation, and CWE/OWASP/MITRE references sourced from the built-in vulnerability knowledge base.
 
 ---
@@ -751,7 +759,7 @@ heaven/                   ← Python package (219 modules)
 ├── api/                  FastAPI server + WebSocket (99 routes)
 └── cli/                  Click CLI - one module per command group (62 commands)
 
-heaven-ui/                React + Vite web console (25 pages)
+heaven-ui/                React + Vite web console (30 pages)
 tests/                    2877 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
@@ -838,7 +846,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>2877 tests · 219 modules · 62 CLI commands · 99 API routes · 25 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>2877 tests · 219 modules · 62 CLI commands · 99 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

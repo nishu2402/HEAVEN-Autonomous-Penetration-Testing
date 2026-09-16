@@ -84,7 +84,7 @@ server is ready (use `heaven serve --no-open` to suppress that). Log in with:
   on first login. Set `HEAVEN_ADMIN_PASSWORD` beforehand to use a strong
   password from the start and skip the prompt.
 
-You'll see 25 pages:
+You'll see 30 pages:
 
 | Page | What it does |
 |---|---|
@@ -99,7 +99,8 @@ You'll see 25 pages:
 | Coverage | Self-grading, "what didn't we test?" |
 | Methodology | OWASP / NIST / PTES mapping viewer |
 | Benchmark | Latest DVWA precision / recall / F1 |
-| … + 14 more |
+| Combined Risk | Correlated multi-finding attack paths + "break the chain" fixes |
+| … + 18 more |
 
 ---
 

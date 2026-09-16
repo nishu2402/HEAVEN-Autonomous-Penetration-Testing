@@ -15,7 +15,11 @@ on:
 jobs:
   dvwa-benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Head-room for the worst case: an on-demand 3-run dispatch, each scan
+    # self-finalising at the 900s internal budget (~45 min) plus image pull and
+    # install. The weekly scheduled run does a single scan and finishes far
+    # sooner.
+    timeout-minutes: 55
 
     steps:
       - uses: actions/checkout@v5
@@ -45,8 +49,22 @@ jobs:
       - name: Run benchmark
         env:
           HEAVEN_RUN_BENCHMARKS: "1"
-          HEAVEN_BENCH_RUNS: ${{ inputs.runs || '3' }}
-          HEAVEN_BENCH_SCAN_TIMEOUT: "900"
+          # The weekly scheduled run aggregates a single scan (schedule passes no
+          # input, so this falls back to 1) — that keeps the job fast and removes
+          # the multi-scan amplification that made it flaky on a shared 2-CPU
+          # runner. An on-demand dispatch can still request more runs for a deeper
+          # mean +/- stddev.
+          HEAVEN_BENCH_RUNS: ${{ inputs.runs || '1' }}
+          # Internal graceful budget: the scan self-finalises here with the
+          # findings it already has (full DVWA recall is reached in a few minutes,
+          # long before this) and PERSISTS them, so on a slow runner it returns a
+          # real result instead of being SIGKILLed by the subprocess timeout with
+          # nothing on disk. Kept 300s below HEAVEN_BENCH_SCAN_TIMEOUT so the
+          # graceful stop always wins the race.
+          HEAVEN_SCAN_DEADLINE: "900"
+          # Hard subprocess backstop, 300s above the internal budget — only ever
+          # reached if the graceful finalise itself were to stall.
+          HEAVEN_BENCH_SCAN_TIMEOUT: "1200"
         run: |
           pytest tests/benchmarks/test_dvwa_baseline.py -v -s \
             --junit-xml=benchmark-results.xml

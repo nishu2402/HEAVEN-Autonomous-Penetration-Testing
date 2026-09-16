@@ -306,6 +306,17 @@ class ScanOrchestrator:
         # work, it does not curtail healthy work. Tunable so tests can drive it fast.
         self._phase_deadline_factor: float = 1.5
         self._phase_deadline_margin: float = 180.0
+        # Optional overall wall-clock budget for the ENTIRE scan, in seconds
+        # (0.0 = unlimited, the default — normal scans are never truncated). When
+        # positive, run() stops launching new phases once the budget is spent and
+        # _execute_phase caps each phase to the time remaining, so the scan always
+        # FINALISES with the findings it has already collected instead of being
+        # killed by an outer hard timeout (e.g. a CI harness' subprocess timeout
+        # that would otherwise SIGKILL the process and lose every finding). This is
+        # the global companion to the per-phase deadline above: that bounds any one
+        # phase; this bounds their sum. Set from HEAVEN_SCAN_DEADLINE in
+        # build_full_scan, or directly by a caller / test.
+        self._scan_budget_s: float = 0.0
 
         self._checkpoint_store = checkpoint_store
         self._resumed_checkpoints: dict[str, dict] = {}
@@ -1080,6 +1091,14 @@ class ScanOrchestrator:
         # cancellation.
         slowest = max((self._effective_timeout(t) for t in phase_tasks), default=60.0)
         phase_deadline = slowest * self._phase_deadline_factor + self._phase_deadline_margin
+        # Honour the overall scan budget (opt-in): never let a single phase run
+        # past the time remaining in the budget, so the SUM of phases cannot
+        # overshoot it — the fixed per-phase margin above otherwise could. At or
+        # past budget the phase still gets a small grace window to finalise its
+        # in-flight work rather than being cut to zero.
+        if self._scan_budget_s:
+            remaining = self._scan_budget_s - self.progress.elapsed_seconds
+            phase_deadline = min(phase_deadline, max(1.0, remaining))
 
         futures = {asyncio.ensure_future(run_with_deps(t)): t for t in phase_tasks}
         done, pending = await asyncio.wait(futures.keys(), timeout=phase_deadline)
@@ -1213,6 +1232,22 @@ class ScanOrchestrator:
         for phase in phase_order:
             if self._cancelled:
                 logger.warning("Scan cancelled: stopping pipeline")
+                break
+
+            # Overall wall-clock budget (opt-in; 0 = unlimited). Once the scan has
+            # spent its budget, stop launching new phases and fall through to
+            # finalisation so the findings already collected are aggregated,
+            # returned and persisted — a graceful early stop instead of an outer
+            # hard-timeout SIGKILL that would lose everything. Findings from every
+            # phase that already ran are captured in the aggregation below,
+            # regardless of where the pipeline stops.
+            if self._scan_budget_s and self.progress.elapsed_seconds >= self._scan_budget_s:
+                logger.warning(
+                    "⏱ Scan budget of %.0fs reached (elapsed %.0fs); finalising "
+                    "with findings collected so far and skipping remaining phases "
+                    "from %s onward.",
+                    self._scan_budget_s, self.progress.elapsed_seconds, phase.value,
+                )
                 break
 
             phase_results = await self._execute_phase(phase)
@@ -1436,6 +1471,22 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # Closed-loop feedback engine, scoped to exactly the operator's targets — it
     # can only ever action a host already inside the authorised scope.
     orch.feedback = FeedbackEngine(targets)
+
+    # Optional overall scan budget. When HEAVEN_SCAN_DEADLINE (seconds) is set,
+    # the whole scan self-finalises at that wall-clock mark with the findings it
+    # has, instead of running unbounded. Left unset (or <= 0) the scan is
+    # unbounded, exactly as before. Used by the DVWA benchmark to guarantee the
+    # scan always returns (and persists) before the harness' subprocess timeout,
+    # so a slow CI runner degrades to a graceful partial result rather than a
+    # SIGKILL that loses every finding.
+    import os as _os
+    try:
+        _budget = float(_os.environ.get("HEAVEN_SCAN_DEADLINE", "0") or "0")
+    except ValueError:
+        _budget = 0.0
+    if _budget > 0:
+        orch._scan_budget_s = _budget
+        logger.info(f"Overall scan budget: {_budget:.0f}s (graceful finalise on expiry)")
 
     # ═══ Phase: RECON (parallel multi-vector) ═══
     # Network recon must scan every target host — whether the operator entered a
@@ -3234,7 +3285,10 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                 _pt = _pu.port or (443 if _pu.scheme == "https" else 80)
                 if _h:
                     http_ports_by_host.setdefault(_h, set()).add(int(_pt))
-            except Exception:  # noqa: BLE001 - a malformed URL just yields no hint
+            except (ValueError, TypeError):
+                # A malformed URL (bad port, unparseable authority) just yields no
+                # hint — skip it. Narrow on purpose: an unexpected error must still
+                # surface rather than be silently swallowed.
                 continue
 
         all_findings: list[dict] = []

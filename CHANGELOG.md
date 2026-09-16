@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0]: 2026-09-16
+
 ### Added
 
 - **Combined Risk now builds end-to-end attack paths, not just pairs.** The
@@ -31,6 +33,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `heaven correlate` output, and the report. New coverage in
   `tests/test_correlation.py` (attack-path chaining, host-role and impact labelling,
   the no-false-chain guard, subpath suppression, and remediation leverage).
+- **The PDF report now carries the same Combined Risk and attack-path analysis as
+  the HTML report and the web UI.** The formal client deliverable stopped at the
+  per-finding summary, so the correlation work reached the web report and the live
+  UI but never the PDF a client is handed. A new "Combined Risk & Attack Paths"
+  section is built from the same `CorrelationEngine().summary()` the other surfaces
+  use, computed at report-build time: it leads with the highest-leverage single
+  fixes and the smallest set that severs every path to the crown jewels, then lists
+  each combined risk with its elevated severity and constituents, then the attack
+  paths with their business impact. It adds no new detection, so it introduces no
+  new false positives: it re-expresses combinations already built from confirmed
+  findings, and the section (with its number) is omitted entirely when a scan
+  produced no correlations, exactly as the HTML report does. Covered by
+  `tests/test_report_and_triage_fixes.py`.
+- **Shellshock detection now covers any HTTP service and proves execution in-band.**
+  The check was tied to a fixed list of web ports and relied on a reverse callback,
+  so a CGI on an unlisted port was missed and a proof needed outbound egress. It now
+  applies wherever a service looks like HTTP (unlisted ports included) and tries an
+  in-band proof first: it injects an arithmetic-expansion marker ahead of the
+  command, so a server that merely echoes the header back shows the literal
+  `$((a*b))` while genuine execution shows the computed product. Matching the product
+  proves code execution with no callback, and the reverse-callback path stays as a
+  fallback for a CGI whose output never appears in the response. New coverage in
+  `tests/test_exploit_engine.py`.
+- **An optional overall time budget lets a long scan finish cleanly instead of being
+  cut off mid-run.** Set `HEAVEN_SCAN_DEADLINE` (seconds) and the scan watches its
+  own wall-clock: once the budget is spent it stops launching new phases and caps
+  every phase still in flight to the time that remains, so the run finalises with the
+  findings it already has and persists them. It is off by default (a budget of 0
+  means unlimited), so an ordinary scan is never shortened. The one place it is
+  enabled is the weekly `Benchmark — HEAVEN vs. DVWA` job, where a slow shared runner
+  could overrun the harness timeout and be killed with nothing written to disk: a
+  900s internal budget, kept 300s below the hard subprocess backstop, now returns a
+  real persisted result instead of an empty database. New coverage in
+  `tests/test_phase_deadline_and_timeout_scale.py`.
 
 ### Fixed
 
@@ -189,6 +225,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforceable SPF nor DMARC. Extended `tests/test_correlation.py` (duplicate and
   info-severity exclusion, the severity floor, the retargeted and corrected rules, the
   new email rule, and a guard that every rule can still match real findings).
+- **An SPF record that ends in `?all` (neutral) is no longer treated as safe.** The
+  email-posture check handled `-all` (hardfail) and `~all` (softfail) but silently
+  passed a neutral `?all` record, a common hosting default. Neutral tells a receiver
+  to treat every sender as unspecified, which is no enforcement at all, so with a
+  missing or non-enforcing DMARC policy the domain stays spoofable. It is now
+  reported as a medium finding that recommends `-all`. Covered by
+  `tests/test_dns_enumeration.py`.
+- **A distribution-packaged service no longer inherits CVEs its distro already
+  backport-fixed.** Distributions patch a flaw inside the same upstream version
+  string, so matching an upstream version range against a distro-packaged banner
+  (Ubuntu, Debian, RHEL and the like) produces near-certain false positives. The
+  archetype is regreSSHion (CVE-2024-6387): its 8.5p1 to 9.7p1 range covers the
+  OpenSSH shipped by current Ubuntu and Debian, which was fixed by backport within
+  days. Records known to be distro-backport-fixed are now dropped for
+  distro-packaged banners, the OpenSSH ceiling that read `<=9.6` is corrected to a
+  strict `<9.6` so the fixed release stops matching, and an exposed
+  `Docker Registry 2.0` is matched to its own product first so its `2.0` API version
+  can no longer collide with Docker Engine CVE ceilings (CVE-2022-0492). New
+  `tests/test_cve_version_fp.py`.
+- **Combined Risk cards show OWASP categories in the current Top 10:2025 edition.**
+  The amplification rules still carry OWASP 2021 ids internally, but the rest of the
+  report, the per-finding tags and the UI moved to Top 10:2025, so a combined-risk
+  card could show a stale `A07:2021` next to 2025 findings in the same deliverable.
+  The tag is now crosswalked to the 2025 taxonomy at the single point every combined
+  risk is built, and a label with no recognisable web-OWASP id (an OT/ICS tag, or
+  none) is left unchanged. Covered by `tests/test_correlation.py`.
 
 ## [4.0.0]: 2026-09-10
 

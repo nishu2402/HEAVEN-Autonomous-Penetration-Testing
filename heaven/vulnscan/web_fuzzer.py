@@ -78,6 +78,18 @@ def _dedup(findings: list[dict]) -> list[dict]:
     return out
 
 
+def _set_query_param(url: str, param: str, value: str) -> str:
+    """Return ``url`` with ``param`` set to a single ``value``, dropping any
+    existing occurrences of it. Used to build a single-value control request when
+    testing for parameter pollution."""
+    parts = urllib.parse.urlparse(url)
+    pairs = [(k, v) for (k, v) in
+             urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+             if k != param]
+    pairs.append((param, value))
+    return urllib.parse.urlunparse(parts._replace(query=urllib.parse.urlencode(pairs)))
+
+
 def _finding(target: str, vuln_type: str, severity: str, title: str,
              description: str, confidence: float = 0.80,
              evidence: Optional[dict] = None, cve: str = "") -> dict:
@@ -288,8 +300,13 @@ _BYPASS_HEADERS = [
     {"X-Forwarded-Host": "localhost"},
 ]
 
+# Same-resource normalization tricks only. Suffixes that inject a parent
+# traversal (``/../``, ``/.%2e/``) are deliberately excluded: appended to the
+# protected URL they resolve to the PARENT directory, so a 200 there is a
+# different resource (typically the site root) and proves nothing about the
+# protected path's access control. Keeping them produced false "bypass" reports.
 _PATH_BYPASS_SUFFIXES = [
-    "/%2e/", "/.%2e/", "/./", "/../",
+    "/%2e/", "/./",
     "/%20", "/%09", "/.json", "/.html",
     ";/", "/;/", "//", "/./.",
     "?anything=1", "#", "%00",
@@ -312,8 +329,32 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
     except Exception:
         return findings
 
+    # Fingerprint the origin root once. A candidate "bypass" that merely lands on
+    # the site's home page (e.g. a path normalization that walks up to ``/``, or a
+    # header that makes the server return the index) is not access to the
+    # protected resource, so a response matching the root is rejected below.
+    root_fp = ""
+    try:
+        parsed_origin = urllib.parse.urlparse(url)
+        root_url = f"{parsed_origin.scheme}://{parsed_origin.netloc}/"
+        async with session.get(root_url,
+                               timeout=aiohttp.ClientTimeout(total=8)) as rr:
+            if rr.status in (200, 201, 204):
+                root_fp = _page_fingerprint(await rr.text())
+    except Exception:
+        logger.debug("suppressed non-fatal exception", exc_info=True)
+
     sem = asyncio.Semaphore(5)
     bypassed: list[dict] = []
+
+    def _is_real_access(body: str) -> bool:
+        """A genuine bypass serves the protected resource: a non-trivial body that
+        differs from the 403 page and is not simply the site root."""
+        if len(body) <= 100 or abs(len(body) - forbidden_len) <= 50:
+            return False
+        if root_fp and _page_fingerprint(body) == root_fp:
+            return False
+        return True
 
     async def _try_header_bypass(hdrs: dict) -> None:
         async with sem:
@@ -323,8 +364,8 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
                     if r.status in (200, 201, 204):
                         body = await r.text()
                         # Confirm actual resource access: body must be meaningfully
-                        # different from the 403 response and non-trivial in size
-                        if len(body) > 100 and abs(len(body) - forbidden_len) > 50:
+                        # different from the 403 response and not the site root.
+                        if _is_real_access(body):
                             bypassed.append({"type": "header", "headers": hdrs,
                                              "status": r.status, "body_len": len(body)})
             except Exception:
@@ -338,7 +379,7 @@ async def _fuzz_403_bypass(session: "aiohttp.ClientSession",
                                        timeout=aiohttp.ClientTimeout(total=8)) as r:
                     if r.status in (200, 201, 204):
                         body = await r.text()
-                        if len(body) > 100 and abs(len(body) - forbidden_len) > 50:
+                        if _is_real_access(body):
                             bypassed.append({"type": "path", "suffix": suffix,
                                              "status": r.status, "body_len": len(body)})
             except Exception:
@@ -732,10 +773,19 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
     except Exception:
         return findings
 
+    # Parameters already present in the URL are not "hidden" — they are visible,
+    # in-request inputs (and are covered by the injection/redirect scanners). Only
+    # names absent from the base query can be genuinely "discovered" here.
+    base_params = set(
+        urllib.parse.parse_qs(urllib.parse.urlparse(url).query).keys()
+    )
+
     sem = asyncio.Semaphore(10)
     interesting: list[dict] = []
 
     async def _try_param(param: str) -> None:
+        if param in base_params:
+            return
         async with sem:
             test_url = url + ("&" if "?" in url else "?") + f"{param}=HEAVEN_PROBE"
             try:
@@ -781,24 +831,36 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
             evidence=item,
         ))
 
-    # HTTP Parameter Pollution
+    # HTTP Parameter Pollution — only a genuine first/last-wins DESYNC counts.
+    # Any functional parameter naturally changes the response when duplicated, and
+    # a stock 3xx error page even echoes the redirect target, so a bare status
+    # change or reflection is not evidence of pollution. Compare a polluted request
+    # against a single-value control: report only when duplicating the parameter
+    # smuggles a token into the response that the single control does NOT reflect.
     try:
         parsed = urllib.parse.urlparse(url)
         qs = urllib.parse.parse_qs(parsed.query)
         for param in list(qs.keys())[:3]:  # Test first 3 existing params
-            pp_url = url + f"&{param}=HEAVEN_PP_PROBE"
-            async with session.get(pp_url, timeout=aiohttp.ClientTimeout(total=8)) as r:
-                body = await r.text()
-                if "HEAVEN_PP_PROBE" in body or r.status != base_status:
-                    findings.append(_finding(
-                        url, "http_parameter_pollution", "medium",
-                        f"HTTP Parameter Pollution: Duplicate '{param}'",
-                        f"Duplicate '{param}' parameter causes a different response. "
-                        f"May bypass WAF rules, input validation, or produce unexpected behavior.",
-                        confidence=0.70,
-                        evidence={"param": param, "test_url": pp_url},
-                    ))
-                    break
+            token = "HEAVEN_PP_" + secrets.token_hex(4)
+            ctrl_url = _set_query_param(url, param, token)   # single occurrence
+            pp_url = url + f"&{param}={token}"               # duplicated occurrence
+            async with session.get(ctrl_url,
+                                   timeout=aiohttp.ClientTimeout(total=8)) as rc:
+                ctrl_body = await rc.text()
+            async with session.get(pp_url,
+                                   timeout=aiohttp.ClientTimeout(total=8)) as rp:
+                pp_body = await rp.text()
+            if token in pp_body and token not in ctrl_body:
+                findings.append(_finding(
+                    url, "http_parameter_pollution", "medium",
+                    f"HTTP Parameter Pollution: Duplicate '{param}'",
+                    f"Duplicating '{param}' smuggles a value into the response that a "
+                    f"single occurrence does not. This first/last-wins desync can "
+                    f"bypass WAF rules or input validation applied to only one copy.",
+                    confidence=0.70,
+                    evidence={"param": param, "test_url": pp_url},
+                ))
+                break
     except Exception:
         logger.debug("suppressed non-fatal exception", exc_info=True)
 

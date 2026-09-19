@@ -81,5 +81,7 @@ def test_sync_poster_matches_real_poster_markup():
         assert ">43</text>" in bumped
         assert ">41</text>" in bumped
         assert "4242 tests, 43 CLI commands, 41 API routes" in bumped
-        # Hand-set figures survive the rewrite untouched.
-        assert "25 UI pages, 16 scan modes" in bumped
+        # Hand-set figures survive the rewrite untouched (30 UI pages =
+        # Sidebar.jsx's 29 nav entries + the Finding Detail route; 15 scan
+        # modes = the SCAN_MODES array in scanModes.js).
+        assert "30 UI pages, 15 scan modes" in bumped

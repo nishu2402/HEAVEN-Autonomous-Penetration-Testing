@@ -162,7 +162,12 @@ class _AccessLogRedactor(logging.Filter):
             if isinstance(record.msg, str) and "=" in record.msg:
                 record.msg = _redact_qs_secrets(record.msg)
         except Exception:  # a logging filter must never raise
-            pass
+            # Redaction is best-effort. Record the miss on this module's own
+            # logger (never uvicorn.access/error, so the filter can't re-enter)
+            # rather than swallowing silently, and let the record through.
+            logging.getLogger(__name__).debug(
+                "access-log secret redaction skipped a record", exc_info=True
+            )
         return True
 
 

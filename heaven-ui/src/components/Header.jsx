@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router";
-import { Engagement, SIEM, Scans, getUser, logout } from "../api";
+import { Engagement, Engagements, SIEM, Scans, getUser, logout } from "../api";
 import { useJobs } from "../context/Jobs.jsx";
+import { useToast } from "./Toast.jsx";
 
 export default function Header({ onMenu }) {
   const { jobs } = useJobs();
@@ -18,6 +19,58 @@ export default function Header({ onMenu }) {
   const navigate = useNavigate();
   const location = useLocation();
   const user = getUser();
+  const toast = useToast();
+
+  // Header engagement chip doubles as a switcher: open a dropdown of the
+  // operator's engagements and switch which one the whole app is viewing.
+  const [engList, setEngList] = useState([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [busyEng, setBusyEng] = useState("");
+  const switchRef = useRef(null);
+
+  const loadEngList = () =>
+    Engagements.list().then((d) => setEngList(d.engagements || [])).catch(() => {});
+
+  function toggleMenu() {
+    setMenuOpen((o) => {
+      const next = !o;
+      if (next) loadEngList();   // fresh counts every time it opens
+      return next;
+    });
+  }
+
+  // Switch the active engagement for the WHOLE app. setActive fires
+  // "heaven:engagement-changed", which this header (and the dashboard, findings,
+  // correlations, kill-chain, assets pages) already listen for and re-fetch on.
+  async function switchEngagement(name) {
+    if (!name || busyEng) return;
+    if (name === eng?.engagement?.name) { setMenuOpen(false); return; }
+    setBusyEng(name);
+    try {
+      await Engagements.setActive(name);
+      toast.success(`Now viewing "${name}"`);
+      setMenuOpen(false);
+    } catch (e) {
+      toast.error(e?.message || "Could not switch engagement");
+    } finally {
+      setBusyEng("");
+    }
+  }
+
+  // Close the dropdown on outside-click or Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocDown = (e) => {
+      if (switchRef.current && !switchRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   function toggleTheme() {
     const next = !light;
@@ -90,19 +143,66 @@ export default function Header({ onMenu }) {
           ☰
         </button>
         {hasEngagement ? (
-          <div
-            className="eng-chip"
-            title={`Engagement: ${eng.engagement.name}${eng.engagement.client ? ` · ${eng.engagement.client}` : ""} · ${eng.stats.total_findings ?? 0} findings · ${eng.stats.scope_targets ?? 0} in scope`}
-          >
-            <span className="eng-label">Engagement</span>
-            <span className="eng-name">{eng.engagement.name}</span>
-            {eng.engagement.client && (
-              <span className="eng-stats eng-client">· {eng.engagement.client}</span>
+          <div className="eng-switch" ref={switchRef}>
+            <button
+              type="button"
+              className="eng-chip eng-chip-btn"
+              aria-haspopup="listbox"
+              aria-expanded={menuOpen}
+              onClick={toggleMenu}
+              title={`Engagement: ${eng.engagement.name}${eng.engagement.client ? ` · ${eng.engagement.client}` : ""} · ${eng.stats.total_findings ?? 0} findings · ${eng.stats.scope_targets ?? 0} in scope · click to switch`}
+            >
+              <span className="eng-label">Engagement</span>
+              <span className="eng-name">{eng.engagement.name}</span>
+              {eng.engagement.client && (
+                <span className="eng-stats eng-client">· {eng.engagement.client}</span>
+              )}
+              <span className="eng-stats eng-counts">
+                · {eng.stats.total_findings ?? 0} finding{(eng.stats.total_findings ?? 0) !== 1 ? "s" : ""}
+                {" · "}{eng.stats.scope_targets ?? 0} target{(eng.stats.scope_targets ?? 0) !== 1 ? "s" : ""}
+              </span>
+              <span className="eng-caret" aria-hidden="true">▾</span>
+            </button>
+            {menuOpen && (
+              <div className="eng-menu" role="listbox" aria-label="Switch engagement">
+                <div className="eng-menu-head">Switch engagement</div>
+                <div className="eng-switch-list">
+                  {engList.length === 0 && (
+                    <div className="eng-menu-empty">Loading engagements…</div>
+                  )}
+                  {engList.map((e) => (
+                    <div
+                      key={e.name}
+                      className={`eng-switch-row${e.active ? " is-active" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        className="eng-switch-pick"
+                        role="option"
+                        aria-selected={e.active}
+                        disabled={busyEng === e.name || e.active}
+                        onClick={() => switchEngagement(e.name)}
+                        title={e.active ? "Currently viewing" : `Switch to "${e.display_name || e.name}"`}
+                      >
+                        <span className="eng-switch-dot" />
+                        <span className="eng-switch-name">{e.display_name || e.name}</span>
+                        {e.active && <span className="eng-switch-tag">current</span>}
+                        <span className="eng-switch-count">
+                          {e.findings} finding{e.findings === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="eng-menu-manage"
+                  onClick={() => { setMenuOpen(false); navigate("/"); }}
+                >
+                  Manage engagements (create · rename · delete) →
+                </button>
+              </div>
             )}
-            <span className="eng-stats eng-counts">
-              · {eng.stats.total_findings ?? 0} finding{(eng.stats.total_findings ?? 0) !== 1 ? "s" : ""}
-              {" · "}{eng.stats.scope_targets ?? 0} target{(eng.stats.scope_targets ?? 0) !== 1 ? "s" : ""}
-            </span>
           </div>
         ) : (
           <span className="eng-warn">

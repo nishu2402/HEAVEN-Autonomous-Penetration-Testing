@@ -462,16 +462,32 @@ a:hover { color: var(--accent-2); }
 .eng-chip-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .eng-caret { color: var(--text-2); font-size: 10px; flex-shrink: 0; margin-left: 1px; }
 .eng-menu {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: var(--z-header-menu);
+  /* Portaled to <body> (see Header.jsx) and anchored to the chip's rect via an
+     inline top/left/width, so it escapes the header's overflow:hidden clip. */
+  position: fixed; z-index: var(--z-header-menu);
   min-width: 250px; max-width: 340px; max-height: 62vh; overflow: auto;
   background: var(--bg-1); border: 1px solid var(--border);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   padding: 8px;
 }
 .eng-menu-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
   color: var(--text-2); text-transform: uppercase; font-size: 9.5px;
   letter-spacing: 0.14em; font-weight: 700; padding: 2px 6px 8px;
 }
+/* Compact sort picker in the switcher header. Overrides the full-width base
+   <select> to a small inline control; uses background-color (not the background
+   shorthand) so the global custom chevron image survives, and resets the header's
+   uppercase/spacing so the option label reads normally. */
+.eng-sort {
+  width: auto; flex-shrink: 0;
+  text-transform: none; letter-spacing: normal; font-weight: 500;
+  font-family: var(--font-ui); font-size: 11px; color: var(--text-1);
+  background-color: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 3px 22px 3px 8px;
+  background-position: right 7px center; cursor: pointer;
+}
+.eng-sort:hover { border-color: var(--border-strong); }
 .eng-menu-empty { color: var(--text-2); font-size: 12px; padding: 6px; }
 .eng-menu-manage {
   width: 100%; margin-top: 8px; padding: 7px 10px; background: none;

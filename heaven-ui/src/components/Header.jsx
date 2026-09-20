@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router";
 import { Engagement, Engagements, SIEM, Scans, getUser, logout } from "../api";
 import { useJobs } from "../context/Jobs.jsx";
@@ -26,15 +27,75 @@ export default function Header({ onMenu }) {
   const [engList, setEngList] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busyEng, setBusyEng] = useState("");
-  const switchRef = useRef(null);
+  // How the switcher list is ordered. Remembered per viewer so the operator's
+  // preference sticks between opens (falls back to "suggested" if storage is
+  // unavailable, e.g. a private window).
+  const [engSort, setEngSort] = useState(() => {
+    try { return localStorage.getItem("heaven.engSort") || "suggested"; }
+    catch { return "suggested"; }
+  });
+  const switchRef = useRef(null);   // the chip button wrapper (the anchor)
+  const menuRef = useRef(null);     // the dropdown itself (portaled to <body>)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
 
   const loadEngList = () =>
     Engagements.list().then((d) => setEngList(d.engagements || [])).catch(() => {});
 
+  function changeSort(mode) {
+    setEngSort(mode);
+    try { localStorage.setItem("heaven.engSort", mode); } catch { /* ignore */ }
+  }
+
+  // Order the switcher rows for display. Sorting lives on the client so changing
+  // the order is instant (no refetch): the server just supplies the raw rows plus
+  // an `updated` timestamp for the "recent" mode. "suggested" mirrors the server's
+  // default (active first, then most findings, then name) so the list is stable
+  // when nothing is chosen.
+  const sortedEngList = useMemo(() => {
+    const byName = (a, b) =>
+      (a.display_name || a.name).localeCompare(
+        b.display_name || b.name, undefined, { sensitivity: "base", numeric: true });
+    const rows = [...engList];
+    switch (engSort) {
+      case "name":
+        rows.sort(byName);
+        break;
+      case "findings":
+        rows.sort((a, b) => (b.findings - a.findings) || byName(a, b));
+        break;
+      case "recent":
+        rows.sort((a, b) => ((b.updated || 0) - (a.updated || 0)) || byName(a, b));
+        break;
+      default: // "suggested"
+        rows.sort((a, b) =>
+          (Number(b.active) - Number(a.active)) ||
+          (b.findings - a.findings) ||
+          byName(a, b));
+    }
+    return rows;
+  }, [engList, engSort]);
+
+  // The dropdown is rendered through a PORTAL to <body> (see the JSX), not as a
+  // child of the chip. That is deliberate: the header's `.header-left` sets
+  // `overflow: hidden` (to truncate a long engagement name) and
+  // `container-type: inline-size`, both of which used to CLIP an
+  // absolutely-positioned child menu so it opened but was invisible — the exact
+  // reason the switcher looked "not working". A portal escapes every ancestor's
+  // clipping/stacking context, so we position it manually from the chip's rect.
+  function placeMenu() {
+    const el = switchRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const GAP = 6;
+    const width = Math.max(250, Math.min(r.width, 340));
+    const left = Math.max(GAP, Math.min(r.left, window.innerWidth - width - GAP));
+    setMenuPos({ top: r.bottom + GAP, left, width });
+  }
+
   function toggleMenu() {
     setMenuOpen((o) => {
       const next = !o;
-      if (next) loadEngList();   // fresh counts every time it opens
+      if (next) { placeMenu(); loadEngList(); }   // anchor + fresh counts on open
       return next;
     });
   }
@@ -57,19 +118,32 @@ export default function Header({ onMenu }) {
     }
   }
 
-  // Close the dropdown on outside-click or Escape.
+  // Close the dropdown on outside-click or Escape, and keep it anchored to the
+  // chip while it's open. Because the menu is portaled to <body> (outside
+  // switchRef), an "outside" click must also exempt the menu itself (menuRef) —
+  // otherwise a mousedown on a menu row would close the menu before the row's
+  // click fires and the switch would silently never happen.
   useEffect(() => {
     if (!menuOpen) return;
     const onDocDown = (e) => {
-      if (switchRef.current && !switchRef.current.contains(e.target)) setMenuOpen(false);
+      const t = e.target;
+      if (switchRef.current && switchRef.current.contains(t)) return;
+      if (menuRef.current && menuRef.current.contains(t)) return;
+      setMenuOpen(false);
     };
     const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    const reflow = () => placeMenu();
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", reflow);
+    window.addEventListener("scroll", reflow, true);
     return () => {
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", reflow);
+      window.removeEventListener("scroll", reflow, true);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuOpen]);
 
   function toggleTheme() {
@@ -163,14 +237,34 @@ export default function Header({ onMenu }) {
               </span>
               <span className="eng-caret" aria-hidden="true">▾</span>
             </button>
-            {menuOpen && (
-              <div className="eng-menu" role="listbox" aria-label="Switch engagement">
-                <div className="eng-menu-head">Switch engagement</div>
+            {menuOpen && createPortal(
+              <div
+                className="eng-menu"
+                role="listbox"
+                aria-label="Switch engagement"
+                ref={menuRef}
+                style={{ top: menuPos.top, left: menuPos.left, width: menuPos.width }}
+              >
+                <div className="eng-menu-head">
+                  <span>Switch engagement</span>
+                  <select
+                    className="eng-sort"
+                    value={engSort}
+                    onChange={(e) => changeSort(e.target.value)}
+                    aria-label="Sort engagements"
+                    title="Sort engagements"
+                  >
+                    <option value="suggested">Suggested</option>
+                    <option value="name">Name (A-Z)</option>
+                    <option value="findings">Most findings</option>
+                    <option value="recent">Recently updated</option>
+                  </select>
+                </div>
                 <div className="eng-switch-list">
                   {engList.length === 0 && (
                     <div className="eng-menu-empty">Loading engagements…</div>
                   )}
-                  {engList.map((e) => (
+                  {sortedEngList.map((e) => (
                     <div
                       key={e.name}
                       className={`eng-switch-row${e.active ? " is-active" : ""}`}
@@ -201,7 +295,8 @@ export default function Header({ onMenu }) {
                 >
                   Manage engagements (create · rename · delete) →
                 </button>
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         ) : (

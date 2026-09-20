@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2877 tests · 62 CLI commands · 99 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2903 tests · 62 CLI commands · 99 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -110,7 +110,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 2877 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 2903 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 219 |
 | ⌨️ **CLI Commands** | 62 |
@@ -729,6 +729,7 @@ The models (~6 MB vector + ~2 MB description) aren't bundled in the wheel or git
 | **JWT RBAC** | `admin` / `operator` / `viewer` / `auditor` roles · brute-force lockout with exponential backoff |
 | **Default-credential protection** | `admin/admin` seed forces password change on first login · `self-audit` flags it as critical until changed |
 | **AES-256-GCM vault** | All stored secrets encrypted at rest |
+| **Owner-only on disk** | Engagement databases, `.env`, and the `data/` tree are created with restrictive permissions (0600 files · 0700 dirs) so other local users on a shared host can't read captured secrets |
 | **HMAC-signed audit log** | Append-only · every operator action recorded |
 | **LLM credential redaction** | Operator credentials scrubbed before any prompt reaches a third-party LLM endpoint |
 | **Authorization gate** | Destructive actions refuse to run without `--i-have-authorization` |
@@ -760,7 +761,7 @@ heaven/                   ← Python package (219 modules)
 └── cli/                  Click CLI - one module per command group (62 commands)
 
 heaven-ui/                React + Vite web console (30 pages)
-tests/                    2877 pytest tests + native & DVWA benchmark suites
+tests/                    2903 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -779,7 +780,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (2877 tests)
+pytest tests/                  # full suite, ~3.5 min (2903 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -846,7 +847,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>2877 tests · 219 modules · 62 CLI commands · 99 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>2903 tests · 219 modules · 62 CLI commands · 99 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

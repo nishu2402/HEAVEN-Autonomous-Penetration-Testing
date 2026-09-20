@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -114,6 +115,69 @@ def setup_logging(
 def get_logger(name: str) -> logging.Logger:
     """Get a child logger under the heaven namespace."""
     return logging.getLogger(f"heaven.{name}")
+
+
+# The Web UI passes the session token in the WebSocket URL query string, because
+# a browser cannot set request headers on a WebSocket open. uvicorn's access log
+# records the request line verbatim, so without this the token lands in the log
+# in cleartext (CWE-532, insertion of sensitive information into a log file) where
+# anyone who can read the log could replay it until it expires. Redact the value
+# of any secret-ish query parameter from access-log records before they are
+# formatted. NOTE: this only covers HEAVEN's own log; the token still rides the
+# URL, so it can also reach browser history and any upstream reverse-proxy log —
+# put HEAVEN behind TLS and treat those logs as sensitive.
+_QS_SECRET_RE = re.compile(
+    r"(?i)\b(token|access_token|refresh_token|api_key|apikey|password|secret)="
+    r"[^&\s\"']+"
+)
+
+
+def _redact_qs_secrets(text: str) -> str:
+    """Replace ``token=<value>`` (and similar) with ``token=<redacted>``."""
+    return _QS_SECRET_RE.sub(lambda m: f"{m.group(1)}=<redacted>", text)
+
+
+class _AccessLogRedactor(logging.Filter):
+    """Strip secret query-string values from access-log records.
+
+    Access records carry the request path (with its query string) as a string
+    argument; a WebSocket handshake line carries it in the message args too. We
+    redact every string argument (and the message template) in place, preserving
+    the tuple's length and element types so uvicorn's access formatter, which
+    unpacks a fixed-arity args tuple, still works.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            args = record.args
+            if isinstance(args, tuple):
+                record.args = tuple(
+                    _redact_qs_secrets(a) if isinstance(a, str) else a for a in args
+                )
+            elif isinstance(args, dict):
+                record.args = {
+                    k: (_redact_qs_secrets(v) if isinstance(v, str) else v)
+                    for k, v in args.items()
+                }
+            if isinstance(record.msg, str) and "=" in record.msg:
+                record.msg = _redact_qs_secrets(record.msg)
+        except Exception:  # a logging filter must never raise
+            pass
+        return True
+
+
+def install_access_log_redaction() -> None:
+    """Attach the query-string secret redactor to uvicorn's loggers (idempotent).
+
+    Call once, before ``uvicorn.run``: the filter is attached to the logger
+    object, and uvicorn's default logging config (``disable_existing_loggers``
+    off, no ``filters`` entry) leaves existing filters in place when it installs
+    its handlers, so the redactor survives startup.
+    """
+    for name in ("uvicorn.access", "uvicorn.error"):
+        lg = logging.getLogger(name)
+        if not any(isinstance(f, _AccessLogRedactor) for f in lg.filters):
+            lg.addFilter(_AccessLogRedactor())
 
 
 def log_scan_event(logger: logging.Logger, event: str, **kwargs: Any) -> None:

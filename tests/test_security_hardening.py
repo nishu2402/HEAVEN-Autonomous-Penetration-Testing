@@ -156,3 +156,68 @@ def test_authenticate_unknown_user_returns_none_without_error():
     assert am.authenticate("no-such-user", "whatever") is None
     # A real account with a wrong password also returns None.
     assert am.authenticate("admin", "definitely-wrong") is None
+
+
+# ── Auth: PBKDF2 work factor is current, self-describing and backward compatible ──
+
+def test_password_hash_uses_current_owasp_work_factor():
+    """New hashes carry the OWASP-floor iteration count in a self-describing form."""
+    from heaven.security.auth import AuthManager
+    am = AuthManager()
+    stored = am._hash_password("correct horse battery staple")
+    alg, iters, salt, digest = stored.split("$")
+    assert alg == "pbkdf2_sha256"
+    assert int(iters) == AuthManager.PBKDF2_ITERATIONS == 600_000
+    assert len(salt) == 32 and len(digest) == 64  # 16-byte salt, sha256 digest, hex
+    assert am._verify_password("correct horse battery staple", stored)
+    assert not am._verify_password("wrong", stored)
+    # A hash at the current factor does not want a rehash.
+    assert am._needs_rehash(stored) is False
+
+
+def test_verify_password_accepts_legacy_bare_salt_hash_format():
+    """A pre-upgrade "<salt>$<hash>" hash (legacy 310k) still verifies and is
+    flagged for transparent upgrade."""
+    import hashlib
+    from heaven.security.auth import AuthManager
+    am = AuthManager()
+    salt = "a" * 32
+    legacy_iters = AuthManager._LEGACY_PBKDF2_ITERATIONS
+    digest = hashlib.pbkdf2_hmac("sha256", b"s3cret-pass", salt.encode(), legacy_iters).hex()
+    legacy_hash = f"{salt}${digest}"  # historical format, no algorithm/iteration prefix
+    assert am._verify_password("s3cret-pass", legacy_hash)
+    assert not am._verify_password("nope", legacy_hash)
+    assert am._needs_rehash(legacy_hash) is True
+
+
+def test_login_transparently_upgrades_a_legacy_hash():
+    """Signing in with a legacy-format password rewrites it to current params,
+    with no forced password change and no lockout."""
+    import os
+    from heaven.security.auth import AuthManager
+    am = AuthManager()
+    user = next(u for u in am._users.values() if u.username == "admin")
+    # Force the stored hash back to the legacy bare form for a known password.
+    salt = os.urandom(16).hex()
+    import hashlib
+    legacy_iters = AuthManager._LEGACY_PBKDF2_ITERATIONS
+    digest = hashlib.pbkdf2_hmac("sha256", b"Tr0ub4dour&3", salt.encode(), legacy_iters).hex()
+    user.password_hash = f"{salt}${digest}"
+    assert am._needs_rehash(user.password_hash) is True
+
+    result = am.authenticate("admin", "Tr0ub4dour&3")
+    assert result is not None and result.get("token")
+    # The stored hash is now the self-describing current-factor form.
+    assert user.password_hash.startswith(f"pbkdf2_sha256${AuthManager.PBKDF2_ITERATIONS}$")
+    assert am._needs_rehash(user.password_hash) is False
+    # And the upgraded hash still verifies the same password.
+    assert am._verify_password("Tr0ub4dour&3", user.password_hash)
+
+
+def test_malformed_hash_fails_closed():
+    """An unparseable stored hash never verifies and never crashes."""
+    from heaven.security.auth import AuthManager
+    am = AuthManager()
+    for junk in ("", "no-dollar-sign", "a$b$c", "pbkdf2_sha256$notanint$s$h", "$$$"):
+        assert am._verify_password("anything", junk) is False
+        assert am._needs_rehash(junk) is False

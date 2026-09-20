@@ -56,10 +56,26 @@ Out of scope (but please still report via DM if you're unsure):
   (`heaven/ai/llm_gateway.py`) has a 13-pattern redaction layer that
   catches AWS / OpenAI / Anthropic / GitHub / Slack / GCP keys, JWTs,
   URL credentials, and Bearer tokens before any prompt hits a
-  third-party endpoint.
+  third-party endpoint. The server access log applies the same idea: the
+  session token the Web UI passes in a WebSocket URL query string is
+  redacted before uvicorn writes the request line (`heaven/utils/logger.py`).
 - **AES-256-GCM credential vault.** `heaven/security/vault.py` covers
   the few cases where HEAVEN must persist credentials (Shodan API key,
   AD service account, etc.).
+- **Secrets and engagement data are owner-only on disk.** The `.env`
+  writer (`heaven/utils/env_file.py`) creates the file 0600 with an atomic
+  rename, so an admin password or API key is never briefly world-readable
+  and a failed write can't truncate the existing one. Each engagement
+  SQLite database and its write-ahead-log sidecars are narrowed to 0600, and
+  the `data/` tree (engagement stores, reports, audit log) is locked to 0700,
+  so another local user on a shared host can't read captured credentials or
+  evidence (`heaven/engagement.py`, `heaven/config.py`). A legacy
+  world-readable database is tightened the first time it is opened.
+- **Login passwords use PBKDF2-HMAC-SHA256 at 600,000 iterations**, the
+  work factor the OWASP Password Storage Cheat Sheet recommends. The stored
+  hash records its own iteration count (`pbkdf2_sha256$<iters>$<salt>$<hash>`),
+  so an older hash is re-hashed to the current work factor on the owner's
+  next successful login, no password change required (`heaven/security/auth.py`).
 - **HMAC-signed append-only audit log.** Every destructive action
   ends up in `data/audit/`, signed with the audit key.
 - **Authorization gate is the first thing every destructive command

@@ -19,7 +19,11 @@ import yaml
 
 from heaven.forensics.certificate import analyze_certificate
 from heaven.forensics.dispatch import detect_kind
-from heaven.recon.container_scanner import _is_dangerous_mount
+from heaven.recon.container_scanner import (
+    _is_dangerous_mount,
+    _is_local_target,
+    scan_containers,
+)
 from heaven.recon.email_scanner import EmailSecurityScanner
 from heaven.recon.git_secrets import scan_file
 from heaven.vulnscan.osv_client import _extract_fixed_version, _version_key
@@ -291,6 +295,36 @@ def test_container_app_bind_is_not_dangerous():
     # A bind of application data is not a host-tamper vector.
     assert _is_dangerous_mount({"Type": "bind", "Source": "/srv/app"}) is False
     assert _is_dangerous_mount({"Type": "bind", "Source": "/data/uploads"}) is False
+
+
+def test_container_remote_engagement_never_self_scans_localhost():
+    """A remote/URL engagement that resolved no container hosts must NOT fall
+    back to probing ``localhost`` and attribute the operator's own
+    ``/var/run/docker.sock`` to the engagement.
+
+    Regression for the bug where the orchestrator passed an explicit *empty*
+    host list (``ips == []`` for a URL-only target like certifiedhacker.com) and
+    ``scan_containers`` silently defaulted it to ``["localhost"]``, emitting a
+    bogus ``docker_socket_exposed`` critical.
+    """
+    import asyncio
+
+    # explicit empty list = nothing in scope = scan nothing, no localhost probe.
+    res = asyncio.run(scan_containers(hosts=[]))
+    assert res["total"] == 0
+    assert res["findings"] == []
+
+    # a remote host is target-scoped and must never yield the LOCAL socket
+    # finding (that check is gated on _is_local_target, which is False here).
+    assert _is_local_target("certifiedhacker.com") is False
+    remote = asyncio.run(scan_containers(hosts=["certifiedhacker.com"]))
+    assert not [
+        f for f in remote["findings"] if f["vuln_type"] == "docker_socket_exposed"
+    ]
+
+    # a bare invocation with no host info at all is still allowed to inspect the
+    # local host on purpose (locality predicate stays correct).
+    assert _is_local_target("localhost") is True
 
 
 # ── email: severity honesty for near-universal hardening notes ───────────────

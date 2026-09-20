@@ -518,8 +518,24 @@ class ContainerScanner:
 
 
 async def scan_containers(hosts: Optional[list[str]] = None, **kwargs) -> dict:
-    """Entry point from orchestrator."""
-    targets = hosts or kwargs.get("container_hosts", ["localhost"])
+    """Entry point from orchestrator.
+
+    ``hosts`` is the container-scan target list derived from the engagement
+    scope. An explicit list is authoritative *including an empty one*: an empty
+    list means no container hosts are in scope, so nothing is scanned. This is
+    the fix for the localhost self-scan bug — when a remote/URL engagement
+    resolved no container hosts, the old ``hosts or [...]`` fallback silently
+    probed ``localhost`` and attributed the operator's own ``/var/run/docker.sock``
+    to the engagement (a bogus critical). The ``localhost`` default now applies
+    only when no host information is supplied at all (a deliberate local-only
+    invocation such as a bare ``scan_containers()``).
+    """
+    if hosts is not None:
+        targets = hosts
+    elif "container_hosts" in kwargs:
+        targets = kwargs["container_hosts"] or []
+    else:
+        targets = ["localhost"]
     scanner = ContainerScanner()
     all_findings = []
     for host in targets:

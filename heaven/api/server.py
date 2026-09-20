@@ -2243,12 +2243,24 @@ def create_app() -> FastAPI:
                     st = EngagementStore(db, create=False)
                     stats = st.stats()
                     eng = st.get_engagement()
+                    # A real timestamp so the switcher can offer a "Recently
+                    # updated" sort: take the freshest mtime across the DB and its
+                    # WAL/SHM sidecars, which reflects the last write of any kind
+                    # (scan, finding, or metadata edit) even in WAL mode.
+                    mtime = 0.0
+                    for p in (db, db.with_name(db.name + "-wal"),
+                              db.with_name(db.name + "-shm")):
+                        try:
+                            mtime = max(mtime, p.stat().st_mtime)
+                        except OSError:
+                            pass
                     out.append({
                         "name": name,
                         "display_name": (eng.name if eng else name) or name,
                         "findings": stats.get("total_findings", 0),
                         "scans": stats.get("scans_run", 0),
                         "active": name == active,
+                        "updated": mtime,
                     })
                 except Exception:  # noqa: BLE001 — skip unreadable/locked DBs
                     logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -2260,7 +2272,8 @@ def create_app() -> FastAPI:
         # fresh, never-scanned install could never get rid of.
         if active not in seen and active != "default":
             out.insert(0, {"name": active, "display_name": active,
-                           "findings": 0, "scans": 0, "active": True})
+                           "findings": 0, "scans": 0, "active": True,
+                           "updated": 0.0})
         out.sort(key=lambda e: (not e["active"], -e["findings"], e["name"]))
         return {"engagements": out, "active": active}
 

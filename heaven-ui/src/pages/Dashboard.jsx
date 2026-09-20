@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from 'react'
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router'
 import LiveTerminal from '../components/LiveTerminal'
@@ -95,8 +95,45 @@ export default function Dashboard() {
   const [topFindings, setTopFindings] = useState([])
   const [engList, setEngList] = useState([])
   const [busyEng, setBusyEng] = useState('')   // engagement name being switched/deleted
+  // How the "Viewing engagement" list is ordered. Shares one remembered
+  // preference key with the header switcher so the operator's choice is
+  // consistent in both places (falls back to "suggested" if storage is blocked).
+  const [engSort, setEngSort] = useState(() => {
+    try { return localStorage.getItem('heaven.engSort') || 'suggested' }
+    catch { return 'suggested' }
+  })
   const navigate = useNavigate()
   const toast = useToast()
+
+  const changeEngSort = (mode) => {
+    setEngSort(mode)
+    try { localStorage.setItem('heaven.engSort', mode) } catch { /* ignore */ }
+  }
+
+  // Order the engagement rows for display. Sorting is client-side so changing it
+  // is instant; the server supplies the raw rows plus an `updated` timestamp for
+  // the "recent" mode. "suggested" mirrors the server default (active first, then
+  // most findings, then name) so the list is stable when nothing is chosen.
+  const sortedEngList = useMemo(() => {
+    const byName = (a, b) =>
+      (a.display_name || a.name).localeCompare(
+        b.display_name || b.name, undefined, { sensitivity: 'base', numeric: true })
+    const rows = [...engList]
+    switch (engSort) {
+      case 'name':
+        rows.sort(byName); break
+      case 'findings':
+        rows.sort((a, b) => (b.findings - a.findings) || byName(a, b)); break
+      case 'recent':
+        rows.sort((a, b) => ((b.updated || 0) - (a.updated || 0)) || byName(a, b)); break
+      default: // "suggested"
+        rows.sort((a, b) =>
+          (Number(b.active) - Number(a.active)) ||
+          (b.findings - a.findings) ||
+          byName(a, b))
+    }
+    return rows
+  }, [engList, engSort])
 
   // Returns the engagement-list promise so callers can await the switcher
   // refresh (switch/delete) before clearing their busy state.
@@ -324,9 +361,30 @@ export default function Dashboard() {
         <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
           {engList.length >= 1 && (
             <div style={{ marginBottom: 14 }}>
-              <div className="stat-label" style={{ marginBottom: 6 }}>Viewing engagement</div>
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between', gap: 8, marginBottom: 6,
+                }}
+              >
+                <div className="stat-label" style={{ marginBottom: 0 }}>Viewing engagement</div>
+                {engList.length > 1 && (
+                  <select
+                    className="eng-sort"
+                    value={engSort}
+                    onChange={(ev) => changeEngSort(ev.target.value)}
+                    aria-label="Sort engagements"
+                    title="Sort engagements"
+                  >
+                    <option value="suggested">Suggested</option>
+                    <option value="name">Name (A-Z)</option>
+                    <option value="findings">Most findings</option>
+                    <option value="recent">Recently updated</option>
+                  </select>
+                )}
+              </div>
               <div className="eng-switch-list">
-                {engList.map((e) => {
+                {sortedEngList.map((e) => {
                   const busy = busyEng === e.name
                   return (
                     <div key={e.name} className={'eng-switch-row' + (e.active ? ' is-active' : '')}>

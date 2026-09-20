@@ -9,6 +9,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Login password hashing raised to the current OWASP work factor.** Password
+  hashing moved from 310,000 to 600,000 PBKDF2-HMAC-SHA256 iterations, the floor
+  the OWASP Password Storage Cheat Sheet now recommends for this algorithm. Each
+  stored hash records its own iteration count (`pbkdf2_sha256$<iters>$<salt>$<hash>`),
+  so the cost can be raised again later without invalidating existing hashes, and
+  any hash below the current floor is transparently re-hashed on the owner's next
+  successful login with no password change required. The credential vault already
+  derived its AES-256-GCM key at 600,000 iterations, so the whole tool now shares
+  one consistent floor, and HEAVEN's own self-audit was updated to check against
+  it. New coverage in `tests/test_security_hardening.py`.
+
+- **Closed a `.env` line-injection path in the settings and change-password
+  writers.** The surgical `.env` writer quoted values for shell-style parsing but
+  did not neutralise a newline, carriage return or NUL, so a value persisted
+  through the Settings API or the change-password flow could break out of its own
+  `KEY=value` line and append another, for example smuggling `HEAVEN_DISABLE_AUTH=1`
+  past the settings key allow-list to disable authentication on the next restart.
+  The writer now rejects control characters in a value and validates the key name,
+  and the password policy rejects control characters so the change-password flow
+  returns a clear error instead of silently truncating the stored value. New
+  coverage in `tests/test_env_file.py`.
+
+- **The `.env` secret file is now written atomically with owner-only
+  permissions.** `.env` holds the admin password, the DB password and API keys,
+  but `heaven init` created it under the process umask (typically world-readable,
+  0644) and never tightened it, and the settings/change-password writer only
+  narrowed the permissions with a follow-up `chmod`, leaving a brief window where
+  a local user could read the secrets (CWE-276). A plain rewrite also truncated
+  the file before writing, so a crash mid-write could wipe the admin password and
+  every API key. Both `heaven init` and the in-place writer now go through one
+  helper that creates the file 0600 from the start (never briefly world-readable)
+  and installs it with an atomic rename, so a concurrent reader sees either the
+  old file or the fully written new one and a failed write leaves the existing
+  file intact. New coverage in `tests/test_env_file.py`.
+
+- **Engagement databases and the data directory are now owner-only on disk.**
+  Each per-engagement SQLite database records the findings for a client
+  engagement, which can include credentials, internal hostnames and evidence
+  captured from the target network, yet SQLite created the database file and its
+  write-ahead-log sidecars under the process umask, leaving them world-readable
+  (0644) on a shared host so any other local user could read a client's findings
+  (CWE-276). Opening an engagement now locks its database and sidecars to 0600 and
+  the containing directory to 0700, and the data directory root plus the
+  tamper-evident audit trail are created 0700 so a single directory permission
+  denies traversal into every sub-store. Legacy world-readable databases are
+  tightened the first time they are opened. New coverage in `tests/test_engagement.py`
+  and `tests/test_env_file.py`.
+
+- **Session tokens are redacted from the server access log.** A browser cannot
+  set request headers when it opens a WebSocket, so the Web UI passes the session
+  token in the WebSocket URL query string, and uvicorn's access log recorded that
+  request line verbatim, writing the token to the log in cleartext (CWE-532)
+  where anyone who could read the log could replay it until it expired. A logging
+  filter now redacts the value of `token` (and other secret-ish query parameters)
+  from access-log records before they are written. The token still travels in the
+  URL, so keep HEAVEN behind TLS and treat any upstream proxy log as sensitive.
+  New coverage in `tests/test_log_redaction.py`.
+
 ## [4.1.0]: 2026-09-16
 
 ### Added

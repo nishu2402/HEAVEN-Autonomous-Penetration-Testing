@@ -726,3 +726,62 @@ def test_finding_status_update_endpoint(api_client_with_engagement):
                    json={"status": "exploded", "notes": ""},
                    headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 400
+
+
+# ── On-disk secrecy (CWE-276): engagement DBs hold discovered creds ──────
+import os  # noqa: E402  (grouped with the perms tests it supports)
+
+_POSIX_ONLY = pytest.mark.skipif(
+    os.name != "posix", reason="POSIX file-mode bits only meaningful on POSIX"
+)
+
+
+@_POSIX_ONLY
+def test_new_engagement_db_is_owner_only(tmp_path):
+    """A freshly created engagement DB must not be world/group readable — it
+    stores findings that can include credentials captured from the client."""
+    from heaven.engagement import EngagementStore
+
+    db = tmp_path / "engs" / "acme.db"
+    store = EngagementStore(db)
+    store.create_engagement("acme", client="ACME")
+
+    assert db.exists()
+    assert (db.stat().st_mode & 0o077) == 0, oct(db.stat().st_mode)
+    # The containing directory is the durable backstop for the WAL/SHM sidecars.
+    assert (db.parent.stat().st_mode & 0o077) == 0, oct(db.parent.stat().st_mode)
+
+
+@_POSIX_ONLY
+def test_wal_shm_sidecars_are_owner_only(tmp_path):
+    """WAL/SHM sidecars created during writes must also be owner-only."""
+    from heaven.engagement import EngagementStore
+
+    db = tmp_path / "engs" / "acme.db"
+    store = EngagementStore(db)
+    store.create_engagement("acme", client="ACME")
+
+    # Re-open + harden so any sidecar produced by the first write is narrowed.
+    EngagementStore(db)
+    for suffix in ("-wal", "-shm"):
+        side = db.with_name(db.name + suffix)
+        if side.exists():
+            assert (side.stat().st_mode & 0o077) == 0, (suffix, oct(side.stat().st_mode))
+
+
+@_POSIX_ONLY
+def test_legacy_world_readable_db_is_narrowed_on_open(tmp_path):
+    """A legacy 0644 engagement DB is tightened to 0600 the next time the store
+    opens it — even on a read-only view — not only after the next re-scan."""
+    from heaven.engagement import EngagementStore
+
+    db = tmp_path / "engs" / "legacy.db"
+    EngagementStore(db).create_engagement("legacy", client="Old")
+    # Simulate a DB written by an older build (and a loosened directory).
+    os.chmod(db, 0o644)
+    os.chmod(db.parent, 0o755)
+    assert (db.stat().st_mode & 0o077) != 0  # precondition: currently readable
+
+    EngagementStore(db, create=False)  # read-only open still hardens
+    assert (db.stat().st_mode & 0o077) == 0, oct(db.stat().st_mode)
+    assert (db.parent.stat().st_mode & 0o077) == 0, oct(db.parent.stat().st_mode)

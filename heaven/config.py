@@ -299,12 +299,26 @@ class HeavenConfig:
         self.honeypot_threshold = _env("HEAVEN_HONEYPOT_THRESHOLD", self.honeypot_threshold, float)
 
     def ensure_dirs(self) -> None:
-        """Create required data directories."""
+        """Create required data directories.
+
+        The data dir holds engagement DBs (with credentials discovered on the
+        client network), scan reports and the tamper-evident audit trail, so its
+        root is created owner-only (0700). On a shared host the default-umask
+        0755 would let any other local user traverse in and read a client's
+        findings (CWE-276); locking the top-level dir denies traversal into every
+        sub-store at once. The audit dir is hardened directly too, in case an
+        operator relocated it outside ``data_dir``. Best-effort: a chmod failure
+        (a non-POSIX filesystem) must never block startup."""
         for d in (self.data_dir, self.data_dir / "scans", self.data_dir / "reports",
                   self.data_dir / "models", self.data_dir / "cache",
                   self.security.audit_log_dir):
             try:
                 d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+        for d in (self.data_dir, self.security.audit_log_dir):
+            try:
+                os.chmod(d, 0o700)
             except OSError:
                 pass
 

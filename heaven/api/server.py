@@ -702,6 +702,17 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
+        # Keep the session token — which the Web UI passes in the WebSocket URL
+        # query string, because a browser can't set headers on a WS open — out of
+        # the access log (CWE-532). Installed here (not just in `heaven serve`) so
+        # every uvicorn-based launcher is covered; it runs before the first request
+        # is served, and the filter is attached to the logger so uvicorn's own log
+        # config leaves it in place.
+        try:
+            from heaven.utils.logger import install_access_log_redaction
+            install_access_log_redaction()
+        except Exception:  # a logging shim must never block startup
+            logger.debug("access-log redaction install skipped", exc_info=True)
         # Native-crash safety net. Scans run in-process, so a native (C-level)
         # segfault in any dependency would take the whole server down — the
         # user sees "Python quit unexpectedly" and every in-flight scan dies.

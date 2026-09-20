@@ -52,7 +52,13 @@ def _load_env(path: Path) -> dict[str, str]:
 
 def _write_env(path: Path, values: dict[str, str]) -> None:
     """Write a .env file preserving the documented key order. Unknown keys
-    are appended in alphabetical order so we don't lose operator customisations."""
+    are appended in alphabetical order so we don't lose operator customisations.
+
+    Written atomically with owner-only 0600 perms: the file holds the admin
+    password, the DB password and API keys, so it must never be world-readable
+    (CWE-276) nor left truncated by a crash mid-write."""
+    from heaven.utils.env_file import write_private_file
+
     lines: list[str] = [
         "# HEAVEN environment variables, written by `heaven init`",
         "# Do not commit this file. Add to .gitignore if not already there.",
@@ -69,7 +75,7 @@ def _write_env(path: Path, values: dict[str, str]) -> None:
         lines.append("# Custom keys (preserved from existing .env)")
         for k in remaining:
             lines.append(f"{k}={_quote(values[k])}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_private_file(path, "\n".join(lines) + "\n")
 
 
 def _quote(v: str) -> str:

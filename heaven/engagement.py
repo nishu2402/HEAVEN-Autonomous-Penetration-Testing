@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from contextlib import contextmanager, suppress
@@ -958,6 +959,7 @@ class EngagementStore:
         if create:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_schema()
+            self._harden_permissions()
         elif self.db_path.exists():
             # An existing engagement opened read-only (the findings list uses this
             # path) still gets the one-time data migrations, so a legacy row's
@@ -966,6 +968,32 @@ class EngagementStore:
             # and never blocks a read if anything goes wrong.
             with suppress(Exception):
                 self._migrate_data()
+            # Narrow a legacy world-readable DB (and lock the directory) the first
+            # time it is viewed, not only after the next re-scan.
+            self._harden_permissions()
+
+    def _harden_permissions(self) -> None:
+        """Keep the engagement store owner-only on disk (CWE-276).
+
+        A per-engagement DB holds discovered findings — credentials, internal
+        hostnames and evidence captured from the client network — so it must
+        never be world-readable. SQLite creates the ``.db`` file and its
+        ``-wal`` / ``-shm`` sidecars honouring the process umask, which on a
+        shared host (a team jump box, a CI runner) leaves them 0644. Lock the
+        containing directory to 0700 — the durable backstop that also covers the
+        short-lived WAL/SHM sidecars whatever their own mode — and narrow the DB
+        file to 0600. Best-effort: a chmod failure (a non-POSIX filesystem, or a
+        file owned by another user) must never break opening a store, and only
+        an over-broad mode is tightened (this never widens permissions)."""
+        with suppress(OSError):
+            os.chmod(self.db_path.parent, 0o700)
+        for name in (self.db_path.name,
+                     self.db_path.name + "-wal",
+                     self.db_path.name + "-shm"):
+            p = self.db_path.with_name(name)
+            with suppress(OSError):
+                if p.exists() and (p.stat().st_mode & 0o077):
+                    os.chmod(p, 0o600)
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:

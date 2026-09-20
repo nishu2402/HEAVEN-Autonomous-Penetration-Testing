@@ -89,6 +89,14 @@ class AuthManager:
     REFRESH_EXPIRY = 86400  # 24 hours
     MAX_FAILED_ATTEMPTS = 5
     LOCKOUT_BASE_SECONDS = 60
+    # PBKDF2-HMAC-SHA256 work factor. 600k matches the OWASP Password Storage
+    # Cheat Sheet's current floor for this algorithm. The count is stored inside
+    # each hash (see _hash_password), so this can be raised later without
+    # invalidating existing hashes — they upgrade on the owner's next login.
+    PBKDF2_ITERATIONS = 600_000
+    # Hashes written before the work factor was embedded used the bare
+    # "<salt>$<hash>" form at this count; _verify_password still accepts them.
+    _LEGACY_PBKDF2_ITERATIONS = 310_000
 
     def __init__(self, jwt_secret: Optional[str] = None):
         self._jwt_secret = jwt_secret or os.urandom(self.JWT_SECRET_SIZE).hex()
@@ -148,6 +156,11 @@ class AuthManager:
             return False
         if not new_password or len(new_password) < 8:
             raise ValueError("Password must be at least 8 characters")
+        if any(c in new_password for c in ("\n", "\r", "\x00")):
+            # A newline/CR would break out of the KEY=value line when the
+            # env-backed admin password is persisted to .env (CWE-93). No real
+            # password contains a control character, so reject it outright.
+            raise ValueError("Password may not contain control characters")
         if new_password.lower() in {"admin", "password", "changeme", "admin123", "administrator"}:
             raise ValueError("Password is too common, choose a stronger one")
         user.password_hash = self._hash_password(new_password)
@@ -157,17 +170,54 @@ class AuthManager:
         return True
 
     def _hash_password(self, password: str, salt: Optional[str] = None) -> str:
+        """Hash a password with PBKDF2-HMAC-SHA256.
+
+        The stored string is self-describing —
+        ``pbkdf2_sha256$<iterations>$<salt>$<hash>`` — so the work factor travels
+        with the hash. That keeps a future cost bump non-breaking: verification
+        reads the iteration count from the hash instead of assuming a fixed
+        constant, and any weaker hash is re-hashed on the owner's next login.
+        """
         salt = salt or os.urandom(16).hex()
-        hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 310_000)
-        return f"{salt}${hashed.hex()}"
+        hashed = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), salt.encode(), self.PBKDF2_ITERATIONS)
+        return f"pbkdf2_sha256${self.PBKDF2_ITERATIONS}${salt}${hashed.hex()}"
+
+    @staticmethod
+    def _parse_hash(stored_hash: str) -> Optional[tuple[int, str, str]]:
+        """Decompose a stored hash into ``(iterations, salt, expected_hex)``.
+
+        Accepts the current self-describing ``pbkdf2_sha256$<iters>$<salt>$<hash>``
+        form and the historical bare ``<salt>$<hash>`` form (implicitly the legacy
+        iteration count). Returns ``None`` for anything unrecognised so a malformed
+        hash fails closed."""
+        parts = stored_hash.split("$")
+        if len(parts) == 4 and parts[0] == "pbkdf2_sha256":
+            try:
+                return int(parts[1]), parts[2], parts[3]
+            except ValueError:
+                return None
+        if len(parts) == 2:
+            return AuthManager._LEGACY_PBKDF2_ITERATIONS, parts[0], parts[1]
+        return None
 
     def _verify_password(self, password: str, stored_hash: str) -> bool:
-        parts = stored_hash.split("$")
-        if len(parts) != 2:
+        parsed = self._parse_hash(stored_hash)
+        if parsed is None:
             return False
-        salt, expected = parts
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 310_000)
+        iterations, salt, expected = parsed
+        actual = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), salt.encode(), iterations)
         return hmac.compare_digest(actual.hex(), expected)
+
+    def _needs_rehash(self, stored_hash: str) -> bool:
+        """True when a just-verified hash should be upgraded to current params
+        (legacy format, or an iteration count below the current floor)."""
+        parsed = self._parse_hash(stored_hash)
+        if parsed is None:
+            return False
+        iterations, _salt, _expected = parsed
+        return iterations < self.PBKDF2_ITERATIONS
 
     def create_user(self, username: str, password: str, role: Role = Role.VIEWER) -> User:
         user = User(
@@ -208,6 +258,10 @@ class AuthManager:
         user.failed_attempts = 0
         user.locked_until = 0
         user.last_login = time.time()
+        # We hold the plaintext here, so transparently upgrade a legacy/weaker
+        # hash to the current work factor — no password change required.
+        if self._needs_rehash(user.password_hash):
+            user.password_hash = self._hash_password(password)
         token = self._issue_token(user, source_ip)
         return {"token": token, "user": user.to_dict(), "expires_in": self.TOKEN_EXPIRY,
                 "must_change_password": user.must_change_password}

@@ -270,12 +270,12 @@ class SelfAuditor:
                 match = re.search(r"PBKDF2_ITERATIONS\s*=\s*([\d_]+)", content)
                 if match:
                     iterations = int(match.group(1).replace("_", ""))
-                    if iterations < 310_000:
+                    if iterations < 600_000:
                         self._findings.append(AuditFinding(
                             category="encryption", severity="medium",
                             title="Low PBKDF2 iteration count",
-                            description=f"PBKDF2 iterations: {iterations} (OWASP recommends ≥310,000 for SHA-256)",
-                            remediation="Increase PBKDF2_ITERATIONS to at least 310,000",
+                            description=f"PBKDF2 iterations: {iterations} (OWASP recommends ≥600,000 for SHA-256)",
+                            remediation="Increase PBKDF2_ITERATIONS to at least 600,000",
                         ))
             self._findings.append(AuditFinding(
                 category="encryption", severity="info",

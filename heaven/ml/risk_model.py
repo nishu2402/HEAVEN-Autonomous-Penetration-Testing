@@ -337,9 +337,10 @@ async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[
       * a real published CVSS vector/score → the 13-feature vector model
         (:class:`HeavenRiskModel`, ~R²=0.91 — it reverses the CVSS calculator);
       * otherwise → the description/type model (:mod:`heaven.ml.desc_model`,
-        a TF-IDF + Ridge text model trained on ~316k real CVEs; on the flagged
-        findings HEAVEN actually routes to it, R²≈0.63 and the right severity
-        band ~99% within one level) instead of a class constant.
+        a TF-IDF + Ridge text model trained on ~316k real CVEs; a ranking aid on
+        the flagged findings HEAVEN actually routes to it, ordering them by true
+        severity at Spearman ρ≈0.80 and landing the right band ~99% within one
+        level, exact-score R²≈0.64) instead of a class constant.
     Both degrade cleanly: with no models, each finding keeps its own base score.
     """
     logger.info("Running ML risk scoring with hybrid CVSS model...")

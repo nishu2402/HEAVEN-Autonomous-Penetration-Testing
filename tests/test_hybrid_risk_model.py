@@ -175,6 +175,36 @@ def test_desc_model_trained_on_real_finding_population():
     assert 0.0 < m["deploy_mae"] < 2.0
 
 
+@pytest.mark.skipif(not _HAS_DESC, reason="description model artifact not present")
+def test_desc_model_reports_rank_correlation():
+    """The model is a RANKING AID for scoreless findings (it never sets a badge),
+    so the metric that matches its job is rank correlation — does it order findings
+    by true severity? The meta/`get_metrics()` must expose Spearman ρ on both the
+    real-finding and deployment populations, and it must be strong (a ranking aid
+    with weak rank correlation would be useless)."""
+    m = get_desc_model().get_metrics()
+    assert m["cv_spearman"] is not None and m["deploy_spearman"] is not None
+    # ranking is the job — must be strongly positive, and never a leakage-perfect 1.0.
+    assert 0.6 < m["deploy_spearman"] < 1.0
+    assert 0.5 < m["cv_spearman"] < 1.0
+    # the deployment population (what HEAVEN routes here) is the stronger read.
+    assert m["deploy_spearman"] >= m["cv_spearman"] - 0.02
+
+
+@pytest.mark.skipif(not _HAS_DESC, reason="description model artifact not present")
+def test_desc_model_temporal_generalisation_when_measured():
+    """When the trainer measured temporal generalisation (train older CVEs → test
+    the newest, unseen year), the ordering must transfer to future vulnerabilities:
+    a strong rank correlation and a high within-one-band rate on CVEs the model
+    never trained on. Tolerant of an artifact/dataset where it was not measured."""
+    m = get_desc_model().get_metrics()
+    if m.get("temporal_test_year") is None:
+        pytest.skip("temporal generalisation not recorded in this artifact")
+    assert m["temporal_deploy_spearman"] is not None
+    assert 0.5 < m["temporal_deploy_spearman"] < 1.0   # ranking transfers to unseen year
+    assert m["temporal_deploy_band_within1"] >= 0.90   # bands stay close under shift
+
+
 # ── denial-of-service vector is availability-oriented (not a data-breach vector) ─
 
 def test_denial_of_service_vector_is_availability_impact():

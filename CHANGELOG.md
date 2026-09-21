@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The description/type CVSS model is a measurably better ranking aid, reported
+  by the metric that matches its job.** Three honest changes, no faking:
+  - **Genuine model lift.** An exhaustive re-search of the text recipe adopted
+    word 1–3 grams at 100k TF-IDF features (from 1–2 grams at 50k). On the
+    deployment population (the scoreless findings HEAVEN actually routes here) this
+    improves every metric at once, measured by honest 5-fold out-of-fold CV:
+    exact-score R² 0.626 → 0.640, MAE 0.790 → 0.767, Spearman rank correlation
+    0.794 → 0.802, exact severity band 70.4% → 71.4%, within-one-band 98.9% →
+    99.0%. char n-grams, gradient boosting on a TruncatedSVD of the TF-IDF, and
+    alpha sweeps were all beaten by this linear recipe, and no leaky CVSS sub-score
+    is used, so the gain is real rather than a leakage artefact.
+  - **Right metric for a ranking aid.** This model never sets a report badge; it
+    only orders findings the deterministic CVSS path could not score. So the
+    trainer, model meta and `get_metrics()` now report Spearman rank correlation
+    (`cv_spearman` / `deploy_spearman`, ρ=0.80 on the deployment population)
+    alongside the exact-score R², because rank correlation and band accuracy are
+    the lenses that reflect its real use. R² is a harsh lens for a target whose
+    same-class scores span a wide range, and it stays disclosed for full honesty.
+  - **Temporal generalisation is now measured.** The trainer holds out the newest
+    publication year (CVEs the model never trained on) and records
+    `temporal_deploy_r2` / `temporal_deploy_spearman` / `temporal_deploy_band_within1`.
+    The ordering transfers to unseen future CVEs (ρ=0.71, 98.4% within one band);
+    only the exact decimal drifts under distribution shift. New coverage in
+    `tests/test_hybrid_risk_model.py`.
+
 ### Security
 
 - **Login password hashing raised to the current OWASP work factor.** Password

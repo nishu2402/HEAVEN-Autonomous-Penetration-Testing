@@ -41,8 +41,11 @@ _MODEL_SIZE_BYTES = 5912225
 # fails the whole command when it is absent.
 _DESC_ASSET = "cvss_text_model.joblib"
 _DESC_META_ASSET = "cvss_text_model.meta.json"
-_DESC_SHA256 = "73e41b525d1078a85cd0a68cad35aac08ad44006edbac142e2df2054b030c01c"
-_DESC_SIZE_BYTES = 1024916
+# Retrained 2026-09-21 on the word 1-3 gram / 100k recipe (deploy R² 0.626→0.640,
+# Spearman ρ=0.80). Re-attach this exact artifact to the release when publishing;
+# the pin below is the local artifact's digest.
+_DESC_SHA256 = "44bfed3f76247a71aa0acd2e2c8a48180f0c52e145fc95c3fd7a1f064404de8e"
+_DESC_SIZE_BYTES = 2054333
 
 
 def _sha256_file(path: Path) -> str:

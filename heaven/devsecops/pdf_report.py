@@ -15,10 +15,12 @@ finding looks identical whether exported as HTML or PDF:
   6. Scope & methodology (targets, phases, standards)
   7. Risk-rating methodology (severity scale + remediation SLAs)
   8. Findings summary table
-  9. Detailed findings (metadata, description, impact, evidence/PoC, remediation, refs)
- 10. OWASP Top 10 coverage
- 11. Remediation roadmap (prioritised)
- 12. Appendix (tooling, glossary, disclaimer)
+  9. Combined risk & attack paths (correlated multi-finding chains + the
+     "break the chain" chokepoint; rendered only when correlations exist)
+ 10. Detailed findings (metadata, description, impact, evidence/PoC, remediation, refs)
+ 11. OWASP Top 10 coverage
+ 12. Remediation roadmap (prioritised)
+ 13. Appendix (tooling, glossary, disclaimer)
 
 If reportlab is not installed, :meth:`PDFReportGenerator.generate` degrades
 gracefully by writing the professional HTML report to a ``.html`` file instead.

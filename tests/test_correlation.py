@@ -978,3 +978,51 @@ def test_report_renders_attack_paths_and_break_the_chain():
     assert "Attack paths" in html
     assert "Break the chain" in html
     assert "Sever every attack path" in html
+
+
+# ── Network-reachability guard: a LOCAL-only CVE is not a network sensitive
+#    function (regression for the CVE-2012-6095 false pairing seen on MSF2) ─────
+
+
+def test_local_only_cve_does_not_fill_remote_sensitive_slot():
+    # A missing-auth backdoor plus a LOCAL-only (CVSS AV:L) privilege CVE whose
+    # title merely contains the words "arbitrary files". authbypass_sensitive_action
+    # is about a NETWORK-reachable sensitive function reached without auth, so a
+    # local-only finding must never fill its "Sensitive function" slot.
+    findings = [
+        _f(id="a", vuln_type="unauthenticated", target="10.0.0.5",
+           title="Unauthenticated backdoor shell", severity="critical"),
+        _f(id="b", vuln_type="vulnerable_service", target="10.0.0.5",
+           title="ProFTPD allows local users to modify ownership of arbitrary files",
+           severity="low", cve_id="CVE-2012-6095",
+           evidence={"cvss_vector": "AV:L/AC:H/Au:N/C:N/I:P/A:N"}),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert all(c.rule_id != "authbypass_sensitive_action" for c in combos), (
+        "a LOCAL-only (AV:L) CVE must not be treated as a network sensitive function")
+
+
+def test_remote_sensitive_function_still_chains_behind_missing_auth():
+    # The same shape but the sensitive function is genuinely network-reachable
+    # (AV:N) — the chain MUST still fire, proving the guard is discriminating and
+    # not a blanket suppression of the slot.
+    findings = [
+        _f(id="a", vuln_type="auth_bypass", target="10.0.0.5",
+           title="Authentication bypass", severity="high"),
+        _f(id="b", vuln_type="unrestricted_upload", target="10.0.0.5",
+           title="Unrestricted file upload", severity="high",
+           evidence={"cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}),
+    ]
+    combos = CorrelationEngine().correlate(findings)
+    assert any(c.rule_id == "authbypass_sensitive_action" for c in combos), (
+        "a network-reachable (AV:N) sensitive function behind missing auth must chain")
+
+
+def test_unknown_attack_vector_is_not_suppressed():
+    # A finding with no CVSS vector at all must NOT be suppressed — the guard only
+    # removes findings it can prove are local, never on missing data.
+    from heaven.vulnscan.correlation import _is_local_only
+    assert _is_local_only({"vuln_type": "unrestricted_upload"}) is False
+    assert _is_local_only({"evidence": {"cvss_vector": "AV:N/AC:L"}}) is False
+    assert _is_local_only({"evidence": {"cvss_vector": "AV:L/AC:H"}}) is True
+    assert _is_local_only({"evidence": {"cvss_vector": "AV:P/AC:L"}}) is True

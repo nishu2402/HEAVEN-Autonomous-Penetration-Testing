@@ -175,6 +175,40 @@ def _kw_matches(hay: str, keyword: str) -> bool:
         start = idx + 1
 
 
+# CVSS attack-vector gate. A network exploitation-chain rule (a public-facing app
+# reached without auth, MITRE T1190) must not treat a LOCAL- or PHYSICAL-only
+# finding as a network-reachable step: the finding's own CVSS vector is ground
+# truth, and AV:L / AV:P means the flaw is not exploitable over the network, so it
+# can never be "the sensitive function reached over the same unauthenticated path".
+# This stops a keyword like "arbitrary_file" from matching the prose "arbitrary
+# files" in an unrelated local privilege CVE (e.g. CVE-2012-6095, AV:L).
+_AV_RE = re.compile(r"\bAV:([NALP])\b", re.IGNORECASE)
+
+
+def _attack_vector(finding: dict) -> str:
+    """The CVSS attack-vector letter (N/A/L/P) parsed from the finding's CVSS
+    vector, or "" when unknown. Reads the evidence keys the scoring tail writes,
+    then the top-level fallbacks an operator-pasted finding might carry."""
+    ev = finding.get("evidence") or {}
+    for key in ("cvss_vector", "cvss3_vector", "cvss31_vector", "cvss_v3_vector",
+                "cvss4_vector", "vector"):
+        m = _AV_RE.search(str(ev.get(key) or ""))
+        if m:
+            return m.group(1).upper()
+    for key in ("cvss_vector", "vector"):
+        m = _AV_RE.search(str(finding.get(key) or ""))
+        if m:
+            return m.group(1).upper()
+    return ""
+
+
+def _is_local_only(finding: dict) -> bool:
+    """True only when the finding's CVSS attack vector is Local or Physical.
+    An unknown vector returns False, so a finding is never suppressed on missing
+    data — the guard removes false pairings, it does not invent absences."""
+    return _attack_vector(finding) in ("L", "P")
+
+
 def _confidence_of(finding: dict) -> float:
     """A finding's confidence in [0,1], defaulting to 0.5 when unstated so a
     combination is neither over- nor under-stated on missing data."""
@@ -315,8 +349,15 @@ class Component:
     """
     slot: str
     any_of: tuple[str, ...]
+    # When set, only a network-reachable finding (CVSS AV:N/AV:A) may fill this
+    # slot; a Local/Physical-only finding is rejected even on a keyword hit. Used
+    # by network exploitation-chain rules so a local-only CVE cannot be mistaken
+    # for a remotely reachable step.
+    require_remote: bool = False
 
     def matches(self, finding: dict) -> bool:
+        if self.require_remote and _is_local_only(finding):
+            return False
         hay = _haystack(finding)
         return any(_kw_matches(hay, k) for k in self.any_of)
 
@@ -501,7 +542,8 @@ AMPLIFICATION_RULES: tuple[AmplificationRule, ...] = (
             Component("Sensitive function",
                       ("file_upload", "unrestricted_upload", "admin_panel",
                        "management_interface", "command_injection", "rce",
-                       "deserial", "arbitrary_file")),
+                       "deserial", "arbitrary_file"),
+                      require_remote=True),
         ),
         combined_severity="critical",
         impact=("A powerful function that should be gated behind authentication is "

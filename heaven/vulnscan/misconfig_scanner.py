@@ -687,6 +687,19 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
                 "error": "aiohttp not installed"}
     import asyncio
 
+    # Under a shared auth session, never probe a logout / session-destroy URL:
+    # the header/cookie/redirect checks fetch each URL (some with redirects), so
+    # touching `/logout` would end the session for every scanner and silently
+    # turn the rest of an authenticated scan unauthenticated. A dir-fuzz can
+    # DISCOVER such a path even though the crawler skips it, so filter here too.
+    try:
+        from heaven.recon.auth_session import get_active_session
+        from heaven.recon.web_crawler import _is_session_destroying
+        if get_active_session():
+            urls = [u for u in urls if not _is_session_destroying(u)]
+    except Exception:  # noqa: BLE001 — guard must never break the scan
+        pass
+
     seen: set[str] = set()
     unique: list[str] = []
     # Probe parameter-bearing URLs first. The per-URL checks that actually read a

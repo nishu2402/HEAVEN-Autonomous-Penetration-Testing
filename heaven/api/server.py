@@ -2521,6 +2521,52 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Finding not found")
         return {"status": "saved", "finding_id": finding_id}
 
+    @app.get("/api/engagement/leads")
+    async def engagement_leads(
+        status: Optional[str] = None,
+        scan_id: Optional[str] = None,
+        limit: int = Query(200, ge=1, le=10000),
+        user: User = Depends(require_permission("vuln.view")),
+    ):
+        """List honest leads from the active engagement.
+
+        A lead is a substantiated signal that did NOT reach the finding bar. It
+        is recorded so a human can look rather than have it dropped silently.
+        Leads are never findings and never counted as findings; a default call
+        returns only `open` leads (not the ones already promoted / dismissed).
+        """
+        store = _read_store()
+        rows = store.get_leads(
+            scan_id=scan_id,
+            status=status if status else "open",
+            limit=limit,
+        )
+        return {"leads": rows, "count": len(rows)}
+
+    @app.put("/api/engagement/leads/{lead_id}/status")
+    async def update_lead_status_endpoint(
+        lead_id: str,
+        status: str = Query(..., pattern="^(open|promoted|dismissed)$"),
+        user: User = Depends(require_permission("vuln.update")),
+    ):
+        """Promote (a human confirmed it) or dismiss (a human ruled it out) a lead.
+
+        This is human adjudication only. Promoting a lead does NOT auto-create a
+        finding: a finding still requires real evidence, added via the manual
+        finding endpoint or produced by a re-scan, so the zero-false-positive
+        finding bar is never bypassed by a click.
+        """
+        store = _engagement_store_factory()
+        if not store:
+            raise HTTPException(404, "No active engagement.")
+        try:
+            ok = store.set_lead_status(lead_id, status)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if not ok:
+            raise HTTPException(404, "Lead not found")
+        return {"status": "updated", "lead_id": lead_id, "new_status": status}
+
     @app.get("/api/engagement/findings/{finding_id}/evidence")
     async def get_finding_evidence(
         finding_id: str,
@@ -6254,6 +6300,16 @@ async def _run_scan_background(scan_id: str, req: ScanRequest, *, resume: bool =
                 # report the same number.
                 persisted_count = store.count_findings(scan_id)
                 active_scans[scan_id]["findings_count"] = persisted_count
+                # Honest leads: substantiated signals below the finding bar,
+                # recorded in their own table (never counted as findings) so a
+                # weak-but-real observation reaches a human instead of vanishing.
+                try:
+                    for lead in result.get("leads", []) or []:
+                        store.record_lead(scan_id, lead)
+                    active_scans[scan_id]["leads_count"] = store.count_leads(scan_id)
+                except Exception:
+                    logger.debug("suppressed non-fatal exception persisting leads",
+                                 exc_info=True)
                 store.record_scan_complete(scan_id, summary={
                     "total": persisted_count,
                     "elapsed_seconds": result.get("elapsed_seconds", 0),

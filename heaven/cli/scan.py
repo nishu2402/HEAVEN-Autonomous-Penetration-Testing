@@ -837,9 +837,23 @@ def scan(
                 persisted += 1
             except Exception as e:
                 logger.debug(f"Could not persist finding: {e}")
+        # Honest leads: substantiated signals that did not reach the finding bar.
+        # Persisted to their own table (never counted as findings) so a
+        # weak-but-real observation is handed to a human instead of dropped.
+        leads_persisted = 0
+        for lead in summary.get("leads", []) or []:
+            try:
+                engagement_store.record_lead(scan_id, lead)
+                leads_persisted += 1
+            except Exception as e:
+                logger.debug(f"Could not persist lead: {e}")
         engagement_store.record_scan_complete(scan_id, summary)
         _print(f"  [cyan]Persisted to engagement:[/cyan] {persisted} findings into "
                f"{_engagement_db_path(engagement)}")
+        if leads_persisted:
+            _print(f"  [yellow]Leads for review:[/yellow] {leads_persisted} unconfirmed "
+                   f"signal(s) recorded (not counted as findings)")
+            _print(f"  [dim]Leads:  [/dim][cyan]heaven leads --engagement {engagement}[/cyan]")
         _print(f"  [dim]List:   [/dim][cyan]heaven findings --engagement {engagement}[/cyan]")
         _print(f"  [dim]Export: [/dim][cyan]heaven export --engagement {engagement} -o report.md --format markdown[/cyan]")
 
@@ -1050,6 +1064,11 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
             store.upsert_finding(scan_id_done, f)
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
+    for lead in summary.get("leads", []) or []:
+        try:
+            store.record_lead(scan_id_done, lead)
+        except Exception:
+            logger.debug("suppressed non-fatal lead-persist exception", exc_info=True)
     store.record_scan_complete(scan_id_done, summary)
 
 

@@ -190,6 +190,11 @@ async def run_watch(
                         store.upsert_finding(orch.scan_id, f)
                     except Exception:
                         logger.debug("suppressed non-fatal exception", exc_info=True)
+                for lead in scan_summary.get("leads", []) or []:
+                    try:
+                        store.record_lead(orch.scan_id, lead)
+                    except Exception:
+                        logger.debug("suppressed non-fatal lead-persist exception", exc_info=True)
 
                 iteration.scan_id = orch.scan_id
                 iteration.findings_total = store.count_findings()

@@ -95,9 +95,17 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
         from heaven.engagement import EngagementStore
         db_path = _engagement_db_path(engagement)
         if not db_path.exists():
-            _print(f"[red]Engagement DB not found:[/red] {db_path}")
-            sys.exit(2)
+            # Auto-create rather than abort, matching `heaven scan`. Aborting
+            # here (the old sys.exit(2)) discarded a completed SCA run just
+            # because the engagement name was new — the same "it ran but saved
+            # nothing" trap the scan CLI already fixed.
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            _print(f"[cyan]Creating engagement:[/cyan] {engagement}")
         store = EngagementStore(db_path)
+        try:
+            store.create_engagement(name=engagement)
+        except Exception:  # noqa: BLE001 — already exists / best-effort
+            pass
         scan_id = f"sca-{uuid.uuid4().hex[:12]}"
         store.record_scan_start(
             scan_id, name=f"SCA: {Path(path).name}", mode="sca",

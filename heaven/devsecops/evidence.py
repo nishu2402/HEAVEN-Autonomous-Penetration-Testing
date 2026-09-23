@@ -636,7 +636,8 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
 def export_findings_markdown(findings: list[dict], engagement_name: str = "",
                              assets: Optional[list[dict]] = None,
                              dns_records: Optional[list[dict]] = None,
-                             compliance_framework: Optional[str] = None) -> str:
+                             compliance_framework: Optional[str] = None,
+                             leads: Optional[list[dict]] = None) -> str:
     """Render multiple findings as a single Markdown report.
 
     When ``assets`` (raw network-scan host records) are supplied, a
@@ -647,6 +648,10 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
     When ``compliance_framework`` names a framework (``hipaa``, ``uk_gdpr``, …),
     a control-coverage mapping section is appended (evidence view, not an
     attestation).
+    When ``leads`` (honest sub-confirmation observations) are supplied, a
+    "Leads for manual review" appendix is added — clearly separated from the
+    findings, never scored as findings, so a weak-but-real signal is handed to a
+    human instead of dropped.
     """
     from datetime import datetime, timezone
     out = []
@@ -698,6 +703,48 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
         if section:
             out.append(section)
 
+    if leads:
+        section = _render_leads_md(leads)
+        if section:
+            out.append(section)
+
+    return "\n".join(out)
+
+
+def _render_leads_md(leads: list[dict]) -> str:
+    """Markdown "Leads for manual review" appendix, or '' when there are none.
+
+    Leads are unconfirmed observations, NOT findings: the section states that
+    plainly, carries only a calibrated probability (never a severity verdict),
+    and gives the operator the honest reason and the concrete next step so the
+    signal can be run down by hand.
+    """
+    if not leads:
+        return ""
+    out = ["## Leads for manual review",
+           "",
+           "_These are unconfirmed observations that did not reach the finding "
+           "bar. They are **not findings** and are not counted or scored as "
+           "such. Each had a real signal the scanner could not confirm safely, "
+           "recorded here so it can be verified by hand rather than dropped._",
+           ""]
+    ranked = sorted(leads, key=lambda x: -float(x.get("calibrated_confidence") or 0.0))
+    for lead in ranked:
+        try:
+            prob = float(lead.get("calibrated_confidence") or 0.0)
+        except (TypeError, ValueError):
+            prob = 0.0
+        title = str(lead.get("title") or lead.get("vuln_type") or "Lead")
+        out.append(f"### {title}")
+        out.append("")
+        out.append(f"- **Target:** {lead.get('target', '')}")
+        out.append(f"- **Type:** {lead.get('vuln_type', '')}")
+        out.append(f"- **Calibrated confidence:** {prob:.0%}")
+        if lead.get("reason"):
+            out.append(f"- **Why unconfirmed:** {lead['reason']}")
+        if lead.get("next_step"):
+            out.append(f"- **How to verify:** {lead['next_step']}")
+        out.append("")
     return "\n".join(out)
 
 

@@ -650,6 +650,15 @@ async def _confirm_tcp(finding: dict[str, Any]) -> ConfirmResult:
 # Short, honest "how would a human confirm this?" note per finding family, so a
 # not_applicable result is still actionable rather than a dead end.
 _MANUAL_HINTS: dict[str, str] = {
+    "sqli": "Confirm with a manual boolean/time payload pair in the parameter (e.g. `1 AND 1=1` vs `1 AND 1=2`, or a `SLEEP`), comparing responses; sqlmap on the captured request also confirms.",
+    "sql_injection": "Confirm with a manual boolean/time payload pair in the parameter, comparing responses; sqlmap on the captured request also confirms.",
+    "xss": "Confirm by placing a unique marker payload in the parameter and checking it renders unescaped in the response context (HTML/attribute/JS).",
+    "ssti": "Confirm with an engine-specific arithmetic probe (e.g. `{{7*7}}` / `${7*7}`) and check the response for the evaluated result.",
+    "lfi": "Confirm by requesting a known file (e.g. `/etc/passwd` or a Windows equivalent) and checking the response body for its signature.",
+    "rce": "Confirm with a benign, uniquely-identifiable command (e.g. echo a random token) and check the response/out-of-band channel for it.",
+    "cmdi": "Confirm with a benign command separator plus a unique token (e.g. `;echo <token>`) and check the response for the token.",
+    "command_injection": "Confirm with a benign command separator plus a unique token and check the response for it.",
+    "ssrf": "Confirm by pointing the parameter at an authorized out-of-band collector you control and watching for the callback.",
     "spf": "Confirm with `dig TXT <domain>`, the absence of a v=spf1 record is itself the proof.",
     "dmarc": "Confirm with `dig TXT _dmarc.<domain>`, a missing/relaxed record is directly observable.",
     "dkim": "Confirm the DKIM selector record via `dig TXT <selector>._domainkey.<domain>`.",

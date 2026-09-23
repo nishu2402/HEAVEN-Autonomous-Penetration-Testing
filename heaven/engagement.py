@@ -25,7 +25,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
 
 from heaven.utils.logger import get_logger
 
@@ -298,6 +298,36 @@ CREATE TABLE IF NOT EXISTS host_labels (
     notes           TEXT,
     updated_at      TEXT NOT NULL
 );
+
+-- Honest leads: sub-confirmation observations that had a REAL signal but could
+-- not be reproduced/confirmed to the finding bar. They are deliberately kept in
+-- their OWN table, never in `findings`, so a lead can never be miscounted as a
+-- confirmed finding (zero-false-positive by construction). A lead has NO
+-- severity column on purpose — it is a "needs a human" pointer, not a verdict —
+-- only a calibrated confidence, an honest reason it did not confirm, and a
+-- concrete manual next step. Distinct from the in-memory scan-routing leads in
+-- heaven/feedback.py (those steer further probing and are never persisted).
+CREATE TABLE IF NOT EXISTS leads (
+    id              TEXT PRIMARY KEY,          -- deterministic hash (finding identity)
+    scan_id         TEXT NOT NULL,
+    target          TEXT NOT NULL,
+    vuln_type       TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    calibrated_confidence REAL NOT NULL DEFAULT 0.0,
+    reason          TEXT,                      -- why it did not confirm (honest)
+    next_step       TEXT,                      -- concrete manual verification step
+    source          TEXT,                      -- which detector raised the lead
+    first_seen_at   TEXT NOT NULL,
+    last_seen_at    TEXT NOT NULL,
+    seen_count      INTEGER NOT NULL DEFAULT 1,
+    status          TEXT NOT NULL DEFAULT 'open',  -- open, promoted, dismissed
+    evidence_json   TEXT,
+    FOREIGN KEY (scan_id) REFERENCES scans(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leads_target ON leads(target);
+CREATE INDEX IF NOT EXISTS idx_leads_scan ON leads(scan_id);
+CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 """
 
 
@@ -880,6 +910,85 @@ def dedup_findings(findings: list) -> list:
             best[key]["target"] = _host_key(target)
     deduped = [best[k] for k in order if k not in suppressed_keys]
     return _consolidate_header_family(deduped)
+
+
+# Human-readable phrasing for the suppressor's machine reason codes, so a lead's
+# "why it did not confirm" reads like a note a tester would write, not a token.
+_LEAD_REASON_PHRASING = {
+    "no_proof_artifact_capped_to_review": "no reproducible proof artifact was captured",
+    "capped_at_high_single_signal": "only a single oracle fired (no independent corroboration)",
+    "above_baseline_noise": "the signal was within baseline response noise",
+    "rate_limited": "the target rate-limited the confirmation probes",
+    "waf_interference": "a WAF/CDN interfered with the confirmation probes",
+    "dynamic_content": "the endpoint returns dynamic content that mimicked the signal",
+    "not_reproducible": "the signal did not reproduce on retry",
+    "network_jitter": "network timing jitter could explain the signal",
+    "suppressor_error": "the confirmation probe errored before it could decide",
+}
+
+
+def _lead_has_substance(f: dict) -> bool:
+    """True when a dropped candidate carried a REAL observation worth a human.
+
+    Pure noise (no evidence, no payload/param/signal) is not a lead — it is
+    dropped as before. This keeps the lead channel meaningful rather than a
+    dumping ground for every rejected probe.
+    """
+    ev = f.get("evidence")
+    if isinstance(ev, dict) and ev:
+        return True
+    return any(f.get(k) for k in
+               ("payload", "param", "parameter", "canary", "request", "response",
+                "signals", "fp_check_reasons", "cve", "cve_id"))
+
+
+def _lead_reason_from(f: dict) -> str:
+    """Compose an honest, readable 'why it did not confirm' from the suppressor's
+    own recorded reason codes (``fp_check_reasons``)."""
+    reasons = [str(r) for r in (f.get("fp_check_reasons") or [])]
+    phrases: list[str] = []
+    for r in reasons:
+        key = r.split(":", 1)[0]  # strip a ":detail" suffix (e.g. suppressor_error:X)
+        phrase = _LEAD_REASON_PHRASING.get(key) or _LEAD_REASON_PHRASING.get(r)
+        if phrase and phrase not in phrases:
+            phrases.append(phrase)
+    if phrases:
+        return ("A signal was observed but not confirmed to the finding bar: "
+                + "; ".join(phrases) + ".")
+    return ("A signal was observed but could not be reproduced to the "
+            "confirmation bar (below the finding threshold).")
+
+
+def extract_leads(findings: list) -> list[dict]:
+    """Distil honest leads from a raw finding stream.
+
+    A *lead* is a candidate the FP layer adjudicated below the finding bar
+    (``suppressed`` / ``result == "false_positive"``) that still carried a real
+    observation. dedup_findings drops these from the user-facing findings; this
+    surfaces the substantiated ones separately so a weak-but-real signal is
+    handed to a human instead of vanishing silently. Deduped by the same
+    identity hash, richest copy kept, so one lead per distinct observation.
+    """
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        is_dropped = f.get("suppressed") is True or f.get("result") == "false_positive"
+        if not is_dropped:
+            continue
+        if _is_junk_finding(f) or not _lead_has_substance(f):
+            continue
+        target, vuln_type, param, endpoint, cve, port = _finding_identity(f)
+        key = _finding_hash(target, vuln_type, param, endpoint, cve, port)
+        lead = dict(f)
+        lead.setdefault("reason", _lead_reason_from(f))
+        if key not in best:
+            best[key] = lead
+            order.append(key)
+        else:
+            best[key] = _richer_finding(best[key], lead)
+    return [best[k] for k in order]
 
 
 @dataclass
@@ -1750,6 +1859,18 @@ class EngagementStore:
                         break
             if finding.get("cvss_vector") and "cvss_vector" not in evidence:
                 evidence["cvss_vector"] = finding["cvss_vector"]
+            # Calibrated confidence — the ONE place raw detector confidence is
+            # turned into a probability via the source-weighted calibration curve
+            # (heaven.ml.ai_brain.ConfidenceCalibrator, trained by `heaven
+            # train-priors`). Additive: it stamps evidence.calibrated_confidence +
+            # an audit block and never touches the adjudicated `confidence`, so the
+            # zero-FP FP-suppression / active-confirmation adjudication is
+            # preserved. Best-effort — a calibration failure never blocks a write.
+            with suppress(Exception):
+                from heaven.vulnscan.calibration import calibrated_confidence
+                prob, audit = calibrated_confidence({**finding, "evidence": evidence})
+                evidence["calibrated_confidence"] = prob
+                evidence["calibration"] = audit
             evidence_json = json.dumps(evidence)
             risk_score = _risk_value(finding)
             confidence = float(finding.get("confidence", 0.0) or 0.0)
@@ -1832,6 +1953,144 @@ class EngagementStore:
                     ),
                 )
         return fid
+
+    # ── Honest leads ─────────────────────────────────────────────────────────
+    #
+    # A lead is a sub-confirmation observation: a real signal was seen but it
+    # could not be reproduced/confirmed to the finding bar. Rather than dropping
+    # it silently (a silent miss) or promoting it to a finding (a false
+    # positive), we record it here, in its own table, honestly labelled. Leads
+    # are NEVER returned by the finding queries and never enter a finding count.
+
+    def record_lead(self, scan_id: str, lead: dict) -> str:
+        """Insert or refresh an honest lead. Returns the lead id.
+
+        ``lead`` is a finding-shaped dict. Identity + dedup reuse the same
+        hash the findings table uses, so a re-scan bumps the seen counter
+        instead of duplicating. ``calibrated_confidence`` / ``reason`` /
+        ``next_step`` are filled from the observation when not supplied, so a
+        caller can pass a bare candidate and still get an honest, actionable
+        lead.
+        """
+        target, vuln_type, param, endpoint, cve, port = _finding_identity(lead)
+        lid = _finding_hash(target, vuln_type, param, endpoint, cve, port)
+        if is_host_level(vuln_type):
+            target = _host_key(target)
+        now = datetime.now(timezone.utc).isoformat()
+
+        evidence = dict(lead.get("evidence", {}) or {})
+        # Calibrated confidence: prefer an explicit value, else the stamped one,
+        # else compute it from the observation. Best-effort — never blocks.
+        calibrated = lead.get("calibrated_confidence")
+        source = str(lead.get("source") or evidence.get("source") or "")
+        if calibrated is None:
+            calibrated = evidence.get("calibrated_confidence")
+        if calibrated is None:
+            with suppress(Exception):
+                from heaven.vulnscan.calibration import calibrated_confidence
+                calibrated, audit = calibrated_confidence(lead)
+                evidence.setdefault("calibration", audit)
+                source = source or str(audit.get("source") or "")
+        try:
+            calibrated = round(float(calibrated), 4)
+        except (TypeError, ValueError):
+            calibrated = 0.0
+
+        reason = str(lead.get("reason") or evidence.get("lead_reason")
+                     or _lead_reason_from(lead))
+        next_step = str(lead.get("next_step") or evidence.get("manual_next_step") or "")
+        if not next_step:
+            with suppress(Exception):
+                from heaven.vulnscan.confirm import _manual_hint
+                next_step = _manual_hint(lead)
+        title = str(lead.get("title") or lead.get("type") or vuln_type or "Lead")
+        evidence.setdefault("lead_reason", reason)
+        evidence.setdefault("manual_next_step", next_step)
+        evidence_json = json.dumps(evidence)
+
+        with self._conn() as c:
+            scan_exists = c.execute(
+                "SELECT 1 FROM scans WHERE id = ?", (scan_id,)
+            ).fetchone()
+            if not scan_exists:
+                c.execute(
+                    "INSERT INTO scans (id, started_at, status) VALUES (?, ?, 'completed')",
+                    (scan_id, now),
+                )
+            existing = c.execute("SELECT 1 FROM leads WHERE id = ?", (lid,)).fetchone()
+            if existing:
+                # Refresh recency + counter, and take the HIGHER calibrated
+                # confidence (a later scan may have seen a stronger signal).
+                c.execute(
+                    "UPDATE leads SET last_seen_at = ?, seen_count = seen_count + 1, "
+                    "scan_id = ?, calibrated_confidence = MAX(calibrated_confidence, ?), "
+                    "evidence_json = ? WHERE id = ?",
+                    (now, scan_id, calibrated, evidence_json, lid),
+                )
+            else:
+                c.execute(
+                    "INSERT INTO leads ("
+                    "id, scan_id, target, vuln_type, title, calibrated_confidence, "
+                    "reason, next_step, source, first_seen_at, last_seen_at, "
+                    "seen_count, status, evidence_json"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'open', ?)",
+                    (lid, scan_id, target, vuln_type, title, calibrated,
+                     reason, next_step, source, now, now, evidence_json),
+                )
+        return lid
+
+    def get_leads(self, scan_id: Optional[str] = None, *,
+                  status: Optional[str] = None, limit: int = 1000) -> list[dict]:
+        """Return honest leads (dicts), highest calibrated confidence first."""
+        sql = "SELECT * FROM leads"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scan_id:
+            clauses.append("scan_id = ?")
+            params.append(scan_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY calibrated_confidence DESC, last_seen_at DESC LIMIT ?"
+        params.append(int(limit))
+        out: list[dict] = []
+        with self._conn() as c:
+            for row in c.execute(sql, params).fetchall():
+                d = dict(row)
+                with suppress(Exception):
+                    d["evidence"] = json.loads(d.pop("evidence_json", "") or "{}")
+                out.append(d)
+        return out
+
+    def count_leads(self, scan_id: Optional[str] = None, *,
+                    status: Optional[str] = None) -> int:
+        """Number of leads, optionally scoped to one scan / status."""
+        sql = "SELECT COUNT(*) FROM leads"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scan_id:
+            clauses.append("scan_id = ?")
+            params.append(scan_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        with self._conn() as c:
+            row = c.execute(sql, params).fetchone()
+            return int(row[0]) if row else 0
+
+    def set_lead_status(self, lead_id: str, status: str) -> bool:
+        """Set a lead's status (open / promoted / dismissed). Human action only."""
+        if status not in ("open", "promoted", "dismissed"):
+            raise ValueError(f"invalid lead status: {status!r}")
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE leads SET status = ? WHERE id = ?", (status, lead_id)
+            )
+            return cur.rowcount > 0
 
     def count_findings(self, scan_id: Optional[str] = None) -> int:
         """

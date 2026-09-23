@@ -312,9 +312,15 @@ class ConfidenceCalibrator:
     boosts on independent-source corroboration.
 
     The curve and per-source weights are loaded from
-    `data/models/priors_bootstrap.json`. The shipped values are hand-curated
-    bootstrap data; the real calibration curve will be fit from labeled
-    historical findings once `heaven train-priors` is implemented.
+    `data/models/priors_bootstrap.json` (the hand-curated bootstrap). Once an
+    operator has enough scan history, `heaven train-priors` fits an empirical
+    curve from labeled historical findings and writes `priors_learned.json`,
+    which `_load_priors` prefers over the bootstrap automatically.
+
+    Applied to every persisted finding via
+    :func:`heaven.vulnscan.calibration.stamp_calibration`, which stamps the
+    calibrated probability onto ``evidence.calibrated_confidence`` without
+    overwriting the finding's adjudicated ``confidence``.
     """
 
     CALIBRATION_CURVE = _PRIORS["calibration_curve"]

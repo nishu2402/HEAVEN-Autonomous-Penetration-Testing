@@ -23,6 +23,7 @@ import NotFound from "./pages/NotFound.jsx";
 const Dashboard      = lazy(() => import("./pages/Dashboard.jsx"));
 const Engagement     = lazy(() => import("./pages/Engagement.jsx"));
 const Findings       = lazy(() => import("./pages/Findings.jsx"));
+const Leads          = lazy(() => import("./pages/Leads.jsx"));
 const FindingDetail  = lazy(() => import("./pages/FindingDetail.jsx"));
 const KillChain      = lazy(() => import("./pages/KillChain.jsx"));
 const Correlations   = lazy(() => import("./pages/Correlations.jsx"));
@@ -141,6 +142,7 @@ function Shell() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/engagement" element={<Engagement />} />
               <Route path="/findings" element={<Findings />} />
+              <Route path="/leads" element={<Leads />} />
               <Route path="/findings/:id" element={<FindingDetail />} />
               <Route path="/kill-chain" element={<KillChain />} />
               <Route path="/correlations" element={<Correlations />} />

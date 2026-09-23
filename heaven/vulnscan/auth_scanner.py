@@ -1075,6 +1075,28 @@ async def scan_auth_targets(urls: list[str], crawl_data: Optional[dict] = None) 
     all_findings: list[dict] = []
     sem = asyncio.Semaphore(5)
 
+    # When an authenticated session is shared across the scan, NEVER audit a
+    # logout / session-destroy URL. The header/cookie audits fetch each URL with
+    # allow_redirects=True, so touching `/logout.php` (or `?action=logout`) ends
+    # the session for every scanner sharing it — silently turning the rest of an
+    # authenticated engagement UNAUTHENTICATED and missing every vuln behind the
+    # login (observed live on DVWA: a logout fetch dropped SQLi/XSS recall to 0).
+    # The crawler and dir-fuzzer already apply this guard; auth-scan targets can
+    # still include such a URL (operator-supplied, or derived), so filter here.
+    # Unauthenticated scans keep their behaviour (no session to lose).
+    try:
+        from heaven.recon.auth_session import get_active_session
+        from heaven.recon.web_crawler import _is_session_destroying
+        if get_active_session():
+            kept = [u for u in urls if not _is_session_destroying(u)]
+            if len(kept) != len(urls):
+                logger.info(
+                    "auth scan: skipped %d session-destroying URL(s) to preserve "
+                    "the authenticated session", len(urls) - len(kept))
+            urls = kept
+    except Exception:  # noqa: BLE001 — guard must never break the scan
+        logger.debug("session-destroying URL filter unavailable", exc_info=True)
+
     async def _one(url: str) -> None:
         async with sem:
             forms = crawl_data.get(url, {}).get("forms", [])

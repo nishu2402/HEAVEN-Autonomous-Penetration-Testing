@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 500" role="img"
-     aria-label="HEAVEN · Autonomous Penetration-Testing Framework. Pipeline: Recon to ML Risk Scoring to Verified Exploitation to Reporting. 3043 tests, 63 CLI commands, 104 API routes, 30 UI pages, 15 scan modes, hybrid CVSS ML predictor R-squared 0.91.">
+     aria-label="HEAVEN · Autonomous Penetration-Testing Framework. Pipeline: Recon to ML Risk Scoring to Verified Exploitation to Reporting. 3056 tests, 64 CLI commands, 106 API routes, 30 UI pages, 15 scan modes, hybrid CVSS ML predictor R-squared 0.91.">
   <title>HEAVEN · Autonomous Penetration-Testing Framework</title>
 
   <defs>
@@ -243,9 +243,9 @@
       <rect x="1037" y="392" width="176" height="66" rx="13" fill="#0C1424" stroke="#22314C"/>
     </g>
     <g text-anchor="middle" fill="url(#stat)" font-family="'Segoe UI',Roboto,-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800">
-      <text x="155"  y="426" font-size="28">3043</text>
-      <text x="349"  y="426" font-size="28">63</text>
-      <text x="543"  y="426" font-size="28">104</text>
+      <text x="155"  y="426" font-size="28">3056</text>
+      <text x="349"  y="426" font-size="28">64</text>
+      <text x="543"  y="426" font-size="28">106</text>
       <text x="737"  y="426" font-size="28">30</text>
       <text x="931"  y="426" font-size="28">15</text>
       <text x="1125" y="426" font-size="24">0.91</text>

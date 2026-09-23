@@ -474,8 +474,9 @@ class LootHarvester:
                         outputs[key] = ""
                         logger.debug("loot cmd %s failed: %s", key, e)
         except Exception as e:
+            logger.debug("loot connect to %s:%s failed", host, port, exc_info=True)
             return LootResult(host=host, user=username, success=False,
-                              error=f"{type(e).__name__}: {e}")
+                              error=ssh_safe.friendly_conn_error(e, host, port))
 
         result = parse_loot(host, username, outputs)
         logger.info("loot %s@%s: %d item(s), %d credential(s)",

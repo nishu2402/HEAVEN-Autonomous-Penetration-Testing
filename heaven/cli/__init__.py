@@ -98,7 +98,7 @@ if HAS_CLICK:
                   help="Suppress informational log output (clean output for scripts/CI).")
     @click.option("--json", "json_out", is_flag=True,
                   help="Emit machine-readable JSON where supported (findings, doctor, "
-                       "config, coverage, demo). Implies --quiet.")
+                       "config, coverage, assets, correlate, demo). Implies --quiet.")
     @click.option("--config-file", type=click.Path(), help="Path to .env config file")
     @click.pass_context
     def cli(ctx: click.Context, debug: bool, quiet: bool, json_out: bool,
@@ -168,7 +168,8 @@ if HAS_CLICK:
         config_cmd, correlate as correlate_module, coverage, cve as cve_module,
         db, demo as demo_module,
         diff, dns as dns_module, egress as egress_module, engage,
-        exploit as exploit_module, exploitdb, findings, info, init as init_module,
+        exploit as exploit_module, exploitdb, findings, fleet as fleet_module,
+        info, init as init_module,
         install_tools as install_tools_module, knowledge,
         labs as labs_module,
         lateral, methodology, mitre, pivot as pivot_module, postex as postex_module,
@@ -199,6 +200,7 @@ if HAS_CLICK:
     exploit_module.register(cli)
     exploitdb.register(cli)
     findings.register(cli)
+    fleet_module.register(cli)
     info.register(cli)
     init_module.register(cli)
     install_tools_module.register(cli)

@@ -86,16 +86,28 @@ _ROW = _page("<pre>First name: admin\nSurname: admin</pre>")
 _EMPTY = _page("")
 
 
+def _cond_is_false(url: str) -> bool:
+    """Evaluate the injected boolean the way a real DB would — by TRUTH VALUE, not
+    by a specific literal — so a faithful oracle fake also handles the scanner's
+    literal-swapped variant probes (8=8/8=9, 'zq'='zq'/'zq'='zx'), not just 1=1/1=2.
+    """
+    import re
+    s = unquote(url)
+    pairs = re.findall(r"'([^']*)'\s*=\s*'([^']*)'", s)
+    pairs += re.findall(r"(?<![\w'])(\d+)\s*=\s*(\d+)", s)
+    return any(a != b for a, b in pairs)
+
+
 @pytest.mark.asyncio
 async def test_boolean_sqli_reported_when_reproduced(monkeypatch):
     import heaven.vulnscan.injection_scanner as inj
 
     async def fake_get(session, url, headers=None, timeout=8.0):
-        # A real oracle: the baseline (id=1) and the TRUE condition (…AND 1=1)
-        # return the row; only the FALSE condition (…AND 1=2) hides it — every
-        # time, and independent of fetch order (so it survives the order-swapped
-        # reproduction round the scanner now runs).
-        return 200, (_EMPTY if "1=2" in unquote(url) else _ROW)
+        # A real oracle: the baseline (id=1) and any TRUE condition (…AND 1=1,
+        # …AND 8=8) return the row; only a FALSE condition (…AND 1=2, …AND 8=9)
+        # hides it — every time, independent of fetch order and of the literal, so
+        # it survives the order-swapped round AND the literal-swapped variant round.
+        return 200, (_EMPTY if _cond_is_false(url) else _ROW)
 
     monkeypatch.setattr(inj, "_get", fake_get)
     scanner = inj.InjectionScanner()

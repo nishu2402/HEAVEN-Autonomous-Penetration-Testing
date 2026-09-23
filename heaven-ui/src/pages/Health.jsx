@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { System } from "../api";
+import { System, Fleet } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
 
@@ -31,11 +31,14 @@ function Card({ title, children }) {
 
 export default function Health() {
   const [h, setH] = useState(null);
+  const [fleet, setFleet] = useState(null);
   const [error, setError] = useState(null);
   const toast = useToast();
 
   function load() {
     System.health().then(setH).catch((e) => setError(e.message));
+    // Best-effort: the fleet card is optional, so a failure just hides it.
+    Fleet.status().then(setFleet).catch(() => setFleet(null));
   }
   useEffect(load, []);
 
@@ -183,6 +186,85 @@ export default function Health() {
           <Link to="/settings" style={{ color: "var(--brand)" }}>Manage keys in Settings →</Link>
         </div>
       </Card>
+
+      {/* Agent Fleet — the default-on multi-agent engine and its intelligence tier */}
+      {fleet && (
+        <Card title="Agent Fleet  ·  default-on multi-agent engine">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "baseline" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <Dot ok={!!fleet.enabled} />
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text-0)" }}>
+                  {fleet.enabled ? "On by default" : "Reverted"}
+                </div>
+                <div className="dim" style={{ fontSize: 11.5 }}>
+                  {fleet.enabled
+                    ? "superset of the pipeline · classic scan unchanged"
+                    : "reverted for this process with HEAVEN_AGENT_FLEET=0"}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <Dot ok={!!fleet.available} />
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text-0)" }}>
+                  {fleet.label === "cloud"
+                    ? `Cloud brain${fleet.model ? ` (${fleet.model})` : ""}`
+                    : fleet.label === "local"
+                      ? `Local brain${fleet.model ? ` (${fleet.model})` : ""}`
+                      : "Deterministic"}
+                </div>
+                <div className="dim" style={{ fontSize: 11.5 }}>
+                  {fleet.available
+                    ? "AI-assisted planning · deterministic floor always on"
+                    : "rule-based · runs at full strength, AI optional"}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <Dot ok={(fleet.modes || []).length > 0} />
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text-0)" }}>
+                  {(fleet.modes || []).length} scan modes covered
+                </div>
+                <div className="dim" style={{ fontSize: 11.5 }}>
+                  one lead agent per mode · no mode without an agent
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <Dot ok={!!fleet.scale_out} />
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text-0)" }}>
+                  {fleet.scale_out
+                    ? `Scale-out · ${fleet.workers} worker processes`
+                    : "Single-process adaptive"}
+                </div>
+                <div className="dim" style={{ fontSize: 11.5 }}>
+                  {fleet.scale_out
+                    ? "scan tasks fan out across processes sharing the engagement DB"
+                    : "opt into scale-out with heaven fleet --workers N (HEAVEN_FLEET_WORKERS)"}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, fontSize: 12 }}>
+            <span className="dim">Local brain: </span>
+            {fleet.local_enabled ? (
+              <span style={{ color: "var(--ok, #46d39a)" }}>✓ available (keyless, private)</span>
+            ) : fleet.local_can_enable ? (
+              <>
+                <span className="dim">not enabled · </span>
+                <Link to="/settings" style={{ color: "var(--brand)" }}>
+                  Enable local AI in Settings →
+                </Link>
+              </>
+            ) : (
+              <span className="dim">optional · the fleet never requires it</span>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Module health */}
       <Card title={`Python modules  ·  ${modulesOk}/${Object.keys(modules).length} OK`}>

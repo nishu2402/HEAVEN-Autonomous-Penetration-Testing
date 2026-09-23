@@ -152,6 +152,18 @@ vulnerabilities:
     detection_required: true
     notes: "Default account credentials (e.g. user:user, msfadmin:msfadmin) accepted over SSH."
 
+  - id: msf2-unrealircd-backdoor
+    service: UnrealIRCd 3.2.8.1
+    port: 6667
+    category: vulnerable_service
+    cve: CVE-2010-2075
+    owasp: "A06:2025-Vulnerable-and-Outdated-Components"
+    cwe: CWE-78
+    severity: critical
+    difficulty: low
+    detection_required: true
+    notes: "UnrealIRCd 3.2.8.1 shipped a trojaned release — a crafted input opens an unauthenticated command-execution backdoor."
+
   # ── Supporting real findings (labelled; not required for the recall floor) ─
   # Service CVE clusters. HEAVEN emits one vulnerable_service finding per
   # matched CVE on the port; one GT entry credits the whole cluster on that port.
@@ -402,5 +414,32 @@ vulnerabilities:
     detection_required: false
     notes: >
       Host-level roll-up of version-unconfirmed service CVEs (Postfix, ProFTPD,
-      VNC, UnrealIRCd) — honest low-confidence candidates where the banner did
-      not expose an exact version to bound the match.
+      VNC) — honest low-confidence candidates where the banner did not expose an
+      exact version to bound the match.
+
+  - id: msf2-netbios-name-disclosure
+    service: NetBIOS Name Service (nmbd)
+    port: 137
+    category: info_disclosure
+    owasp: "A01:2025-Broken-Access-Control"
+    cwe: CWE-200
+    severity: low
+    difficulty: low
+    detection_required: false
+    notes: >
+      NetBIOS name service (137) discloses the host name (METASPLOITABLE), the
+      workgroup, and the SMB service roles.
+
+  - id: msf2-ntlm-coercion-surface
+    service: Samba RPC (MS-RPRN / MS-DFSNM)
+    port: null
+    category: exposed_service
+    owasp: "A05:2025-Security-Misconfiguration"
+    cwe: CWE-306
+    severity: high
+    difficulty: medium
+    detection_required: false
+    notes: >
+      The spoolss (MS-RPRN / PrinterBug) and netdfs (MS-DFSNM / DFSCoerce) RPC
+      interfaces bind over a null session — a reachable NTLM authentication-coercion
+      surface. HEAVEN binds the interface only; it never issues the coercion call.

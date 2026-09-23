@@ -167,6 +167,9 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     # distributed Ruby, world-readable NFS export.
     "database_exposed": "exposed_service", "dangerous_service_exposed": "exposed_service",
     "nfs_export_exposed": "exposed_service", "service_exposed": "exposed_service",
+    # An NTLM authentication-coercion RPC surface (spoolss/netdfs/efsrpc reachable
+    # via a null session) — a dangerous interface exposed to the network.
+    "ntlm_coercion": "exposed_service",
     # SMB weaknesses (host-level; no distinct port on the finding).
     "smb_signing_not_required": "smb_signing", "smb_signing": "smb_signing",
     "smb_null_session": "smb_null_session",
@@ -180,6 +183,8 @@ _TYPE_TO_CATEGORY: dict[str, str] = {
     "tomcat_manager_default_creds": "weak_auth",
     # SMB host/domain banner is information disclosure.
     "domain_information": "info_disclosure", "smb_host_information": "info_disclosure",
+    # NetBIOS name-service (UDP/137) leaks the host/workgroup names and roles.
+    "netbios_information_disclosure": "info_disclosure",
     # ── API tier (heaven/vulnscan/api_scanner.py vuln_types) ────────────────
     # OWASP API1 Broken Object Level Authorization (BOLA/IDOR at the object).
     "bola": "bola",

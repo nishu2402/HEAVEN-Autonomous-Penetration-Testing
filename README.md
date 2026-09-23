@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 2909 tests · 62 CLI commands · 99 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3043 tests · 63 CLI commands · 104 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -14,15 +14,15 @@
 
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-    <img src="https://img.shields.io/badge/API-FastAPI_99_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+    <img src="https://img.shields.io/badge/API-FastAPI_104_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
     <img src="https://img.shields.io/github/actions/workflow/status/nishu2402/HEAVEN-Autonomous-Penetration-Testing/ci.yml?style=for-the-badge&logo=pytest&logoColor=black&label=Tests" alt="Tests"/>
     <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
     <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-219-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
-    <img src="https://img.shields.io/badge/CLI_Commands-62-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
+    <img src="https://img.shields.io/badge/Modules-230-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/CLI_Commands-63-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-30-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.91-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
@@ -89,9 +89,9 @@ HEAVEN is a **production-grade penetration-testing platform** that automates the
 
 It runs three ways from the **same engagement dataset**:
 
-- **CLI**: 62 commands for scriptable, CI-friendly workflows.
+- **CLI**: 63 commands for scriptable, CI-friendly workflows.
 - **Web UI**: a 30-page React command centre (scan launcher, live findings, combined risk, kill-chain, reports).
-- **REST + WebSocket API**: 99 RBAC-protected routes for automation and integration.
+- **REST + WebSocket API**: 104 RBAC-protected routes for automation and integration.
 
 <div align="center">
 <img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.1.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
@@ -110,11 +110,11 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 2909 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 3043 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 219 |
-| ⌨️ **CLI Commands** | 62 |
-| 🌐 **API Routes** | 99 RBAC-protected routes |
+| 🧩 **Modules** | 230 |
+| ⌨️ **CLI Commands** | 63 |
+| 🌐 **API Routes** | 104 RBAC-protected routes |
 | 🖥️ **UI Pages** | 30 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
@@ -461,7 +461,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,33:7400B8,66:FF36AB,100:FF6E00"/>
 </p>
 
-62 commands. Run `heaven <command> --help` for full options.
+63 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
 <img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.1.0)" src="docs/screenshots/Heaven_cli.png" />
@@ -478,6 +478,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 | `export` · `report` · `sbom` | Export findings (8 formats) · compliance HTML/PDF · CycloneDX SBOM |
 | `kill-chain` · `coverage` | Kill-chain phase coverage · OWASP coverage grade |
 | `autonomous` | LLM-driven observe→plan→act loop (bounded budget) |
+| `fleet` | **Agent Fleet**: default-on multi-agent engine (a superset of the pipeline; revert a process with `HEAVEN_AGENT_FLEET=0`) · one lead per scan mode + recon/strategy/hypothesis/FP-critic/coverage roles · agents PROPOSE, real oracles VERIFY (no agent ever writes a finding) · runs at full strength with **no API key** (`-m` focuses one mode, `--i-have-authorization` arms the exploit lead) |
 | `watch` | Continuous monitoring: diffs each run, alerts only on change |
 | `diff` | Compare two scans (new / resolved / regressed / unchanged) |
 | `sast` | Semgrep static analysis + curated OWASP rule pack |
@@ -507,7 +508,38 @@ heaven autonomous -t 10.0.0.5 --engagement test --i-have-authorization
 
 # Fully deterministic, no API key required
 heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
+
+# Agent Fleet: many role-scoped agents over the whole engagement, zero keys.
+# Read-only by default; agents propose, real oracles verify, only confirmed
+# findings persist. `--mode` focuses one mode; omit it to run every mode lead.
+heaven fleet -t 10.0.0.5 -u https://app.example.com --engagement test
+heaven fleet -u https://app.example.com --mode web --engagement test
+
+# Biggest targets: opt into cross-process scale-out (workers share the engagement
+# DB). Single-process is the default; --workers N is only for very large surfaces.
+heaven fleet -t 10.0.0.0/24 --engagement test --workers 4
 ```
+
+**Agent Fleet · how it stays honest and keyless.** The fleet wraps the existing
+pipeline; it does not replace it, so classic `heaven scan` and the UI are
+unchanged. It registers one agent lead per backend scan mode (network · web · api
+· cloud · container · iot · ot · ad · email · wireless · dos · sniff · malware ·
+exploit · devsecops · ci) plus recon, strategy, hypothesis, FP-critic and coverage
+roles. A role only ever **proposes** a task; the same deterministic detectors that
+power `heaven scan` **verify** it, and only their confirmed output becomes a
+finding · no agent can mint one. The intelligence ladder auto-selects the best
+brain that is already present (Tier 0 deterministic → local Ollama → cloud key),
+requires none, and never blocks or downloads anything, so the whole fleet runs at
+full strength on a fresh install with no keys. Run `heaven doctor` to see the
+active tier. The fleet is **on by default**: it is a superset of the pipeline (it
+runs the same verify oracles as `heaven scan`, then fans out onto the surface it
+discovers), so it can only add coverage, never drop a finding. Classic `heaven
+scan` stays byte-for-byte the same, and you can revert the default for a process
+with a single flag, `HEAVEN_AGENT_FLEET=0`. It scales the same way HEAVEN scans do · a single process
+by default (bounded async concurrency over the orchestrator's own semaphores),
+with an opt-in cross-process worker pool (`--workers N` / `HEAVEN_FLEET_WORKERS`)
+for the very biggest engagements, where scan tasks fan out across processes that
+share one engagement DB and persist the identical findings a single process would.
 
 **Stealth levels:**
 
@@ -597,7 +629,7 @@ heaven autonomous -t 10.0.0.5 --no-llm --i-have-authorization
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7400B8,50:00D2FF,100:B8FF00"/>
 </p>
 
-99 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
+104 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
 
 ```bash
 # Health (no auth)
@@ -747,7 +779,7 @@ The models (~6 MB vector + ~2 MB description) aren't bundled in the wheel or git
 </p>
 
 ```
-heaven/                   ← Python package (219 modules)
+heaven/                   ← Python package (230 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines - Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -757,11 +789,11 @@ heaven/                   ← Python package (219 modules)
 ├── devsecops/            PDF/compliance reports · vuln KB · SBOM · diff · alerting · ticketing
 ├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
-├── api/                  FastAPI server + WebSocket (99 routes)
-└── cli/                  Click CLI - one module per command group (62 commands)
+├── api/                  FastAPI server + WebSocket (104 routes)
+└── cli/                  Click CLI - one module per command group (63 commands)
 
 heaven-ui/                React + Vite web console (30 pages)
-tests/                    2909 pytest tests + native & DVWA benchmark suites
+tests/                    3043 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -780,7 +812,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (2909 tests)
+pytest tests/                  # full suite, ~3.5 min (3043 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -847,7 +879,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>2909 tests · 219 modules · 62 CLI commands · 99 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>3043 tests · 230 modules · 63 CLI commands · 104 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

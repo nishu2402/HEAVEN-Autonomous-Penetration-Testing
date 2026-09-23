@@ -1120,6 +1120,19 @@ _GENERIC_SERVICE_KEYS = frozenset({
     "ssl/http", "https-alt",
 })
 
+# Service labels nmap uses for an IRC daemon, and the classic IRC listener ports.
+# An IRC daemon (UnrealIRCd is the archetype) answers VERSION only AFTER the
+# client registers and throttles rapid reconnects with a "Closing Link:
+# Throttled" error, so a busy port sweep can leave the daemon identified only as
+# a bare "irc" service with no product/version. Without a dedicated note such a
+# host produced no finding at all — the operator never learned an IRC daemon was
+# even exposed. These sets drive one honest, low, UNVERIFIED exposure note in
+# that case (never a confirmed CVE: the trojaned-build match still needs the
+# 3.2.8.1 version string, which the fingerprinted path handles).
+_IRC_SERVICE_LABELS = frozenset({"irc", "ircd", "ircs", "irc-server", "ircu"})
+_CLASSIC_IRC_PORTS = frozenset({6660, 6661, 6662, 6663, 6664, 6665,
+                                6666, 6667, 6668, 6669, 6697, 7000})
+
 
 # ── Main mapping entry point ──
 
@@ -1435,6 +1448,68 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                             "Confirm the exact version (authenticated access or "
                             "vendor advisory); unauthenticated banner matching "
                             "cannot confirm these CVEs are present."
+                        ),
+                    },
+                })
+
+            # 1b. Bare IRC daemon: nmap could not fingerprint the product and
+            #     HEAVEN's VERSION grab was refused (IRC daemons throttle rapid
+            #     reconnects, so a busy sweep can leave only a generic "irc"
+            #     label with no version), so neither an inline hit nor the
+            #     version-less candidate above fired. Emit ONE honest low note so
+            #     an exposed IRC daemon is never silently dropped. This is an
+            #     UNVERIFIED exposure note, not a confirmed CVE — the trojaned
+            #     UnrealIRCd 3.2.8.1 backdoor (CVE-2010-2075) is named only as the
+            #     thing to verify, never asserted, since that match requires the
+            #     exact version the fingerprinted path already handles.
+            _port_num = port_info.get("port", 0)
+            _svc_lower = (service or "").lower()
+            _irc_labelled = (product_key in _IRC_SERVICE_LABELS
+                             or _svc_lower in _IRC_SERVICE_LABELS)
+            _irc_port_unknown = (_port_num in _CLASSIC_IRC_PORTS
+                                 and _svc_lower in _GENERIC_SERVICE_KEYS
+                                 and not nmap_product)
+            if (not version_str and not inline_cves
+                    and (_irc_labelled or _irc_port_unknown)):
+                host_name = host.get("host", "unknown")
+                all_vulns.append({
+                    "host":       host_name,
+                    "port":       _port_num,
+                    "target":     f"{host_name}:{_port_num}" if _port_num else host_name,
+                    "vuln_type":  "potential_vulnerable_service",
+                    "title":      "IRC daemon exposed (version undetermined)",
+                    "severity":   "low",
+                    "description": (
+                        "An IRC daemon is reachable on this port but its product "
+                        "and version could not be fingerprinted from the outside "
+                        "(IRC servers such as UnrealIRCd answer VERSION only after "
+                        "registration and throttle rapid reconnects, so a busy "
+                        "scan can leave the build unread). This is an UNVERIFIED "
+                        "exposure note, not a confirmed vulnerability. Confirm the "
+                        "daemon and version manually: if it is the trojaned "
+                        "UnrealIRCd 3.2.8.1 build it carries the CVE-2010-2075 "
+                        "backdoor (remote command execution). Re-run with "
+                        "--stealth stealth to pace the scan so the version "
+                        "handshake completes."
+                    ),
+                    "product":    "irc",
+                    "confidence": 0.3,
+                    "source":     "inline_db",
+                    "evidence": {
+                        "service":  "irc",
+                        "version":  "undetermined",
+                        "note": ("Product/version not fingerprinted (likely "
+                                 "reconnect throttling). No CVE is asserted."),
+                        "how_to_confirm": (
+                            "Connect and issue VERSION (e.g. `nc HOST PORT` then "
+                            "`NICK x` / `USER x x x :x` / `VERSION`), or nmap "
+                            "`-sV --version-intensity 9` after the throttle "
+                            "window clears, to read the build."
+                        ),
+                        "verification": (
+                            "Confirm the IRC daemon and its exact version before "
+                            "treating CVE-2010-2075 (or any CVE) as present; "
+                            "unauthenticated detection alone cannot confirm it."
                         ),
                     },
                 })

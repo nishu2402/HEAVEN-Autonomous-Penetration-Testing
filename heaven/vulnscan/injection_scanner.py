@@ -88,6 +88,24 @@ SQLI_BOOL_PROBES: list[tuple[str, str, str]] = [
     ("1' AND '1'='1'#", "1' AND '1'='2'#", "and_bool_str_hash"),
 ]
 
+# Literal-swapped counterparts of each SQLI_BOOL_PROBES entry: the SAME structure
+# with DIFFERENT constants (8=8 vs 8=9, 'zq'='zq' vs 'zq'='zx'). A genuine
+# boolean-blind oracle is a function of the injected condition's TRUTH VALUE, not
+# of the specific literal — the database evaluates 8=8 exactly like 1=1 and 8=9
+# exactly like 1=2 — so a real oracle reproduces identically on these. A transient
+# tied to one specific request (e.g. a one-shot dvwaMessage flash consumed
+# positionally under a concurrent scan, which can even repeat across two rounds of
+# the SAME pair) does NOT recur on a different literal, so a variant round is what
+# finally drops it. It cannot lower recall: on a genuinely injectable parameter
+# the variant is an equivalent oracle by construction. Keyed by probe name.
+SQLI_BOOL_VARIANTS: dict[str, tuple[str, str]] = {
+    "and_bool_int":      ("1 AND 8=8-- ",        "1 AND 8=9-- "),
+    "and_bool_str":      ("1' AND 'zq'='zq'-- ", "1' AND 'zq'='zx'-- "),
+    "and_bool_paren":    ("1) AND (8=8)-- ",     "1) AND (8=9)-- "),
+    "or_bool_int":       ("1 OR 8=8-- ",         "1 OR 8=9-- "),
+    "and_bool_str_hash": ("1' AND 'zq'='zq'#",   "1' AND 'zq'='zx'#"),
+}
+
 # Time-based blind SQLi: (payload, sleep_seconds, probe_name)
 # We use short sleep (3s) to keep the scan reasonably fast.
 _SLEEP = 3
@@ -758,6 +776,7 @@ class InjectionScanner:
             # false positive, and it does not lower recall on real oracles
             # (deterministic pages have zero jitter and are order-independent).
             reproduced = True
+            variant_confirmed = True
             if REQUIRE_BOOLEAN_REPRODUCTION:
                 async with self._sem:
                     _, baseline2 = await self._get_rec(session, url, self._headers)
@@ -774,8 +793,33 @@ class InjectionScanner:
                     # …and the order-swapped round must hold too.
                     and _boolean_sqli_confirmed(baseline_body, body_true2, body_false2,
                                                 true_pl, false_pl, noise_floor=noise))
-            if not reproduced:
-                continue  # did not reproduce → treat as noise, try next probe
+
+                # Truth-value (literal-swap) confirmation. A real oracle depends on
+                # the CONDITION's truth value, not the literal, so a differently-
+                # constant'd pair (8=8 / 8=9) must reproduce the SAME oracle. A
+                # transient that fooled the two rounds above by recurring on the
+                # SAME pair will not recur on a fresh literal — this is what drops
+                # the live DVWA csrf ?Change= boolean-SQLi false positive, whose
+                # 81-char TRUE/FALSE swing was a concurrent one-shot flash, not a
+                # SQL result (verified: with a quiet session every variant body is
+                # byte-identical). Recall is untouched: on a genuinely injectable
+                # parameter the variant is an equivalent oracle by construction.
+                if reproduced:
+                    v_true_pl, v_false_pl = SQLI_BOOL_VARIANTS.get(
+                        probe_name, (true_pl, false_pl))
+                    async with self._sem:
+                        _, v_true = await self._get_rec(
+                            session, _inject_param(url, param, v_true_pl), self._headers)
+                    async with self._sem:
+                        _, v_false = await self._get_rec(
+                            session, _inject_param(url, param, v_false_pl), self._headers)
+                    variant_confirmed = bool(
+                        v_true and v_false
+                        and _boolean_sqli_confirmed(baseline_body, v_true, v_false,
+                                                    v_true_pl, v_false_pl,
+                                                    noise_floor=noise))
+            if not (reproduced and variant_confirmed):
+                continue  # did not reproduce on independent evidence → noise
 
             self._add_finding(
                 target=url_true,
@@ -793,9 +837,11 @@ class InjectionScanner:
                     "true_len": len(body_true),
                     "false_len": len(body_false),
                     "reproduced": True,
-                    "signals": ["boolean_oracle_confirmed", "boolean_oracle_reproduced"],
-                    "proof": (f"boolean oracle held on two independent rounds "
-                              f"(param '{param}', probe {probe_name})"),
+                    "variant_confirmed": variant_confirmed,
+                    "signals": ["boolean_oracle_confirmed", "boolean_oracle_reproduced"]
+                    + (["boolean_oracle_variant_confirmed"] if variant_confirmed else []),
+                    "proof": (f"boolean oracle held on two independent rounds and a "
+                              f"literal-swapped variant (param '{param}', probe {probe_name})"),
                     "url": url,
                 },
                 remediation="Use parameterised queries / prepared statements.",

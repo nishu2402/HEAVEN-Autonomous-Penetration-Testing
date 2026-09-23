@@ -46,14 +46,24 @@ def _make_fake_get(state: dict):
       (fooling a single-shot oracle) but it never reproduces. A false positive
       unless the reproduction pass rejects it.
     """
+    def _cond_is_false(u: str) -> bool:
+        # Evaluate the injected boolean by TRUTH VALUE, not by a fixed literal, so
+        # the fake also answers the scanner's literal-swapped variant probes
+        # (8=8/8=9, 'zq'='zq'/'zq'='zx') the way a real DB would — not only 1=1/1=2.
+        import re
+        pairs = re.findall(r"'([^']*)'\s*=\s*'([^']*)'", u)
+        pairs += re.findall(r"(?<![\w'])(\d+)\s*=\s*(\d+)", u)
+        return any(a != b for a, b in pairs)
+
     async def fake_get(session, url, headers=None, timeout=8.0):
         u = unquote(url)
-        is_true = "1=1" in u
+        is_true = not _cond_is_false(u)
         if "genuine" in u:
-            # A real oracle, order-independent: the baseline (id=1) and TRUE(1=1)
-            # return the row; only FALSE(1=2) hides it — so it survives the
-            # scanner's order-swapped reproduction round.
-            return 200, (_EMPTY if "1=2" in u else _ROW)
+            # A real oracle, order- and literal-independent: the baseline (id=1)
+            # and any TRUE condition return the row; only a FALSE condition hides
+            # it — so it survives the scanner's order-swapped reproduction round
+            # AND its literal-swapped variant round.
+            return 200, (_EMPTY if _cond_is_false(u) else _ROW)
         # /flaky: only the very first true/false pair looks like an oracle.
         state["flaky"] = state.get("flaky", 0) + 1
         if state["flaky"] <= 2:

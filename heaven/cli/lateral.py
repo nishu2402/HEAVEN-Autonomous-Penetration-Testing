@@ -27,6 +27,8 @@ from heaven.cli._helpers import _print
               help="NT hash for pass-the-hash. Mutually exclusive with --smb-pass.")
 @click.option("--target", "-t", multiple=True, required=True,
               help='host:port pairs, e.g. -t 10.0.0.5:22 -t 10.0.0.5:445')
+@click.option("--verbose", "-v", is_flag=True,
+              help="Print the per-target error detail instead of just a count.")
 @click.option("--output", "-o", type=click.Path(), default=None,
               help="Write the JSON hop graph to this path.")
 @click.option("--i-have-authorization", is_flag=True, required=True,
@@ -35,7 +37,7 @@ def lateral(
     ssh_key: Optional[str],
     ssh_user: tuple[str, ...],
     smb_user: str, smb_domain: str, smb_pass: str, smb_nthash: str,
-    target: tuple[str, ...], output: Optional[str],
+    target: tuple[str, ...], verbose: bool, output: Optional[str],
     i_have_authorization: bool,
 ) -> None:
     """Try SSH key reuse + SMB/PsExec across a set of hosts.
@@ -104,7 +106,16 @@ def lateral(
             _print(f"  {h['from']:24}  →  {h['to']:24}  via {h['technique']:20}  "
                    f"as {h['credential_label']}")
     if result.get("errors"):
-        _print(f"\n[dim]{len(result['errors'])} error(s) suppressed · pass --verbose to dump[/dim]")
+        if verbose:
+            _print(f"\n[bold]Errors ({len(result['errors'])}):[/bold]")
+            for err in result["errors"]:
+                _print(f"  [dim]{err}[/dim]")
+        else:
+            _print(f"\n[dim]{len(result['errors'])} error(s) hidden · pass -v to "
+                   "see them, or -o to write the full JSON.[/dim]")
+    if result["successful"] == 0 and not result.get("errors"):
+        _print("\n[dim]No credential was accepted. Hosts that simply refused or "
+               "timed out are treated as a clean miss (not an error).[/dim]")
 
     if output:
         Path(output).write_text(json.dumps(result, indent=2))

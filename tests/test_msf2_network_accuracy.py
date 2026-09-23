@@ -107,6 +107,40 @@ async def test_unrealircd_stays_potential_without_the_exact_build():
 
 
 @pytest.mark.asyncio
+async def test_throttled_irc_still_surfaces_an_exposure_note():
+    # Case B (the gap): a busy sweep tripped the daemon's reconnect throttle, so
+    # neither nmap -sV nor HEAVEN's VERSION grab read the product/version and the
+    # port is labelled only as a bare "irc" service. It must NOT go silent — the
+    # operator still needs to learn an IRC daemon is exposed — but it must also
+    # NOT assert the backdoor without the exact build.
+    vulns = await _map([
+        {"port": 6667, "service": "irc", "product": "", "version": "",
+         "banner": "ERROR :Closing Link: (Throttled: Reconnecting too fast)"},
+    ])
+    notes = [v for v in vulns if v.get("port") == 6667]
+    assert notes, "a throttled IRC daemon must not vanish from the report"
+    note = notes[0]
+    assert note["severity"] == "low"
+    assert note["vuln_type"] == "potential_vulnerable_service"
+    # Honest: names the CVE to verify, asserts none.
+    assert note.get("cve") in (None, "")
+    assert not any(v.get("cve") == "CVE-2010-2075"
+                   and v.get("vuln_type") == "vulnerable_service" for v in vulns)
+
+
+@pytest.mark.asyncio
+async def test_non_irc_service_on_irc_range_port_does_not_misfire():
+    # Guard: a different, fingerprinted service that merely happens to sit on an
+    # IRC-range port must get its own handling, never the IRC exposure note.
+    vulns = await _map([
+        {"port": 7000, "service": "http", "product": "nginx",
+         "version": "", "banner": ""},
+    ])
+    assert not any(v.get("title") == "IRC daemon exposed (version undetermined)"
+                   for v in vulns), "nginx on 7000 must not be labelled an IRC daemon"
+
+
+@pytest.mark.asyncio
 async def test_irc_probe_registers_before_asking_for_version(monkeypatch):
     """UnrealIRCd only emits the build-bearing 002/004/351 numerics once the
     client has registered, so a bare ``VERSION`` (the old probe) never captured

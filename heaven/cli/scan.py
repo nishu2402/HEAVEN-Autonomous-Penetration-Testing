@@ -1082,11 +1082,17 @@ def status_cmd(engagement: Optional[str]) -> None:
         return
     status_color = {"running": "green", "completed": "cyan",
                     "paused": "yellow", "failed": "red"}
+    # Show the FULL scan id: it is what `heaven diff/retest/replay/pause/resume`
+    # take, and those require an exact match (no prefix resolution), so a
+    # truncated id printed here would not be usable.
     for s in scans:
         col = status_color.get(s["status"], "dim")
         _print(f"  [{col}]{s['status']:12}[/{col}] "
-               f"{s['id'][:8]}  findings:{s['findings']:4}  "
-               f"started:{(s['started_at'] or '')[:16]}")
+               f"findings:{s['findings']:4}  "
+               f"started:{(s['started_at'] or '')[:16]}  "
+               f"{s['id']}")
+    _print("\n[dim]Use the id with heaven diff / retest / replay / pause / "
+           "resume.[/dim]")
 
 
 def register(cli: click.Group) -> None:

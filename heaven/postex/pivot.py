@@ -182,7 +182,12 @@ async def run_pivot(*, authorized: bool = False, jumps: list[JumpSpec],
             scan_ports = ports or [21, 22, 23, 25, 80, 139, 445, 3306, 3389, 8080]
             result.reachable = await chain.scan_through(targets, scan_ports)
     except Exception as e:  # noqa: BLE001
-        result.errors.append(f"{type(e).__name__}: {e}")
+        from heaven.utils import ssh_safe
+        first = jumps[0]
+        logger.debug("pivot establish via %s:%s failed", first.host, first.port,
+                     exc_info=True)
+        result.errors.append(
+            ssh_safe.friendly_conn_error(e, first.host, first.port))
     finally:
         if not socks:      # keep the chain open only if a SOCKS proxy is live
             await chain.close()

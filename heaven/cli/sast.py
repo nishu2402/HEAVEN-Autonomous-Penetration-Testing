@@ -14,9 +14,34 @@ import click
 from heaven.cli._helpers import _engagement_db_path, _print
 
 
-@click.group(name="sast")
+class _DefaultSubcommandGroup(click.Group):
+    """A group that falls back to its ``scan`` subcommand.
+
+    So ``heaven sast ./src`` behaves like ``heaven sast scan ./src`` — matching
+    the sibling ``heaven sca ./src`` — while the explicit ``heaven sast scan ...``
+    form, ``heaven sast --help`` and ``heaven sast`` (bare) all keep working
+    unchanged. The fallback only fires when the first token is a value (not an
+    option) that is not already a known subcommand.
+    """
+
+    _DEFAULT = "scan"
+
+    def resolve_command(self, ctx, args):  # type: ignore[override]
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError:
+            if args and not args[0].startswith("-") and self._DEFAULT in self.commands:
+                return super().resolve_command(ctx, [self._DEFAULT, *args])
+            raise
+
+
+@click.group(name="sast", cls=_DefaultSubcommandGroup)
 def sast() -> None:
-    """Static source-code analysis via Semgrep + HEAVEN's curated rule pack."""
+    """Static source-code analysis via Semgrep + HEAVEN's curated rule pack.
+
+    Pass a source path directly (``heaven sast ./my-app``) or use the explicit
+    ``heaven sast scan ./my-app`` form; both run the same analysis.
+    """
 
 
 @sast.command("scan")

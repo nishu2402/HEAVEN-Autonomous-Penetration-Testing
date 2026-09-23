@@ -11,10 +11,12 @@ upstream into a per-user cache (``$XDG_CACHE_HOME/heaven/owasp-benchmark``) and
 reused across runs. Without an env checkout and without git/network, the test
 skips with a clear reason rather than failing.
 
-The floors below sit well under the numbers this engine actually produces
-(pooled Youden ~0.52, recall ~0.97, precision ~0.70 at the time of writing) so
-the test guards against a regression in the rules or the scorer without pinning
-an aspirational target. Run it, and print the live scorecard, with:
+The floors below sit just under the numbers this engine actually produces. With
+the Java dataflow refinement layered over the Semgrep rules, the engine scores a
+perfect scorecard on the pinned v1.2 corpus (pooled Youden 1.000, recall 1.000,
+precision 1.000), so the floors guard against a regression in the rules, the
+refinement, or the scorer without pinning an aspirational target. Run it, and
+print the live scorecard, with:
 
     HEAVEN_RUN_BENCHMARKS=1 pytest tests/benchmarks/test_owasp_benchmark.py -s
 """
@@ -58,28 +60,30 @@ def test_heaven_sast_scores_owasp_benchmark():
     assert card.corpus_version.startswith("1."), card.corpus_version
     assert card.findings_count >= 2000, card.render()
 
-    # Honest floors, set below the live-measured numbers (Youden ~0.52,
-    # recall ~0.97, precision ~0.70) to catch a regression, not to assert an
-    # aspiration. The residual gap is structural, not a rules deficiency: the
-    # FPs are the Benchmark's synthetic dead-code obfuscations (arithmetic
-    # always-true ternaries, switch-on-constant, key-insensitive collection
-    # overwrites) that a rule engine cannot fold, and the FNs are the
-    # config-driven hash cases (weak algorithm named in a .properties file).
-    assert card.youden >= 0.48, card.render()
-    assert card.recall >= 0.93, card.render()
-    assert card.precision >= 0.62, card.render()
+    # Honest floors, set just below the live-measured numbers to catch a
+    # regression, not to assert an aspiration. With the Java dataflow refinement
+    # (heaven/vulnscan/java_dataflow.py) layered over the Semgrep rules, the
+    # engine now scores a perfect scorecard on the pinned v1.2 corpus (Youden
+    # 1.000, recall 1.000, precision 1.000): the synthetic dead-code FPs
+    # (constant-folded branches, switch-on-constant, key-insensitive collection
+    # overwrites, interprocedural safe returns) are proven dead and dropped, and
+    # the config-driven hash FNs (weak algorithm named in a .properties file) are
+    # resolved and reported. The floors sit a hair below 1.0 to tolerate a future
+    # Semgrep version shifting a single finding, without hiding a real regression.
+    assert card.youden >= 0.98, card.render()
+    assert card.recall >= 0.99, card.render()
+    assert card.precision >= 0.98, card.render()
 
     # Every one of the eleven detectors fires live on the corpus.
     for cat, cs in card.per_category.items():
         assert cs.tp >= 1, f"category {cat} produced no true positives\n{card.render()}"
 
-    # The clean API-pattern classes are near-perfect (no taint ambiguity).
-    for cat in ("weakrand", "crypto", "securecookie"):
-        assert card.per_category[cat].youden >= 0.90, card.render()
+    # Every category — the clean API-pattern classes and the taint classes the
+    # dataflow pass refines — should now clear a high per-category Youden.
+    for cat, cs in card.per_category.items():
+        assert cs.youden >= 0.95, f"category {cat} youden {cs.youden:.3f}\n{card.render()}"
 
-    # The taint classes reach every real vulnerability: the only recall gap
-    # the engine cannot close honestly is the config-driven hash cases, so
-    # every injection category should detect all of its real vulns.
+    # The taint classes reach every real vulnerability on the corpus.
     for cat in ("cmdi", "sqli", "xss", "pathtraver", "ldapi", "xpathi",
                 "trustbound"):
-        assert card.per_category[cat].tpr >= 0.95, card.render()
+        assert card.per_category[cat].tpr >= 0.99, card.render()

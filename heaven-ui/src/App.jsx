@@ -34,6 +34,7 @@ const Benchmark      = lazy(() => import("./pages/Benchmark.jsx"));
 const Methodology    = lazy(() => import("./pages/Methodology.jsx"));
 const Compliance     = lazy(() => import("./pages/Compliance.jsx"));
 const AutonomousPage = lazy(() => import("./pages/Autonomous.jsx"));
+const FleetPage      = lazy(() => import("./pages/Fleet.jsx"));
 const CoveragePage   = lazy(() => import("./pages/Coverage.jsx"));
 const PostexPage     = lazy(() => import("./pages/Postex.jsx"));
 const ExploitPage    = lazy(() => import("./pages/Exploit.jsx"));
@@ -147,6 +148,7 @@ function Shell() {
               <Route path="/assets" element={<AssetsPage />} />
               <Route path="/diff" element={<DiffPage />} />
               <Route path="/autonomous" element={<AutonomousPage />} />
+              <Route path="/fleet" element={<FleetPage />} />
               <Route path="/coverage" element={<CoveragePage />} />
               <Route path="/postex" element={<PostexPage />} />
               <Route path="/exploit" element={<ExploitPage />} />

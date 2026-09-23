@@ -604,8 +604,9 @@ class WindowsEnumEngine:
                         outputs[key] = ""
                         logger.debug("win enum cmd %s failed: %s", key, e)
         except Exception as e:
+            logger.debug("win-enum connect to %s:%s failed", host, port, exc_info=True)
             return WinEnumResult(host=host, user=username, success=False,
-                                 error=f"{type(e).__name__}: {e}")
+                                 error=ssh_safe.friendly_conn_error(e, host, port))
 
         result = parse_windows_enumeration(host, username, outputs)
         logger.info("win-enum %s@%s: %d privesc vector(s)",

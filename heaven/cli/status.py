@@ -119,6 +119,26 @@ def _collect_status(engagement: Optional[str]) -> dict:
     except Exception as e:
         report["local_llm"] = {"installed": None, "reachable": False, "error": str(e)}
 
+    # Agent Fleet — the default-on multi-agent engine (revert with
+    # HEAVEN_AGENT_FLEET=0). Report its intelligence tier so the operator sees the
+    # honest "runs deterministically, AI optional" picture.
+    try:
+        from heaven.ai.fleet import (
+            FleetBrain,
+            distributed_enabled,
+            fleet_enabled,
+            fleet_workers,
+        )
+        info = FleetBrain().describe()
+        info["enabled"] = fleet_enabled()
+        info["workers"] = fleet_workers()
+        info["scale_out"] = distributed_enabled()
+        report["fleet"] = info
+    except Exception as e:  # noqa: BLE001 — fleet status is best-effort
+        report["fleet"] = {"tier": 0, "label": "deterministic", "available": False,
+                           "enabled": False, "workers": 1, "scale_out": False,
+                           "error": str(e)}
+
     # SIEM
     try:
         from heaven.devsecops.alerting import SIEMNotifier, WebhookAlerter
@@ -298,6 +318,20 @@ def _render_pretty(report: dict) -> None:
     else:
         _print("  [dim]· Local AI    not installed · heaven ai setup "
                "(no key, no rate limits)[/dim]")
+
+    # Agent Fleet — the multi-agent engine and its active intelligence tier.
+    fleet = report.get("fleet", {})
+    if fleet:
+        tier_label = fleet.get("label", "deterministic")
+        gate = "default-on" if fleet.get("enabled") else "reverted (HEAVEN_AGENT_FLEET=0)"
+        # Scale-out is off unless the operator set HEAVEN_FLEET_WORKERS>1.
+        scale = (f" · {fleet.get('workers')} workers"
+                 if fleet.get("scale_out") else " · single-process")
+        if fleet.get("available"):
+            _print(f"  [green]✓ Fleet[/green]      {tier_label} brain · {gate}{scale}")
+        else:
+            _print(f"  [dim]· Fleet      deterministic (full strength, AI optional) "
+                   f"· {gate}{scale}[/dim]")
 
     # SIEM
     siem = report.get("siem", {})

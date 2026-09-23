@@ -277,6 +277,23 @@ class RaceConditionDetector:
             # 2-sample baseline happened to draw identical.
             if len(seq_hashes) != 1:
                 return None   # inherently dynamic response, not a race signal
+            # Reproduce-before-report. A genuine TOCTOU is reproducible: identical
+            # concurrent requests keep committing divergent state on every burst.
+            # A transient artifact (server-side session/file-lock contention, load
+            # jitter, a one-off warm-up allocation) diverges once under load and
+            # then settles, so it does NOT recur. Firing a confirmation burst and
+            # requiring the divergence a SECOND time removes that class of
+            # low-confidence false positive (seen live as spurious race leads on
+            # DVWA's authenticated POST endpoints, where lock contention, not an
+            # app-level race, drove the one-off divergence) without touching a real
+            # race, which keeps diverging. This mirrors the reproduction pass the
+            # injection oracles already use to lift precision without losing recall.
+            confirm = [r for r in await asyncio.gather(
+                *[send_request() for _ in range(concurrent_requests)]) if r is not None]
+            confirm_success_hashes = {r["body_hash"] for r in confirm
+                                      if 200 <= r["status"] < 300}
+            if len(confirm_success_hashes) <= 1:
+                return None   # divergence did not reproduce → transient, not a race
             return AdvancedFinding(
                 target=url, vuln_type="race_condition", severity="low",
                 title="Possible Race Condition (TOCTOU) Indicator",

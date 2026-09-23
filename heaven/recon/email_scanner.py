@@ -572,11 +572,18 @@ class EmailSecurityScanner:
             # Only reported when a plausibly-valid mailbox and a random one
             # produce DIFFERENT response classes (2xx vs 5xx): that proves the
             # server discloses which accounts exist. No mail is ever sent.
+            #
+            # 252 counts as a valid-side response: Postfix (a very common MTA)
+            # answers VRFY for a real mailbox with "252 …" ("cannot VRFY, but
+            # will accept") while still rejecting an unknown one with 550 — that
+            # is a real leak. Requiring the junk probe to be a 55x REJECT keeps
+            # this differential (a server that 252s *everything* is never flagged
+            # because its junk probe is 252, not 550).
             try:
                 valid_resp = await _cmd(b"VRFY postmaster\r\n")
                 junk_resp = await _cmd(
                     f"VRFY heaven{secrets.token_hex(5)}\r\n".encode())
-                if (valid_resp[:3] in ("250", "251")
+                if (valid_resp[:3] in ("250", "251", "252")
                         and junk_resp[:3] in ("550", "551", "553")):
                     self._findings.append(EmailFinding(
                         target=server, vuln_type="smtp_user_enumeration",

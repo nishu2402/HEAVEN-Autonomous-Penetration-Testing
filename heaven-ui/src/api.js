@@ -289,6 +289,19 @@ export const Engagement = {
   // both; omitted fields are left unchanged. → { ok, engagement }.
   updateDetails: (fields) =>
     api(`/engagement`, { method: "PATCH", body: JSON.stringify(fields) }),
+  // Honest leads: substantiated signals that did NOT reach the finding bar.
+  // They are never findings and never counted as findings. Default: open leads.
+  leads: (status = "open", limit = 200) => {
+    const q = new URLSearchParams();
+    if (status) q.append("status", status);
+    q.append("limit", limit);
+    return api(`/engagement/leads?${q.toString()}`);
+  },
+  // Human adjudication: "promoted" (a human confirmed it) / "dismissed" (ruled
+  // out). Promoting does NOT auto-create a finding — that still needs evidence.
+  setLeadStatus: (id, status) =>
+    api(`/engagement/leads/${encodeURIComponent(id)}/status?status=${encodeURIComponent(status)}`,
+      { method: "PUT" }),
 };
 
 export const Scans = {

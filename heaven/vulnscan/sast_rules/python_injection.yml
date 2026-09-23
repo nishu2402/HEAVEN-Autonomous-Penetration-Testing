@@ -55,6 +55,28 @@ rules:
       - pattern-not: subprocess.$F("...", shell=True, ...)
       - pattern-not: os.system("...")
 
+  - id: heaven.python.code-injection-eval
+    message: |
+      eval() / exec() on a variable runs arbitrary Python whenever any part of
+      that value is attacker-controlled (CWE-95). Parse instead: ast.literal_eval()
+      for literal data, or an explicit dispatch dict / getattr allow-list for
+      dynamic dispatch. Never eval/exec request, file, or network input.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: CWE-95
+      owasp: A05:2025 - Injection
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: eval($X, ...)
+          - pattern: exec($X, ...)
+      # A literal-only call (eval("1 + 1")) has no injection surface — skip it,
+      # mirroring the string-literal carve-out in the JS/PHP eval rules so the
+      # rule stays high-precision.
+      - pattern-not: eval("...", ...)
+      - pattern-not: exec("...", ...)
+
   - id: heaven.python.deserialisation-unsafe
     message: |
       pickle.loads / marshal.loads / yaml.load on data you don't fully

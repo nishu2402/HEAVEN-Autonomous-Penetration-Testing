@@ -1444,11 +1444,20 @@ class InjectionScanner:
                 if action:
                     merged_forms.setdefault(action, []).append(form)
 
-        # De-duplicate target list
+        # De-duplicate target list, and never fuzz a logout / session-destroy
+        # URL: it yields no injection finding and, under a shared auth session,
+        # fetching it would log the whole scan out (the crawler and dir-fuzzer
+        # apply the same guard). Defense in depth — crawler-sourced targets are
+        # already filtered, but seed URLs / derived targets may not be.
+        try:
+            from heaven.recon.web_crawler import _is_session_destroying
+        except Exception:  # noqa: BLE001
+            def _is_session_destroying(_u: str) -> bool:  # type: ignore[misc]
+                return False
         seen_urls: set[str] = set()
         unique_targets: list[str] = []
         for t in targets:
-            if t and t not in seen_urls:
+            if t and t not in seen_urls and not _is_session_destroying(t):
                 seen_urls.add(t)
                 unique_targets.append(t)
 

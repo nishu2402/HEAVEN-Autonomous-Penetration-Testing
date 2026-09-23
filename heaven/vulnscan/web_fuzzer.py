@@ -1209,6 +1209,18 @@ async def fuzz_targets(urls: list[str], aggressive: Optional[bool] = None,
         # operator asked to stay quiet.
         aggressive = stealth_level not in ("stealth", "paranoid")
 
+    # Under a shared auth session, never fuzz a logout / session-destroy URL: the
+    # verb-tampering / header checks fetch it and would end the session for every
+    # scanner (a dir-fuzz can discover `/logout` even though the crawler skips
+    # it). Filtering here keeps an authenticated fuzz from logging itself out.
+    try:
+        from heaven.recon.auth_session import get_active_session
+        from heaven.recon.web_crawler import _is_session_destroying
+        if get_active_session():
+            urls = [u for u in urls if not _is_session_destroying(u)]
+    except Exception:  # noqa: BLE001 — guard must never break the scan
+        pass
+
     seen: set[str] = set()
     unique: list[str] = []
     for u in urls:

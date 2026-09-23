@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Honest leads: a substantiated signal below the finding bar is now kept for a
+  human instead of being dropped silently.** The false-positive suppressor discards
+  anything it scores under 0.40 confidence, which is right for noise but meant a
+  weak-but-real observation could vanish with no operator ever seeing it. HEAVEN now
+  distils the substantiated discards (the ones carrying real evidence or a signal,
+  not pure noise) into **leads** and records them in their own `leads` table in the
+  engagement database, kept separate from findings by construction so a lead can
+  never be counted as a finding or carry a severity verdict. Each lead keeps a
+  calibrated probability, an honest reason it did not confirm (composed from the
+  suppressor's own recorded reasons) and a concrete manual next step. Surfaced end
+  to end: `heaven leads` (list, with `--promote`/`--dismiss` to triage),
+  `GET /api/engagement/leads` and `PUT /api/engagement/leads/{id}/status` (promoting
+  never auto-creates a finding, so the finding bar is never bypassed by a click), a
+  Leads page in the web UI under Findings, and a clearly separated "Leads for manual
+  review" appendix in the Markdown report. The table auto-creates on existing
+  engagement databases. New coverage in `tests/test_honest_leads.py`.
+
+- **Source-weighted confidence calibration is now applied to every finding.** The
+  `ConfidenceCalibrator` (a source-weighted piecewise-linear curve learned by
+  `heaven train-priors`) already existed but was never called on the write path, so
+  a finding's stored confidence was the raw detector value. It is now applied
+  additively when a finding is persisted: HEAVEN records a `calibrated_confidence`
+  and a full calibration audit in the finding's evidence and **never overwrites**
+  the adjudicated confidence, so the zero-false-positive suppression and
+  active-confirmation work is preserved untouched. The calibration is honest about
+  its source: a validated proof calibrates high, a banner-only CVE match calibrates
+  down (a version match is not a proof) and a fuzzing anomaly lands near zero. The
+  stale `ai_brain.py` note claiming `train-priors` was unimplemented was corrected.
+
 ### Changed
 
 - **The description/type CVSS model is a measurably better ranking aid, reported
@@ -35,6 +66,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     The ordering transfers to unseen future CVEs (ρ=0.71, 98.4% within one band);
     only the exact decimal drifts under distribution shift. New coverage in
     `tests/test_hybrid_risk_model.py`.
+
+### Fixed
+
+- **Authenticated web scans no longer log themselves out mid-scan.** On a target
+  with a reachable logout link (nearly every real application), scanners that share
+  the authenticated session were fetching the logout / session-destroy URL, which
+  ended the session for every other scanner. The rest of the scan then ran
+  unauthenticated and silently missed everything behind the login. Proven live on
+  DVWA: a single logout fetch dropped confirmed SQLi / XSS / command-injection recall
+  to zero. The crawler and directory fuzzer already skipped these URLs; the guard now
+  also covers the authentication auditor, the injection scanner, the misconfiguration
+  scanner and the web fuzzer, so no scanner sharing the session can tear it down.
+  After the fix the same authenticated DVWA scan recovers the confirmed SQLi
+  (including an actively-proven one), LFI and command-injection findings.
+
+- **`--mode email` now audits a mail server addressed by IP.** Email mode only
+  derived domains from URLs, so `heaven scan -t <ip> --mode email` skipped a live
+  SMTP server entirely (a bare IP has no MX domain to resolve). It now probes the
+  SMTP endpoint directly (STARTTLS / VRFY / open-relay, sending RSET before DATA so
+  no mail is ever relayed), bounded and CIDR-safe, the same posture a full scan
+  applies to an open port 25.
+
+- **SMTP user-enumeration now catches Postfix.** The VRFY differential only treated a
+  250/251 reply as a valid-mailbox response, so Postfix (which answers a real mailbox
+  with `252` while rejecting an unknown one with `550`) was missed. The `252` reply is
+  now recognised as a valid-side response; the junk probe must still be a 55x
+  rejection, so a server that answers `252` to everything is never flagged.
+
+- **Python SAST now flags `eval` / `exec` on a variable (CWE-95).** The JavaScript and
+  PHP rule packs already caught dynamic code execution, but the Python pack did not, so
+  `eval(user_input)` went unreported under Semgrep. Added a high-precision rule that
+  skips string-literal-only calls, matching the JS/PHP carve-out.
+
+- **`heaven sca` and `heaven sast` create the engagement on demand.** With
+  `--engagement <new-name>` both commands ran the full analysis and then aborted
+  because the engagement database did not already exist, discarding every finding.
+  They now auto-create the engagement and persist, matching `heaven scan`.
 
 ### Security
 

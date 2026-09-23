@@ -261,10 +261,14 @@ def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
             _collect_engagement_assets,
             _collect_engagement_dns,
         )
+        # Honest leads appendix: unconfirmed observations for manual review,
+        # clearly separated from findings (never counted/scored as findings).
+        open_leads = store.get_leads(status="open", limit=1000)
         text = export_findings_markdown(finding_dicts,
                                          engagement_name=eng.name if eng else "",
                                          assets=_collect_engagement_assets(engagement),
-                                         dns_records=_collect_engagement_dns(engagement))
+                                         dns_records=_collect_engagement_dns(engagement),
+                                         leads=open_leads)
         out_path.write_text(text)
     elif fmt == "csv":
         out_path.write_text(export_findings_csv(finding_dicts))
@@ -490,6 +494,75 @@ def report(engagement: Optional[str], output: str, framework: str) -> None:
         _print(f"  {s:10}: {n}")
 
 
+@click.command()
+@click.option("--engagement", help="Engagement name")
+@click.option("--status", type=click.Choice(["open", "promoted", "dismissed"]),
+              default="open", show_default=True, help="Filter by lead status")
+@click.option("--all", "show_all", is_flag=True, help="Show leads of every status")
+@click.option("--limit", type=int, default=100, help="Max rows to show")
+@click.option("--format", "fmt", type=click.Choice(["table", "json", "ids"]),
+              default="table", help="Output format")
+@click.option("--promote", "promote_id", help="Mark a lead id as promoted (a human confirmed it)")
+@click.option("--dismiss", "dismiss_id", help="Mark a lead id as dismissed (a human ruled it out)")
+def leads(engagement: Optional[str], status: str, show_all: bool, limit: int,
+          fmt: str, promote_id: Optional[str], dismiss_id: Optional[str]) -> None:
+    """List honest leads: substantiated signals that did NOT reach the finding bar.
+
+    A lead is not a finding. It is a weak-but-real observation the scanner could
+    not confirm, recorded so a human can look rather than have it dropped
+    silently. Leads never count as findings and never carry a severity verdict.
+    """
+    if json_output():
+        fmt = "json"
+    from heaven.engagement import EngagementStore
+    store = EngagementStore(_engagement_db_path(engagement))
+
+    # Human adjudication: promote (a human confirmed it) / dismiss (ruled out).
+    if promote_id or dismiss_id:
+        lid = promote_id or dismiss_id
+        new_status = "promoted" if promote_id else "dismissed"
+        if store.set_lead_status(lid, new_status):
+            _print(f"[green]Lead {lid} → {new_status}.[/green]")
+            if promote_id:
+                _print("[dim]A promoted lead is a human's call. To make it a tracked "
+                       "finding, add it with your evidence via the API or a re-scan.[/dim]")
+        else:
+            _print(f"[red]Lead not found:[/red] {lid}")
+            sys.exit(2)
+        return
+
+    rows = store.get_leads(status=None if show_all else status, limit=limit)
+    if not rows:
+        if fmt == "json":
+            print("[]")
+        else:
+            _print("[green]No leads for review.[/green] "
+                   "[dim]Every substantiated signal reached the finding bar, or none was seen.[/dim]")
+        return
+
+    if fmt == "json":
+        print(json.dumps(rows, indent=2, default=str))
+    elif fmt == "ids":
+        for r in rows:
+            print(r["id"])
+    else:
+        _print("[bold]Leads for manual review[/bold] "
+               "[dim](unconfirmed · not counted as findings)[/dim]\n")
+        for r in rows:
+            conf = float(r.get("calibrated_confidence") or 0.0)
+            _print(
+                f"  [yellow]LEAD[/yellow] {r['id']}  p={conf:.0%}  "
+                f"{str(r.get('vuln_type') or '')[:18]:18} "
+                f"{str(r.get('target') or '')[:38]:38} [dim]{r.get('status', 'open')}[/dim]"
+            )
+            _print(f"       [dim]why:[/dim] {str(r.get('reason') or '')[:100]}")
+            if r.get("next_step"):
+                _print(f"       [dim]next:[/dim] {str(r.get('next_step'))[:100]}")
+        _print(f"\n[dim]{len(rows)} lead(s) shown. "
+               f"Confirm: [/dim][cyan]heaven leads --promote <id>[/cyan][dim] · "
+               f"rule out: [/dim][cyan]heaven leads --dismiss <id>[/cyan]")
+
+
 def register(cli: click.Group) -> None:
     cli.add_command(findings)
     cli.add_command(show)
@@ -499,3 +572,4 @@ def register(cli: click.Group) -> None:
     cli.add_command(verify)
     cli.add_command(export)
     cli.add_command(report)
+    cli.add_command(leads)

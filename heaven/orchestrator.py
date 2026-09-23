@@ -1334,7 +1334,12 @@ class ScanOrchestrator:
         # "vulnerabilities". Summing all of those double-counts. Collapse to
         # one entry per stable identity so the report, scan list, kill chain
         # and engagement store all agree on the finding count.
-        from heaven.engagement import dedup_findings
+        from heaven.engagement import dedup_findings, extract_leads
+        # Honest leads: substantiated candidates the FP layer dropped below the
+        # finding bar. Captured from the RAW stream before dedup discards them,
+        # so a weak-but-real signal reaches a human instead of vanishing. Never
+        # findings, never counted as findings.
+        all_leads = extract_leads(all_vulns)
         all_vulns = dedup_findings(all_vulns)
         # Cross-reference the NVD sweep's KEV / EPSS onto the real findings by CVE
         # id. KEV (CISA Known-Exploited) is a strong triage signal the inline
@@ -1363,6 +1368,7 @@ class ScanOrchestrator:
             "failed": self.progress.failed_tasks,
             "vulnerabilities": all_vulns,
             "findings": all_vulns,
+            "leads": all_leads,
             "assets": all_assets,
             "dns_records": all_dns,
             **sev_counts,
@@ -3668,17 +3674,63 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     # ═══ Phase: EMAIL SCAN ═══
     async def _email_scan(**kw):
         try:
-            from heaven.recon.email_scanner import scan_email_domains
-            # Extract domains from URLs
+            from heaven.recon.email_scanner import (
+                scan_email_domains, scan_smtp_endpoint,
+            )
             from urllib.parse import urlparse
-            domains = set()
-            for url in targets.get("urls", []):
-                domain = _registered_domain(urlparse(url).hostname or "")
-                if domain:
-                    domains.add(domain)
-            if not domains:
-                return {"skipped": True, "reason": "no email domains (IP/localhost targets)"}
-            return await scan_email_domains(domains=list(domains))
+            # A mail DOMAIN (drives SPF/DKIM/DMARC/DNSSEC + MX-resolved SMTP) is
+            # any hostname target with a registered domain; a bare IP has none.
+            # Every explicit host (bare IP, or a hostname/URL host) is ALSO probed
+            # as a raw SMTP endpoint, so `--mode email -t <ip>` audits a mail
+            # server that publishes no MX record, exactly the way a full scan's
+            # open-:25 injection does. Without this, email mode silently skipped
+            # IP targets while `--mode full` caught the very same SMTP posture.
+            domains: set[str] = set()
+            host_targets: list[str] = []
+            for url in targets.get("urls", []) or []:
+                host = urlparse(url).hostname or ""
+                dom = _registered_domain(host)
+                if dom:
+                    domains.add(dom)
+                elif host:
+                    host_targets.append(host)
+            for t in targets.get("ips", []) or []:
+                if not t or "/" in t:  # skip CIDRs — never a single mail host
+                    continue
+                dom = _registered_domain(t)
+                if dom:
+                    domains.add(dom)
+                host_targets.append(t)
+            if not domains and not host_targets:
+                return {"skipped": True,
+                        "reason": "no email domains or host targets"}
+
+            findings: list = []
+            if domains:
+                dom_res = await scan_email_domains(domains=list(domains))
+                findings.extend(dom_res.get("findings", []) or [])
+
+            # De-duplicate and bound the direct-SMTP fan-out so a host list can
+            # never blow up the probe budget; each probe fails fast on a closed
+            # port and is non-intrusive (RSET before DATA — no mail is relayed).
+            seen: set[str] = set()
+            probe_hosts = [h for h in host_targets
+                           if not (h in seen or seen.add(h))][:256]
+            if probe_hosts:
+                sem = asyncio.Semaphore(32)
+
+                async def _probe(host: str) -> dict:
+                    async with sem:
+                        try:
+                            return await scan_smtp_endpoint(host, 25)
+                        except Exception:  # noqa: BLE001
+                            return {}
+
+                for res in await asyncio.gather(*[_probe(h) for h in probe_hosts]):
+                    findings.extend(res.get("findings", []) or [])
+
+            return {"total": len(findings), "findings": findings,
+                    "domains": sorted(domains), "smtp_hosts": probe_hosts}
         except ImportError:
             return {}
 

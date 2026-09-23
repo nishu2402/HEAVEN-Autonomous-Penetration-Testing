@@ -761,7 +761,7 @@ def render_coverage_html(std: dict[str, Any], eng_name: str = "") -> str:
     su = std.get("summary", {})
     title = std.get("meta_title") or std.get("title") or std.get("name", "")
     sub = std.get("subtitle", "")
-    generated = _now_utc()
+    generated = _generated_at()
 
     def _refs_html(row: dict[str, Any]) -> str:
         refs = row.get("findings") or []
@@ -852,7 +852,7 @@ def render_coverage_markdown(std: dict[str, Any], eng_name: str = "") -> str:
     lines = [
         f"# {title}: Coverage",
         "",
-        f"*{std.get('subtitle', '')}* · Engagement: **{eng_name or '—'}** · Generated {_now_utc()}",
+        f"*{std.get('subtitle', '')}* · Engagement: **{eng_name or '—'}** · Generated {_generated_at()}",
         "",
         _coverage_intro(std, eng_name),
         "",
@@ -949,7 +949,7 @@ def render_coverage_pdf(std: dict[str, Any], eng_name: str = "") -> bytes:
     return render_matrix_pdf(
         title=f"{title}: Coverage",
         subtitle=sub,
-        meta_lines=[f"Engagement: {eng_name or '—'}  ·  Generated {_now_utc()}"],
+        meta_lines=[f"Engagement: {eng_name or '—'}  ·  Generated {_generated_at()}"],
         intro=_coverage_intro(std, eng_name),
         kpis=[(su.get("total", 0), "Tests mapped"),
               (su.get("covered", 0), "Automated"),
@@ -961,6 +961,6 @@ def render_coverage_pdf(std: dict[str, Any], eng_name: str = "") -> bytes:
                "finding in this engagement.")
 
 
-def _now_utc() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M UTC")
+def _generated_at() -> str:
+    from heaven.utils.timefmt import report_timestamp
+    return report_timestamp()

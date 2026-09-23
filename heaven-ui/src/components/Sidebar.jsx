@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router";
 import Logo from "./Logo.jsx";
+import { localClock, tzLabel } from "../datetime.js";
 
 const GROUPS = [
   {
@@ -162,7 +163,7 @@ export default function Sidebar() {
         <div className="flex items-center justify-between">
           <span><span className="status-dot" />System online</span>
           <span className="mono" style={{ color: 'var(--text-2)' }}>
-            {time.toISOString().slice(11, 19)}
+            {localClock(time)} {tzLabel(time)}
           </span>
         </div>
         <div style={{ marginTop: 8, fontSize: 10.5, color: 'var(--text-2)' }}>

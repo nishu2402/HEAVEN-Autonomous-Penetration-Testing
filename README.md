@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3063 tests · 64 CLI commands · 106 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3075 tests · 64 CLI commands · 106 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -21,7 +21,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-231-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-232-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-64-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-30-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
@@ -110,9 +110,9 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 3063 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 3075 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 231 |
+| 🧩 **Modules** | 232 |
 | ⌨️ **CLI Commands** | 64 |
 | 🌐 **API Routes** | 106 RBAC-protected routes |
 | 🖥️ **UI Pages** | 30 (React + Vite, dark glassmorphic) |
@@ -708,6 +708,8 @@ The PDF and HTML client deliverables also carry a **Combined Risk & Attack Paths
 
 Every finding carries a defensible **evidence package**: request/response, copy-pasteable curl repro, detection rationale, remediation, and CWE/OWASP/MITRE references sourced from the built-in vulnerability knowledge base.
 
+Report footers and the **"Generated"** timestamp render in the operator's own timezone: a report produced in India reads **IST**, one in the UK reads **GMT/BST**, automatically, with no configuration. Pin an explicit zone for a client abroad with `HEAVEN_REPORT_TZ=Asia/Kolkata` (any IANA name), or `HEAVEN_REPORT_TZ=UTC` to keep UTC footers. Stored timestamps stay UTC regardless. The web UI clock follows the viewer's own browser zone.
+
 ---
 
 <a id="integrations"></a>
@@ -781,7 +783,7 @@ The models (~6 MB vector + ~2 MB description) aren't bundled in the wheel or git
 </p>
 
 ```
-heaven/                   ← Python package (231 modules)
+heaven/                   ← Python package (232 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines - Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -795,7 +797,7 @@ heaven/                   ← Python package (231 modules)
 └── cli/                  Click CLI - one module per command group (64 commands)
 
 heaven-ui/                React + Vite web console (30 pages)
-tests/                    3063 pytest tests + native & DVWA benchmark suites
+tests/                    3075 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -814,7 +816,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (3063 tests)
+pytest tests/                  # full suite, ~3.5 min (3075 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -881,7 +883,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>3063 tests · 231 modules · 64 CLI commands · 106 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>3075 tests · 232 modules · 64 CLI commands · 106 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

@@ -553,9 +553,9 @@ def coverage_for(fw_id: str, findings: list[dict[str, Any]],
     }
 
 
-def _now_utc() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M UTC")
+def _generated_at() -> str:
+    from heaven.utils.timefmt import report_timestamp
+    return report_timestamp()
 
 
 def _coverage_intro(cov: dict[str, Any]) -> str:
@@ -619,7 +619,7 @@ def render_coverage_html(cov: dict[str, Any]) -> str:
  <div class="page">
   <h1>{_esc(title)} · Compliance coverage</h1>
   <p class="muted">{_esc(cov.get('subtitle', ''))} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng or '—')}</strong>
-     &nbsp;·&nbsp; Generated {_esc(_now_utc())}</p>
+     &nbsp;·&nbsp; Generated {_esc(_generated_at())}</p>
   <div class="disclaimer"><strong>Coverage view, not an attestation.</strong>
    {_esc(_coverage_intro(cov))}</div>
   <div class="kpis">
@@ -641,7 +641,7 @@ def render_coverage_markdown(cov: dict[str, Any]) -> str:
         f"# {cov.get('title', '')}: Compliance coverage",
         "",
         f"*{cov.get('subtitle', '')}* · Engagement: **{cov.get('engagement') or '—'}** "
-        f"· Generated {_now_utc()}",
+        f"· Generated {_generated_at()}",
         "",
         f"> **Coverage view, not an attestation of compliance.** {_coverage_intro(cov)}",
         "",
@@ -698,7 +698,7 @@ def render_coverage_pdf(cov: dict[str, Any]) -> bytes:
         title=f"{cov.get('title', '')}: Compliance coverage",
         subtitle=cov.get("subtitle", ""),
         meta_lines=[f"Engagement: {cov.get('engagement') or '—'}  ·  "
-                    f"Generated {_now_utc()}"],
+                    f"Generated {_generated_at()}"],
         intro="Coverage view, not an attestation of compliance. "
               + _coverage_intro(cov),
         kpis=[(cov.get("controls_total", 0), "Controls"),

@@ -667,12 +667,12 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
     findings, never scored as findings, so a weak-but-real signal is handed to a
     human instead of dropped.
     """
-    from datetime import datetime, timezone
+    from heaven.utils.timefmt import stamp
     out = []
     out.append("# HEAVEN Findings Report")
     if engagement_name:
         out.append(f"\n**Engagement:** {engagement_name}")
-    out.append(f"\n**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    out.append(f"\n**Generated:** {stamp()}")
     out.append(f"\n**Total findings:** {len(findings)}")
     out.append("")
 

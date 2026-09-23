@@ -137,9 +137,10 @@ class LinpeasRunner:
                     **parsed,
                 )
         except Exception as e:
+            logger.debug("linpeas connect to %s:%s failed", host, port, exc_info=True)
             return LinpeasResult(
                 host=host, user=username, success=False,
-                error=f"{type(e).__name__}: {e}",
+                error=ssh_safe.friendly_conn_error(e, host, port),
             )
 
 

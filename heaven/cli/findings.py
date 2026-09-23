@@ -151,13 +151,35 @@ def replay(finding_id: str, engagement: Optional[str]) -> None:
         sys.exit(1)
 
 
+# Output-extension → export format. Only unambiguous mappings are listed; .xml is
+# deliberately omitted because both junit and burp emit XML.
+_EXPORT_EXT_MAP = {
+    ".md": "markdown", ".markdown": "markdown",
+    ".csv": "csv",
+    ".json": "json",
+    ".sarif": "sarif",
+    ".jsonl": "proxy-jsonl",
+}
+
+
+def _infer_export_format(output: str) -> Optional[str]:
+    """Best-effort export format from the output filename, or None if unclear."""
+    name = Path(output).name.lower()
+    # A ``.sarif.json`` name means SARIF even though the final suffix is .json.
+    if name.endswith(".sarif.json") or name.endswith(".sarif"):
+        return "sarif"
+    return _EXPORT_EXT_MAP.get(Path(name).suffix)
+
+
 @click.command()
 @click.option("--engagement", help="Engagement name")
 @click.option("--output", "-o", required=True, type=click.Path(), help="Output file")
 @click.option("--format", "fmt",
               type=click.Choice(["markdown", "csv", "json", "sarif", "junit",
                                  "burp", "proxy-jsonl"]),
-              default="markdown", help="Export format")
+              default=None,
+              help="Export format. Inferred from the --output extension "
+                   "(.json/.csv/.sarif/.md/.jsonl) when omitted; markdown otherwise.")
 @click.option("--fail-on",
               type=click.Choice(["critical", "high", "medium", "low", "none"]),
               default="medium",
@@ -187,6 +209,18 @@ def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
     from heaven.devsecops.evidence import (
         export_findings_markdown, export_findings_csv,
     )
+
+    # When --format is omitted, infer it from the output extension so
+    # `heaven export -o findings.json` does the obvious thing instead of
+    # silently writing markdown into a .json file. Ambiguous/unknown extensions
+    # (e.g. .xml, which could be junit or burp) fall back to markdown.
+    if fmt is None:
+        inferred = _infer_export_format(output)
+        fmt = inferred or "markdown"
+        if inferred and inferred != "markdown":
+            _print(f"[dim]Format '{inferred}' inferred from output extension "
+                   f"(override with --format).[/dim]")
+
     store = EngagementStore(_engagement_db_path(engagement))
     eng = store.get_engagement()
 
@@ -262,12 +296,17 @@ def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
 @click.command()
 @click.argument("finding_id")
 @click.option("--engagement", help="Engagement name")
-def remediate(finding_id: str, engagement: Optional[str]) -> None:
+@click.option("--no-llm", is_flag=True,
+              help="Skip the LLM and return HEAVEN's knowledge-base remediation "
+                   "(deterministic, no API key used).")
+def remediate(finding_id: str, engagement: Optional[str], no_llm: bool) -> None:
     """Generate AI-assisted remediation guidance for one finding.
 
-    Uses the configured LLM provider (ANTHROPIC / OPENAI / GEMINI). When no key
-    is set it falls back to the finding's knowledge-base remediation, so the
-    command always returns something actionable.
+    Uses the configured LLM provider (ANTHROPIC / OPENAI / GEMINI / DEEPSEEK).
+    When no key is set, the call fails, or --no-llm is passed, it falls back to
+    the finding's knowledge-base remediation, so the command always returns
+    something actionable. The output is labelled honestly with whether the LLM
+    actually produced it.
     """
     from heaven.engagement import EngagementStore
     from heaven.devsecops.ai_remediation import AIRemediationEngine
@@ -292,17 +331,29 @@ def remediate(finding_id: str, engagement: Optional[str]) -> None:
     }
 
     engine = AIRemediationEngine()
-    text = engine.generate_patch(finding_dict)
+    if no_llm:
+        # Force the deterministic knowledge-base path without touching any API.
+        engine.available = False
+    # generate_patch_with_source reports whether the LLM *actually* wrote the
+    # text, so a transient API failure that silently fell back to the KB is
+    # labelled honestly instead of being claimed as AI output.
+    text, used_ai = engine.generate_patch_with_source(finding_dict)
 
     if json_output():
         print(json.dumps({"finding_id": finding_id, "remediation": text,
-                          "ai_generated": bool(engine.available)}, indent=2))
+                          "ai_generated": used_ai}, indent=2))
         return
 
-    if not engine.available:
-        _print("[yellow]No LLM configured · showing knowledge-base remediation. "
-               "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / "
-               "DEEPSEEK_API_KEY for AI-tailored guidance.[/yellow]")
+    if not used_ai:
+        if no_llm:
+            _print("[dim]--no-llm · showing knowledge-base remediation.[/dim]")
+        elif not engine.available:
+            _print("[yellow]No LLM configured · showing knowledge-base remediation. "
+                   "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / "
+                   "DEEPSEEK_API_KEY for AI-tailored guidance.[/yellow]")
+        else:
+            _print("[yellow]LLM call did not complete · showing knowledge-base "
+                   "remediation.[/yellow]")
     if HAS_RICH:
         from rich.markdown import Markdown
         from heaven.utils.logger import console

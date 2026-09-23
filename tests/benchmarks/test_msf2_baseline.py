@@ -120,6 +120,8 @@ _FIXTURE_FINDINGS: list[dict] = [
      "severity": "critical", "title": "VNC Server Accepts a Default Password"},
     {"target": "ssh://192.168.0.162:22", "vuln_type": "default_credentials",
      "severity": "critical", "title": "SSH Default Credentials: user:user"},
+    {"target": "192.168.0.162:6667", "vuln_type": "vulnerable_service",
+     "severity": "critical", "title": "UnrealIRCd 3.2.8.1 backdoor command execution"},
     # Supporting findings (labelled, non-required).
     {"target": "192.168.0.162:21", "vuln_type": "cleartext_service",
      "severity": "high", "title": "Cleartext Service Exposed: FTP (port 21)"},
@@ -137,6 +139,10 @@ _FIXTURE_FINDINGS: list[dict] = [
      "severity": "medium", "title": "SMB Null Session Allows Share Enumeration"},
     {"target": "192.168.0.162", "vuln_type": "potential_vulnerable_service",
      "severity": "low", "title": "Potential vulnerable service: Vnc (version unconfirmed)"},
+    {"target": "192.168.0.162:137", "vuln_type": "netbios_information_disclosure",
+     "severity": "low", "title": "NetBIOS Name Service Information Disclosure"},
+    {"target": "192.168.0.162", "vuln_type": "ntlm_coercion",
+     "severity": "high", "title": "NTLM authentication-coercion surface exposed"},
 ]
 
 

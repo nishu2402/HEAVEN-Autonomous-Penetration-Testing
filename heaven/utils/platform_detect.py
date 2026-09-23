@@ -140,7 +140,7 @@ def configure_event_loop() -> None:
         try:
             import uvloop
             uvloop.install()
-            logger.info("uvloop installed")
+            logger.debug("uvloop installed")
         except ImportError:
             logger.debug("uvloop not available, using default event loop")
 

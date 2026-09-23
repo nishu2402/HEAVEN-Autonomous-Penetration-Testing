@@ -181,7 +181,9 @@ class SSHKeyReuseScanner:
                 except OSError:
                     pass  # host unreachable
                 except Exception as e:
-                    summary.errors.append(f"{user}@{host}:{port} → {type(e).__name__}: {e}")
+                    summary.errors.append(
+                        f"{user}@{host}:{port} → "
+                        f"{ssh_safe.friendly_conn_error(e, host, port)}")
 
         await asyncio.gather(*(
             _try_one(h, p, u) for u in usernames for (h, p) in targets

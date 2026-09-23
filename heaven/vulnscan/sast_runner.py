@@ -220,6 +220,16 @@ async def run_sast(
     scanned = paths_meta.get("scanned") or []
     result.files_scanned = len(scanned) if isinstance(scanned, list) else 0
     result.semgrep_version = (data.get("version") or "").strip()
+
+    # Dataflow refinement of the Java results: sound false-positive suppression
+    # (dead taint branches, constant-key collections, interprocedural safe
+    # returns) plus config-resolved weak crypto that pattern rules miss. Never
+    # drops a finding it cannot prove safe; disabled with HEAVEN_JAVA_DATAFLOW=0.
+    try:
+        result.findings = _refine_java_findings(str(src), result.findings)
+    except Exception as e:      # refinement must never break a scan
+        logger.debug(f"sast: java dataflow refinement skipped: {e}")
+
     result.success = True
 
     logger.info(
@@ -227,6 +237,75 @@ async def run_sast(
         f"{result.files_scanned} file(s) in {result.duration_s:.1f}s"
     )
     return result
+
+
+def _refine_java_findings(source_path: str, findings: list[SastFinding]) -> list[SastFinding]:
+    """Apply the Java dataflow refinement to a Semgrep finding list.
+
+    Suppresses taint-category findings the analyzer proves are dead flows, and
+    appends config-resolved weak hash/cipher findings a pattern rule misses. A
+    no-op when javalang is unavailable or the scan has no Java.
+    """
+    from heaven.vulnscan import java_dataflow as jd
+    if not jd.available():
+        return findings
+    if not any((f.file_path or "").endswith(".java") for f in findings) and \
+            not Path(source_path).exists():
+        return findings
+
+    refiner = jd.JavaRefiner(source_path)
+
+    # 1) Sound false-positive suppression for taint categories.
+    kept: list[SastFinding] = []
+    dropped = 0
+    for f in findings:
+        cat = jd.category_for_cwe(f.cwe)
+        if cat and (f.file_path or "").endswith(".java") and \
+                refiner.is_false_positive(f.file_path, cat):
+            dropped += 1
+            continue
+        kept.append(f)
+
+    # 2) Config-resolved weak crypto (adds the flows pattern rules miss).
+    have = {(f.file_path, (f.cwe or "").upper()) for f in kept}
+    added = 0
+    _CRYPTO_META = {
+        "hash": ("heaven.java.config-weak-hash", "CWE-328",
+                 "Weak hash: a broken message digest ({alg}) is configured and "
+                 "used. Use SHA-256 or stronger."),
+        "crypto": ("heaven.java.config-weak-cipher", "CWE-327",
+                   "Weak cryptography: a broken cipher/mode ({alg}) is configured "
+                   "and used. Use AES in an authenticated mode (GCM)."),
+    }
+    try:
+        for file_path, hit in refiner.iter_config_crypto():
+            cwe = hit["cwe"].upper()
+            if (file_path, cwe) in have:
+                continue
+            rule_id, _cwe, msg = _CRYPTO_META[hit["category"]]
+            kept.append(SastFinding(
+                rule_id=rule_id,
+                severity="medium",
+                title=msg.format(alg=hit["algorithm"]).split(":")[0],
+                description=msg.format(alg=hit["algorithm"]),
+                file_path=file_path,
+                line=int(hit.get("line") or 0),
+                cwe=cwe,
+                owasp="A02:2021 - Cryptographic Failures",
+                confidence=0.9,
+                metadata={"source": "heaven-java-dataflow",
+                          "algorithm": hit["algorithm"],
+                          "resolved_from": "properties"},
+            ))
+            have.add((file_path, cwe))
+            added += 1
+    except Exception as e:
+        logger.debug(f"sast: config-crypto resolution skipped: {e}")
+
+    if dropped or added:
+        logger.info(f"sast: java dataflow refined findings "
+                    f"(-{dropped} dead-flow FP, +{added} config-crypto)")
+    return kept
 
 
 # ═══════════════════════════════════════════

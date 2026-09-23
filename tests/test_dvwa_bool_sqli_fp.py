@@ -131,9 +131,19 @@ class _FlashSession:
         return 200, body
 
 
+def _cond_is_false(val: str) -> bool:
+    """Evaluate the injected boolean by TRUTH VALUE (a real DB oracle depends on
+    the condition, not the literal), so the fake also answers the scanner's
+    literal-swapped variant probes ('zq'='zq'/'zq'='zx', 8=8/8=9), not just 1/2."""
+    import re
+    pairs = re.findall(r"'([^']*)'\s*=\s*'([^']*)'", val)
+    pairs += re.findall(r"(?<![\w'])(\d+)\s*=\s*(\d+)", val)
+    return any(a != b for a, b in pairs)
+
+
 class _BlindSession:
     """Fake DVWA blind endpoint: deterministic and order-independent — the row
-    is present for the TRUE condition and 'MISSING' for the FALSE condition."""
+    is present for any TRUE condition and 'MISSING' for any FALSE condition."""
 
     def __init__(self):
         self.base = _load("blind_baseline.html")
@@ -141,12 +151,12 @@ class _BlindSession:
         self.f = _load("blind_false.html")
 
     async def get(self, session, url, headers=None, timeout=8.0):
+        import re
         val = _param_value(url, "id")
-        if "'='1'" in val:
-            return 200, self.t
-        if "'='2'" in val:
-            return 200, self.f
-        return 200, self.base
+        has_cmp = bool(re.search(r"'[^']*'\s*=\s*'[^']*'|(?<![\w'])\d+\s*=\s*\d+", val))
+        if not has_cmp:
+            return 200, self.base
+        return 200, (self.f if _cond_is_false(val) else self.t)
 
 
 def _run_boolean(scanner, session_obj, url, param, baseline):

@@ -29,7 +29,9 @@ idempotent.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import socket
 from typing import Any
 
 from heaven.utils.logger import get_logger
@@ -112,6 +114,60 @@ def connect(*args: Any, **kwargs: Any) -> Any:
     import asyncssh  # local import: asyncssh is an optional dependency
 
     return asyncssh.connect(*args, **kwargs)
+
+
+def friendly_conn_error(exc: BaseException, host: str = "", port: int = 0) -> str:
+    """Turn a raw connection/SSH exception into one plain sentence.
+
+    The post-ex, loot, enum and pivot engines all reach a target over SSH (or a
+    raw TCP connect for pivots). When that fails the caller previously surfaced
+    ``f"{type(e).__name__}: {e}"`` — e.g. ``ConnectionRefusedError: [Errno 61]
+    Connection refused`` — which makes a pentester decode a Python class name and
+    an errno. This maps the handful of failure modes that actually happen to a
+    message that names the host, the cause, and the next thing to check. Used at
+    every engine boundary so the CLI, the API and the fleet all read the same.
+    The full exception is still available to callers that log at ``--debug``.
+    """
+    where = f"{host}:{port}" if (host and port) else (host or "the target")
+
+    # asyncssh-specific failures first (auth/protocol). asyncssh is optional, so
+    # import lazily and fall through cleanly when it is absent.
+    with contextlib.suppress(Exception):
+        import asyncssh  # type: ignore[import-not-found]
+
+        perm = getattr(asyncssh, "PermissionDenied", ())
+        if perm and isinstance(exc, perm):
+            return (f"SSH authentication was rejected by {where}. Check the "
+                    "username and the password / key.")
+        hostkey = getattr(asyncssh, "HostKeyNotVerifiable", ())
+        if hostkey and isinstance(exc, hostkey):
+            return f"SSH host key for {where} could not be verified."
+        lost = getattr(asyncssh, "ConnectionLost", ())
+        if lost and isinstance(exc, lost):
+            return f"SSH connection to {where} dropped mid-session."
+        base = getattr(asyncssh, "Error", ())
+        if base and isinstance(exc, base):
+            reason = getattr(exc, "reason", "") or str(exc)
+            return f"SSH error talking to {where}: {reason}"
+
+    if isinstance(exc, ConnectionRefusedError):
+        return (f"Could not reach SSH on {where}: connection refused. Is the "
+                "SSH service running, and is the port correct?")
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return (f"Timed out connecting to {where}. The host may be down, "
+                "firewalled, or the port filtered.")
+    if isinstance(exc, socket.gaierror):
+        return f"Could not resolve host '{host or where}'. Check the name / DNS."
+    if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+        return f"Connection to {where} was reset before the session completed."
+    if isinstance(exc, PermissionError):
+        return str(exc)
+    if isinstance(exc, OSError):
+        # e.g. no route to host, network unreachable · strerror is human-readable.
+        detail = getattr(exc, "strerror", "") or str(exc)
+        return f"Could not connect to {where}: {detail}."
+    # Unknown: keep it readable, but drop the class-name/errno prefix.
+    return f"{where}: {exc}"
 
 
 def enable_crash_dumps() -> bool:

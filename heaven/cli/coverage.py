@@ -10,7 +10,7 @@ from typing import Optional
 
 import click
 
-from heaven.cli._helpers import _engagement_db_path, _print
+from heaven.cli._helpers import _engagement_db_path, _print, emit_json, json_output
 
 
 @click.command(name="coverage")
@@ -42,6 +42,14 @@ def coverage(engagement: Optional[str], no_llm: bool, output: Optional[str]) -> 
 
     store = EngagementStore(db_path)
     report = asyncio.run(grade_engagement(store, use_llm=not no_llm))
+
+    # Global --json: emit the machine-readable report to stdout and stop, so the
+    # command is scriptable exactly as the top-level `heaven --json` help promises.
+    if json_output():
+        emit_json(report.to_dict())
+        if output:
+            Path(output).write_text(json.dumps(report.to_dict(), indent=2, default=str))
+        return
 
     grade_color = {"A": "green", "B": "cyan", "C": "yellow",
                    "D": "red", "F": "red bold"}.get(report.grade, "dim")

@@ -393,6 +393,21 @@ export const System = {
   health: () => api("/system/health"),
 };
 
+// Agent Fleet — GET /api/fleet/status reports the default-on multi-agent engine's
+// state for the Health card: { tier, label, provider, model, available, enabled,
+// local_enabled, local_can_enable, concurrency, modes:[…] }. The fleet runs at
+// full strength with no brain, so this is always an honest "AI optional" picture,
+// never an error. Read-only.
+export const Fleet = {
+  status: () => api("/fleet/status"),
+  // POST /api/fleet/run → { job_id, status } (read-only; runs in the background).
+  run: (body) => api(`/fleet/run`, { method: "POST", body: JSON.stringify(body) }),
+  // GET /api/fleet/jobs/{id} → { status, result, error, progress, ... }
+  job: (jobId) => api(`/fleet/jobs/${encodeURIComponent(jobId)}`),
+  // GET /api/fleet/jobs → { jobs: [...] }
+  jobs: () => api(`/fleet/jobs`),
+};
+
 // Demo / sample data — POST /api/demo/seed populates the active engagement with
 // realistic example findings so a fresh install shows a full dashboard.
 export const Demo = {
@@ -872,6 +887,20 @@ export function openAutonomousStream(jobId, onMessage) {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(
     `${proto}//${window.location.host}/api/autonomous/jobs/${encodeURIComponent(jobId)}` +
+    `/stream?token=${encodeURIComponent(authToken)}`
+  );
+  ws.onmessage = (ev) => {
+    try { onMessage(JSON.parse(ev.data)); } catch { /* ignore malformed frame */ }
+  };
+  return ws;
+}
+
+// Live per-iteration stream for an Agent Fleet job (mirrors openAutonomousStream).
+export function openFleetStream(jobId, onMessage) {
+  if (!authToken) return null;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(
+    `${proto}//${window.location.host}/api/fleet/jobs/${encodeURIComponent(jobId)}` +
     `/stream?token=${encodeURIComponent(authToken)}`
   );
   ws.onmessage = (ev) => {

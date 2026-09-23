@@ -17,6 +17,7 @@ const GROUPS = [
       { to: "/assets",      label: "Assets",       icon: "🖧" },
       { to: "/watch",       label: "Watch",        icon: "🔁" },
       { to: "/autonomous",  label: "Autonomous",   icon: "∞" },
+      { to: "/fleet",       label: "Agent Fleet",  icon: "⚙" },
       { to: "/diff",        label: "Scan Diff",    icon: "↹" },
       { to: "/sast",        label: "SAST",         icon: "🔬" },
       { to: "/sca",         label: "SCA · Deps",   icon: "📦" },

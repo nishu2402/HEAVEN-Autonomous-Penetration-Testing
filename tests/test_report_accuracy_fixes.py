@@ -253,14 +253,21 @@ async def test_race_divergent_successes_is_a_low_lead():
 
     def handler(method, url, **kw):
         calls["n"] += 1
-        # The genuine (weak) race signal: the CONCURRENT burst diverges (the
-        # state raced), but once serialised the endpoint is deterministic. The
-        # detector confirms that stability with two sequential probes AFTER the
-        # burst, so a merely-dynamic page (which diverges every time, even
-        # serially) is rejected — see test_race_dynamic_page_not_flagged.
-        if calls["n"] <= concurrent:
-            return _Resp(status=200, text=f"balance-{calls['n']}")
-        return _Resp(status=200, text="balance-final")   # stable when serialised
+        n = calls["n"]
+        # The genuine (weak) race signal: a CONCURRENT burst diverges (the state
+        # raced), but once serialised the endpoint is deterministic. Because a
+        # real TOCTOU is reproducible, the detector requires the divergence to
+        # recur on a confirmation burst before reporting, so the calls fall as:
+        #   1..concurrent            → burst 1 (concurrent): raced, divergent
+        #   concurrent+1..concurrent+4 → 4-sample serial baseline: stable
+        #   concurrent+5..           → confirmation burst (concurrent): races again
+        # A merely-dynamic page (divergent even serially) is still rejected by the
+        # stable-baseline check — see test_race_dynamic_page_not_flagged.
+        if n <= concurrent:
+            return _Resp(status=200, text=f"balance-{n}")
+        if n <= concurrent + 4:
+            return _Resp(status=200, text="balance-final")   # stable when serialised
+        return _Resp(status=200, text=f"balance-{n}")        # divergence reproduces
 
     r = await RaceConditionDetector.test_race(_FnSession(handler), "https://t/redeem",
                                               method="POST", concurrent_requests=concurrent)

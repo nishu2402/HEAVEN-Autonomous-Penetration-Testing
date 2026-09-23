@@ -13,18 +13,42 @@ from heaven.utils.logger import print_banner
 
 
 @click.command(name="mitre-report")
+@click.option("--engagement", help="Engagement name")
 @click.option("--output", "-o", type=click.Path(), default="data/mitre_navigator.json",
               help="Navigator layer output path")
-def mitre_report(output: str) -> None:
+def mitre_report(engagement: Optional[str], output: str) -> None:
     """Generate MITRE ATT&CK Navigator heatmap layer from scan results."""
     print_banner()
-    _print("[cyan]Generating MITRE ATT&CK report...[/cyan]")
 
+    from heaven.engagement import EngagementStore
     from heaven.mitre.attack_mapper import MITREAttackMapper
+
+    store = EngagementStore(_engagement_db_path(engagement))
+    all_findings = store.list_findings(limit=10000)
+    if not all_findings:
+        _print("[yellow]No findings yet · run a scan first, then re-run "
+               "heaven mitre-report.[/yellow]")
+        return
+
+    _print(f"[cyan]Mapping {len(all_findings)} finding(s) to MITRE ATT&CK...[/cyan]")
+
+    # Feed the real engagement findings into the mapper. It keys on CWE first
+    # (stored in a finding's evidence, e.g. "CWE-89") and falls back to the
+    # vuln_type, so both signals are supplied.
+    finding_dicts = [
+        {"id": f.id, "title": f.title or f.vuln_type, "severity": f.severity,
+         "vuln_type": f.vuln_type, "type": f.vuln_type,
+         "cwe": (f.evidence or {}).get("cwe", "")}
+        for f in all_findings
+    ]
     mapper = MITREAttackMapper()
+    mappings = mapper.map_all_findings(finding_dicts)
+    mapped = sum(1 for m in mappings if m.techniques)
+
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     mapper.export_navigator_layer(Path(output))
-    _print(f"[green]Navigator layer exported to: {output}[/green]")
+    _print(f"[green]Navigator layer exported to:[/green] {output}")
+    _print(f"  Findings mapped to techniques: {mapped}/{len(all_findings)}")
     summary = mapper.get_tactic_coverage()
     _print(f"  Tactic coverage: {summary['coverage_pct']}%")
 

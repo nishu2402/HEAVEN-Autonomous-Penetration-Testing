@@ -542,8 +542,9 @@ class LinuxEnumEngine:
                         outputs[key] = ""
                         logger.debug("enum cmd %s failed: %s", key, e)
         except Exception as e:
+            logger.debug("enum connect to %s:%s failed", host, port, exc_info=True)
             return EnumResult(host=host, user=username, success=False,
-                              error=f"{type(e).__name__}: {e}")
+                              error=ssh_safe.friendly_conn_error(e, host, port))
 
         result = parse_enumeration(host, username, outputs)
         logger.info("enum %s@%s: %d privesc vector(s)", username, host, len(result.vectors))

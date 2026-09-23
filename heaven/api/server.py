@@ -256,6 +256,29 @@ def _autonomous_broadcast(job_id: str, message: dict) -> None:
             logger.debug("suppressed non-fatal exception", exc_info=True)
 
 
+# ── Agent Fleet jobs ──
+# The multi-agent fleet run is long-lived (observe→plan→act over minutes), so it
+# uses the same detached-job + WebSocket-stream pattern as the autonomous loop:
+# POST /api/fleet/run returns a job_id immediately; the coordinator's per-iteration
+# trace is fanned out to /api/fleet/jobs/{id}/stream subscribers. The web launcher
+# is strictly READ-ONLY — the Exploit lead and active hypothesis verification stay
+# behind the CLI's `heaven fleet --i-have-authorization`, so the browser can never
+# arm active exploitation.
+fleet_jobs: dict[str, dict] = {}
+_fleet_tasks: set = set()
+_fleet_subscribers: dict[str, set] = {}  # job_id -> set[asyncio.Queue]
+
+
+def _fleet_broadcast(job_id: str, message: dict) -> None:
+    """Push a message to every live WebSocket subscriber of a fleet job. Safe to
+    call from the loop — uses put_nowait and swallows errors."""
+    for q in list(_fleet_subscribers.get(job_id, set())):
+        try:
+            q.put_nowait(message)
+        except Exception:  # noqa: BLE001 — a full/closed queue must not break the run
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+
+
 # ── Watch-mode jobs ──
 # `heaven watch` is a continuous monitoring loop (scan → diff → alert-on-change).
 # Like the autonomous loop it can run for a long time, so the web launcher runs
@@ -3080,6 +3103,221 @@ def create_app() -> FastAPI:
                     "reachable": False, "host": "", "models": [],
                     "default_model": local_llm.DEFAULT_OLLAMA_MODEL, "recommended": [],
                     "error": str(e)}
+
+    @app.get("/api/fleet/status")
+    async def fleet_status(user: User = Depends(require_permission("config.modify"))):
+        """Agent Fleet status for the Settings / Health panel: whether the
+        default-on engine is enabled (revert with HEAVEN_AGENT_FLEET=0) and which
+        intelligence tier it would use. The fleet runs at full strength with no
+        brain, so this always reports an honest 'AI optional' picture rather than
+        an error. Read-only; never 500s."""
+        try:
+            from heaven.ai.fleet import (
+                BACKEND_MODES,
+                FleetBrain,
+                distributed_enabled,
+                fleet_enabled,
+                fleet_workers,
+            )
+            info = FleetBrain().describe()
+            info["enabled"] = fleet_enabled()
+            # Mode coverage is exactly the scanner's backend modes plus `full`.
+            info["modes"] = ["full", *BACKEND_MODES]
+            # Scale-out (opt-in): the single-process adaptive fleet is the default;
+            # HEAVEN_FLEET_WORKERS>1 fans scans across worker processes that share
+            # the engagement DB. Reported honestly so the panel shows the real mode.
+            info["workers"] = fleet_workers()
+            info["scale_out"] = distributed_enabled()
+            return info
+        except Exception as e:  # noqa: BLE001 — status must never 500
+            return {"tier": 0, "label": "deterministic", "available": False,
+                    "enabled": False, "modes": [], "workers": 1,
+                    "scale_out": False, "error": str(e)}
+
+    @app.post("/api/fleet/run")
+    async def fleet_run(
+        request: Request,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Start an Agent Fleet run as a BACKGROUND job (read-only).
+
+        Body JSON:
+          {"engagement": "name", "ips": [...], "urls": [...],
+           "mode": "full"|"web"|…, "max_iterations": 6, "time_budget_s": 1800,
+           "objective": "critical rce"}
+
+        Returns immediately with {"job_id", "status": "running"}. The web launcher
+        is strictly read-only: the Exploit lead and active hypothesis verification
+        stay behind the CLI's `heaven fleet --i-have-authorization`, so a browser
+        can never arm active exploitation. Poll GET /api/fleet/jobs/{job_id} or
+        subscribe to /api/fleet/jobs/{job_id}/stream for live progress.
+        """
+        try:
+            from heaven.ai.fleet import run_fleet
+            from heaven.cli._helpers import _engagement_db_path
+            from heaven.config import ScanMode
+            from heaven.config import get_config as _get_config
+        except Exception as e:
+            raise _server_error("agent fleet unavailable", e)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        engagement = str(body.get("engagement") or "").strip()
+        if not engagement:
+            raise HTTPException(422, "engagement is required (the fleet persists findings)")
+        seed_targets = {
+            "ips": list(body.get("ips") or []),
+            "urls": list(body.get("urls") or []),
+        }
+        if not (seed_targets["ips"] or seed_targets["urls"]):
+            raise HTTPException(422, "need at least one ip or url")
+
+        mode = str(body.get("mode") or "full")
+        valid_modes = {"full", *(m.value for m in ScanMode)}
+        if mode not in valid_modes:
+            raise HTTPException(422, f"invalid mode: {mode}")
+
+        max_iterations = max(1, min(50, int(body.get("max_iterations") or 6)))
+        time_budget_s = max(30, min(7200, int(body.get("time_budget_s") or 1800)))
+        objective = str(body.get("objective") or "")
+
+        if not _engagement_db_path(engagement).exists():
+            raise HTTPException(404, f"engagement '{engagement}' not found: "
+                                     f"create it first (Dashboard → New engagement)")
+        # Re-open through the sandboxed factory (its path-traversal choke point).
+        store = _engagement_store_factory(engagement)
+
+        job_id = uuid.uuid4().hex[:12]
+        job: dict = {
+            "job_id": job_id,
+            "status": "running",          # running | done | error
+            "engagement": engagement,
+            "seeds": seed_targets,
+            "mode": mode,
+            "objective": objective,
+            "max_iterations": max_iterations,
+            "authorized": False,          # web launcher is always read-only
+            "started_by": user.username,
+            "started_at": time.time(),
+            "ended_at": None,
+            "result": None,
+            "error": None,
+            "progress": [],
+        }
+        fleet_jobs[job_id] = job
+
+        if len(fleet_jobs) > 30:
+            stale = sorted(fleet_jobs.values(), key=lambda j: j["started_at"])
+            for old in stale[:-30]:
+                fleet_jobs.pop(old["job_id"], None)
+                _fleet_subscribers.pop(old["job_id"], None)
+
+        def _on_iteration(item: dict) -> None:
+            job["progress"].append(item)
+            _fleet_broadcast(job_id, {"type": "iteration", "data": item})
+
+        async def _runner() -> None:
+            try:
+                summary = await run_fleet(
+                    seed_targets=seed_targets,
+                    engagement_store=store,
+                    base_config=_get_config(),
+                    objective=objective,
+                    active_mode=mode,
+                    max_iterations=max_iterations,
+                    time_budget_s=float(time_budget_s),
+                    authorized=False,
+                    engagement_name=engagement,
+                    on_iteration=_on_iteration,
+                )
+                job["result"] = summary.to_dict()
+                job["status"] = "done"
+            except Exception as e:  # noqa: BLE001 — surface any failure to the UI
+                job["error"] = str(e)
+                job["status"] = "error"
+                logger.exception("Fleet job %s failed", job_id)
+            finally:
+                job["ended_at"] = time.time()
+                _fleet_broadcast(job_id, {"type": "done", "job": job})
+
+        task = asyncio.create_task(_runner())
+        _fleet_tasks.add(task)
+        task.add_done_callback(_fleet_tasks.discard)
+
+        return {"job_id": job_id, "status": "running"}
+
+    @app.get("/api/fleet/jobs")
+    async def fleet_jobs_list(user: User = Depends(require_permission("scan.view"))):
+        """Most-recent-first list of fleet jobs this server has launched."""
+        return {
+            "jobs": sorted(
+                fleet_jobs.values(), key=lambda j: j["started_at"], reverse=True,
+            ),
+        }
+
+    @app.get("/api/fleet/jobs/{job_id}")
+    async def fleet_job_get(
+        job_id: str, user: User = Depends(require_permission("scan.view")),
+    ):
+        """Status + (when finished) the full FleetRunSummary for one job."""
+        job = fleet_jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, "no such fleet job")
+        return job
+
+    @app.websocket("/api/fleet/jobs/{job_id}/stream")
+    async def fleet_stream(
+        websocket: WebSocket, job_id: str, token: Optional[str] = Query(None),
+    ):
+        """Live per-iteration progress for a fleet job.
+
+        On connect, sends a `snapshot` (status + iterations so far), then streams
+        `iteration` messages and a final `done` message with the full job. Auth is
+        via the `token` query param. Polling GET /api/fleet/jobs/{id} is a complete
+        fallback."""
+        if not await _ws_authenticate(websocket, token):
+            return
+
+        job = fleet_jobs.get(job_id)
+        if not job:
+            await websocket.close(code=4404, reason="No such job")
+            return
+
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "snapshot", "status": job["status"],
+            "progress": list(job.get("progress", [])),
+        })
+        if job["status"] != "running":
+            await websocket.send_json({"type": "done", "job": job})
+            await websocket.close()
+            return
+
+        queue: asyncio.Queue = asyncio.Queue()
+        _fleet_subscribers.setdefault(job_id, set()).add(queue)
+        try:
+            while True:
+                msg = await queue.get()
+                await websocket.send_json(msg)
+                if msg.get("type") == "done":
+                    break
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:  # noqa: BLE001 — never let a socket error crash the worker
+            logger.debug("fleet stream error for %s: %s", job_id, e)
+        finally:
+            subs = _fleet_subscribers.get(job_id)
+            if subs is not None:
+                subs.discard(queue)
+                if not subs:
+                    _fleet_subscribers.pop(job_id, None)
+            try:
+                await websocket.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
     @app.get("/api/ai/models")
     async def ai_models(

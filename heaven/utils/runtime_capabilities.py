@@ -54,8 +54,14 @@ class _PlaywrightTeardownFilter(logging.Filter):
     through untouched.
     """
 
+    # ``Future.__del__`` builds the message as
+    # ``f"{self.__class__.__name__} exception was never retrieved"``, so a
+    # pending ``Task`` (a ``Future`` subclass) reports "Task exception ...", not
+    # "Future exception ...". Both spellings must be listed or the Task variant
+    # leaks a raw traceback to stderr after otherwise-clean output.
     _MARKERS = ("Task was destroyed but it is pending",
-                "Future exception was never retrieved")
+                "Future exception was never retrieved",
+                "Task exception was never retrieved")
 
     def filter(self, record: logging.LogRecord) -> bool:  # True == keep
         try:

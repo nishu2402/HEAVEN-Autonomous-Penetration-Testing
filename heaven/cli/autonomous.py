@@ -24,7 +24,9 @@ from heaven.cli._helpers import (
     _URL_REGEX,
 )
 from heaven.config import get_config
-from heaven.utils.logger import print_banner
+from heaven.utils.logger import get_logger, print_banner
+
+logger = get_logger("cli.autonomous")
 
 
 @click.command(name="autonomous")
@@ -105,10 +107,16 @@ def autonomous(
     from heaven.engagement import EngagementStore
     db_path = _engagement_db_path(engagement)
     if not db_path.exists():
-        _print(f"[red]Engagement DB not found:[/red] {db_path}")
-        _print(f"Run: [cyan]heaven engage init {engagement}[/cyan]")
-        sys.exit(2)
+        # Auto-create rather than abort, matching `heaven scan` and `heaven
+        # fleet`. Autonomous mode persists everything into this engagement, so a
+        # first-time name should start the run, not send the user off to init.
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        _print(f"[cyan]Creating engagement:[/cyan] {engagement}")
     store = EngagementStore(db_path)
+    try:
+        store.create_engagement(name=engagement)
+    except Exception:  # noqa: BLE001 — already exists / best-effort
+        logger.debug("engagement create was a no-op / already exists", exc_info=True)
 
     _print(f"[bold magenta]⚙ AUTONOMOUS LOOP[/bold magenta] ·  "
            f"max_iter={max_iterations} budget={time_budget}s "

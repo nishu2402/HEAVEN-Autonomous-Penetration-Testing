@@ -55,7 +55,12 @@ def diff(baseline_scan_id: str, current_scan_id: str,
         sys.exit(2)
 
     store = EngagementStore(db_path)
-    report = compute_diff(store, baseline_scan_id, current_scan_id)
+    try:
+        report = compute_diff(store, baseline_scan_id, current_scan_id)
+    except ValueError as e:
+        _print(f"[red]{e}[/red]  Both scans must belong to this engagement "
+               "(see: heaven status).")
+        sys.exit(2)
     s = report.to_dict()["summary"]
 
     if fmt == "json":

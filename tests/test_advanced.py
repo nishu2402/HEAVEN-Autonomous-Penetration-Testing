@@ -259,6 +259,48 @@ def test_kill_chain_endpoint_exists(api_client):
     assert data["report"]["phase_count"] == 7
 
 
+class _BurstResp:
+    """Minimal aiohttp-style response returning a fixed body under ``async with``."""
+
+    def __init__(self, body: str):
+        self._body = body
+        self.status = 200
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_a):
+        return False
+
+    async def text(self) -> str:
+        return self._body
+
+
+class _BurstSession:
+    """Fake session that drives ``RaceConditionDetector.test_race`` through its
+    three phases so the reproduce-before-report guard can be exercised
+    deterministically. With ``concurrent_requests=4`` the calls fall as:
+    burst 1 (indices 0-3, divergent A/B → concurrent divergence), the stable
+    4-sample sequential baseline (4-7, all A → not inherently dynamic), then the
+    confirmation burst (8-11): divergent again iff ``reproduce`` (a real TOCTOU),
+    otherwise stable (a transient artifact that must be dropped)."""
+
+    def __init__(self, reproduce: bool):
+        self.reproduce = reproduce
+        self.n = 0
+
+    def request(self, method, url, **_kw):
+        i = self.n
+        self.n += 1
+        if i < 4:            # burst 1: diverge so succ_hashes > 1
+            body = "A" if i % 2 == 0 else "B"
+        elif i < 8:          # sequential baseline: stable so seq_hashes == 1
+            body = "A"
+        else:                # confirmation burst
+            body = ("A" if i % 2 == 0 else "B") if self.reproduce else "A"
+        return _BurstResp(body)
+
+
 class TestRaceConditionPrecision:
     """The low-confidence TOCTOU heuristic must not fire on read-only pages."""
 
@@ -283,3 +325,29 @@ class TestRaceConditionPrecision:
         out = asyncio.run(RaceConditionDetector.test_race(
             session=None, url="http://h/transfer", method="GET"))
         assert out is None
+
+    def test_transient_divergence_that_does_not_reproduce_is_dropped(self):
+        """A concurrent divergence that settles on the confirmation burst is a
+        transient artifact (server-side lock contention / load jitter), NOT a
+        race. Reproduce-before-report drops it — this is the class of spurious
+        low-confidence race lead seen live on DVWA's authenticated POST
+        endpoints, which kept the web benchmark's precision below 100%."""
+        import asyncio
+        from heaven.vulnscan.advanced_attacks import RaceConditionDetector
+        out = asyncio.run(RaceConditionDetector.test_race(
+            session=_BurstSession(reproduce=False), url="http://h/checkout",
+            method="POST", data={"x": "1"}, concurrent_requests=4))
+        assert out is None
+
+    def test_reproducible_divergence_is_still_reported(self):
+        """A genuine TOCTOU keeps committing divergent state, so the divergence
+        RECURS on the confirmation burst; that real signal is still reported as
+        the low-confidence (0.4) manual-verification lead — recall is preserved."""
+        import asyncio
+        from heaven.vulnscan.advanced_attacks import RaceConditionDetector
+        out = asyncio.run(RaceConditionDetector.test_race(
+            session=_BurstSession(reproduce=True), url="http://h/checkout",
+            method="POST", data={"x": "1"}, concurrent_requests=4))
+        assert out is not None
+        assert out.vuln_type == "race_condition"
+        assert out.confidence == 0.4

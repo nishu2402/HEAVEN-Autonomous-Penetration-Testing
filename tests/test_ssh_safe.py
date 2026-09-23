@@ -96,3 +96,48 @@ def test_enable_crash_dumps():
 
     assert ssh_safe.enable_crash_dumps() is True
     assert faulthandler.is_enabled()
+
+
+# ── friendly_conn_error: no raw class name / errno leaks to operators ─────────
+
+def test_friendly_conn_error_refused_is_human():
+    from heaven.utils import ssh_safe
+
+    msg = ssh_safe.friendly_conn_error(
+        ConnectionRefusedError(61, "Connection refused"), "10.0.0.5", 22)
+    assert "10.0.0.5:22" in msg
+    assert "connection refused" in msg.lower()
+    # No raw Python class name or errno leaks through.
+    assert "ConnectionRefusedError" not in msg
+    assert "Errno" not in msg
+
+
+def test_friendly_conn_error_timeout_and_dns():
+    import asyncio
+    import socket
+
+    from heaven.utils import ssh_safe
+
+    timeout = ssh_safe.friendly_conn_error(asyncio.TimeoutError(), "host", 2222)
+    assert "host:2222" in timeout and "timed out" in timeout.lower()
+
+    dns = ssh_safe.friendly_conn_error(socket.gaierror(8, "nodename"), "nope.invalid", 22)
+    assert "nope.invalid" in dns and "resolve" in dns.lower()
+
+
+def test_friendly_conn_error_has_no_em_dashes():
+    """Product prose keeps '·'/'→', never em/en dashes (humanized-prose rule)."""
+    import asyncio
+    import socket
+
+    from heaven.utils import ssh_safe
+
+    samples = [
+        ssh_safe.friendly_conn_error(ConnectionRefusedError(61, "x"), "h", 22),
+        ssh_safe.friendly_conn_error(asyncio.TimeoutError(), "h", 22),
+        ssh_safe.friendly_conn_error(socket.gaierror(8, "x"), "h", 22),
+        ssh_safe.friendly_conn_error(OSError(51, "Network is unreachable"), "h", 22),
+        ssh_safe.friendly_conn_error(ValueError("weird"), "h", 22),
+    ]
+    for msg in samples:
+        assert "—" not in msg and "–" not in msg, msg

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router";
 import { Engagement, Engagements, SIEM, Scans, getUser, logout } from "../api";
+import { tzLabel } from "../datetime.js";
 import { useJobs } from "../context/Jobs.jsx";
 import { useToast } from "./Toast.jsx";
 
@@ -355,7 +356,7 @@ export default function Header({ onMenu }) {
         >
           {light ? "☾" : "☀"}
         </button>
-        <span className="header-clock">{clock}</span>
+        <span className="header-clock">{clock} {tzLabel()}</span>
         {user && (
           <span
             className="user-identity"

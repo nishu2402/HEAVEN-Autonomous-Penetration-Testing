@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import datetime, timezone
 from typing import Any
+
+from heaven.utils.timefmt import stamp
 
 _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -134,7 +135,7 @@ def render_markdown(result: dict[str, Any]) -> str:
     fname = result.get("filename", "")
     findings = sorted(result.get("findings", []),
                       key=lambda f: _SEV_ORDER.get(f.get("severity", "info"), 5))
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ts = stamp()
 
     lines = [f"# HEAVEN Offline Artifact Analysis: {kind}", ""]
     if fname:
@@ -264,7 +265,7 @@ def render_html(result: dict[str, Any]) -> str:
     fname = result.get("filename", "")
     findings = sorted(result.get("findings", []),
                       key=lambda f: _SEV_ORDER.get(f.get("severity", "info"), 5))
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ts = stamp()
 
     body = ["<h1>HEAVEN Offline Artifact Analysis</h1>",
             "<div class='meta'>"
@@ -369,7 +370,7 @@ def render_pdf(result: dict[str, Any]) -> bytes:
     summary = str(result.get("summary") or "")
     findings = sorted(result.get("findings", []),
                       key=lambda f: _SEV_ORDER.get(f.get("severity", "info"), 5))
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ts = stamp()
 
     ink = colors.HexColor("#1a1f29")
     muted = colors.HexColor("#5b6472")

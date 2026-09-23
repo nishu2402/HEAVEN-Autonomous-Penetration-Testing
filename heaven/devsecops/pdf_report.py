@@ -28,7 +28,6 @@ gracefully by writing the professional HTML report to a ``.html`` file instead.
 
 from __future__ import annotations
 
-import datetime
 import os
 from typing import Any, Optional
 from xml.sax.saxutils import escape as _xml_escape  # nosec B406 -- escape() is OUTPUT encoding (a security control), not XML parsing
@@ -485,8 +484,8 @@ class PDFReportGenerator:
         from heaven.devsecops.dns_inventory import dns_totals, normalize_dns
         dns_inv = normalize_dns(data.get("dns_records"))
         dns_tot = dns_totals(dns_inv)
-        now = datetime.datetime.now(datetime.UTC)
-        gen_date = now.strftime("%d %B %Y, %H:%M UTC")
+        from heaven.utils.timefmt import report_timestamp
+        gen_date = report_timestamp()
         version = str(data.get("version") or "1.0")
 
         ink = colors.HexColor("#1a1f29")

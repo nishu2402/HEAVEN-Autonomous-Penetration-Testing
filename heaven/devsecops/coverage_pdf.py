@@ -16,7 +16,6 @@ function raises ``RuntimeError`` with an actionable message when it is missing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -42,8 +41,9 @@ _HIT_BG = "#eef4ff"
 _LINE = "#e3e7ee"
 
 
-def _now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M UTC")
+def _generated_at() -> str:
+    from heaven.utils.timefmt import report_timestamp
+    return report_timestamp()
 
 
 def render_matrix_pdf(

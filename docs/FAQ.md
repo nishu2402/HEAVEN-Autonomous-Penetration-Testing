@@ -36,6 +36,16 @@ In `.env` in the working directory. Set them three ways, they all write the
 same file: the web UI **Settings** page, `heaven config set <KEY>`, or
 `heaven init`. `.env` is auto-loaded on every command and is git-ignored.
 
+### What timezone are report timestamps in?
+
+The operator's own. Report footers and the "Generated" line render in the zone
+of the machine that produced the report, so a report made in India reads IST and
+one in the UK reads GMT/BST with no configuration. The web UI clock follows the
+viewer's browser zone. Pin an explicit zone (say, to match a client abroad) with
+`HEAVEN_REPORT_TZ=Asia/Kolkata` (any IANA name), or `HEAVEN_REPORT_TZ=UTC` to
+keep UTC footers. Stored values (the database, the audit trail, isoformat fields)
+stay UTC either way; only the human-facing display changes.
+
 ---
 
 ## Scanning

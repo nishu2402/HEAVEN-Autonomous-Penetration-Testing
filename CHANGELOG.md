@@ -53,6 +53,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Human-facing timestamps now follow the operator's own timezone instead of a
+  hardcoded UTC.** A pentester in India reads IST and one in the UK reads GMT or
+  BST, with no configuration. The report footers (`heaven methodology`, the PDF
+  report, the compliance and coverage reports), the Markdown findings report's
+  `Generated:` line, the offline-artifact reports, and the UI clocks (header and
+  sidebar) all render in the local zone with a self-describing label (`IST`,
+  `BST`, or a numeric `UTC+05:30` fallback). The sidebar clock in particular was
+  showing UTC-of-day via `toISOString()` regardless of location; it now matches
+  the header. Stored timestamps, audit records, database rows and every
+  machine-readable isoformat field stay UTC, so nothing downstream has to guess
+  an offset. A new `heaven/utils/timefmt.py` resolves the display zone, and
+  `HEAVEN_REPORT_TZ` (config `report_timezone`) can pin an explicit IANA zone
+  (`Asia/Kolkata`, `Europe/London`) for a client abroad, or `UTC` to keep the
+  old behaviour. An unknown zone or a host with no tz database falls back to
+  local and never raises.
 - **The description/type CVSS model is a measurably better ranking aid, reported
   by the metric that matches its job.** Three honest changes, no faking:
   - **Genuine model lift.** An exhaustive re-search of the text recipe adopted

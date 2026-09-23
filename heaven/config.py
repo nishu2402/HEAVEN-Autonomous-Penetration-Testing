@@ -268,6 +268,15 @@ class HeavenConfig:
     data_dir: Path = field(default_factory=lambda: Path("data"))
     scan_mode: ScanMode = ScanMode.FULL
     honeypot_threshold: float = 0.7
+    # Timezone for the server-rendered human-facing timestamps: report footers
+    # and the "Generated" line in the PDF/HTML/Markdown and forensics reports.
+    # Empty means "follow the machine running HEAVEN", so a report generated in
+    # India reads IST and one in the UK reads GMT/BST with no config at all. Set
+    # HEAVEN_REPORT_TZ to an IANA name (e.g. "Asia/Kolkata", "Europe/London") to
+    # pin a specific zone, or "UTC" to keep the old UTC behaviour. The web UI
+    # clock is rendered per-viewer in the browser's own zone and ignores this
+    # setting. Stored timestamps stay UTC regardless; this only changes display.
+    report_timezone: str = ""
 
     db: DatabaseConfig = field(default_factory=DatabaseConfig)
     scanner: ScannerConfig = field(default_factory=ScannerConfig)
@@ -297,6 +306,7 @@ class HeavenConfig:
             except ValueError:
                 pass
         self.honeypot_threshold = _env("HEAVEN_HONEYPOT_THRESHOLD", self.honeypot_threshold, float)
+        self.report_timezone = _env("HEAVEN_REPORT_TZ", self.report_timezone).strip()
 
     def ensure_dirs(self) -> None:
         """Create required data directories.

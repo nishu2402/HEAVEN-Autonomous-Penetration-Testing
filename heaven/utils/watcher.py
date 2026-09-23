@@ -184,8 +184,10 @@ async def run_watch(
                             "seed": (config.seed + iter_n) if config.seed is not None else None},
                 )
                 scan_summary = await orch.run()
-                for f in (scan_summary.get("vulnerabilities", [])
-                          + scan_summary.get("findings", [])):
+                # Both keys point to the same deduped list; take one, never both,
+                # or every finding's seen-count is bumped twice per iteration.
+                for f in (scan_summary.get("vulnerabilities")
+                          or scan_summary.get("findings") or []):
                     try:
                         store.upsert_finding(orch.scan_id, f)
                     except Exception:

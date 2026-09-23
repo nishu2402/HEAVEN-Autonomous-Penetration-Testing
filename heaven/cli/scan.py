@@ -875,20 +875,41 @@ def scan(
                     _print("  [red]Failed to generate PDF report.[/red]")
             elif output == "sarif":
                 from heaven.devsecops.ci_export import findings_to_sarif_str
+                # vulnerabilities and findings are the SAME deduped list in the
+                # summary; take one, never both, or every finding is written to
+                # the SARIF file twice.
                 findings_in_summary = (
-                    summary.get("vulnerabilities", []) + summary.get("findings", [])
+                    summary.get("vulnerabilities")
+                    or summary.get("findings")
+                    or []
                 )
                 Path(output_file).write_text(
                     findings_to_sarif_str(findings_in_summary))
                 _print(f"  SARIF results written to: {output_file}")
             elif output == "markdown":
                 from heaven.devsecops.evidence import export_findings_markdown
+                # One deduped list (both keys point to it); never concatenate, or
+                # every finding is written to the report twice.
                 findings_in_summary = (
-                    summary.get("vulnerabilities", [])
-                    + summary.get("findings", [])
+                    summary.get("vulnerabilities")
+                    or summary.get("findings")
+                    or []
                 )
+                # Honest leads appendix: prefer the calibrated leads persisted to
+                # the engagement (richer: calibrated confidence + manual next
+                # step), else the raw leads from the summary so the appendix still
+                # renders for an engagement-less scan.
+                md_leads = summary.get("leads") or []
+                if engagement_store:
+                    try:
+                        md_leads = engagement_store.get_leads(
+                            scan_id, status="open") or md_leads
+                    except Exception:
+                        logger.debug("suppressed non-fatal lead-read exception",
+                                     exc_info=True)
                 Path(output_file).write_text(export_findings_markdown(
-                    findings_in_summary, assets=summary.get("assets")))
+                    findings_in_summary, assets=summary.get("assets"),
+                    leads=md_leads))
                 _print(f"  Markdown report written to: {output_file}")
             else:
                 Path(output_file).write_text(json.dumps(summary, indent=2, default=str))
@@ -1059,7 +1080,9 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
     _print_inventory(summary.get("assets"))
 
     scan_id_done = target_scan["id"]
-    for f in summary.get("vulnerabilities", []) + summary.get("findings", []):
+    # Both keys point to the same deduped list; take one, never both, or every
+    # finding's seen-count is bumped twice for a single scan.
+    for f in (summary.get("vulnerabilities") or summary.get("findings") or []):
         try:
             store.upsert_finding(scan_id_done, f)
         except Exception:

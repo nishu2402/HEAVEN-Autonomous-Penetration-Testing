@@ -104,6 +104,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the engagement database did not already exist, discarding every finding.
   They now auto-create the engagement and persist, matching `heaven scan`.
 
+- **Exported reports no longer list every finding twice.** The scan summary
+  publishes the one deduped finding list under both a `vulnerabilities` and a
+  `findings` key (they are the same object). Several consumers concatenated the two
+  keys, so each finding was emitted twice: the `heaven scan -o report.md`
+  (Markdown) and `-o out.sarif` (SARIF) exports duplicated every finding, the
+  `heaven replay` / `heaven autonomous` / watch-mode / API-replay persist loops
+  bumped each finding's seen-count twice per scan, and the self-test benchmark
+  scored every finding twice (corrupting precision/recall on a summary export).
+  Every consumer now selects one key (`vulnerabilities or findings`), matching the
+  main scan and API scan-complete paths that were already correct. New coverage in
+  `tests/test_honest_leads.py`.
+
+- **The honest-leads appendix now appears in every Markdown report.** The
+  "Leads for manual review" appendix was only passed through the `heaven report` /
+  `heaven export` path, so the inline `heaven scan -o report.md` output and the API
+  Markdown report download silently dropped it. Both now include the same appendix
+  (the scan path preferring the calibrated leads persisted to the engagement), so
+  the deliverable is identical whichever surface produced it.
+
 ### Security
 
 - **Login password hashing raised to the current OWASP work factor.** Password

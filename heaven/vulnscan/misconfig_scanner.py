@@ -698,7 +698,9 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
         if get_active_session():
             urls = [u for u in urls if not _is_session_destroying(u)]
     except Exception:  # noqa: BLE001 — guard must never break the scan
-        pass
+        logger.debug(
+            "auth-session logout guard unavailable; skipping session-destroying "
+            "URL filter for this misconfig batch", exc_info=True)
 
     seen: set[str] = set()
     unique: list[str] = []

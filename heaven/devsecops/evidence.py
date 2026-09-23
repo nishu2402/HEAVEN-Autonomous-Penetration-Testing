@@ -575,8 +575,22 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
     if not reasons and _kb.get("title"):
         reasons = [f"Matches the {_kb['title']} class ({_kb.get('cwe', '')})."]
 
+    # A stable id for the report even when the finding has not been persisted yet:
+    # the inline `scan -o markdown` path renders from the raw scan summary, whose
+    # findings carry no id, so the ID column came out blank and two distinct
+    # findings on one service (different CVEs, neither shown in the block) rendered
+    # as an indistinguishable pair. Derive it from the SAME content hash the
+    # engagement store uses, so the report id matches the stored id exactly.
+    finding_id = finding.get("id") or ""
+    if not finding_id:
+        try:
+            from heaven.engagement import _finding_hash, _finding_identity
+            finding_id = _finding_hash(*_finding_identity(finding))
+        except Exception:
+            finding_id = ""
+
     pkg = EvidencePackage(
-        finding_id=finding.get("id", ""),
+        finding_id=finding_id,
         vuln_type=vuln_type,
         target=target,
         severity=finding.get("severity", "info"),

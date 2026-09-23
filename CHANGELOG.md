@@ -25,8 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GET /api/engagement/leads` and `PUT /api/engagement/leads/{id}/status` (promoting
   never auto-creates a finding, so the finding bar is never bypassed by a click), a
   Leads page in the web UI under Findings, and a clearly separated "Leads for manual
-  review" appendix in the Markdown report. The table auto-creates on existing
-  engagement databases. New coverage in `tests/test_honest_leads.py`.
+  review" section in the Markdown, HTML and PDF reports. The table auto-creates on
+  existing engagement databases. New coverage in `tests/test_honest_leads.py`.
+
+- **The leads section now appears in the client-facing HTML and PDF reports too, not
+  just Markdown.** The "Leads for manual review" appendix was Markdown-only; it now
+  renders in the professional HTML report and the ReportLab PDF as its own numbered
+  section, with the same honest framing (these are unconfirmed observations, **not
+  findings**, never counted or scored as such), a calibrated probability, the reason
+  each did not confirm and the concrete step to verify it by hand. The section and
+  its table-of-contents entry appear only when leads exist, so a report without leads
+  keeps its original section numbering. The CLI (`heaven scan -o report.pdf`,
+  `heaven report`) and the API export endpoint carry the calibrated engagement leads
+  into every deliverable, so the Markdown, HTML and PDF are consistent.
 
 - **Source-weighted confidence calibration is now applied to every finding.** The
   `ConfidenceCalibrator` (a source-weighted piecewise-linear curve learned by
@@ -123,7 +134,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the scan path preferring the calibrated leads persisted to the engagement), so
   the deliverable is identical whichever surface produced it.
 
+- **The inline `heaven scan -o markdown` report no longer shows a blank finding
+  ID.** That path renders straight from the scan summary, whose findings are not
+  persisted and so carry no id, so the report's ID column came out empty and two
+  distinct findings on one service (different CVEs, neither shown in the block)
+  rendered as an indistinguishable pair that looked like a duplicate. The report
+  now derives a stable id from the same content hash the engagement store uses, so
+  the id is never blank, matches the stored id exactly, and tells otherwise
+  identical-looking findings apart. New coverage in `tests/test_honest_leads.py`.
+
 ### Security
+
+- **The four open Bandit code-scanning alerts are resolved, so the static-analysis
+  security scan is clean again.** GitHub code scanning flagged four `B110`
+  (try/except/pass) notes introduced by the authenticated-scan logout guard
+  (`web_fuzzer.py`, `misconfig_scanner.py`) and the SCA/SAST engagement
+  auto-create (`cli/sca.py`, `cli/sast.py`). Each empty `except ... : pass` now
+  records the swallowed exception with `logger.debug(..., exc_info=True)`, the same
+  remediation already applied across the codebase, so the guard still can never
+  break a scan but the suppressed error is observable in debug logs instead of
+  vanishing. Bandit now reports zero issues at every severity. The CI Bandit step
+  keeps `continue-on-error` so a future note never blocks the build; the scan
+  staying clean is the real goal, not silencing it.
 
 - **Login password hashing raised to the current OWASP work factor.** Password
   hashing moved from 310,000 to 600,000 PBKDF2-HMAC-SHA256 iterations, the floor

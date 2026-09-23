@@ -204,6 +204,90 @@ def test_summary_export_never_doubles_findings():
     assert "**Total findings:** 2" in md  # header reflects the deduped count
 
 
+def test_report_derives_stable_id_for_unpersisted_findings(store):
+    # The inline `scan -o markdown` path renders from the raw summary, whose
+    # findings carry no id. The report must still show a stable id (not blank),
+    # it must match the id the store assigns on persist, and two distinct
+    # findings that differ only by CVE must get different ids so they never
+    # render as an indistinguishable pair.
+    import re
+
+    from heaven.devsecops.evidence import package_finding
+
+    base = {"vuln_type": "vulnerable_service", "target": "10.0.0.1:22",
+            "title": "SSH", "severity": "high", "confidence": 0.9, "evidence": {}}
+    f1 = {**base, "cve_id": "CVE-2011-2523"}
+    f2 = {**base, "cve_id": "CVE-2008-0166", "severity": "medium"}
+
+    def rid(f):
+        return re.search(r"\*\*ID:\*\* `([^`]*)`", package_finding(f).to_markdown()).group(1)
+
+    id1, id2 = rid(f1), rid(f2)
+    assert id1 and id2            # never blank
+    assert id1 != id2            # distinct CVEs are distinguishable
+    assert store.upsert_finding("s1", dict(f1)) == id1  # matches the stored id
+
+
+def test_html_report_carries_leads_section_never_as_findings():
+    # The client-facing HTML report carries the leads through a dedicated
+    # "Leads for Manual Review" section, clearly separated from the findings and
+    # never rendered or counted as one. Parity with the Markdown appendix.
+    from heaven.devsecops.compliance_report import ComplianceReportGenerator
+    gen = ComplianceReportGenerator()
+    findings = [{"vuln_type": "sqli", "target": "http://x/a", "title": "SQLi",
+                 "severity": "critical", "confidence": 1.0}]
+    leads = [{"vuln_type": "lfi", "target": "http://x/c", "title": "Possible LFI",
+              "reason": "a signal was observed but not confirmed",
+              "next_step": "replay the request by hand",
+              "calibrated_confidence": 0.28}]
+    with_leads = gen.generate_html_report(findings, leads=leads)
+    without = gen.generate_html_report(findings)
+
+    # Section + TOC entry appear only when leads are supplied.
+    assert 'id="leads"' in with_leads and "Leads for Manual Review" in with_leads
+    assert 'id="leads"' not in without and "Leads for Manual Review" not in without
+
+    # Honest framing preserved; the lead's detail reaches the operator.
+    assert "not findings" in with_leads
+    assert "Possible LFI" in with_leads and "replay the request by hand" in with_leads
+    assert "28%" in with_leads
+
+    # A lead is never rendered as a finding: the detailed-finding blocks are the
+    # same with or without the leads section (the lead does not become one).
+    assert with_leads.count('class="finding"') == without.count('class="finding"')
+
+
+def test_pdf_report_renders_with_leads(tmp_path):
+    # The PDF deliverable renders end-to-end with a leads section and produces a
+    # non-empty file (strict=True so a real build error surfaces, never a silent
+    # HTML fallback). This exercises the section-number offset path too.
+    pytest.importorskip("reportlab")
+    from heaven.devsecops.pdf_report import PDFReportGenerator
+    gen = PDFReportGenerator()
+    findings = [{"vuln_type": "sqli", "target": "http://x/a", "title": "SQLi",
+                 "severity": "critical", "confidence": 1.0, "evidence": {}}]
+    leads = [{"vuln_type": "lfi", "target": "http://x/c", "title": "Possible LFI",
+              "reason": "a signal was observed but not confirmed",
+              "next_step": "replay the request by hand",
+              "calibrated_confidence": 0.28}]
+    out = tmp_path / "report.pdf"
+    ok = gen.generate({"engagement": "t", "findings": findings,
+                       "vulnerabilities": findings, "leads": leads},
+                      str(out), strict=True)
+    assert ok and out.exists() and out.stat().st_size > 0
+
+
+def test_pdf_leads_section_omitted_when_empty():
+    # The leads section (and the number it would consume) renders only when
+    # leads exist — parity with the Combined-Risk section's offset behaviour, so
+    # a report without leads keeps its original section numbering.
+    from heaven.devsecops.pdf_report import PDFReportGenerator
+    gen = PDFReportGenerator()
+    sentinel = object()  # helpers are untouched when there are no leads
+    assert gen._leads_section([], cw=400, styles=sentinel, table=sentinel,
+                              heading=sentinel, number="9.") == []
+
+
 def test_lead_listing_all_vs_open(store):
     # The default view lists only open leads (so promoted/dismissed don't
     # reappear); an explicit "all" lists every status. This is the semantic the

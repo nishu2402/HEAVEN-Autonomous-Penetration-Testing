@@ -479,12 +479,16 @@ def report(engagement: Optional[str], output: str, framework: str) -> None:
         _collect_engagement_assets,
         _collect_engagement_dns,
     )
+    # Honest leads appendix: unconfirmed observations for manual review, clearly
+    # separated from findings (never counted or scored as findings).
+    open_leads = store.get_leads(status="open", limit=1000)
     gen = ComplianceReportGenerator()
     gen.generate_html_report(finding_dicts,
                               engagement_name=eng.name if eng else "",
                               output_path=Path(output),
                               assets=_collect_engagement_assets(engagement),
-                              dns_records=_collect_engagement_dns(engagement))
+                              dns_records=_collect_engagement_dns(engagement),
+                              leads=open_leads)
     _print(f"[green]Report written:[/green] {output} ({len(finding_dicts)} findings)")
     sev: dict[str, int] = {}
     for f in finding_dicts:

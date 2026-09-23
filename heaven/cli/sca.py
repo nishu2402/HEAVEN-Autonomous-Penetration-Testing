@@ -22,6 +22,9 @@ from typing import Optional
 import click
 
 from heaven.cli._helpers import _engagement_db_path, _print, json_output
+from heaven.utils.logger import get_logger
+
+logger = get_logger("cli.sca")
 
 
 @click.command(name="sca")
@@ -105,7 +108,8 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
         try:
             store.create_engagement(name=engagement)
         except Exception:  # noqa: BLE001 — already exists / best-effort
-            pass
+            logger.debug(
+                "engagement create was a no-op / already exists", exc_info=True)
         scan_id = f"sca-{uuid.uuid4().hex[:12]}"
         store.record_scan_start(
             scan_id, name=f"SCA: {Path(path).name}", mode="sca",

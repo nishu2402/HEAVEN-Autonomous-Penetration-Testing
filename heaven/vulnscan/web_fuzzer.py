@@ -1219,7 +1219,9 @@ async def fuzz_targets(urls: list[str], aggressive: Optional[bool] = None,
         if get_active_session():
             urls = [u for u in urls if not _is_session_destroying(u)]
     except Exception:  # noqa: BLE001 — guard must never break the scan
-        pass
+        logger.debug(
+            "auth-session logout guard unavailable; skipping session-destroying "
+            "URL filter for this fuzz batch", exc_info=True)
 
     seen: set[str] = set()
     unique: list[str] = []

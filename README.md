@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3056 tests · 64 CLI commands · 106 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3059 tests · 64 CLI commands · 106 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -110,7 +110,7 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 3056 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 3059 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 231 |
 | ⌨️ **CLI Commands** | 64 |
@@ -795,7 +795,7 @@ heaven/                   ← Python package (231 modules)
 └── cli/                  Click CLI - one module per command group (64 commands)
 
 heaven-ui/                React + Vite web console (30 pages)
-tests/                    3056 pytest tests + native & DVWA benchmark suites
+tests/                    3059 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -814,7 +814,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (3056 tests)
+pytest tests/                  # full suite, ~3.5 min (3059 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -881,7 +881,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>3056 tests · 231 modules · 64 CLI commands · 106 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>3059 tests · 231 modules · 64 CLI commands · 106 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

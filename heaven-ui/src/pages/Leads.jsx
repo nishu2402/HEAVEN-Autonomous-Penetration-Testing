@@ -24,7 +24,10 @@ export default function Leads() {
 
   const load = useCallback(() => {
     setLoading(true);
-    Engagement.leads(status === "all" ? "" : status)
+    // "all" is sent through verbatim: the API treats it as "every status", while
+    // an omitted status defaults to open only. Sending "" would hit that default
+    // and silently hide promoted / dismissed leads.
+    Engagement.leads(status)
       .then((d) => { setData(d); setError(null); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

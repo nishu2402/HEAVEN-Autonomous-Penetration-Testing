@@ -358,7 +358,9 @@ async def _execute_action(
             )
         summary = await orch.run()
         if engagement_store:
-            for f in summary.get("vulnerabilities", []) + summary.get("findings", []):
+            # Both keys point to the same deduped list; take one, never both, or
+            # every finding's seen-count is bumped twice per iteration.
+            for f in (summary.get("vulnerabilities") or summary.get("findings") or []):
                 try:
                     engagement_store.upsert_finding(orch.scan_id, f)
                 except Exception:

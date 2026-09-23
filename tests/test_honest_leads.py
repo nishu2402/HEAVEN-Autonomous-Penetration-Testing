@@ -154,3 +154,77 @@ def test_leads_table_created_on_existing_db(tmp_path):
     EngagementStore(db).create_engagement(name="t")
     s2 = EngagementStore(db)
     assert s2.count_leads() == 0  # no crash → table exists
+
+
+# ── report / export end-to-end ───────────────────────────────────────────────
+
+def test_markdown_report_carries_leads_appendix_never_as_findings():
+    # A lead reaches the operator through the report, clearly separated from the
+    # findings and never scored or counted as one.
+    from heaven.devsecops.evidence import export_findings_markdown
+    findings = [{"vuln_type": "sqli", "target": "http://x/a", "title": "SQLi",
+                 "severity": "critical", "confidence": 1.0}]
+    leads = [{"vuln_type": "lfi", "target": "http://x/c",
+              "reason": "a signal was observed but not confirmed",
+              "calibrated_confidence": 0.28}]
+    md = export_findings_markdown(findings, leads=leads)
+    assert "## Leads for manual review" in md
+    assert "**not findings**" in md          # honest framing preserved
+    assert "**Total findings:** 1" in md      # the lead is NOT counted as a finding
+
+
+def test_summary_export_never_doubles_findings():
+    # The orchestrator publishes the SAME deduped list under both "vulnerabilities"
+    # and "findings" (orchestrator.py). Every export/persist consumer must select
+    # ONE of the two keys, never concatenate them, or each finding is emitted
+    # twice. This locks the selection idiom the CLI and watcher use.
+    import json
+
+    from heaven.devsecops.ci_export import findings_to_sarif_str
+    from heaven.devsecops.evidence import export_findings_markdown
+
+    shared = [
+        {"vuln_type": "sqli", "target": "http://x/a", "title": "SQLi",
+         "severity": "critical", "confidence": 1.0},
+        {"vuln_type": "xss", "target": "http://x/b", "title": "XSS",
+         "severity": "high", "confidence": 0.9},
+    ]
+    summary = {"vulnerabilities": shared, "findings": shared}
+    selected = summary.get("vulnerabilities") or summary.get("findings") or []
+    assert len(selected) == 2  # not 4
+
+    sarif = json.loads(findings_to_sarif_str(selected))
+    assert len(sarif["runs"][0]["results"]) == 2  # exports each finding once
+
+    # The concatenated (buggy) list would have emitted four SARIF results.
+    doubled = summary.get("vulnerabilities", []) + summary.get("findings", [])
+    assert len(json.loads(findings_to_sarif_str(doubled))["runs"][0]["results"]) == 4
+
+    md = export_findings_markdown(selected)
+    assert "**Total findings:** 2" in md  # header reflects the deduped count
+
+
+def test_lead_listing_all_vs_open(store):
+    # The default view lists only open leads (so promoted/dismissed don't
+    # reappear); an explicit "all" lists every status. This is the semantic the
+    # API endpoint maps "all" → no filter for, and the UI "All" filter relies on.
+    for i, st in enumerate(("open", "promoted", "dismissed")):
+        lid = store.record_lead("s1", {
+            "vuln_type": "sqli", "target": f"http://x/{i}", "param": "id",
+            "payload": "x", "evidence": {"n": i}})
+        if st != "open":
+            store.set_lead_status(lid, st)
+
+    open_only = store.get_leads(status="open")
+    every = store.get_leads(status=None)  # what the endpoint passes for "all"
+    assert {ld["status"] for ld in open_only} == {"open"}
+    assert {ld["status"] for ld in every} == {"open", "promoted", "dismissed"}
+    assert len(every) == 3 and len(open_only) == 1
+
+    # The endpoint's own mapping: "all" → no filter, anything else → itself/open.
+    def effective(status):
+        return None if status == "all" else (status or "open")
+    assert effective("all") is None
+    assert effective("") == "open"
+    assert effective(None) == "open"
+    assert effective("promoted") == "promoted"

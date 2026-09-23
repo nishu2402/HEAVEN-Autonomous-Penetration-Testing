@@ -290,7 +290,9 @@ def cli_main() -> int:
 
         scan = json.loads(findings_path.read_text())
         truth = json.loads(truth_path.read_text())
-        findings = scan.get("vulnerabilities", []) + scan.get("findings", [])
+        # A scan summary carries the SAME deduped list under both keys; take one,
+        # never both, or the benchmark scores every finding twice.
+        findings = scan.get("vulnerabilities") or scan.get("findings") or []
         report = evaluate_against_truth(findings, truth)
         report.print_summary()
 

@@ -116,7 +116,9 @@ def replay(scan_id: str, engagement: Optional[str],
     _print(f"  Tasks: {summary['completed']}/{summary['total_tasks']} (failed: {summary['failed']})")
 
     new_scan_id = summary.get("scan_id", orch.scan_id)
-    for f in summary.get("vulnerabilities", []) + summary.get("findings", []):
+    # Both keys point to the same deduped list; take one, never both, or every
+    # finding's seen-count is bumped twice for a single replay.
+    for f in (summary.get("vulnerabilities") or summary.get("findings") or []):
         try:
             store.upsert_finding(new_scan_id, f)
         except Exception:

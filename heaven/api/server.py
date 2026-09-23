@@ -2536,9 +2536,13 @@ def create_app() -> FastAPI:
         returns only `open` leads (not the ones already promoted / dismissed).
         """
         store = _read_store()
+        # "all" (an explicit request) lists every status; the default (no status
+        # given) lists only open leads, so promoted / dismissed leads do not
+        # reappear in the default triage view.
+        effective = None if status == "all" else (status or "open")
         rows = store.get_leads(
             scan_id=scan_id,
-            status=status if status else "open",
+            status=effective,
             limit=limit,
         )
         return {"leads": rows, "count": len(rows)}
@@ -2720,6 +2724,13 @@ def create_app() -> FastAPI:
         raw_assets = _collect_raw_assets(engagement)
         # DNS enumeration (records + subdomains) for the report's DNS section.
         raw_dns = _collect_raw_dns(engagement)
+        # Honest leads (substantiated sub-confirmation observations) for the
+        # report's "Leads for manual review" appendix. Never findings, never
+        # counted as such — the same channel the CLI export renders, so the
+        # Markdown deliverable is identical whichever surface produced it.
+        raw_leads: list = []
+        with contextlib.suppress(Exception):
+            raw_leads = store.get_leads(status="open", limit=1000)
 
         fmt = (format or "html").lower()
         media = {
@@ -2787,7 +2798,8 @@ def create_app() -> FastAPI:
                 from heaven.devsecops.evidence import export_findings_markdown
                 body = export_findings_markdown(findings, engagement_name=eng_name,
                                                 assets=raw_assets, dns_records=raw_dns,
-                                                compliance_framework=compliance_fw)
+                                                compliance_framework=compliance_fw,
+                                                leads=raw_leads)
             elif fmt == "csv":
                 from heaven.devsecops.evidence import export_findings_csv
                 body = export_findings_csv(findings)
@@ -3900,7 +3912,8 @@ def create_app() -> FastAPI:
         async def _run():
             try:
                 summary = await orch.run()
-                for f in summary.get("vulnerabilities", []) + summary.get("findings", []):
+                # Both keys point to the same deduped list; take one, never both.
+                for f in (summary.get("vulnerabilities") or summary.get("findings") or []):
                     try:
                         store.upsert_finding(orch.scan_id, f)
                     except Exception:

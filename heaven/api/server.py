@@ -2770,6 +2770,7 @@ def create_app() -> FastAPI:
                          "findings": findings, "assets": raw_assets,
                          "dns_records": raw_dns, "tester": report_tester,
                          "client": report_meta.get("client", ""),
+                         "leads": raw_leads,
                          "compliance_framework": compliance_fw}, tmp.name, strict=True)
                 except Exception as exc:  # noqa: BLE001
                     try:
@@ -2793,7 +2794,7 @@ def create_app() -> FastAPI:
                 body = ComplianceReportGenerator().generate_html_report(
                     findings, engagement_name=eng_name, assets=raw_assets,
                     dns_records=raw_dns, compliance_framework=compliance_fw,
-                    meta=report_meta or None)
+                    meta=report_meta or None, leads=raw_leads)
             elif fmt == "markdown":
                 from heaven.devsecops.evidence import export_findings_markdown
                 body = export_findings_markdown(findings, engagement_name=eng_name,

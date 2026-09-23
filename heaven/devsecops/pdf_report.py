@@ -186,7 +186,8 @@ class PDFReportGenerator:
                 meta["client"] = str(data["client"]).strip()
             html = ComplianceReportGenerator().generate_html_report(
                 findings, engagement_name=self._engagement(data),
-                assets=data.get("assets"), meta=meta or None)
+                assets=data.get("assets"), meta=meta or None,
+                leads=data.get("leads"))
             Path(html_path).write_text(html, encoding="utf-8")
             logger.info(f"HTML report written to {html_path} (install reportlab for PDF)")
             return True
@@ -386,6 +387,64 @@ class PDFReportGenerator:
         out.append(PageBreak())
         return out
 
+    def _leads_section(self, leads, cw, styles, table, heading, number):
+        """Section: Leads for Manual Review (only when leads are present).
+
+        Leads are unconfirmed observations, NOT findings: the section says so
+        plainly, carries only a calibrated probability (never a severity
+        verdict), and gives the operator the honest reason and the concrete next
+        step so the signal can be run down by hand. Parity with the Markdown /
+        HTML appendix. Returns an empty list (section + number omitted) when
+        there are no leads, so a report without leads is unchanged.
+        """
+        if not leads:
+            return []
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
+        from reportlab.platypus import PageBreak, Paragraph, Table, TableStyle
+
+        def _prob(x) -> float:
+            try:
+                return float(x.get("calibrated_confidence") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        out: list[Any] = [heading(number, "Leads for Manual Review")]
+        note = Table([[Paragraph(
+            "These are <b>unconfirmed observations</b> that did not reach the finding "
+            "bar. They are <b>not findings</b> and are not counted or scored as such. "
+            "Each had a real signal the scanner could not confirm safely, listed here "
+            "with a calibrated probability so it can be verified by hand rather than "
+            "dropped.", styles["small"])]], colWidths=[cw])
+        note.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff8e6")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#f0d98c")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        out.append(note)
+        out.append(Paragraph("", styles["small"]))
+
+        rows = [[Paragraph(h, styles["th"]) for h in
+                 ("Lead", "Target", "Conf.", "Why unconfirmed", "How to verify")]]
+        for lead in sorted(leads, key=_prob, reverse=True):
+            title = str(lead.get("title") or lead.get("vuln_type") or "Lead")
+            vtype = str(lead.get("vuln_type") or "")
+            title_html = _esc(title)
+            if vtype:
+                title_html += f'<br/><font size="7" color="#5b6472">{_esc(vtype)}</font>'
+            rows.append([
+                Paragraph(title_html, styles["cell"]),
+                Paragraph(_esc(lead.get("target") or "—"), styles["small"]),
+                Paragraph(f"{_prob(lead):.0%}", styles["small"]),
+                Paragraph(_esc(lead.get("reason") or "—"), styles["small"]),
+                Paragraph(_esc(lead.get("next_step") or "—"), styles["small"]),
+            ])
+        out.append(table(rows, [cw - 148 * mm, 34 * mm, 14 * mm,
+                                50 * mm, 50 * mm]))
+        out.append(PageBreak())
+        return out
+
     # ── PDF construction ────────────────────────────────────────────
 
     def _build_pdf(self, data: dict[str, Any], output_path: str) -> None:
@@ -416,6 +475,10 @@ class PDFReportGenerator:
         potential_total = len(findings) - confirmed_total
         overall = self._overall(confirmed_counts)
         scope = data.get("scope") or sorted({str(f.get("target")) for f in findings if f.get("target")})
+        # Honest leads: substantiated sub-confirmation observations. Rendered in
+        # their own section, never counted or scored as findings (parity with
+        # the Markdown / HTML appendix). Empty for scans with no leads.
+        leads = data.get("leads") or []
         from heaven.devsecops.inventory import inventory_totals, normalize_assets
         inventory = normalize_assets(data.get("assets"))
         inv_totals = inventory_totals(inventory)
@@ -936,8 +999,16 @@ class PDFReportGenerator:
             story.append(table(rr, [8 * mm, 24 * mm, 48 * mm, cw - 110 * mm, 30 * mm]))
         story.append(PageBreak())
 
+        # ── Leads for manual review (only when present) ──
+        # Kept out of the finding count and severity math on purpose; like the
+        # Combined-Risk section it shifts the later number only when it renders.
+        leads_flowables = self._leads_section(
+            leads, cw, styles, table, heading, f"{8 + off}.")
+        story.extend(leads_flowables)
+        loff = 1 if leads_flowables else 0
+
         # ── 9. Appendix ──
-        story.append(heading(f"{8 + off}.", "Appendix"))
+        story.append(heading(f"{8 + off + loff}.", "Appendix"))
         story.append(Paragraph("Tooling", styles["h3"]))
         story.append(Paragraph(
             "Assessment performed with the HEAVEN Autonomous Penetration-Testing Platform, which "

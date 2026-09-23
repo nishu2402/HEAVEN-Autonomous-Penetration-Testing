@@ -362,7 +362,8 @@ class ComplianceReportGenerator:
                              meta: Optional[dict] = None,
                              assets: Optional[list[dict]] = None,
                              dns_records: Optional[list[dict]] = None,
-                             compliance_framework: Optional[str] = None) -> str:
+                             compliance_framework: Optional[str] = None,
+                             leads: Optional[list[dict]] = None) -> str:
         """Render the full professional report as one HTML string.
 
         `meta` (all optional) may carry: client, assessor, period, version,
@@ -377,6 +378,12 @@ class ComplianceReportGenerator:
         ``uk_gdpr``, …); when valid, a control-coverage section mapping the
         findings to that framework's controls is added, and the cover / TOC name
         it. Unknown ids are ignored (a normal report).
+
+        `leads` (optional) are honest sub-confirmation observations; when
+        present a "Leads for Manual Review" section is added, clearly separated
+        from the findings and never scored or counted as one, so a weak-but-real
+        signal reaches the operator instead of being dropped. Parity with the
+        Markdown export appendix.
         """
         from heaven.devsecops import compliance_frameworks as _cf
         from heaven.devsecops.vuln_kb import enrich_finding
@@ -434,6 +441,7 @@ class ComplianceReportGenerator:
 
         inventory = _normalize_assets(assets) if assets else []
         dns_inv = _normalize_dns(dns_records) if dns_records else []
+        leads_list = list(leads or [])
         has_api = self.has_api_findings(findings)
         has_iot = self.has_iot_findings(findings)
         has_ot = self.has_ot_findings(findings)
@@ -450,7 +458,8 @@ class ComplianceReportGenerator:
                           (f.get("vuln_type") or f.get("type") or "") in
                           ("directory_listing", "sensitive_file") for f in findings),
                       compliance_title=compliance_title,
-                      has_combined=bool(combo_dicts)),
+                      has_combined=bool(combo_dicts),
+                      has_leads=bool(leads_list)),
             self._exec_summary(eng, counts, len(findings), overall, ordered,
                                len(scope), confirmed_counts, confirmed_total,
                                potential_total),
@@ -478,6 +487,7 @@ class ComplianceReportGenerator:
             sections.append(self._compliance_coverage(findings, fw))
         sections += [
             self._roadmap(ordered),
+            self._leads_section(leads_list),
             self._appendix(),
             self._footer(),
         ]
@@ -662,7 +672,8 @@ class ComplianceReportGenerator:
     def _toc(has_inventory: bool = False, has_api: bool = False,
              has_iot: bool = False, has_ot: bool = False,
              has_dns: bool = False, has_content: bool = False,
-             compliance_title: str = "", has_combined: bool = False) -> str:
+             compliance_title: str = "", has_combined: bool = False,
+             has_leads: bool = False) -> str:
         items = [
             ("exec", "Executive Summary"),
             ("scope", "Scope & Methodology"),
@@ -691,10 +702,10 @@ class ComplianceReportGenerator:
             items.append(("ot-ics", "OT / ICS Security Coverage (IEC 62443)"))
         if compliance_title:
             items.append(("compliance", f"{compliance_title} Compliance Mapping"))
-        items += [
-            ("roadmap", "Remediation Roadmap"),
-            ("appendix", "Appendix"),
-        ]
+        items.append(("roadmap", "Remediation Roadmap"))
+        if has_leads:
+            items.append(("leads", "Leads for Manual Review"))
+        items.append(("appendix", "Appendix"))
         lis = "".join(f'<li><a href="#{i}">{_esc(t)}</a></li>' for i, t in items)
         return f'<div class="page section"><h2>Table of Contents</h2><div class="toc"><ol>{lis}</ol></div></div>'
 
@@ -1791,6 +1802,54 @@ class ComplianceReportGenerator:
           <table>
             <tr><th style="width:40px">#</th><th style="width:90px">Severity</th><th>Finding</th>
                 <th>Recommended action</th><th style="width:100px">Target SLA</th></tr>
+            {rows}
+          </table>
+        </div>"""
+
+    @staticmethod
+    def _leads_section(leads: list[dict]) -> str:
+        """Render the "Leads for Manual Review" section, or '' when empty.
+
+        Leads are unconfirmed observations, NOT findings: the section says so
+        plainly, carries only a calibrated probability (never a severity
+        verdict), and gives the operator the honest reason and the concrete next
+        step so the signal can be run down by hand. Parity with the Markdown
+        appendix (`_render_leads_md`); the section and its TOC entry are omitted
+        when there are no leads, so the report is unchanged otherwise.
+        """
+        if not leads:
+            return ""
+
+        def _prob(x: dict) -> float:
+            try:
+                return float(x.get("calibrated_confidence") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        rows = ""
+        for lead in sorted(leads, key=_prob, reverse=True):
+            title = str(lead.get("title") or lead.get("vuln_type") or "Lead")
+            vtype = str(lead.get("vuln_type") or "")
+            target = str(lead.get("target") or "")
+            reason = str(lead.get("reason") or "")
+            next_step = str(lead.get("next_step") or "")
+            rows += (
+                f'<tr><td>{_esc(title)}'
+                + (f'<div class="muted small">{_esc(vtype)}</div>' if vtype else "")
+                + f'</td><td class="small">{_esc(target)}</td>'
+                f'<td class="small">{_prob(lead):.0%}</td>'
+                f'<td class="small">{_esc(reason) or "&mdash;"}</td>'
+                f'<td class="small">{_esc(next_step) or "&mdash;"}</td></tr>'
+            )
+        return f"""<div class="page section" id="leads"><h2>Leads for Manual Review</h2>
+          <div class="note">These are <strong>unconfirmed observations</strong> that did not
+          reach the finding bar. They are <strong>not findings</strong> and are not counted or
+          scored as such. Each had a real signal the scanner could not confirm safely, listed
+          here with a calibrated probability so it can be verified by hand rather than dropped.</div>
+          <table>
+            <tr><th>Lead</th><th style="width:150px">Target</th>
+                <th style="width:90px">Confidence</th>
+                <th>Why unconfirmed</th><th>How to verify</th></tr>
             {rows}
           </table>
         </div>"""

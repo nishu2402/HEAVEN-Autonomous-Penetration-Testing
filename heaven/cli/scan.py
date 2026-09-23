@@ -859,10 +859,22 @@ def scan(
 
     if output_file:
         try:
+            # Honest leads for the report appendix (PDF + Markdown): prefer the
+            # calibrated leads persisted to the engagement (calibrated confidence
+            # + concrete next step), else the raw leads from the summary so the
+            # appendix still renders for an engagement-less scan. Never findings.
+            report_leads = summary.get("leads") or []
+            if engagement_store:
+                try:
+                    report_leads = engagement_store.get_leads(
+                        scan_id, status="open") or report_leads
+                except Exception:
+                    logger.debug("suppressed non-fatal lead-read exception",
+                                 exc_info=True)
             if output == "pdf":
                 from heaven.devsecops.pdf_report import PDFReportGenerator
                 gen = PDFReportGenerator()
-                if gen.generate(summary, output_file):
+                if gen.generate({**summary, "leads": report_leads}, output_file):
                     if gen.available:
                         _print(f"  PDF report written to: {output_file}")
                     else:
@@ -895,21 +907,11 @@ def scan(
                     or summary.get("findings")
                     or []
                 )
-                # Honest leads appendix: prefer the calibrated leads persisted to
-                # the engagement (richer: calibrated confidence + manual next
-                # step), else the raw leads from the summary so the appendix still
-                # renders for an engagement-less scan.
-                md_leads = summary.get("leads") or []
-                if engagement_store:
-                    try:
-                        md_leads = engagement_store.get_leads(
-                            scan_id, status="open") or md_leads
-                    except Exception:
-                        logger.debug("suppressed non-fatal lead-read exception",
-                                     exc_info=True)
+                # Honest leads appendix uses the same `report_leads` computed
+                # above (calibrated engagement leads when available).
                 Path(output_file).write_text(export_findings_markdown(
                     findings_in_summary, assets=summary.get("assets"),
-                    leads=md_leads))
+                    leads=report_leads))
                 _print(f"  Markdown report written to: {output_file}")
             else:
                 Path(output_file).write_text(json.dumps(summary, indent=2, default=str))

@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3075 tests · 64 CLI commands · 106 API routes · 30 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3075 tests · 64 CLI commands · 106 API routes · 32 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -23,7 +23,7 @@
   <p>
     <img src="https://img.shields.io/badge/Modules-232-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-64-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
-    <img src="https://img.shields.io/badge/UI_Pages-30-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
+    <img src="https://img.shields.io/badge/UI_Pages-32-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.91-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
   </p>
@@ -94,7 +94,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API**: 106 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.1.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.2.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -115,7 +115,7 @@ It runs three ways from the **same engagement dataset**:
 | 🧩 **Modules** | 232 |
 | ⌨️ **CLI Commands** | 64 |
 | 🌐 **API Routes** | 106 RBAC-protected routes |
-| 🖥️ **UI Pages** | 30 (React + Vite, dark glassmorphic) |
+| 🖥️ **UI Pages** | 32 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
 | 🧠 **LLM Providers** | Anthropic · OpenAI · Gemini · DeepSeek · local (Ollama / any OpenAI-compatible server) · **deterministic fallback (no API key needed)** |
@@ -464,7 +464,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 64 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.1.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.2.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">
@@ -883,7 +883,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>3075 tests · 232 modules · 64 CLI commands · 106 API routes · 30 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>3075 tests · 232 modules · 64 CLI commands · 106 API routes · 32 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

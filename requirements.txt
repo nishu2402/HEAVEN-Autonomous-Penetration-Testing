@@ -59,6 +59,8 @@ cryptography>=50.0.0      # floor patched: incl. 2026 advisories thru 49.x (OSV)
 pyjwt>=2.13.0             # floor patched: multiple JWT advisories (OSV)
 defusedxml>=0.7.1         # XXE-safe XML parsing (untrusted pom.xml / nmap output)
 cvss>=3.0                # reference-grade CVSS v4.0 base scoring
+javalang>=0.13.0         # pure-Python Java parser powering the SAST dataflow
+                         # refinement (heaven/vulnscan/java_dataflow.py)
 
 # ── Network reconnaissance ──────────────────────────────────────────────
 # nmap / nuclei / sqlmap are SYSTEM binaries (apt/brew), not pip packages -
@@ -104,6 +106,8 @@ rich>=13.7.0
 click>=8.3.3             # floor patched: PYSEC-2026-2132 (OSV)
 rich-click>=1.7.0
 python-dotenv>=1.2.2     # floor patched: PYSEC-2026-2270 (OSV)
+tzdata>=2024.1           # bundled IANA tz database so HEAVEN_REPORT_TZ resolves
+                         # on any host (Windows / minimal containers ship none)
 
 # ── AI (default LLM provider) ───────────────────────────────────────────
 # Gemini ships by default so the AI features (recon-parse, planner, FP-review,

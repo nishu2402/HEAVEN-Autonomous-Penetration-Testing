@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 500" role="img"
-     aria-label="HEAVEN · Autonomous Penetration-Testing Framework. Pipeline: Recon to ML Risk Scoring to Verified Exploitation to Reporting. 3075 tests, 64 CLI commands, 106 API routes, 30 UI pages, 15 scan modes, hybrid CVSS ML predictor R-squared 0.91.">
+     aria-label="HEAVEN · Autonomous Penetration-Testing Framework. Pipeline: Recon to ML Risk Scoring to Verified Exploitation to Reporting. 3075 tests, 64 CLI commands, 106 API routes, 32 UI pages, 15 scan modes, hybrid CVSS ML predictor R-squared 0.91.">
   <title>HEAVEN · Autonomous Penetration-Testing Framework</title>
 
   <defs>
@@ -246,7 +246,7 @@
       <text x="155"  y="426" font-size="28">3075</text>
       <text x="349"  y="426" font-size="28">64</text>
       <text x="543"  y="426" font-size="28">106</text>
-      <text x="737"  y="426" font-size="28">30</text>
+      <text x="737"  y="426" font-size="28">32</text>
       <text x="931"  y="426" font-size="28">15</text>
       <text x="1125" y="426" font-size="24">0.91</text>
     </g>
@@ -265,7 +265,7 @@
       <animateTransform attributeName="transform" type="translate" values="0 0; 996 0; 0 0" keyTimes="0;0.5;1" dur="5s" repeatCount="indefinite"/>
     </rect>
     <text x="67" y="489" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#46536E">CLI · WEB UI · REST + WEBSOCKET API · ONE ENGAGEMENT DATASET</text>
-    <text x="1213" y="489" text-anchor="end" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#46536E">v4.1.0 · MIT LICENSE</text>
+    <text x="1213" y="489" text-anchor="end" font-family="'JetBrains Mono','Fira Code',ui-monospace,Menlo,monospace" font-size="10.5" letter-spacing="1.2" fill="#46536E">v4.2.0 · MIT LICENSE</text>
   </g>
 
   <!-- outer frame -->

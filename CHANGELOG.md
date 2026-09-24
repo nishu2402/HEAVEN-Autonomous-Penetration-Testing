@@ -9,7 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0]: 2026-09-24
+
 ### Added
+
+- **The Agent Fleet is now the default scan engine: a role-based multi-agent
+  layer that wraps the deterministic scanners instead of replacing them.** Roles
+  propose work and the same deterministic oracles that power `heaven scan` verify
+  it, so only a confirmed result ever becomes a finding and no agent can author
+  one. The fleet runs at full strength with no LLM and no API key (the rule-based
+  planners are the floor); a brain, when one is present, is pure enrichment chosen
+  by an intelligence ladder that auto-selects a local Ollama model or an existing
+  cloud key and otherwise stays deterministic. Because the fleet is a superset of
+  the classic pipeline it can only add coverage, never drop a finding (recall
+  parity is proven on the labs), and classic `heaven scan` stays byte-for-byte the
+  same; a process reverts the default with `HEAVEN_AGENT_FLEET=0`. It ships one
+  lead role per scan mode plus five agent primitives (recon, hypothesis, critic,
+  gap and strategist), a blackboard the agents coordinate through, a bounded
+  scheduler, a metrics harness and an optional distributed worker pool
+  (`HEAVEN_FLEET_WORKERS`) for the largest engagements. Surfaced end to end: the
+  `heaven fleet` command, a Fleet page in the web UI, the autonomous loop, and a
+  live tier and status readout in `heaven doctor` and the health API.
+
+- **Java SAST now confirms or drops a Semgrep match with a real dataflow pass
+  instead of trusting the syntactic rule.** Semgrep's Java taint rules flag a
+  source-to-sink flow whenever both appear in one method, but they cannot fold
+  constants, tell which branch of an `if` / `switch` is live, model a `Map` / `List`
+  access by its constant key, or resolve an algorithm name a `.properties` file
+  supplies at runtime, which is how a lookalike sitting in dead code slips through.
+  A new `heaven/vulnscan/java_dataflow.py` refinement pass parses a real Java AST
+  (`javalang`) and runs a small intra-procedural abstract interpreter that tracks
+  taint per variable, folds integer / string / char / boolean constants, prunes
+  provably-dead branches, models `StringBuilder` / `Map` / `List` / array
+  operations on constant keys and honors the same category sanitizers the rules
+  use. A finding is dropped only when the interpreter can prove every reachable
+  sink of that category receives no tainted value; every unknown over-approximates
+  taint, so the pass removes lookalikes and can never hide a real flow. It also
+  resolves weak-crypto algorithm names read from `.properties` files and flags the
+  resolved value when it is broken. New coverage in `tests/test_java_dataflow.py`.
+
+- **The engagement chip in the header is now an app-wide switcher.** Clicking it
+  opens the full engagement list (sorted by most-recently-updated, each with a
+  last-updated timestamp) and selecting one changes the active engagement for the
+  whole app at once: the dashboard, findings, reports and every other page follow
+  the same `heaven:engagement-changed` event, so an operator juggling several
+  client engagements no longer has to switch it from the CLI or reload the page to
+  change context.
 
 - **Honest leads: a substantiated signal below the finding bar is now kept for a
   human instead of being dropped silently.** The false-positive suppressor discards
@@ -71,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The description/type CVSS model is a measurably better ranking aid, reported
   by the metric that matches its job.** Three honest changes, no faking:
   - **Genuine model lift.** An exhaustive re-search of the text recipe adopted
-    word 1–3 grams at 100k TF-IDF features (from 1–2 grams at 50k). On the
+    word 1-3 grams at 100k TF-IDF features (from 1-2 grams at 50k). On the
     deployment population (the scoreless findings HEAVEN actually routes here) this
     improves every metric at once, measured by honest 5-fold out-of-fold CV:
     exact-score R² 0.626 → 0.640, MAE 0.790 → 0.767, Spearman rank correlation
@@ -157,6 +202,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now derives a stable id from the same content hash the engagement store uses, so
   the id is never blank, matches the stored id exactly, and tells otherwise
   identical-looking findings apart. New coverage in `tests/test_honest_leads.py`.
+
+- **Container scanning no longer probes the operator's own machine when no
+  container host is in scope.** A remote or URL engagement that resolved no
+  container hosts fell through a `hosts or ["localhost"]` default and scanned the
+  operator's own `/var/run/docker.sock`, then attributed that local Docker socket
+  to the engagement as a bogus critical finding. An explicit host list is now
+  authoritative including an empty one (empty means nothing is in scope, so
+  nothing is scanned); the `localhost` default applies only to a deliberate
+  local-only invocation such as a bare `scan_containers()`. New coverage in
+  `tests/test_scanmode_fp_audit2_fixes.py`.
 
 ### Security
 

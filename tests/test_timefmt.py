@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import heaven.utils.timefmt as tf
-from heaven.config import HeavenConfig, get_config
+from heaven.config import HeavenConfig
 
 # A machine's tz database may be absent (a bare Windows CI without `tzdata`); the
 # helper then falls back to local, which is correct but not assertable as IST.
@@ -28,8 +28,21 @@ _needs_tzdata = pytest.mark.skipif(not _HAVE_TZDATA, reason="no IANA tz database
 
 
 def _pin(monkeypatch, name: str) -> None:
-    """Pin the display timezone on the live config singleton (auto-restored)."""
-    monkeypatch.setattr(get_config(), "report_timezone", name, raising=False)
+    """Pin the display timezone on the live config singleton (auto-restored).
+
+    Resolve ``heaven.config`` at call time instead of through a module-level
+    import: a sibling test (``test_advanced``) deletes every ``heaven.*`` module
+    from ``sys.modules`` and re-imports, so an import-time ``get_config`` binding
+    would be orphaned by the time this file runs — it would patch the *old*
+    module's singleton while ``timefmt.resolve_tz`` (which imports the config
+    fresh on every call) reads the *new* module's, and the pin would silently not
+    apply. Importing here keeps the patched singleton the one ``resolve_tz`` sees,
+    the same call-time-import discipline the rest of the suite already uses (see
+    ``test_egress_routing`` / ``test_fp_review_concurrency``)."""
+    import importlib
+
+    cfg = importlib.import_module("heaven.config")
+    monkeypatch.setattr(cfg.get_config(), "report_timezone", name, raising=False)
 
 
 # A fixed instant so wall-clock assertions are exact regardless of "now".

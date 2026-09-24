@@ -84,47 +84,18 @@ jobs:
         id: ver
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Extract changelog section for this version
+      - name: Build release notes (banner + changelog + install)
         id: changelog
         run: |
-          # Grab everything between this version's heading and the next ## heading
-          awk -v ver="${{ steps.ver.outputs.version }}" '
-            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
-            flag && /^## \[/ {exit}
-            flag {print}
-          ' CHANGELOG.md > /tmp/release-notes.md
-          if [ ! -s /tmp/release-notes.md ]; then
-            echo "No CHANGELOG entry for version ${{ steps.ver.outputs.version }} — using fallback" >&2
-            echo "See CHANGELOG.md for changes." > /tmp/release-notes.md
-          fi
-          # Append install + pre-trained-model instructions. HEAVEN is distributed
-          # via this Release (not PyPI): grab the wheel below, or install from source.
-          # The 48 MB NVD model is not in the wheel/git, so users grab it from this
-          # release with a SHA-256-verified one-liner.
-          {
-            echo ""
-            echo "### Install"
-            echo ""
-            echo "HEAVEN is distributed here, not on PyPI. Install the attached wheel:"
-            echo ""
-            echo '```bash'
-            echo "pip install heaven_pentest-${{ steps.ver.outputs.version }}-py3-none-any.whl"
-            echo '```'
-            echo ""
-            echo "…or from source: \`git clone\` + \`pip install -e .\`."
-            echo ""
-            echo "### Pre-trained NVD CVSS model"
-            echo ""
-            echo "The ML CVSS model (R²≈0.99) ships as a release asset, not in the wheel."
-            echo "Fetch it once (SHA-256 verified):"
-            echo ""
-            echo '```bash'
-            echo "heaven download-model --tag ${{ github.ref_name }}"
-            echo '```'
-            echo ""
-            echo "HEAVEN runs without it (CVSS falls back to each finding's base score)."
-          } >> /tmp/release-notes.md
-          head -40 /tmp/release-notes.md
+          # One source of truth for release-note formatting (banner + this
+          # version's CHANGELOG section + install/model steps). The banner is the
+          # README hero poster + badges, tag-pinned, so EVERY release carries the
+          # same in-sync banner. See scripts/build_release_notes.sh.
+          scripts/build_release_notes.sh \
+            "${{ steps.ver.outputs.version }}" \
+            "${{ github.ref_name }}" \
+            "${{ github.repository }}" > /tmp/release-notes.md
+          head -60 /tmp/release-notes.md
 
       # NOTE: NVD_model.pkl is gitignored, so CI does not have it — the glob
       # below is skipped automatically (fail_on_unmatched_files defaults false).

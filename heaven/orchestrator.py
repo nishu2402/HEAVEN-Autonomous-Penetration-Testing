@@ -661,6 +661,19 @@ class ScanOrchestrator:
                     self.add_task(f"SSH Credential Check {ip}:{port}", _ssh_check,
                                   phase=ScanPhase.VULN_SCAN, timeout=120)
 
+                    # Credential-free crypto posture audit: parse the server's
+                    # KEXINIT and flag weak host-key / kex / cipher / MAC algorithms
+                    # (ssh-dss, ssh-rsa SHA-1, 3DES/RC4/CBC, MD5/SHA-1 MACs). This
+                    # is the deep SSH finding class scanners like ssh-audit report.
+                    async def _ssh_crypto_audit(ip=ip, port=port, **kw):
+                        try:
+                            from heaven.vulnscan.ssh_audit import scan_ssh
+                            return await scan_ssh(ip, port)
+                        except Exception:
+                            return {}
+                    self.add_task(f"SSH Crypto Audit {ip}:{port}", _ssh_crypto_audit,
+                                  phase=ScanPhase.VULN_SCAN, timeout=60)
+
                 elif port in (445, 139) or "smb" in service or "microsoft-ds" in service:
                     async def _smb_enum(ip=ip, **kw):
                         try:
@@ -732,6 +745,19 @@ class ScanOrchestrator:
                             return {}
                     self.add_task(f"SMTP Relay/Posture {ip}:{port}", _smtp_relay,
                                   phase=ScanPhase.VULN_SCAN, timeout=60)
+
+                elif port == 1194 or "openvpn" in service or service == "vpn":
+                    # OpenVPN control-channel exposure: a server without
+                    # tls-auth/tls-crypt answers an unauthenticated hard-reset. Try
+                    # both UDP (the default) and TCP framing. No auth, no exploit.
+                    async def _openvpn_check(ip=ip, port=port, **kw):
+                        try:
+                            from heaven.vulnscan.vpn_scanner import scan_openvpn
+                            return await scan_openvpn(ip, port, proto="both")
+                        except Exception:
+                            return {}
+                    self.add_task(f"OpenVPN Control-Channel Check {ip}:{port}",
+                                  _openvpn_check, phase=ScanPhase.VULN_SCAN, timeout=60)
 
                 # Web service (HTTP/HTTPS on any port) → remember its origin.
                 # Checked for EVERY open port, independently of the elif chain
@@ -1859,10 +1885,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _deep_recon(**kw):
         try:
             from heaven.recon.deep_recon import (
-                enumerate_subdomains, extract_js_secrets, fuzz_endpoints,
+                analyze_certificate, discover_vhosts, enumerate_subdomains,
+                extract_js_secrets, fuzz_endpoints,
             )
             import aiohttp
-            results = {"subdomains": [], "js_secrets": [], "endpoints": []}
+            results = {"subdomains": [], "js_secrets": [], "endpoints": [],
+                       "vhosts": []}
             # Subdomain enumeration (CT-log + DNS brute) maps a domain's whole
             # subdomain tree — appropriate only when the operator authorised
             # subdomain-wide scope. For a bare single-host / URL target
@@ -1875,10 +1903,44 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                             timeout=aiohttp.ClientTimeout(total=25, connect=10)) as session:
                 for url in targets.get("urls", []):
                     from urllib.parse import urlparse
-                    domain = urlparse(url).hostname or ""
+                    parsed = urlparse(url)
+                    domain = parsed.hostname or ""
                     if domain and (scope is None or scope.allows_subdomains(domain)):
                         subs = await enumerate_subdomains(domain, session, concurrency=50)
                         results["subdomains"].extend([s.value for s in subs])
+                        # Live-cert SAN read: a source complementary to CT logs
+                        # (catches freshly issued certs and internal hosts absent
+                        # from public CT). Only over TLS, and only SANs that are
+                        # subdomains of the scoped domain are kept, so a shared /
+                        # multi-domain cert never injects out-of-scope hosts.
+                        if parsed.scheme == "https" or (parsed.port == 443):
+                            cert_port = parsed.port or 443
+                            cert_assets = await analyze_certificate(domain, cert_port)
+                            suffix = "." + domain.lower()
+                            for a in cert_assets:
+                                if a.asset_type != "subdomain":
+                                    continue
+                                san = a.value.lower()
+                                if san.endswith(suffix) and san not in results["subdomains"]:
+                                    results["subdomains"].append(san)
+                        # Virtual-host discovery: probe candidate Host headers
+                        # against this exact origin (same IP the operator
+                        # authorised) to surface same-server apps that CT logs
+                        # and DNS brute may miss. Candidates are <word>.<domain>
+                        # only, so it inherits subdomain scope. Discovered vhosts
+                        # are recon assets: a resolvable one rides the fully
+                        # wired subdomains path (feedback host-leads + DNS
+                        # inventory + report); every one is also recorded under
+                        # ``vhosts`` for the scan record. Never a finding.
+                        vhosts = await discover_vhosts(
+                            session, domain, domain,
+                            scheme=parsed.scheme or "http", port=parsed.port)
+                        for vh in vhosts:
+                            name = vh.value.lower()
+                            if name not in results["vhosts"]:
+                                results["vhosts"].append(name)
+                            if name not in results["subdomains"]:
+                                results["subdomains"].append(name)
                     secrets = await extract_js_secrets(session, url)
                     results["js_secrets"].extend([s.value for s in secrets if s.asset_type == "secret"])
                     results["endpoints"].extend([s.value for s in secrets if s.asset_type == "endpoint"])

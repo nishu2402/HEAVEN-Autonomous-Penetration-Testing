@@ -67,6 +67,39 @@ def test_all_tools_present_no_install_step(monkeypatch):
     assert "install-tools" not in "\n".join(_next_steps(report))
 
 
+def test_missing_browser_surfaces_arm_step(monkeypatch):
+    """A missing Playwright browser bundle surfaces the one-command arm step so
+    the SPA renderer / XSS proof is never left as a hidden, un-armed dependency."""
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "x" * 12)
+    report = {
+        "engagement": {"name": "demo", "selector": "demo", "exists": True,
+                       "total_findings": 3},
+        "external_tools": {"nmap": True, "sqlmap": True},
+        "runtime_capabilities": [
+            {"name": "playwright-chromium", "present": False,
+             "detail": "browser bundle not downloaded"},
+        ],
+    }
+    joined = "\n".join(_next_steps(report))
+    assert "heaven install-tools browser" in joined
+    assert "SPA" in joined
+
+
+def test_present_browser_no_arm_step(monkeypatch):
+    """When the browser is armed, no browser next-step is offered."""
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "x" * 12)
+    report = {
+        "engagement": {"name": "demo", "selector": "demo", "exists": True,
+                       "total_findings": 3},
+        "external_tools": {"nmap": True, "sqlmap": True},
+        "runtime_capabilities": [
+            {"name": "playwright-chromium", "present": True,
+             "detail": "Chromium browser installed"},
+        ],
+    }
+    assert "install-tools browser" not in "\n".join(_next_steps(report))
+
+
 def test_untested_python_surfaces_rebuild_step_first(monkeypatch):
     """Running on an unvetted interpreter is the most foundational fix (it can
     crash scans natively), so it must be the FIRST next-step suggested."""

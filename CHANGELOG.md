@@ -9,6 +9,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deep cryptographic and configuration-posture detectors that close a class of
+  findings a senior pentester expects but HEAVEN was missing.** These sit
+  alongside the existing CVE and classic-vulnerability detectors and only ever
+  report what is observed on the wire, so each finding is deterministic and
+  false-positive-free.
+  - **TLS signature-algorithm audit.** `ssl_scanner` now sends a TLS 1.2
+    ClientHello that offers only SHA-1 signature schemes, reads the whole server
+    flight and parses the ServerKeyExchange to see the algorithm the server
+    actually signed with. It reports `ecdsa_sha1` / `rsa_pkcs1_sha1` only when the
+    server truly signs with SHA-1, matching the sslyze / SSL Labs result.
+  - **HSTS directive audit.** The scanner already parsed `includeSubDomains` and
+    `preload` but never acted on them; it now flags each omission (subdomains left
+    reachable over plain HTTP, and no preload eligibility) as its own finding.
+  - **Certificate findings now actually fire, plus weak key and MD5 signature.**
+    The TLS scanner wrapped the socket with certificate verification disabled (so
+    it can read a self-signed or expired cert), and under that mode Python's
+    `getpeercert()` returns an empty dict, so every certificate finding (expired,
+    self-signed, weak signature) was silently produced from nothing and never
+    fired in a real scan. The certificate is now parsed straight from the DER with
+    `cryptography`, restoring those findings and adding two the class always
+    reports: an **MD5-signed certificate** (previously missed because the code
+    only checked for SHA-1) and a **weak public key** (RSA/DSA below 2048 bits, EC
+    below 224). Verified live against badssl.com with no false positive on a strong
+    certificate.
+  - **Weak Diffie-Hellman parameters.** The Logjam check keyed off the cipher-suite
+    name (`"1024" in name`), which is never true, so weak DH was never detected. A
+    DHE-only ClientHello now reads the real prime size off the ServerKeyExchange
+    and flags a 1024-bit-or-smaller group as Logjam and a 1025-2047-bit group as a
+    weak DH parameter finding. Verified live: dh1024/dh2048.badssl.com read as
+    exactly 1024 and 2048 bits, and an ECDHE-only server produces no finding.
+  - **SSH transport crypto audit.** A new `heaven/vulnscan/ssh_audit.py` reads the
+    server banner and KEXINIT and flags weak host-key algorithms (ssh-dss, ssh-rsa
+    with SHA-1), SHA-1 or 1024-bit-group key exchanges, 64-bit-block / RC4 / CBC
+    ciphers and MD5 / SHA-1 / 64-bit MACs. It runs on every SSH service a scan
+    finds, with no authentication.
+  - **AWS Transfer Family security-policy check.** An AWS Transfer SFTP endpoint
+    that still offers algorithms dropped in TransferSecurityPolicy-2022-03 and
+    later is flagged as pinned to a superseded security policy.
+  - **OpenVPN control-channel exposure.** A new `heaven/vulnscan/vpn_scanner.py`
+    sends a real `P_CONTROL_HARD_RESET_CLIENT_V2`; a server that answers proves it
+    runs without tls-auth / tls-crypt and is reported. UDP/1194 now carries a real
+    probe in the UDP sweep, so OpenVPN is detected instead of silently missed.
+  - **Software and firmware currency.** The endoflife.date layer in `eol_scanner`
+    now also flags a still-supported release that is behind the latest patch, with
+    the real month lag computed from the feed's release dates, so an out-of-date
+    (not yet end-of-life) component is caught. Two gaps this could not cover are
+    now closed: a new curated dataset (`heaven/vulnscan/firmware_currency.py`)
+    handles software endoflife.date does not track at all, seeded with **OpenSSH**
+    (banner-observable, verified against upstream release dates), and appliances
+    endoflife.date lists without a `latest` field (e.g. **FortiOS**) get a
+    release-line currency check that uses the feed's own per-cycle release dates,
+    so nothing is hard-coded and a stale dataset degrades to a silent miss rather
+    than a false positive. The OpenSSH check stays low severity with an explicit
+    distro-backport caveat, and only products whose older release lines genuinely
+    miss fixes are checked, so a supported LTS distro is never flagged for not
+    being on the newest cycle.
+  - Every new finding type carries full CWE / OWASP / CVSS taxonomy through the
+    report knowledge base, with new `weak_ssh`, `vpn_control_exposed` and
+    `outdated_patch_level` entries.
+- **`heaven ssh` and `heaven vpn` commands** for direct, one-off probing, at
+  parity with `heaven dns`. `heaven ssh <host>` runs the SSH transport crypto
+  audit and `heaven vpn <host>` runs the OpenVPN control-channel check; both print
+  a table or JSON and can persist into an engagement with `--engagement`.
+- **Single-page-app crawl escalation, so a JavaScript-rendered app's endpoints
+  are no longer missed.** The web crawler is static (it reads the served HTML), so
+  on an Angular / React / Vue / Next app it saw only the empty shell and every
+  downstream injection, XSS and access-control scanner received almost no surface
+  to test. The crawler now detects a framework marker in the shell and, when a
+  Playwright Chromium bundle is actually present, renders the app and merges the
+  client-rendered routes, forms and input vectors into the crawl result. It is
+  purely additive and deduped, and evidence-gated on a real framework marker.
+  Verified live: a JS-only login form and its client routes surface where the
+  static crawl found nothing.
+- **A single-page app's attack surface is recovered without a browser, so it is
+  never gated on a 150 MB download.** The DOM render above needs the Playwright
+  Chromium bundle, which used to mean a JS-rendered app's surface was only fully
+  recovered on a host that had it. HEAVEN now mines the app's own JavaScript
+  bundles in pure Python (`extract_js_surface`): it reads the endpoints the app
+  calls, their HTTP methods, and the request parameter names straight from the
+  `fetch` / `axios` / `XMLHttpRequest` / jQuery calls and `JSON.stringify` /
+  `body` / `data` / `params` payloads written into the code. These become real
+  `input_vectors` the injection, API and access-control scanners test, recovered
+  with no download at all. Only same-origin endpoints that carry a real parameter
+  are emitted (a third-party host, a MIME type or a bare word is dropped), and
+  nothing is ever a finding: the scanners still actively confirm every candidate.
+  The headless-browser render is now a higher-fidelity superset, not a
+  precondition.
+- **The residual DOM-only gap is disclosed, never a silent no-op.** When no
+  browser is present the static pass has already recovered the request surface,
+  so HEAVEN returns an honest coverage note that reports what it recovered (the
+  framework, and the endpoint and input-vector counts) and names the one gap that
+  still needs a browser: routes and forms an app builds entirely at runtime.
+  `heaven install-tools` (which `heaven doctor` points at) provisions the
+  Playwright browser alongside the missing scanner binaries for that full
+  fidelity, and `HEAVEN_AUTO_INSTALL_BROWSER=1` lets a scan provision it on demand
+  the first time it meets a SPA. The download is never silent or automatic without
+  that opt-in, and provisioning runs under the same watchdog timeout as the tool
+  installer so it can never hang a scan.
+- **Live-certificate SAN discovery in Deep Reconnaissance.** The cert analyser
+  read the peer certificate with `getpeercert()`, which returns an empty dict when
+  verification is disabled (required to read any cert), so it produced no assets
+  and was never wired in. It now parses the certificate from the DER with
+  `cryptography` and is wired into Deep Recon as a subject-alternative-name source
+  that complements the certificate-transparency logs (it catches a freshly issued
+  cert or an internal host absent from public CT). Only SAN hostnames that are
+  subdomains of the scoped domain are kept, so a shared or multi-domain
+  certificate never pulls an out-of-scope host into the engagement.
+- **Virtual-host discovery is now wired into Deep Reconnaissance.** The engine
+  shipped a `discover_vhosts` probe that varied the `Host` header to surface
+  same-server apps missing from public DNS, but nothing ever called it. It now
+  runs in the deep-recon phase under the same scope gate as subdomain
+  enumeration, probing the target's own origin so every request stays on the
+  authorised host, with candidate names built only from the scoped domain. It
+  was also hardened against the false-positive mode of a length-only heuristic:
+  a target whose body varies between two identical baseline requests (nonces,
+  timestamps, ads) is treated as length-unstable, so only a distinct HTTP status
+  is accepted there, while a stable target also accepts a substantial body-length
+  delta. Discovered virtual hosts are recon assets, never findings: a resolvable
+  one rides the existing subdomain path (feedback host-leads, DNS inventory,
+  report) and each is recorded under a `vhosts` key for the scan record.
+
 ## [4.2.0]: 2026-09-24
 
 ### Added

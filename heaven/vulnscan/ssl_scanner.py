@@ -30,6 +30,39 @@ _FORWARD_SECRECY_KEXES = {"ECDHE", "DHE", "ECDH", "EDH"}
 # the other classic case. RC2/DES are 64-bit too but already caught as broken.
 _SWEET32_TOKENS = ("3DES", "DES-CBC3", "IDEA")
 
+# ── Legacy SHA-1 signature schemes (TLS 1.2 SignatureAndHashAlgorithm, RFC 5246
+# §7.4.1.4.1) ────────────────────────────────────────────────────────────────
+# A current server must never sign its key exchange with SHA-1. Offering ONLY
+# these in a ClientHello's signature_algorithms extension is the sslyze / testssl
+# technique for proving a server still accepts SHA-1 signatures in TLS 1.2.
+_SIGALG_ECDSA_SHA1 = b"\x02\x03"   # hash=sha1(2), sig=ecdsa(3)  → ecdsa_sha1
+_SIGALG_RSA_SHA1   = b"\x02\x01"   # hash=sha1(2), sig=rsa(1)    → rsa_pkcs1_sha1
+_SIGALG_DSA_SHA1   = b"\x02\x02"   # hash=sha1(2), sig=dsa(2)    → dsa_sha1
+# Ephemeral (signed-KEX) suites only, so signature_algorithms genuinely gates the
+# handshake. Static-RSA suites (TLS_RSA_WITH_*) carry no signed ServerKeyExchange
+# and would complete regardless — including them would create a false positive.
+# A mix of ECDSA-auth and RSA-auth suites lets either server cert type negotiate;
+# the negotiated suite then tells us which SHA-1 scheme the server actually used.
+_SIGALG_TEST_SUITES = [
+    0xC02B, 0xC02C,          # ECDHE-ECDSA AES-GCM
+    0xC02F, 0xC030,          # ECDHE-RSA  AES-GCM
+    0xC023, 0xC024,          # ECDHE-ECDSA AES-CBC-SHA256/384
+    0xC027, 0xC028,          # ECDHE-RSA  AES-CBC-SHA256/384
+    0xC009, 0xC00A,          # ECDHE-ECDSA AES-CBC-SHA
+    0xC013, 0xC014,          # ECDHE-RSA  AES-CBC-SHA
+    0x009E, 0x009F,          # DHE-RSA    AES-GCM
+    0x0033, 0x0039,          # DHE-RSA    AES-CBC-SHA
+]
+# Suites whose ServerKeyExchange is an ECDHE named-curve block (curve_type +
+# named_curve + pubkey) vs. a DHE block (p, g, Ys). We must know which to locate
+# the SignatureAndHashAlgorithm that the server actually signed with.
+_ECDHE_SUITES_ALL = {0xC02B, 0xC02C, 0xC02F, 0xC030, 0xC023, 0xC024,
+                     0xC027, 0xC028, 0xC009, 0xC00A, 0xC013, 0xC014}
+_DHE_SUITES_ALL = {0x009E, 0x009F, 0x0033, 0x0039}
+# TLS 1.2 SignatureAndHashAlgorithm codepoints (hash byte, then sig byte).
+_TLS_HASH_SHA1 = 0x02
+_TLS_SIG_NAME = {1: "rsa_pkcs1_sha1", 2: "dsa_sha1", 3: "ecdsa_sha1"}
+
 # ── TLS protocol constants ─────────────────────────────────────────────────────
 _TLS_VERSIONS = {
     "SSLv2":  ssl.PROTOCOL_SSLv23,   # will negotiate down
@@ -128,6 +161,7 @@ class SSLResult:
     crime: bool = False        # TLS compression enabled
     drown: bool = False        # SSLv2 enabled
     logjam: bool = False       # DHE <=1024-bit
+    dh_bits: int = 0           # measured ephemeral DH prime size (0 = no DHE)
     freak: bool = False        # EXPORT cipher support
     sweet32: bool = False       # 64-bit block cipher (3DES/IDEA) = SWEET32
     robot: bool = False        # RSA key exchange timing (heuristic)
@@ -140,6 +174,7 @@ class SSLResult:
     supported_ciphers: list[str] = field(default_factory=list)
     weak_ciphers: list[str] = field(default_factory=list)
     forward_secrecy: bool = False
+    legacy_sigalg: str = ""     # SHA-1 sig scheme accepted in TLS 1.2 ("" = none)
     findings: list[dict] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -166,7 +201,17 @@ def _check_protocol(host: str, port: int, min_ver: int, max_ver: int,
 
 
 def _get_certificate(host: str, port: int, timeout: float = 8.0) -> Optional[CertInfo]:
-    """Retrieve and parse the server certificate."""
+    """Retrieve and parse the server certificate.
+
+    CRITICAL: the socket is wrapped with ``verify_mode = CERT_NONE`` (we must be
+    able to read a self-signed / expired cert without the handshake failing), and
+    under CERT_NONE Python's ``getpeercert()`` returns an EMPTY dict — only
+    ``getpeercert(binary_form=True)`` yields the DER. So the certificate is parsed
+    from the DER with ``cryptography``; the parsed-dict path is a fallback only.
+    Parsing the dict was the previous behaviour, and because it is always empty
+    here it silently produced NO certificate findings at all (expired,
+    self-signed, weak signature, weak key). This reads them straight from the DER.
+    """
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -175,69 +220,141 @@ def _get_certificate(host: str, port: int, timeout: float = 8.0) -> Optional[Cer
             with ctx.wrap_socket(raw, server_hostname=host) as tls:
                 der = tls.getpeercert(binary_form=True)
                 cert_dict = tls.getpeercert()
-
-        if not cert_dict:
-            return None
-
-        ci = CertInfo()
-
-        # Subject — ssl cert dicts use nested tuple structures; extract via iteration
-        subj: dict[str, str] = {}
-        for rdns in (cert_dict.get("subject") or ()):
-            for attr in rdns:
-                if len(attr) == 2:
-                    subj[str(attr[0])] = str(attr[1])
-        ci.subject = subj.get("commonName", "")
-
-        # Issuer
-        iss: dict[str, str] = {}
-        for rdns in (cert_dict.get("issuer") or ()):
-            for attr in rdns:
-                if len(attr) == 2:
-                    iss[str(attr[0])] = str(attr[1])
-        ci.issuer = iss.get("organizationName", iss.get("commonName", ""))
-        ci.is_self_signed = ci.subject == ci.issuer or (
-            subj.get("commonName", "a") == iss.get("commonName", "b")
-        )
-
-        # Validity
-        fmt = "%b %d %H:%M:%S %Y %Z"
-        nb_str = str(cert_dict.get("notBefore") or "")
-        na_str = str(cert_dict.get("notAfter") or "")
-        try:
-            not_after = datetime.datetime.strptime(na_str, fmt)
-            ci.not_after = na_str
-            ci.not_before = nb_str
-            now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-            delta = not_after - now_utc
-            ci.days_until_expiry = delta.days
-            ci.is_expired = delta.days < 0
-        except ValueError:
-            pass
-
-        # SANs — ssl cert dict has heterogeneous types; cast via Any to avoid mypy noise
-        san_raw: Any = cert_dict.get("subjectAltName") or []
-        ci.san = [str(v) for t, v in san_raw if str(t) == "DNS"]
-
-        # Signature algorithm (best effort via der)
-        if der:
-            try:
-                # Simple heuristic: look for sha1WithRSA OID bytes
-                sha1_oid = bytes([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x05])
-                md5_oid  = bytes([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x04])
-                if sha1_oid in der:
-                    ci.signature_algorithm = "sha1WithRSAEncryption"
-                elif md5_oid in der:
-                    ci.signature_algorithm = "md5WithRSAEncryption"
-                else:
-                    ci.signature_algorithm = "unknown"
-            except Exception:
-                logger.debug("suppressed non-fatal exception", exc_info=True)
-
-        return ci
     except Exception as e:
         logger.debug(f"cert fetch failed for {host}:{port}: {e}")
         return None
+
+    # Primary path: parse the DER with cryptography (works under CERT_NONE).
+    if der:
+        ci = _parse_cert_der(der)
+        if ci is not None:
+            return ci
+    # Fallback: the validated-dict path (only non-empty when verification is on).
+    if cert_dict:
+        return _cert_from_dict(cert_dict)
+    return None
+
+
+def _parse_cert_der(der: bytes) -> Optional[CertInfo]:
+    """Parse a DER certificate into a CertInfo using the cryptography library.
+
+    Reads subject/issuer, validity (→ expiry), SANs, self-signed status, the
+    public-key type/size and the signature hash — everything the finding block
+    needs. Returns None if cryptography is unavailable or the DER won't parse
+    (caller then falls back to the parsed-dict path)."""
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives.asymmetric import dsa, ec, rsa
+        from cryptography.x509.oid import NameOID
+    except Exception:
+        return None
+    try:
+        cert = x509.load_der_x509_certificate(der)
+    except Exception:
+        return None
+    ci = CertInfo()
+
+    def _cn(name) -> str:  # noqa: ANN001 - x509.Name
+        try:
+            attrs = name.get_attributes_for_oid(NameOID.COMMON_NAME)
+            return str(attrs[0].value) if attrs else ""
+        except Exception:
+            return ""
+
+    def _org(name) -> str:  # noqa: ANN001
+        try:
+            attrs = name.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)
+            return str(attrs[0].value) if attrs else ""
+        except Exception:
+            return ""
+
+    ci.subject = _cn(cert.subject)
+    ci.issuer = _org(cert.issuer) or _cn(cert.issuer)
+    # A cert whose issuer DN equals its subject DN is self-issued (self-signed in
+    # the common case). Comparing the full Name is more reliable than CN-only.
+    try:
+        ci.is_self_signed = cert.subject == cert.issuer
+    except Exception:
+        ci.is_self_signed = bool(ci.subject) and ci.subject == _cn(cert.issuer)
+
+    # Validity → days until expiry. Prefer the tz-aware *_utc accessors
+    # (cryptography >= 42); fall back to the naive (UTC) ones on older versions.
+    try:
+        na = getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after
+        nb = getattr(cert, "not_valid_before_utc", None) or cert.not_valid_before
+        na_naive = na.replace(tzinfo=None) if na.tzinfo else na
+        nb_naive = nb.replace(tzinfo=None) if nb.tzinfo else nb
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ci.not_after = na_naive.strftime("%Y-%m-%d %H:%M:%S")
+        ci.not_before = nb_naive.strftime("%Y-%m-%d %H:%M:%S")
+        ci.days_until_expiry = (na_naive - now).days
+        ci.is_expired = ci.days_until_expiry < 0
+    except Exception:
+        logger.debug("cert validity parse failed", exc_info=True)
+
+    # SAN DNS names.
+    try:
+        san_ext = cert.extensions.get_extension_for_class(
+            x509.SubjectAlternativeName)
+        ci.san = list(san_ext.value.get_values_for_type(x509.DNSName))
+    except Exception:
+        ci.san = []
+
+    # Public key type/size.
+    try:
+        pub = cert.public_key()
+        if isinstance(pub, rsa.RSAPublicKey):
+            ci.key_type, ci.key_bits = "RSA", pub.key_size
+        elif isinstance(pub, dsa.DSAPublicKey):
+            ci.key_type, ci.key_bits = "DSA", pub.key_size
+        elif isinstance(pub, ec.EllipticCurvePublicKey):
+            ci.key_type, ci.key_bits = f"EC ({pub.curve.name})", pub.key_size
+        else:
+            ci.key_type = type(pub).__name__.replace("PublicKey", "")
+    except Exception:
+        logger.debug("cert public-key parse failed", exc_info=True)
+
+    # Signature hash ("sha1" / "md5" / "sha256" / ...).
+    try:
+        ci.signature_algorithm = (cert.signature_hash_algorithm.name
+                                  if cert.signature_hash_algorithm else "")
+    except Exception:
+        ci.signature_algorithm = ""
+    return ci
+
+
+def _cert_from_dict(cert_dict: dict) -> CertInfo:
+    """Legacy fallback: build a CertInfo from ssl.getpeercert()'s parsed dict
+    (only non-empty when the handshake was verified). Does not expose key size."""
+    ci = CertInfo()
+    subj: dict[str, str] = {}
+    for rdns in (cert_dict.get("subject") or ()):
+        for attr in rdns:
+            if len(attr) == 2:
+                subj[str(attr[0])] = str(attr[1])
+    ci.subject = subj.get("commonName", "")
+    iss: dict[str, str] = {}
+    for rdns in (cert_dict.get("issuer") or ()):
+        for attr in rdns:
+            if len(attr) == 2:
+                iss[str(attr[0])] = str(attr[1])
+    ci.issuer = iss.get("organizationName", iss.get("commonName", ""))
+    ci.is_self_signed = ci.subject == ci.issuer or (
+        subj.get("commonName", "a") == iss.get("commonName", "b"))
+    fmt = "%b %d %H:%M:%S %Y %Z"
+    na_str = str(cert_dict.get("notAfter") or "")
+    try:
+        not_after = datetime.datetime.strptime(na_str, fmt)
+        ci.not_after = na_str
+        ci.not_before = str(cert_dict.get("notBefore") or "")
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ci.days_until_expiry = (not_after - now_utc).days
+        ci.is_expired = ci.days_until_expiry < 0
+    except ValueError:
+        pass
+    san_raw: Any = cert_dict.get("subjectAltName") or []
+    ci.san = [str(v) for t, v in san_raw if str(t) == "DNS"]
+    return ci
 
 
 def _get_ciphers(host: str, port: int, timeout: float = 5.0) -> tuple[list[str], list[str]]:
@@ -364,6 +481,258 @@ def _probe_sslv3(host: str, port: int, timeout: float = 6.0) -> bool:
         return False
 
 
+def _looks_like_ip(host: str) -> bool:
+    """True if host is a literal IPv4/IPv6 address (so we skip SNI for it)."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _tls12_sigalg_probe_bytes(host: str) -> bytes:
+    """Build a TLS 1.2 ClientHello that offers ONLY SHA-1 signature schemes.
+
+    The client_version is pinned to TLS 1.2 with no supported_versions extension,
+    so the server negotiates <=1.2 and the classic TLS 1.2 signature_algorithms
+    rules apply (TLS 1.3 forbids SHA-1 outright, a different code path).
+    """
+    import os as _os
+
+    # signature_algorithms (ext 0x000d): 2-byte list length + 2-byte-code entries.
+    sigalgs = _SIGALG_ECDSA_SHA1 + _SIGALG_RSA_SHA1 + _SIGALG_DSA_SHA1
+    ext_sigalg = (b"\x00\x0d"
+                  + struct.pack(">H", len(sigalgs) + 2)
+                  + struct.pack(">H", len(sigalgs)) + sigalgs)
+    # supported_groups (ext 0x000a): secp256r1, secp384r1, x25519.
+    groups = b"\x00\x17\x00\x18\x00\x1d"
+    ext_groups = (b"\x00\x0a"
+                  + struct.pack(">H", len(groups) + 2)
+                  + struct.pack(">H", len(groups)) + groups)
+    # ec_point_formats (ext 0x000b): uncompressed.
+    ext_ecpf = b"\x00\x0b\x00\x02\x01\x00"
+    # server_name (ext 0x0000) so name-based virtual hosts respond (skip for IPs).
+    ext_sni = b""
+    if host and not _looks_like_ip(host):
+        try:
+            sni = host.encode("idna")
+        except Exception:
+            sni = host.encode("ascii", "ignore")
+        if sni:
+            server_name = b"\x00" + struct.pack(">H", len(sni)) + sni
+            sni_list = struct.pack(">H", len(server_name)) + server_name
+            ext_sni = b"\x00\x00" + struct.pack(">H", len(sni_list)) + sni_list
+
+    extensions = ext_sni + ext_groups + ext_ecpf + ext_sigalg
+    ext_block = struct.pack(">H", len(extensions)) + extensions
+
+    suites = b"".join(struct.pack(">H", s) for s in _SIGALG_TEST_SUITES)
+    body = (
+        b"\x03\x03"                                   # client_version = TLS 1.2
+        + _os.urandom(32)                             # random
+        + b"\x00"                                     # session_id length = 0
+        + struct.pack(">H", len(suites)) + suites     # cipher_suites
+        + b"\x01\x00"                                 # compression: 1 method, null
+        + ext_block
+    )
+    handshake = b"\x01" + struct.pack(">I", len(body))[1:] + body   # ClientHello
+    return b"\x16\x03\x01" + struct.pack(">H", len(handshake)) + handshake
+
+
+def _split_handshake(hs: bytes) -> list[tuple[int, bytes]]:
+    """Split a reassembled handshake byte stream into (msg_type, body) pairs.
+
+    Stops cleanly at any incomplete trailing message (partial flight)."""
+    out: list[tuple[int, bytes]] = []
+    i = 0
+    while i + 4 <= len(hs):
+        mtype = hs[i]
+        mlen = struct.unpack(">I", b"\x00" + hs[i + 1:i + 4])[0]
+        if i + 4 + mlen > len(hs):
+            break
+        out.append((mtype, hs[i + 4:i + 4 + mlen]))
+        i += 4 + mlen
+    return out
+
+
+def _ske_signature_scheme(ske_body: bytes, suite: int) -> Optional[tuple[int, int]]:
+    """Return the (hash, sig) SignatureAndHashAlgorithm the server signed the
+    ServerKeyExchange with, or None. The KEX params come first and differ by
+    suite family (ECDHE named-curve vs DHE), so we skip exactly past them."""
+    try:
+        if suite in _ECDHE_SUITES_ALL:
+            if not ske_body or ske_body[0] != 0x03:   # 0x03 = named_curve
+                return None
+            pk_len = ske_body[3]                        # curve_type(1)+curve(2)+len(1)
+            off = 4 + pk_len
+        elif suite in _DHE_SUITES_ALL:
+            off = 0
+            for _ in range(3):                          # dh_p, dh_g, dh_Ys
+                ln = struct.unpack(">H", ske_body[off:off + 2])[0]
+                off += 2 + ln
+        else:
+            return None
+        if off + 2 > len(ske_body):
+            return None
+        return ske_body[off], ske_body[off + 1]         # hash, sig
+    except Exception:
+        return None
+
+
+def _recv_handshake_flight(sock: "socket.socket",
+                           timeout: float) -> tuple[bytes, bool]:
+    """Read a TLS server flight off an open socket and return (handshake_stream,
+    got_alert). Reassembles TLS records into the handshake byte stream (records
+    may fragment a handshake message, and one record may carry several), stopping
+    at ServerHelloDone (0x0e) or an alert. Shared by the sigalg and DH probes."""
+    raw = b""
+    hs = b""
+    got_alert = False
+    deadline = time.time() + timeout
+    try:
+        while time.time() < deadline and len(raw) < 65536:
+            try:
+                chunk = sock.recv(8192)
+            except Exception:
+                break
+            if not chunk:
+                break
+            raw += chunk
+            hs, i = b"", 0
+            while i + 5 <= len(raw):
+                ctype = raw[i]
+                rlen = struct.unpack(">H", raw[i + 3:i + 5])[0]
+                if i + 5 + rlen > len(raw):
+                    break                                  # incomplete record
+                payload = raw[i + 5:i + 5 + rlen]
+                if ctype == 0x15:                          # alert → server refused
+                    got_alert = True
+                elif ctype == 0x16:                        # handshake
+                    hs += payload
+                i += 5 + rlen
+            msgs = _split_handshake(hs)
+            if got_alert or any(t == 0x0e for t, _ in msgs):
+                break
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+    return hs, got_alert
+
+
+def _dhe_probe_bytes(host: str) -> bytes:
+    """Build a TLS 1.2 ClientHello offering ONLY DHE_RSA suites with modern
+    signature_algorithms, so the server completes an ephemeral DH handshake whose
+    ServerKeyExchange carries the DH prime (whose bit length we then read)."""
+    import os as _os
+    # Modern sig algs (SHA-256/384/512, RSA-PSS) so the server signs the SKE.
+    sigalgs = (b"\x04\x01\x05\x01\x06\x01\x04\x03\x05\x03\x06\x03"
+               b"\x08\x04\x08\x05\x08\x06")
+    ext_sigalg = (b"\x00\x0d" + struct.pack(">H", len(sigalgs) + 2)
+                  + struct.pack(">H", len(sigalgs)) + sigalgs)
+    ext_sni = b""
+    if host and not _looks_like_ip(host):
+        try:
+            sni = host.encode("idna")
+        except Exception:
+            sni = host.encode("ascii", "ignore")
+        if sni:
+            server_name = b"\x00" + struct.pack(">H", len(sni)) + sni
+            sni_list = struct.pack(">H", len(server_name)) + server_name
+            ext_sni = b"\x00\x00" + struct.pack(">H", len(sni_list)) + sni_list
+    extensions = ext_sni + ext_sigalg
+    ext_block = struct.pack(">H", len(extensions)) + extensions
+    suites = b"".join(struct.pack(">H", s) for s in sorted(_DHE_SUITES_ALL))
+    body = (b"\x03\x03" + _os.urandom(32) + b"\x00"
+            + struct.pack(">H", len(suites)) + suites + b"\x01\x00" + ext_block)
+    handshake = b"\x01" + struct.pack(">I", len(body))[1:] + body
+    return b"\x16\x03\x01" + struct.pack(">H", len(handshake)) + handshake
+
+
+def _check_dh_params(host: str, port: int, timeout: float = 6.0) -> int:
+    """Return the server's ephemeral DH prime size in BITS, or 0 if the server
+    does not negotiate a classic DHE suite (so nothing to measure). Reads the
+    prime straight from the ServerKeyExchange, exactly as sslyze/testssl do, so a
+    weak-DH finding is objective and false-positive-free."""
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall(_dhe_probe_bytes(host))
+    except Exception as e:
+        logger.debug("DH-param probe failed for %s:%s: %s", host, port, e)
+        return 0
+    hs, got_alert = _recv_handshake_flight(s, timeout)
+    if got_alert:
+        return 0
+    msgs = _split_handshake(hs)
+    sh = next((b for t, b in msgs if t == 0x02), None)     # ServerHello
+    ske = next((b for t, b in msgs if t == 0x0c), None)    # ServerKeyExchange
+    if sh is None or ske is None:
+        return 0
+    if len(sh) < 38 or sh[0:2] != b"\x03\x03":             # negotiated must be 1.2
+        return 0
+    sid_len = sh[34]
+    ci = 35 + sid_len
+    if ci + 2 > len(sh):
+        return 0
+    suite = struct.unpack(">H", sh[ci:ci + 2])[0]
+    if suite not in _DHE_SUITES_ALL:                       # server didn't pick DHE
+        return 0
+    # DHE ServerKeyExchange begins with dh_p: uint16 length + big-endian prime.
+    if len(ske) < 2:
+        return 0
+    p_len = struct.unpack(">H", ske[0:2])[0]
+    if p_len <= 0 or 2 + p_len > len(ske):
+        return 0
+    return int.from_bytes(ske[2:2 + p_len], "big").bit_length()
+
+
+def _check_legacy_sigalgs(host: str, port: int, timeout: float = 6.0) -> str:
+    """Detect whether the server *actually signs* with SHA-1 in TLS 1.2.
+
+    Sends a ClientHello whose signature_algorithms extension offers ONLY legacy
+    SHA-1 schemes with ephemeral (signed-KEX) cipher suites, reads the whole
+    server handshake flight, and parses the ServerKeyExchange to read the exact
+    SignatureAndHashAlgorithm the server used. A finding is returned ONLY when
+    that hash is SHA-1 — a ServerHello alone is not enough, because many servers
+    ignore a restrictive list at ServerHello time and then sign with their strong
+    default (which is correct behaviour and must not be flagged). This mirrors the
+    sslyze / testssl approach and is false-positive-free by construction.
+
+    Returns "ecdsa_sha1" / "rsa_pkcs1_sha1" / "dsa_sha1", else "".
+    """
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall(_tls12_sigalg_probe_bytes(host))
+    except Exception as e:
+        logger.debug("legacy-sigalg probe failed for %s:%s: %s", host, port, e)
+        return ""
+
+    hs, got_alert = _recv_handshake_flight(s, timeout)
+    if got_alert:
+        return ""
+    msgs = _split_handshake(hs)
+    sh = next((b for t, b in msgs if t == 0x02), None)     # ServerHello
+    ske = next((b for t, b in msgs if t == 0x0c), None)    # ServerKeyExchange
+    if sh is None or ske is None:
+        return ""
+    # ServerHello body: version(2) random(32) sid_len(1) sid cipher_suite(2) ...
+    if len(sh) < 38 or sh[0:2] != b"\x03\x03":             # negotiated must be 1.2
+        return ""
+    sid_len = sh[34]
+    cs_off = 35 + sid_len
+    if cs_off + 2 > len(sh):
+        return ""
+    suite = struct.unpack(">H", sh[cs_off:cs_off + 2])[0]
+    sh_alg = _ske_signature_scheme(ske, suite)
+    if not sh_alg or sh_alg[0] != _TLS_HASH_SHA1:          # server did NOT use SHA-1
+        return ""
+    return _TLS_SIG_NAME.get(sh_alg[1], "rsa_pkcs1_sha1")
+
+
 def _check_hsts(host: str, port: int = 443, timeout: float = 8.0) -> tuple[bool, int, bool, bool]:
     """
     Fetch HTTPS response and parse Strict-Transport-Security header.
@@ -467,6 +836,23 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     result.forward_secrecy = result.tls13 or any(
         k in c for c in supported for k in _FORWARD_SECRECY_KEXES)
 
+    # ── 5b. Legacy signature algorithms (TLS 1.2 only) ────────────────────────
+    # Only meaningful when the server actually speaks TLS 1.2; TLS 1.3 forbids
+    # SHA-1 signatures by protocol, so there is nothing to test there.
+    result.legacy_sigalg = _check_legacy_sigalgs(host, port) if result.tls12 else ""
+
+    # ── 5c. Ephemeral DH parameter strength ───────────────────────────────────
+    # Read the actual DH prime size off the ServerKeyExchange. The old heuristic
+    # (`"1024" in cipher_name`) was never true — cipher names carry no key size —
+    # so weak DH was silently missed. This is a RAW-socket DHE probe, so it must
+    # NOT be gated on Python's protocol detection: a server that offers only weak
+    # (1024-bit) DHE ciphers makes the local OpenSSL handshake fail (SECLEVEL),
+    # which would otherwise hide the very weakness we want to find. The probe
+    # self-gates — it returns 0 when the server does not negotiate a classic DHE
+    # suite (e.g. a TLS 1.3-only or ECDHE-only server), so it is always safe to run.
+    if result.reachable:
+        result.dh_bits = _check_dh_params(host, port)
+
     # ── 6. Derived vulnerabilities ────────────────────────────────────────────
     result.poodle = result.ssl3          # POODLE = SSLv3 (now actively probed)
     # DROWN requires an SSLv2-speaking server. SSLv2 is extinct and uses a
@@ -475,7 +861,8 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     result.beast  = result.tls10 and any("CBC" in c for c in supported)
     result.crime  = False                # compression: Python ssl doesn't expose this easily
     result.freak  = any("EXPORT" in c for c in supported)
-    result.logjam = any("DHE" in c and "1024" in c for c in supported)
+    # Logjam = a genuinely 1024-bit-or-smaller DH prime, measured on the wire.
+    result.logjam = 0 < result.dh_bits <= 1024
     # SWEET32: a 64-bit block cipher (3DES/IDEA) accepted for a TLS ≤1.2 session.
     # TLS 1.3 dropped these suites entirely, so only the enumerable ≤1.2 set counts.
     result.sweet32 = any(
@@ -506,8 +893,17 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
     if result.logjam:
         F.append(_make_finding(host, port, "logjam", "high",
             "Logjam: Weak DHE Key Exchange (CVE-2015-4000)",
-            "Server uses 512-bit or 1024-bit DHE parameters, broken by NSA-class adversaries.",
+            f"The server negotiates a {result.dh_bits}-bit ephemeral DH group "
+            "(<= 1024-bit), which is breakable by a well-resourced adversary "
+            "(Logjam). Configure a 2048-bit (or larger) DH group, or prefer ECDHE.",
             cve="CVE-2015-4000"))
+    elif 1024 < result.dh_bits < 2048:
+        F.append(_make_finding(host, port, "weak_dh_params", "medium",
+            f"Weak Diffie-Hellman Group ({result.dh_bits}-bit)",
+            f"The server's ephemeral DH key exchange uses a {result.dh_bits}-bit "
+            "prime, below the 2048-bit minimum recommended by NIST SP 800-57 and "
+            "modern TLS guidance. Use a 2048-bit-or-larger DH group (e.g. the "
+            "RFC 7919 ffdhe2048+ groups) or switch to ECDHE.", confidence=0.9))
     if result.beast:
         F.append(_make_finding(host, port, "beast", "medium",
             "BEAST: TLS 1.0 CBC Vulnerability (CVE-2011-3389)",
@@ -539,6 +935,22 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             f"blocks. Accepted: {', '.join(_s32[:5]) or '3DES'}. Disable 3DES "
             "and IDEA and offer only AEAD suites (AES-GCM / ChaCha20-Poly1305).",
             cve="CVE-2016-2183"))
+    if result.legacy_sigalg:
+        _pretty = {
+            "ecdsa_sha1": "ECDSA with SHA-1 (ecdsa_sha1)",
+            "rsa_pkcs1_sha1": "RSA PKCS#1 with SHA-1 (rsa_pkcs1_sha1)",
+        }.get(result.legacy_sigalg, result.legacy_sigalg)
+        F.append(_make_finding(host, port, "tls_sha1_signature_algorithm", "low",
+            f"TLS 1.2 Accepts a SHA-1 Signature Algorithm ({_pretty})",
+            "The server completed a TLS 1.2 handshake after being offered ONLY "
+            "SHA-1 signature schemes in the signature_algorithms extension, so it "
+            f"is willing to authenticate its key exchange with {_pretty}. SHA-1 is "
+            "collision-broken (SHAttered, 2017); accepting it weakens the integrity "
+            "of the handshake signature and fails modern TLS baselines (Mozilla "
+            "Intermediate, NIST SP 800-52r2). Configure the server to offer only "
+            "SHA-256+ signature schemes (e.g. rsa_pss_rsae_sha256, "
+            "ecdsa_secp256r1_sha256) and drop rsa_pkcs1_sha1 / ecdsa_sha1.",
+            confidence=0.95))
     # Only assert the *absence* of forward secrecy when we actually enumerated at
     # least one TLS ≤1.2 cipher. An empty list means enumeration failed (transient
     # handshake drops), so "no FS" then would be a false positive, not a finding.
@@ -560,11 +972,36 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
                 "HSTS Not Configured",
                 "Missing Strict-Transport-Security header. Browsers will accept HTTP downgrade.",
                 confidence=0.97))
-        elif result.hsts_max_age < 15552000:
-            F.append(_make_finding(host, port, "hsts_short_maxage", "low",
-                f"HSTS max-age Too Short ({result.hsts_max_age}s)",
-                "HSTS max-age should be at least 180 days (15552000s). "
-                "Short values allow HSTS eviction attacks."))
+        else:
+            # HSTS is present — audit each directive independently. A deep TLS
+            # auditor (sslyze / testssl / Qualys SSL Labs) reports every omission,
+            # because each one leaves a distinct downgrade window open. The header
+            # itself (already parsed in _check_hsts) is the evidence, so these are
+            # deterministic and false-positive-free.
+            if result.hsts_max_age < 15552000:
+                F.append(_make_finding(host, port, "hsts_short_maxage", "low",
+                    f"HSTS max-age Too Short ({result.hsts_max_age}s)",
+                    "HSTS max-age should be at least 180 days (15552000s). "
+                    "Short values allow HSTS eviction attacks.", confidence=0.9))
+            if not result.hsts_subdomains:
+                F.append(_make_finding(host, port, "hsts_no_include_subdomains", "low",
+                    "HSTS Omits includeSubDomains",
+                    "The Strict-Transport-Security header is present but omits the "
+                    "includeSubDomains directive, so HSTS does not cover subdomains. "
+                    "An attacker can serve plain HTTP on a subdomain (or a "
+                    "man-in-the-middle can spoof one) to plant or steal a "
+                    "domain-scoped session cookie, bypassing the protection the "
+                    "apex domain enforces.", confidence=0.9))
+            if not result.hsts_preload:
+                F.append(_make_finding(host, port, "hsts_no_preload", "info",
+                    "HSTS Not Preload-Eligible (preload directive absent)",
+                    "The Strict-Transport-Security header omits the preload "
+                    "directive, so the site cannot be added to the browsers' "
+                    "built-in HSTS preload list. Until a client has made one "
+                    "successful HTTPS visit it has no HSTS entry, leaving the very "
+                    "first request open to an SSL-strip downgrade (trust-on-first-"
+                    "use gap). Preload eligibility also requires includeSubDomains "
+                    "and max-age >= 31536000 (1 year).", confidence=0.9))
     if result.cert:
         c = result.cert
         if c.is_expired:
@@ -580,10 +1017,40 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             F.append(_make_finding(host, port, "self_signed_cert", "high",
                 "Self-Signed TLS Certificate",
                 "Certificate is not signed by a trusted CA. Vulnerable to MITM attacks."))
-        if "sha1" in (c.signature_algorithm or "").lower():
+        sig = (c.signature_algorithm or "").lower()
+        # MD5 is worse than SHA-1 (practical collisions, RapidSSL/Flame) and used
+        # to be missed here because the block only checked for "sha1".
+        if "md5" in sig:
+            F.append(_make_finding(host, port, "md5_signature", "high",
+                "MD5-Signed TLS Certificate (Broken)",
+                "The certificate is signed with MD5, which is collision-broken "
+                "(Flame malware, forged-CA attacks). Reissue it with a SHA-256 "
+                "(or stronger) signature immediately.", confidence=0.95))
+        elif "sha1" in sig:
             F.append(_make_finding(host, port, "sha1_signature", "high",
                 "SHA-1 Signed Certificate (Deprecated)",
                 "SHA-1 is cryptographically broken. Replace certificate signed with SHA-256."))
+        # Weak public key: RSA/DSA below 2048 bits is a standard testssl/sslyze
+        # finding. EC keys below ~224 bits are similarly weak. Objective and
+        # false-positive-free — the bit length is read straight from the cert.
+        kt = (c.key_type or "").upper()
+        if c.key_bits:
+            weak_key = False
+            if kt.startswith(("RSA", "DSA")) and c.key_bits < 2048:
+                weak_key = True
+            elif kt.startswith("EC") and c.key_bits < 224:
+                weak_key = True
+            if weak_key:
+                sev = "critical" if c.key_bits <= 1024 else "high"
+                F.append(_make_finding(host, port, "weak_cert_key", sev,
+                    f"Weak TLS Certificate Key ({c.key_type} {c.key_bits}-bit)",
+                    f"The certificate uses a {c.key_bits}-bit {c.key_type} public "
+                    "key, below the 2048-bit RSA/DSA (or 224-bit EC) minimum "
+                    "recommended by NIST SP 800-57 and the CA/Browser Forum. A key "
+                    "this small is factorable by a capable adversary, allowing "
+                    "decryption and impersonation. Reissue the certificate with a "
+                    "2048-bit (or stronger) RSA key or a P-256+ EC key.",
+                    confidence=0.95))
 
     return result
 
@@ -615,7 +1082,11 @@ async def scan_ssl(host: str, port: int = 443) -> dict:
         },
         "hsts": result.hsts,
         "hsts_max_age": result.hsts_max_age,
+        "hsts_include_subdomains": result.hsts_subdomains,
+        "hsts_preload": result.hsts_preload,
         "forward_secrecy": result.forward_secrecy,
+        "dh_bits": result.dh_bits,
+        "legacy_sigalg": result.legacy_sigalg,
         "weak_ciphers": result.weak_ciphers,
         "supported_ciphers": result.supported_ciphers[:20],
         "cert": {

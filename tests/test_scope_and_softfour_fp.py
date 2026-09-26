@@ -358,3 +358,92 @@ async def test_ct_log_subdomains_liveness_filtered(monkeypatch):
     values = {s.value for s in subs}
     assert "live.example.com" in values
     assert "dead.example.com" not in values     # dead CT ghost dropped
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Issue C — deep_recon.analyze_certificate: SANs must be read from the DER.
+# Under verify_mode=CERT_NONE (required to read self-signed / expired certs)
+# ssl.getpeercert() returns {} — the old code keyed on it and produced NOTHING.
+# Now the DER is parsed with cryptography, so live-cert SANs surface as assets.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _self_signed_der_with_sans(sans):
+    """Build a self-signed cert carrying the given SAN DNS names → DER bytes."""
+    import datetime
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, "example.com"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Example Org"),
+    ])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject).issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=365))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(s) for s in sans]),
+            critical=False)
+        .sign(key, hashes.SHA256())
+    )
+    from cryptography.hazmat.primitives.serialization import Encoding
+    return cert.public_bytes(Encoding.DER)
+
+
+@pytest.mark.asyncio
+async def test_analyze_certificate_reads_sans_from_der(monkeypatch):
+    import heaven.recon.deep_recon as dr
+
+    der = _self_signed_der_with_sans(
+        ["example.com", "www.example.com", "api.example.com", "*.example.com"])
+
+    class _FakeSSLObj:
+        # Mirrors the real CERT_NONE behaviour: dict empty, DER present.
+        def getpeercert(self, binary_form=False):
+            return der if binary_form else {}
+
+    class _FakeWriter:
+        def get_extra_info(self, _key):
+            return _FakeSSLObj()
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    async def _fake_open(host, port, ssl=None):
+        return (object(), _FakeWriter())
+
+    monkeypatch.setattr(dr.asyncio, "open_connection", _fake_open)
+
+    assets = await dr.analyze_certificate("example.com", 443)
+    subs = {a.value for a in assets if a.asset_type == "subdomain"}
+    # Real SAN hosts surface...
+    assert "www.example.com" in subs
+    assert "api.example.com" in subs
+    # ...the cert's own host is not re-added, and a wildcard is never a live host.
+    assert "example.com" not in subs
+    assert "*.example.com" not in subs
+    # And issuer/expiry intelligence is captured (this whole block was dead before).
+    info = [a for a in assets if a.asset_type == "cert_info"]
+    assert info and info[0].metadata.get("not_after")
+
+
+@pytest.mark.asyncio
+async def test_analyze_certificate_empty_when_no_cert(monkeypatch):
+    """No handshake / no DER → no assets, no crash (honesty: never fabricate)."""
+    import heaven.recon.deep_recon as dr
+
+    async def _fake_open(host, port, ssl=None):
+        raise ConnectionRefusedError("nope")
+
+    monkeypatch.setattr(dr.asyncio, "open_connection", _fake_open)
+    assert await dr.analyze_certificate("127.0.0.1", 443) == []

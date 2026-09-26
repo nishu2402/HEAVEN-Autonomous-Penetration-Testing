@@ -404,42 +404,81 @@ async def _discover_js_files(session: aiohttp.ClientSession, url: str) -> list[s
 # ── Virtual Host Discovery ──
 
 async def discover_vhosts(session: aiohttp.ClientSession, ip: str,
-                           domain: str, wordlist: Optional[list[str]] = None) -> list[DiscoveredAsset]:
-    """Discover virtual hosts by sending requests with different Host headers."""
+                           domain: str, wordlist: Optional[list[str]] = None,
+                           *, scheme: str = "http", port: Optional[int] = None,
+                           max_results: int = 50) -> list[DiscoveredAsset]:
+    """Discover virtual hosts by varying the ``Host`` header against one origin.
+
+    The connection always targets ``ip`` (an IP or the target's own hostname,
+    so the probe stays on the exact origin the operator authorised); only the
+    ``Host`` header changes, to ``<word>.<domain>``. Candidate names are drawn
+    from ``domain`` alone, so every probe is same-scope by construction.
+
+    False positives are the failure mode of a length-only heuristic: a page
+    with per-request nonces / timestamps / ads varies in size between two
+    identical requests, which would flag *every* word as a "vhost". To stay
+    honest we take TWO independent baselines against random non-existent hosts
+    and treat the target as length-*unstable* when they disagree. On an
+    unstable target only a distinct HTTP status (a strong routing signal) is
+    accepted; on a stable one a substantial body-length delta also counts.
+    Results are recon *assets* (candidates), never findings.
+    """
+    import random
+    import string
+
     discovered: list[DiscoveredAsset] = []
     words = wordlist or SUBDOMAIN_WORDLIST[:30]
+    netloc = f"{ip}:{port}" if port else ip
+    origin = f"{scheme}://{netloc}/"
 
-    # Get baseline response
-    try:
-        async with session.get(f"http://{ip}/",
-                                headers={"Host": "nonexistent.invalid"},
-                                timeout=aiohttp.ClientTimeout(total=5)) as resp:
-            baseline_status = resp.status
-            baseline_len = len(await resp.text())
-    except Exception:
-        return discovered
-
-    for word in words:
-        hostname = f"{word}.{domain}"
+    async def _probe(host_header: str) -> Optional[tuple[int, int]]:
         try:
-            async with session.get(f"http://{ip}/",
-                                    headers={"Host": hostname},
-                                    timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                status = resp.status
-                body_len = len(await resp.text())
-
-                # Different response = valid vhost
-                if status != baseline_status or abs(body_len - baseline_len) > 100:
-                    discovered.append(DiscoveredAsset(
-                        asset_type="vhost", value=hostname,
-                        host=ip, source="vhost_bruteforce",
-                        metadata={"status": status, "length": body_len},
-                    ))
+            async with session.get(
+                origin, headers={"Host": host_header},
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                return resp.status, len(await resp.read())
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
+            return None
+
+    def _rand_host() -> str:
+        label = "".join(random.choices(string.ascii_lowercase, k=16))  # nosec B311
+        return f"{label}.{domain}"
+
+    base1 = await _probe(_rand_host())
+    if base1 is None:
+        return discovered
+    base2 = await _probe(_rand_host())
+    base_statuses = {base1[0]} | ({base2[0]} if base2 else set())
+    # Length signal is trustworthy only when two "should-be-identical" baseline
+    # responses agree; otherwise the body is dynamic and we ignore length.
+    stable = base2 is not None and base1[0] == base2[0] and abs(base1[1] - base2[1]) <= 64
+    len_threshold = max(256, int(base1[1] * 0.10))
+
+    for word in words:
+        if len(discovered) >= max_results:
+            break
+        hostname = f"{word}.{domain}"
+        res = await _probe(hostname)
+        if res is None:
+            continue
+        status, body_len = res
+        status_signal = status not in base_statuses
+        length_signal = stable and abs(body_len - base1[1]) > len_threshold
+        if status_signal or length_signal:
+            discovered.append(DiscoveredAsset(
+                asset_type="vhost", value=hostname,
+                host=ip, source="vhost_bruteforce",
+                confidence=0.9 if status_signal else 0.6,
+                metadata={"status": status, "length": body_len,
+                          "signal": "status" if status_signal else "length",
+                          "baseline_status": base1[0]},
+            ))
 
     if discovered:
-        logger.info(f"VHost discovery: {len(discovered)} virtual hosts on {ip}")
+        logger.info(f"VHost discovery: {len(discovered)} virtual host(s) on {ip}")
     return discovered
 
 
@@ -666,8 +705,21 @@ async def fuzz_endpoints(session: aiohttp.ClientSession, base_url: str,
 # ── Certificate Analysis ──
 
 async def analyze_certificate(host: str, port: int = 443) -> list[DiscoveredAsset]:
-    """Extract intelligence from TLS certificates."""
-    discovered = []
+    """Extract intelligence (SAN hostnames + issuer/expiry) from a live TLS cert.
+
+    CRITICAL: the handshake uses ``verify_mode = CERT_NONE`` so a self-signed or
+    expired cert can be read without failing, and under CERT_NONE Python's
+    ``getpeercert()`` returns an EMPTY dict — only ``getpeercert(binary_form=True)``
+    yields the DER. So the SANs are parsed from the DER with ``cryptography``; the
+    parsed-dict path is a fallback for the (rare) verified case. Reading the dict
+    was the previous behaviour, and because it is always empty here this function
+    silently produced NO assets at all. Each SAN DNS name becomes a ``subdomain``
+    asset (a live-cert source that complements CT logs, and the only source for a
+    freshly issued cert or an internal host not in a public CT log).
+    """
+    discovered: list[DiscoveredAsset] = []
+    der = b""
+    cert_dict: dict = {}
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -677,34 +729,82 @@ async def analyze_certificate(host: str, port: int = 443) -> list[DiscoveredAsse
             asyncio.open_connection(host, port, ssl=ctx), timeout=5)
 
         ssl_obj = writer.get_extra_info("ssl_object")
-        cert = ssl_obj.getpeercert()
+        if ssl_obj is not None:
+            try:
+                der = ssl_obj.getpeercert(binary_form=True) or b""
+            except Exception:
+                der = b""
+            try:
+                cert_dict = ssl_obj.getpeercert() or {}
+            except Exception:
+                cert_dict = {}
         writer.close()
         try:
             await writer.wait_closed()
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
-
-        if cert:
-            # Extract SANs (Subject Alternative Names)
-            san = cert.get("subjectAltName", ())
-            for type_, value in san:
-                if type_ == "DNS" and value != host:
-                    discovered.append(DiscoveredAsset(
-                        asset_type="subdomain", value=value,
-                        host=host, source="tls_certificate",
-                        metadata={"san_type": type_},
-                    ))
-
-            # Certificate dates
-            not_after = cert.get("notAfter", "")
-            discovered.append(DiscoveredAsset(
-                asset_type="cert_info", value=f"expires: {not_after}",
-                host=host, source="tls_certificate",
-                metadata={"issuer": str(cert.get("issuer", "")),
-                           "not_after": not_after},
-            ))
-
     except Exception as e:
         logger.debug(f"Certificate analysis error for {host}: {e}")
+        return discovered
+
+    san_names: list[str] = []
+    issuer = ""
+    not_after = ""
+
+    # Primary path: parse the DER with cryptography (works under CERT_NONE).
+    if der:
+        try:
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+
+            cert = x509.load_der_x509_certificate(der)
+            try:
+                san_ext = cert.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName)
+                san_names = list(san_ext.value.get_values_for_type(x509.DNSName))
+            except Exception:
+                san_names = []
+            try:
+                org = cert.issuer.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)
+                cn = cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)
+                issuer = str((org or cn)[0].value) if (org or cn) else ""
+            except Exception:
+                issuer = ""
+            try:
+                na = getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after
+                not_after = na.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                not_after = ""
+        except Exception as e:
+            logger.debug(f"DER parse failed for {host}: {e}")
+
+    # Fallback: the parsed dict (only non-empty when verification succeeded).
+    if not san_names and cert_dict:
+        san_names = [v for t, v in cert_dict.get("subjectAltName", ()) if t == "DNS"]
+    if not not_after and cert_dict:
+        not_after = cert_dict.get("notAfter", "")
+    if not issuer and cert_dict:
+        issuer = str(cert_dict.get("issuer", ""))
+
+    seen: set[str] = set()
+    for value in san_names:
+        name = value.strip().lower().rstrip(".")
+        # A wildcard SAN (``*.example.com``) is not itself a resolvable host, so
+        # it is not a subdomain asset; skip it (never fabricate a live host).
+        if not name or name.startswith("*.") or name == host.lower() or name in seen:
+            continue
+        seen.add(name)
+        discovered.append(DiscoveredAsset(
+            asset_type="subdomain", value=name,
+            host=host, source="tls_certificate",
+            metadata={"san_type": "DNS"},
+        ))
+
+    if not_after or issuer:
+        discovered.append(DiscoveredAsset(
+            asset_type="cert_info", value=f"expires: {not_after}",
+            host=host, source="tls_certificate",
+            metadata={"issuer": issuer, "not_after": not_after},
+        ))
 
     return discovered

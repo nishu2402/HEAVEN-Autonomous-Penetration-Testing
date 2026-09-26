@@ -105,8 +105,114 @@ def test_dynamic_can_be_turned_off_by_flag(monkeypatch):
     assert res["total"] == 0
 
 
+def _iso_months_ago(months: int) -> str:
+    from datetime import date, timedelta
+    return (date.today() - timedelta(days=months * 30 + 5)).isoformat()
+
+
+def test_currency_flags_behind_latest(monkeypatch):
+    # Supported cycle (eol far future) but the host runs 1.27.0 while the latest
+    # patch 1.27.9 has been out ~8 months → outdated_patch_level, real month lag.
+    _mock_feed(monkeypatch, [{
+        "cycle": "1.27", "eol": "2999-01-01",
+        "latest": "1.27.9", "latestReleaseDate": _iso_months_ago(8)}])
+    res = _run(eol.scan_eol_from_net(_net("nginx", "1.27.0")))
+    assert res["total"] == 1
+    f = res["findings"][0]
+    assert f["vuln_type"] == "outdated_patch_level"
+    assert f["evidence"]["latest_version"] == "1.27.9"
+    assert f["evidence"]["months_behind"] >= 6
+    assert f["severity"] == "medium"          # >= 6 months
+    assert "behind latest" in f["title"]
+
+
+def test_currency_recent_release_below_threshold(monkeypatch):
+    # Latest patch published only ~1 month ago → below the reporting threshold.
+    _mock_feed(monkeypatch, [{
+        "cycle": "1.27", "eol": "2999-01-01",
+        "latest": "1.27.9", "latestReleaseDate": _iso_months_ago(1)}])
+    res = _run(eol.scan_eol_from_net(_net("nginx", "1.27.0")))
+    assert res["total"] == 0
+
+
+def test_currency_on_latest_no_finding(monkeypatch):
+    _mock_feed(monkeypatch, [{
+        "cycle": "1.27", "eol": "2999-01-01",
+        "latest": "1.27.9", "latestReleaseDate": _iso_months_ago(8)}])
+    res = _run(eol.scan_eol_from_net(_net("nginx", "1.27.9")))
+    assert res["total"] == 0
+
+
+def test_eol_takes_priority_over_currency(monkeypatch):
+    # A past-EOL cycle that also has a newer patch → reported as EOL, not currency.
+    _mock_feed(monkeypatch, [{
+        "cycle": "1.20", "eol": "2000-01-01",
+        "latest": "1.20.9", "latestReleaseDate": _iso_months_ago(8)}])
+    res = _run(eol.scan_eol_from_net(_net("nginx", "1.20.1")))
+    assert res["total"] == 1
+    assert res["findings"][0]["vuln_type"] == "unsupported_software"
+
+
+def test_currency_no_latest_field_no_finding(monkeypatch):
+    # Feed lacks latest/latestReleaseDate (e.g. fortios) → no fabricated lag.
+    _mock_feed(monkeypatch, [{"cycle": "7.4", "eol": "2999-01-01"}])
+    res = _run(eol.scan_eol_from_net(_net("fortios", "7.4.1")))
+    assert res["total"] == 0
+
+
 def test_slug_detection():
     assert eol._endoflife_slug("nginx", "") == "nginx"
     assert eol._endoflife_slug("Apache", "httpd") == "apache"
     assert eol._endoflife_slug("PostgreSQL", "") == "postgresql"
     assert eol._endoflife_slug("some-random-appliance", "") == ""
+    assert eol._endoflife_slug("FortiGate", "FortiOS 7.2.5") == "fortios"
+
+
+# ── appliance release-line currency (endoflife.date, no `latest` field) ─────────
+# FortiOS is tracked WITHOUT a `latest` field but WITH per-cycle release dates, so
+# the release-line currency path uses live dates (nothing hard-coded). Structure
+# mirrors the real endoflife.date/api/fortios.json response.
+_FORTIOS = [
+    {"cycle": "8.0", "releaseDate": "2026-04-21", "eol": "2030-10-21",
+     "support": "2029-04-21", "lts": False},
+    {"cycle": "7.6", "releaseDate": "2024-07-25", "eol": "2030-01-25",
+     "support": "2028-07-25", "lts": False},
+    {"cycle": "7.4", "releaseDate": "2023-05-11", "eol": "2028-11-11",
+     "support": "2027-05-11", "lts": False},
+    {"cycle": "7.2", "releaseDate": "2022-03-31", "eol": "2026-12-30",
+     "support": "2025-03-31", "lts": False},
+]
+
+
+def test_fortios_behind_release_line(monkeypatch):
+    # Host on 7.2 while 7.6 has been GA well over a year → release-line currency.
+    # 8.0 is too recent to demand, so the "current line" reported is the mature 7.6.
+    _mock_feed(monkeypatch, _FORTIOS)
+    res = _run(eol.scan_eol_from_net(
+        _net("FortiGate", "7.2.5", banner="FortiOS 7.2.5", port=443)))
+    assert res["total"] == 1
+    f = res["findings"][0]
+    assert f["vuln_type"] == "outdated_patch_level"
+    assert f["severity"] == "low"
+    assert f["evidence"]["newer_cycle"] == "7.6"
+    assert f["evidence"]["months_behind"] >= 12
+    assert f["evidence"]["source_feed"] == "endoflife.date"
+
+
+def test_fortios_on_newest_mature_line_no_finding(monkeypatch):
+    # Host on 7.6; the only newer line (8.0) is < 12 months old → not demanded.
+    _mock_feed(monkeypatch, _FORTIOS)
+    res = _run(eol.scan_eol_from_net(
+        _net("FortiGate", "7.6.1", banner="FortiOS 7.6.1", port=443)))
+    assert res["total"] == 0
+
+
+def test_fortios_eol_line_takes_priority(monkeypatch):
+    # A past-EOL FortiOS line is reported as unsupported, not merely behind.
+    cycles = [{"cycle": "6.4", "releaseDate": "2020-05-01", "eol": "2023-09-28"}] \
+        + _FORTIOS
+    _mock_feed(monkeypatch, cycles)
+    res = _run(eol.scan_eol_from_net(
+        _net("FortiGate", "6.4.9", banner="FortiOS 6.4.9", port=443)))
+    assert res["total"] == 1
+    assert res["findings"][0]["vuln_type"] == "unsupported_software"

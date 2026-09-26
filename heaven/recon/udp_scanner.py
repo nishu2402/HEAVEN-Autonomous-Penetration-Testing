@@ -65,6 +65,12 @@ UDP_SERVICE_PROBES: dict[int, bytes] = {
     111: (b"\x72\xFE\x1D\x13\x00\x00\x00\x00\x00\x00\x00\x02"
           b"\x00\x01\x86\xA0\x00\x00\x00\x02\x00\x00\x00\x00"
           b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"),
+    # OpenVPN — P_CONTROL_HARD_RESET_CLIENT_V2 (opcode 7<<3=0x38): opcode +
+    # 8-byte session id + ack-array-len 0 + 4-byte message packet id. A server
+    # WITHOUT tls-auth/tls-crypt answers with a server hard-reset (opcode 8); a
+    # protected one silently drops it. Without this real probe OpenVPN was never
+    # detected. heaven.vulnscan.vpn_scanner then classifies the reply.
+    1194: b"\x38\x48\x45\x41\x56\x45\x4e\x01\x02\x00\x00\x00\x00\x00",
 }
 
 # A generic empty-ish probe for ports without a service-specific payload. Rarely

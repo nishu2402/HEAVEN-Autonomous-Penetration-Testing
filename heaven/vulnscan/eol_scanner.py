@@ -253,7 +253,25 @@ _ENDOFLIFE_SLUGS: list[tuple[str, str]] = [
     (r"red\s*hat|rhel", "rhel"),
     (r"almalinux", "almalinux"),
     (r"rocky", "rocky-linux"),
+    # Edge/VPN appliances: endoflife.date tracks these but WITHOUT a `latest`
+    # field, so the patch-level check below never fires for them. They are handled
+    # by the release-line currency path instead (see _NON_LTS_CURRENCY_SLUGS).
+    (r"fortios|fortigate|fortinet", "fortios"),
+    (r"fortiproxy", "fortiproxy"),
 ]
+
+# endoflife.date slugs where being on an older *release line* genuinely means
+# missing fixes (appliances that do not run a long-term-support back-port model
+# the way Ubuntu/Debian/RHEL/Node LTS do). Only these get the release-line
+# currency check, so a supported LTS distro is never flagged just for not being on
+# the newest cycle. Live per-cycle release dates are used, so nothing is hard-coded
+# and nothing goes stale.
+_NON_LTS_CURRENCY_SLUGS = {"fortios", "fortiproxy"}
+
+# A newer release LINE must have been generally available at least this long before
+# a release-line-behind finding fires — appliances are often deliberately kept on
+# the previous mature branch for a while, so this avoids flagging a recent major.
+_RELEASE_LINE_MIN_MONTHS = 12
 
 
 def _endoflife_slug(product: str, banner: str) -> str:
@@ -315,6 +333,13 @@ def _cycle_status(cycle: dict) -> Optional[tuple[str, str, bool]]:
 def _match_cycle(cycles: list[dict],
                  version: tuple[int, ...]) -> Optional[tuple[str, str, bool]]:
     """Find the release cycle covering *version* (e.g. 5.7.44 → cycle '5.7')."""
+    cand = _find_cycle(cycles, version)
+    return _cycle_status(cand) if cand else None
+
+
+def _find_cycle(cycles: list[dict],
+                version: tuple[int, ...]) -> Optional[dict]:
+    """Return the release-cycle dict covering *version* (e.g. 5.7.44 → '5.7')."""
     cands: list[str] = []
     if len(version) >= 2:
         cands.append(f"{version[0]}.{version[1]}")
@@ -322,13 +347,97 @@ def _match_cycle(cycles: list[dict],
     for cand in cands:
         for c in cycles:
             if str(c.get("cycle", "")) == cand:
-                return _cycle_status(c)
+                return c
     return None
+
+
+def _months_since(iso_date: str) -> Optional[int]:
+    """Whole months between an ISO date and today, or None if unparseable."""
+    try:
+        d = date.fromisoformat(iso_date)
+    except (ValueError, TypeError):
+        return None
+    return max(0, (date.today() - d).days // 30)
+
+
+# A newer patch must have been available at least this long before the lag is
+# reported — avoids flagging a release that came out days ago.
+_CURRENCY_MIN_MONTHS = 3
+
+
+def _release_line_currency_finding(target: str, display: str, slug: str,
+                                   detected: str, obs_cycle: str,
+                                   cycles: list[dict]) -> Optional[dict]:
+    """Flag a non-LTS appliance running an older release LINE.
+
+    For appliance slugs on ``_NON_LTS_CURRENCY_SLUGS`` (where endoflife.date has no
+    ``latest`` field but does carry per-cycle ``releaseDate``), find the newest
+    already-released, non-EOL cycle that is strictly newer than the host's line. If
+    it has been generally available long enough, report the host as behind. Uses
+    only live feed dates — no firmware version numbers are hard-coded, so it cannot
+    go stale into a false positive.
+    """
+    if slug not in _NON_LTS_CURRENCY_SLUGS:
+        return None
+    obs_ver = _parse_version(obs_cycle)
+    if obs_ver is None:
+        return None
+    # Among release lines strictly newer than the host's, that are already GA, not
+    # EOL, AND have been available long enough to be considered mature, pick the
+    # NEWEST. We deliberately do not demand the host be on a brand-new major that
+    # only shipped a few months ago, only on a mature newer line.
+    best: Optional[tuple[tuple[int, ...], str, str, int]] = None
+    for c in cycles:
+        label = str(c.get("cycle", ""))
+        cv = _parse_version(label)
+        if cv is None or not _lt(obs_ver, cv):   # not newer than the host's line
+            continue
+        st = _cycle_status(c)
+        if st and st[2]:                          # newer line already EOL — skip
+            continue
+        rd = str(c.get("releaseDate") or "")
+        try:
+            rdd = date.fromisoformat(rd)
+        except (ValueError, TypeError):
+            continue
+        if rdd > date.today():                    # not generally available yet
+            continue
+        months_ga = _months_since(rd)
+        if months_ga is None or months_ga < _RELEASE_LINE_MIN_MONTHS:
+            continue                              # too new to demand the host be on it
+        if best is None or cv > best[0]:
+            best = (cv, label, rd, months_ga)
+    if not best:
+        return None
+    _cv, newer_label, newer_date, months = best
+    age = f"~{months} month{'s' if months != 1 else ''}"
+    return _finding(
+        target, "outdated_patch_level", "low",
+        f"Outdated Release Line: {display} {obs_cycle} (current line {newer_label})",
+        f"{display} is running the {obs_cycle} release line. The newer {newer_label} "
+        f"line has been generally available since {newer_date} ({age} ago) according "
+        "to endoflife.date. Appliances left on a superseded release line miss fixes "
+        "and hardening delivered only to the current train, confirm the running "
+        f"branch still receives vendor security backports and plan an upgrade to the "
+        f"{newer_label} line.",
+        0.75,
+        {"product": display, "detected_version": detected,
+         "detected_cycle": obs_cycle, "newer_cycle": newer_label,
+         "newer_cycle_release_date": newer_date, "months_behind": months,
+         "kind": "software_component", "cwe": "CWE-1104",
+         "source_feed": "endoflife.date"})
 
 
 async def _dynamic_eol_finding(target: str, product: str, version: str,
                                banner: str) -> Optional[dict]:
-    """Flag an EOL component via endoflife.date; None unless it's genuinely EOL."""
+    """Flag an EOL *or* out-of-date component via endoflife.date.
+
+    Priority: a genuinely end-of-life release is reported as unsupported_software;
+    otherwise a still-supported release that is behind the latest patch (for long
+    enough to matter) is reported as outdated_patch_level with the real month lag.
+    Returns None when the version is current or the feed lacks the data — never a
+    guess.
+    """
     slug = _endoflife_slug(product, banner)
     if not slug:
         return None
@@ -338,27 +447,60 @@ async def _dynamic_eol_finding(target: str, product: str, version: str,
     cycles = await _endoflife_lookup(slug)
     if not cycles:
         return None
-    match = _match_cycle(cycles, v)
-    if not match:
-        return None
-    eol_date, cycle_label, is_eol = match
-    if not is_eol:
+    cycle = _find_cycle(cycles, v)
+    if not cycle:
         return None
     display = (product or slug).strip() or slug
     detected = ".".join(str(x) for x in v)
-    when = f" on {eol_date}" if eol_date else ""
-    return _finding(
-        target, "unsupported_software", "medium",
-        f"Unsupported / End-of-Life Software: {display} {cycle_label}".rstrip(),
-        f"{display} release {cycle_label} reached end-of-life{when} according to "
-        "endoflife.date and receives no further security patches. End-of-life "
-        "software leaves any newly disclosed vulnerability permanently "
-        "exploitable, inventory and upgrade all affected instances to a "
-        "vendor-supported release.",
-        0.8,
-        {"product": display, "detected_version": detected,
-         "kind": "software_component", "eol_date": eol_date or "vendor-marked EOL",
-         "cwe": "CWE-1104", "source_feed": "endoflife.date"})
+
+    # 1) End-of-life takes priority (no further patches at all).
+    status = _cycle_status(cycle)
+    if status and status[2]:                       # is_eol
+        eol_date, cycle_label, _ = status
+        when = f" on {eol_date}" if eol_date else ""
+        return _finding(
+            target, "unsupported_software", "medium",
+            f"Unsupported / End-of-Life Software: {display} {cycle_label}".rstrip(),
+            f"{display} release {cycle_label} reached end-of-life{when} according to "
+            "endoflife.date and receives no further security patches. End-of-life "
+            "software leaves any newly disclosed vulnerability permanently "
+            "exploitable, inventory and upgrade all affected instances to a "
+            "vendor-supported release.",
+            0.8,
+            {"product": display, "detected_version": detected,
+             "kind": "software_component", "eol_date": eol_date or "vendor-marked EOL",
+             "cwe": "CWE-1104", "source_feed": "endoflife.date"})
+
+    # 2) Supported but behind the latest patch → currency finding with real lag.
+    latest = str(cycle.get("latest") or "")
+    latest_date = str(cycle.get("latestReleaseDate") or "")
+    lv = _parse_version(latest)
+    if latest and lv and _lt(v, lv):
+        months = _months_since(latest_date)
+        if months is not None and months >= _CURRENCY_MIN_MONTHS:
+            sev = "medium" if months >= 6 else "low"
+            age = f"~{months} month{'s' if months != 1 else ''}"
+            return _finding(
+                target, "outdated_patch_level", sev,
+                f"Outdated Patch Level: {display} {detected} ({age} behind latest)",
+                f"{display} {detected} is behind the latest patch {latest} for this "
+                f"release line, which endoflife.date records as published on "
+                f"{latest_date} ({age} ago). The host is therefore missing {age} of "
+                f"security and stability fixes. Upgrade {display} to {latest} "
+                "(or newer) and adopt a regular patch cadence.",
+                0.8,
+                {"product": display, "detected_version": detected,
+                 "latest_version": latest, "latest_release_date": latest_date,
+                 "months_behind": months, "kind": "software_component",
+                 "cwe": "CWE-1104", "source_feed": "endoflife.date"})
+
+    # 3) No `latest` field (typical for appliances). For non-LTS appliance slugs,
+    #    fall back to release-LINE currency using the feed's per-cycle dates.
+    rl = _release_line_currency_finding(
+        target, display, slug, detected, str(cycle.get("cycle", "")), cycles)
+    if rl:
+        return rl
+    return None
 
 
 async def scan_eol_from_net(net_data: dict, *, dynamic: bool = True) -> dict:
@@ -409,15 +551,33 @@ async def scan_eol_from_net(net_data: dict, *, dynamic: bool = True) -> dict:
                 continue
             # Gap-fill: nothing in the static table matched this product — ask the
             # live feed (bounded per scan; cache dedups repeat products).
+            dyn = None
             if use_dynamic and live_used < _EOL_MAX_LOOKUPS and product:
                 live_used += 1
                 dyn = await _dynamic_eol_finding(target, product, version, banner)
-                if dyn:
-                    prod = dyn["evidence"]["product"]
-                    key = (ip, prod.lower(), dyn["evidence"].get("detected_version", ""))
+            if dyn:
+                prod = dyn["evidence"]["product"]
+                key = (ip, prod.lower(), dyn["evidence"].get("detected_version", ""))
+                if key not in seen:
+                    seen.add(key)
+                    findings.append(dyn)
+                continue
+            # Curated currency dataset (offline) for products endoflife.date does
+            # not cover (e.g. OpenSSH). It is part of the currency layer, so it
+            # honours the same passive-intel gate as the live feed — off in the
+            # test suite, on by default in production.
+            if use_dynamic and (product or banner):
+                from heaven.vulnscan.firmware_currency import (
+                    firmware_currency_finding,
+                )
+                fc = firmware_currency_finding(target, product, version, banner)
+                if fc:
+                    prod = fc["evidence"]["product"]
+                    key = (ip, prod.lower(),
+                           fc["evidence"].get("detected_version", ""))
                     if key not in seen:
                         seen.add(key)
-                        findings.append(dyn)
+                        findings.append(fc)
 
     logger.info("EOL scan → %d unsupported-software finding(s) across %d host(s)",
                 len(findings), len(hosts))

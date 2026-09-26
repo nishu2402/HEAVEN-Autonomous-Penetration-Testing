@@ -190,6 +190,104 @@ def _cached_chromium_status(use_cache: bool = True) -> tuple[bool, str]:
     return val
 
 
+def _provision_timeout() -> int:
+    """Hard cap (seconds) on the browser download so it can never hang a caller.
+
+    Shares the ``HEAVEN_TOOL_INSTALL_TIMEOUT`` knob with the external-tool
+    installer so every long provisioning step in HEAVEN honours one budget."""
+    raw = os.environ.get("HEAVEN_TOOL_INSTALL_TIMEOUT", "900")
+    try:
+        val = int(raw)
+    except ValueError:
+        return 900
+    return val if val > 0 else 900
+
+
+def ensure_chromium(on_output: Optional[object] = None) -> tuple[bool, str]:
+    """Provision Playwright's Chromium bundle (``python -m playwright install
+    chromium``) so the headless-browser DAST capabilities are actually armed.
+
+    This is the in-app equivalent of the one-liner ``heaven doctor`` prints. It
+    is the arming path for the JS-rendered crawl (``web_crawler.crawl_url_js``)
+    and the XSS execution proof, which are otherwise a silent no-op on a host
+    whose install skipped the ~150 MB download.
+
+    Contract:
+      * **Idempotent** — returns immediately if the browser is already present.
+      * **Bounded** — the download runs under a watchdog (``HEAVEN_TOOL_INSTALL_TIMEOUT``,
+        default 900 s); a stuck child is killed rather than hanging the caller.
+      * **Non-fabricating** — success is re-verified by an authoritative
+        (cache-bypassing) probe of Playwright's own resolved executable, never
+        by trusting the installer's exit code alone.
+      * **Never raises** — any failure degrades to ``(False, reason)`` so a scan
+        or CLI keeps running.
+
+    ``on_output`` (optional callable) receives each installer line for live
+    display; when omitted the child's stdout is captured quietly.
+    """
+    import subprocess
+    import sys
+
+    present, detail = _cached_chromium_status(use_cache=False)
+    if present:
+        return True, detail
+    try:
+        import playwright  # noqa: F401
+    except Exception:  # noqa: BLE001
+        return False, "playwright package not installed (pip install playwright)"
+
+    cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
+    env = os.environ.copy()
+    env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    try:
+        proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+    except Exception as e:  # noqa: BLE001
+        return False, f"could not launch playwright installer: {e!r}"
+
+    # Watchdog: kill the whole child if it exceeds the budget so a hung download
+    # can never block the read loop (which would otherwise wait on the pipe).
+    timed_out = threading.Event()
+
+    def _kill() -> None:
+        timed_out.set()
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+    timer = threading.Timer(float(_provision_timeout()), _kill)
+    timer.start()
+    try:
+        if callable(on_output) and proc.stdout is not None:
+            for line in proc.stdout:
+                try:
+                    on_output(line.rstrip())
+                except Exception:  # noqa: BLE001 — a bad sink must not abort the install
+                    pass
+            proc.wait()
+        else:
+            proc.communicate()
+    except Exception as e:  # noqa: BLE001
+        _kill()
+        return False, f"playwright install error: {e!r}"
+    finally:
+        timer.cancel()
+
+    if timed_out.is_set():
+        return False, (f"install timed out after {_provision_timeout()}s "
+                       "(raise HEAVEN_TOOL_INSTALL_TIMEOUT for a slow link)")
+
+    rc = proc.returncode
+    # Re-probe authoritatively — the browser may be on disk now regardless of rc.
+    global _cache_val
+    _cache_val = None
+    present, detail = _cached_chromium_status(use_cache=False)
+    if present:
+        return True, detail
+    return False, (detail if rc == 0 else f"playwright install exited {rc}: {detail}")
+
+
 def runtime_capabilities(use_cache: bool = True) -> list[dict]:
     """Optional runtime capabilities, shaped like the ``tool_installer`` entries
     (``name`` / ``present`` / ``purpose`` / ``hint``) so ``heaven doctor`` and

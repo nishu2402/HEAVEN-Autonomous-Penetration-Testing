@@ -175,8 +175,10 @@ if HAS_CLICK:
         lateral, methodology, mitre, pivot as pivot_module, postex as postex_module,
         quickstart as quickstart_module, replay,
         sast, sbom as sbom_module, sca as sca_module, scan, server,
+        ssh as ssh_module,
         status as status_module, tickets,
-        train, update as update_module, use as use_module, watch,
+        train, update as update_module, use as use_module,
+        vpn as vpn_module, watch,
     )
     ai_module.register(cli)
     analyze_module.register(cli)
@@ -218,11 +220,13 @@ if HAS_CLICK:
     sca_module.register(cli)
     scan.register(cli)
     server.register(cli)
+    ssh_module.register(cli)
     status_module.register(cli)
     tickets.register(cli)
     train.register(cli)
     update_module.register(cli)
     use_module.register(cli)
+    vpn_module.register(cli)
     watch.register(cli)
 
 else:

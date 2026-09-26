@@ -264,12 +264,14 @@ def _next_steps(report: dict) -> list[str]:
     if missing:
         shown = ", ".join(missing[:3]) + ("…" if len(missing) > 3 else "")
         steps.append(f"[cyan]heaven install-tools[/cyan]: install missing scanners ({shown})")
-    # The Playwright browser gates the headless-browser XSS execution proof; if
-    # it isn't downloaded, offer the one-liner that arms it.
+    # The Playwright browser gates the headless-browser XSS execution proof and
+    # the JS-rendered SPA crawl; if it isn't downloaded, point at the one command
+    # that arms it (same command that installs the missing scanners).
     caps = report.get("runtime_capabilities") or []
     pw = next((c for c in caps if c.get("name") == "playwright-chromium"), None)
     if pw and not pw.get("present"):
-        steps.append("[cyan]playwright install chromium[/cyan], arm the headless-browser XSS execution proof")
+        steps.append("[cyan]heaven install-tools browser[/cyan], arm the JS-rendered "
+                     "SPA crawl + headless-browser XSS execution proof")
     if not admin_set:
         steps.append("[cyan]heaven init[/cyan], set the Web-UI admin password + optional API keys")
     if not eng.get("exists"):

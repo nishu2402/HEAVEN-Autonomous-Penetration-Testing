@@ -135,3 +135,101 @@ def test_cache_serves_prior_result(monkeypatch):
     rc.runtime_capabilities(use_cache=True)
     rc.runtime_capabilities(use_cache=True)
     assert calls["n"] == 1              # second call served from cache
+
+
+# ── ensure_chromium: the in-app arming path for the SPA renderer + XSS proof ──
+# These stub the probe and the installer subprocess so no 150 MB download ever
+# runs — the tests assert the CONTRACT (idempotent, re-verified, never raises).
+
+class _FakePopen:
+    """Minimal subprocess.Popen stand-in for the installer."""
+    def __init__(self, *a, lines=(), rc=0, **k):
+        self._lines = list(lines)
+        self.returncode = rc
+        self.stdout = iter(self._lines)
+        self.killed = False
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def communicate(self, timeout=None):
+        return ("", "")
+
+    def kill(self):
+        self.killed = True
+
+
+def test_ensure_chromium_short_circuits_when_present(monkeypatch):
+    """Already-armed → returns immediately, never spawns the installer."""
+    _reset_cache()
+    monkeypatch.setattr(rc, "_chromium_status",
+                        lambda: (True, "Chromium browser installed"))
+
+    def _boom(*a, **k):  # a spawn here would mean it failed to short-circuit
+        raise AssertionError("installer must not run when browser is present")
+
+    monkeypatch.setattr("subprocess.Popen", _boom)
+    ok, detail = rc.ensure_chromium()
+    assert ok is True
+    assert "installed" in detail
+
+
+def test_ensure_chromium_reprobes_and_reports_success(monkeypatch):
+    """After the installer runs, success is confirmed by a fresh probe (not by
+    trusting the exit code): absent before, present after → (True, …)."""
+    _reset_cache()
+    state = {"installed": False}
+
+    def _status():
+        return (True, "Chromium browser installed") if state["installed"] \
+            else (False, "browser bundle not downloaded")
+
+    def _popen(*a, **k):
+        state["installed"] = True          # the "download" landed
+        return _FakePopen(rc=0)
+
+    monkeypatch.setattr(rc, "_chromium_status", _status)
+    monkeypatch.setattr("subprocess.Popen", _popen)
+    ok, detail = rc.ensure_chromium()
+    assert ok is True
+    assert "installed" in detail
+
+
+def test_ensure_chromium_reports_failure_when_still_absent(monkeypatch):
+    """Installer exits non-zero and the browser is still absent → honest failure,
+    surfacing the exit code and the probe detail. Never raises."""
+    _reset_cache()
+    monkeypatch.setattr(rc, "_chromium_status",
+                        lambda: (False, "browser bundle not downloaded"))
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: _FakePopen(rc=1))
+    ok, detail = rc.ensure_chromium()
+    assert ok is False
+    assert "exited 1" in detail
+
+
+def test_ensure_chromium_streams_output(monkeypatch):
+    """When given a sink, each installer line is streamed to it."""
+    _reset_cache()
+    monkeypatch.setattr(rc, "_chromium_status",
+                        lambda: (False, "browser bundle not downloaded"))
+    monkeypatch.setattr(
+        "subprocess.Popen",
+        lambda *a, **k: _FakePopen(lines=["Downloading Chromium", "done"], rc=0))
+    seen: list[str] = []
+    rc.ensure_chromium(on_output=seen.append)
+    assert "Downloading Chromium" in seen
+
+
+def test_ensure_chromium_never_raises_on_launch_error(monkeypatch):
+    """A failure to even launch the installer degrades to (False, reason)."""
+    _reset_cache()
+    monkeypatch.setattr(rc, "_chromium_status",
+                        lambda: (False, "browser bundle not downloaded"))
+
+    def _raise(*a, **k):
+        raise OSError("no python on PATH")
+
+    monkeypatch.setattr("subprocess.Popen", _raise)
+    ok, detail = rc.ensure_chromium()
+    assert ok is False
+    assert "could not launch" in detail

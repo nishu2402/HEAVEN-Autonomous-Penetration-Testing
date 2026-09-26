@@ -41,10 +41,11 @@ _INFO_ONLY = {"dkim_found", "mx_enumeration", "anomalous_behavior", "zero_day_he
 
 _EMITTED_TYPES = [
     # SSL/TLS scanner (heaven/vulnscan/ssl_scanner.py)
-    "heartbleed", "drown", "poodle", "freak", "logjam", "beast", "weak_cipher",
+    "heartbleed", "drown", "poodle", "freak", "logjam", "weak_dh_params", "beast",
+    "weak_cipher",
     "tls10_only", "tls11_deprecated", "no_forward_secrecy", "no_hsts",
     "hsts_short_maxage", "cert_expired", "cert_expiring_soon", "self_signed_cert",
-    "sha1_signature",
+    "sha1_signature", "md5_signature", "weak_cert_key",
     # misconfig / injection / headers
     "jwt_alg_none", "jwt_weak_secret", "cors_misconfig", "insecure_cookie",
     "missing_security_headers", "security_headers", "open_redirect", "sqli",

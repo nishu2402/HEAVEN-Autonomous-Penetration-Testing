@@ -266,3 +266,87 @@ def test_run_install_times_out_instead_of_hanging(monkeypatch):
     assert result.status == "failed"
     assert "timed out" in result.detail
     assert elapsed < 15   # must not wait the full 30s
+
+
+# ── `heaven install-tools` also arms the Playwright browser bundle ──────────────
+# The browser is the one runtime capability that isn't a PATH binary; folding it
+# into the full-power command means it is never left un-armed behind a separate,
+# easily-missed `playwright install`. These stub the probe + provisioner so no
+# 150 MB download ever runs.
+
+def test_cli_browser_dry_run_plans_when_absent(monkeypatch):
+    import json
+
+    from click.testing import CliRunner
+
+    import heaven.utils.runtime_capabilities as rc
+    from heaven.main import cli
+
+    monkeypatch.setattr(rc, "_cached_chromium_status",
+                        lambda use_cache=True: (False, "browser bundle not downloaded"))
+    r = CliRunner().invoke(cli, ["--json", "install-tools", "browser", "--dry-run"])
+    assert r.exit_code == 0, r.output
+    payload = json.loads(r.output)
+    assert payload["ok"] is True
+    browser = next(x for x in payload["results"] if x["name"] == "playwright-chromium")
+    assert browser["status"] == "planned"        # previewed, never installed
+
+
+def test_cli_browser_reports_present_when_armed(monkeypatch):
+    import json
+
+    from click.testing import CliRunner
+
+    import heaven.utils.runtime_capabilities as rc
+    from heaven.main import cli
+
+    monkeypatch.setattr(rc, "_cached_chromium_status",
+                        lambda use_cache=True: (True, "Chromium browser installed"))
+    r = CliRunner().invoke(cli, ["--json", "install-tools", "browser"])
+    assert r.exit_code == 0, r.output
+    payload = json.loads(r.output)
+    browser = next(x for x in payload["results"] if x["name"] == "playwright-chromium")
+    assert browser["status"] == "present"
+
+
+def test_cli_browser_arm_invokes_provisioner(monkeypatch):
+    """A real (non-dry) `install-tools browser` on a browser-less host drives
+    ``ensure_chromium`` and reports the outcome — no PATH tool is touched."""
+    import json
+
+    from click.testing import CliRunner
+
+    import heaven.utils.runtime_capabilities as rc
+    from heaven.main import cli
+
+    calls = {"ensure": False}
+
+    def _fake_ensure(on_output=None):
+        calls["ensure"] = True
+        return True, "Chromium browser installed"
+
+    monkeypatch.setattr(rc, "_cached_chromium_status",
+                        lambda use_cache=True: (False, "browser bundle not downloaded"))
+    monkeypatch.setattr(rc, "ensure_chromium", _fake_ensure)
+    r = CliRunner().invoke(cli, ["--json", "install-tools", "browser"])
+    assert r.exit_code == 0, r.output
+    assert calls["ensure"] is True
+    payload = json.loads(r.output)
+    browser = next(x for x in payload["results"] if x["name"] == "playwright-chromium")
+    assert browser["status"] == "installed"
+
+
+def test_cli_unknown_tool_still_errors_with_browser_alias_known(monkeypatch):
+    """`browser` is a known selector, so it must not be reported as unknown, but a
+    genuinely bogus name still errors."""
+    from click.testing import CliRunner
+
+    from heaven.main import cli
+
+    r = CliRunner().invoke(cli, ["install-tools", "browser", "definitely-not-a-tool"])
+    assert r.exit_code == 2
+    # Everything before "Known:" is the unknown-names list — it names the bogus
+    # tool but never the recognized `browser` alias.
+    unknown_part = r.output.split("Known:")[0]
+    assert "definitely-not-a-tool" in unknown_part
+    assert "browser" not in unknown_part

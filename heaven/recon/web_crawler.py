@@ -130,6 +130,157 @@ JS_ENDPOINT_PATTERNS = [
     r"""endpoint['":\s]+['"](/?[^'"]+)['"]""",
 ]
 
+# ── SPA framework markers ───────────────────────────────────────────────────
+# A JavaScript-heavy single-page app renders its routes, forms and links in the
+# browser, so this static (aiohttp) crawler sees only the empty shell and misses
+# the real endpoint surface. Detecting a framework marker in the shell lets
+# ``crawl_targets`` escalate to the Playwright renderer (``crawl_url_js``), which
+# executes the JS and enumerates the rendered surface — the endpoints downstream
+# injection / XSS / access-control scanners would otherwise never receive. Each
+# marker is a literal substring a real SPA shell emits (not inferred), so the
+# escalation is evidence-gated, never speculative.
+_SPA_MARKERS: list[tuple[str, str]] = [
+    ("ng-version", "Angular"), ("<app-root", "Angular"), ("ng-app", "AngularJS"),
+    ("data-reactroot", "React"), ("react-dom", "React"), ("__next_data__", "Next.js"),
+    ("/_next/static", "Next.js"), ("__nuxt__", "Nuxt"), ("_nuxt/", "Nuxt"),
+    ("data-server-rendered", "Vue"), ("__vue__", "Vue"),
+    ('id="svelte"', "Svelte"), ("data-sveltekit", "SvelteKit"),
+    ("window.__initial_state__", "SPA"),
+]
+
+
+def _detect_spa_frameworks(body: str) -> list[str]:
+    """Return SPA framework tags whose literal marker appears in the shell HTML."""
+    low = body.lower()
+    found: list[str] = []
+    for marker, tech in _SPA_MARKERS:
+        if marker in low and tech not in found:
+            found.append(tech)
+    return found
+
+
+_SPA_TECHS = {"Angular", "AngularJS", "React", "Next.js", "Nuxt", "Vue",
+              "Svelte", "SvelteKit", "SPA"}
+
+
+def _endpoints_look_spa(endpoints: list["WebEndpoint"]) -> bool:
+    """True if the statically crawled shell carries an SPA framework marker."""
+    return any(t in _SPA_TECHS for ep in endpoints for t in ep.technologies)
+
+
+def _merge_endpoint(dst: "WebEndpoint", src: "WebEndpoint") -> None:
+    """Merge a rendered endpoint's forms / input-vectors / js into ``dst``.
+
+    Used when the Playwright render produces the SAME URL as the static crawl but
+    with additional client-rendered forms and input vectors. Dedupes so the merge
+    never inflates the surface with repeats."""
+    seen_iv: set[tuple] = {(iv.get("url"), iv.get("method"), iv.get("param"))
+                           for iv in dst.input_vectors}
+    for iv in src.input_vectors:
+        iv_key = (iv.get("url"), iv.get("method"), iv.get("param"))
+        if iv.get("param") and iv_key not in seen_iv:
+            dst.input_vectors.append(iv)
+            seen_iv.add(iv_key)
+    seen_forms: set[tuple] = {(f.get("action"), f.get("method")) for f in dst.forms}
+    for f in src.forms:
+        f_key = (f.get("action"), f.get("method"))
+        if f_key not in seen_forms:
+            dst.forms.append(f)
+            seen_forms.add(f_key)
+    for js in src.js_files:
+        if js not in dst.js_files:
+            dst.js_files.append(js)
+    for tech in src.technologies:
+        if tech not in dst.technologies:
+            dst.technologies.append(tech)
+
+
+def _chromium_available() -> bool:
+    """Whether a usable Playwright Chromium is present (cached probe).
+
+    Returns False on any error so SPA escalation is a strict opt-in that never
+    breaks a crawl when the browser bundle is not installed."""
+    try:
+        from heaven.utils.runtime_capabilities import _cached_chromium_status
+        ok, _ = _cached_chromium_status()
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def _auto_install_browser_enabled() -> bool:
+    """Whether the operator opted in to on-demand browser provisioning.
+
+    The SPA renderer needs the ~150 MB Chromium bundle, which HEAVEN never
+    downloads silently (a large fetch is always an explicit choice, matching the
+    ``no auto-download without consent`` rule). Setting
+    ``HEAVEN_AUTO_INSTALL_BROWSER=1`` is that consent: a scan that then meets a
+    SPA on a host missing the browser provisions it once, so the client-rendered
+    surface is never quietly missed."""
+    import os
+    return os.environ.get("HEAVEN_AUTO_INSTALL_BROWSER", "").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
+# Provision the browser at most once per process: a fleet of SPA targets must
+# not each retry a 150 MB download. False until an attempt has run.
+_browser_provision_attempted = False
+
+
+def _ensure_chromium_once() -> bool:
+    """Best-effort, one-shot on-demand provisioning of the Playwright browser.
+
+    Returns True only when a usable Chromium is present afterwards. Never raises
+    and never attempts more than once per process, so a run with many SPA
+    targets and no browser stays fast and predictable."""
+    global _browser_provision_attempted
+    if _chromium_available():
+        return True
+    if _browser_provision_attempted:
+        return False
+    _browser_provision_attempted = True
+    try:
+        from heaven.utils.runtime_capabilities import ensure_chromium
+        ok, detail = ensure_chromium(on_output=lambda ln: logger.info("playwright: %s", ln))
+        if ok:
+            logger.info("Playwright Chromium provisioned on demand: %s", detail)
+        else:
+            logger.warning("On-demand Playwright provisioning failed: %s", detail)
+        return bool(ok)
+    except Exception as exc:  # noqa: BLE001 — provisioning must never break a scan
+        logger.warning("On-demand Playwright provisioning error: %s", exc)
+        return False
+
+
+def _spa_render_gap_note(
+    url: str, frameworks: list[str],
+    recovered_endpoints: int = 0, recovered_vectors: int = 0,
+) -> dict[str, Any]:
+    """An honest, actionable coverage note for a SPA rendered WITHOUT a browser.
+
+    Emitted (never a finding) when a JS framework is detected but no headless
+    browser is available. The request surface was already recovered statically
+    from the JS bundles (see :func:`extract_js_surface`), so this is not a silent
+    no-op — it discloses the residual gap: DOM-only routes and forms a browser
+    builds at runtime, which static analysis cannot see, plus the one-command arm
+    for full fidelity. The recovered counts make the honest state explicit."""
+    fw = ", ".join(frameworks) if frameworks else "SPA"
+    return {
+        "type": "spa_render_reduced_fidelity",
+        "url": url,
+        "frameworks": frameworks,
+        "recovered_endpoints": recovered_endpoints,
+        "recovered_input_vectors": recovered_vectors,
+        "impact": (f"{fw} detected. Its request surface was recovered statically from "
+                   f"the JS bundles ({recovered_endpoints} endpoint(s), "
+                   f"{recovered_vectors} input vector(s)), but DOM-rendered routes and "
+                   "runtime-built forms may still be UNDER-REPORTED without the "
+                   "headless-browser renderer"),
+        "remediation": ("run `heaven install-tools` (or `playwright install chromium`) "
+                        "for full DOM-render fidelity, or set "
+                        "HEAVEN_AUTO_INSTALL_BROWSER=1 to provision it on demand"),
+    }
+
 TECH_FINGERPRINTS = {
     "X-Powered-By": {"Express": "Express.js", "PHP": "PHP", "ASP.NET": "ASP.NET"},
     "Server": {"nginx": "Nginx", "Apache": "Apache", "Microsoft-IIS": "IIS"},
@@ -251,6 +402,13 @@ async def crawl_url(
                             if gen and gen.get("content"):
                                 ep.technologies.append(str(gen.get("content", "")))
 
+                            # SPA framework markers → lets crawl_targets escalate
+                            # to the JS renderer so client-rendered routes/forms
+                            # are not missed on Angular/React/Vue/Next apps.
+                            for tech in _detect_spa_frameworks(body):
+                                if tech not in ep.technologies:
+                                    ep.technologies.append(tech)
+
                         endpoints.append(ep)
 
                 except Exception as e:
@@ -295,6 +453,171 @@ async def extract_js_endpoints(js_urls: list[str], timeout: float = 10.0) -> lis
                 logger.debug(f"JS endpoint extraction error for {js_url}: {e}")
                 continue
     return sorted(discovered)
+
+
+# ── Static SPA request-surface recovery (NO browser required) ───────────────
+# A JS-rendered app's real attack surface — the endpoints it calls and the
+# PARAMETERS it sends — is written into its JavaScript bundles as string and
+# object literals. A DOM render (Playwright) recovers this by *executing* the
+# app, but that needs the ~150 MB Chromium bundle. This analyser recovers the
+# same request surface in pure Python: fetch the bundles, read the literals. So
+# a JS app's attack surface is NEVER gated on that download — the browser render
+# becomes a higher-fidelity superset, not a precondition. It reports only what
+# the source literally constructs (same-origin endpoints, real payload keys) and
+# emits ``input_vectors`` — never a finding: the downstream injection / API /
+# access-control scanners still actively confirm every candidate.
+_JS_SURFACE_MAX_BUNDLES = 50
+_JS_SURFACE_MAX_BYTES = 2_000_000       # bound regex time on huge minified bundles
+_JS_SURFACE_MAX_ENDPOINTS = 300
+_JS_SURFACE_MAX_PARAMS = 25
+
+# Calls whose URL (and often method) can be read straight from the source. Each
+# yields (explicit_method_or_None, raw_url). ``resolve_js_endpoint`` then keeps
+# only same-origin, non-asset paths, so a bare word / MIME type / CDN asset /
+# template literal (``${…}``) is dropped — the surface stays same-origin + real.
+_JS_FETCH_RE = re.compile(r"""\bfetch\(\s*['"]([^'"\s]+)['"]""", re.IGNORECASE)
+_JS_METHODCALL_RE = re.compile(
+    r"""[\w$.]*\.(get|post|put|delete|patch)\(\s*['"]([^'"\s]+)['"]""", re.IGNORECASE)
+_JS_XHR_OPEN_RE = re.compile(
+    r"""\.open\(\s*['"](GET|POST|PUT|DELETE|PATCH)['"]\s*,\s*['"]([^'"\s]+)['"]""",
+    re.IGNORECASE)
+_JS_URLKEY_RE = re.compile(r"""\b(?:url|endpoint)\s*:\s*['"](/[^'"\s]+)['"]""", re.IGNORECASE)
+
+# Payload objects whose KEYS are real request parameters — the app's own API
+# contract, which survives minification because the server expects those exact
+# names (variable names get mangled; contract keys cannot). Restricted to a flat
+# ``{…}`` (no nested braces) so extraction is bounded and low-noise.
+_JS_PAYLOAD_RE = re.compile(
+    r"""(?:JSON\.stringify\(\s*\{([^{}]*)\}"""       # group 1: JSON.stringify({...})
+    r"""|(?:body|data|params)\s*:\s*\{([^{}]*)\}"""  # group 2: body/data/params: {...}
+    r"""|,\s*\{([^{}]*)\})""",                       # group 3: positional data arg — $.post(u,{...})
+    re.IGNORECASE)
+_JS_KEY_RE = re.compile(r"""['"]?([A-Za-z_$][\w$]*)['"]?\s*:""")
+_JS_SHORTHAND_RE = re.compile(r"""(?:^|,)\s*([A-Za-z_$][\w$]*)\s*(?=[,}]|$)""")
+_JS_INLINE_METHOD_RE = re.compile(r"""(?:\bmethod|\btype)\s*:\s*['"]([A-Za-z]+)['"]""",
+                                  re.IGNORECASE)
+_JS_BODY_HINT_RE = re.compile(r"""JSON\.stringify|\bbody\s*:""", re.IGNORECASE)
+
+# Object keys that are HTTP-client configuration, never a user-supplied parameter.
+_JS_NON_PARAM = {
+    "method", "headers", "header", "body", "credentials", "mode", "cache",
+    "redirect", "referrer", "referrerpolicy", "signal", "integrity", "keepalive",
+    "url", "params", "data", "timeout", "responsetype", "withcredentials",
+    "baseurl", "type", "contenttype", "datatype", "async", "crossdomain",
+    "accept", "authorization", "observe", "reportprogress",
+}
+
+
+def _iter_js_calls(content: str):
+    """Yield ``(explicit_method_or_None, raw_url, window)`` for each HTTP call.
+
+    ``window`` is a bounded slice of source around the call, from which the
+    method and payload parameter names are read. Pure and side-effect free."""
+    for m in _JS_FETCH_RE.finditer(content):
+        yield None, m.group(1), content[m.end():m.end() + 400]
+    for m in _JS_METHODCALL_RE.finditer(content):
+        yield m.group(1), m.group(2), content[m.end():m.end() + 400]
+    for m in _JS_XHR_OPEN_RE.finditer(content):
+        yield m.group(1), m.group(2), content[m.end():m.end() + 400]
+    for m in _JS_URLKEY_RE.finditer(content):
+        # Sibling keys of a request-config object can sit either side of ``url:``.
+        yield None, m.group(1), content[max(0, m.start() - 200):m.end() + 400]
+
+
+def _params_from_window(window: str) -> list[str]:
+    """Extract real request-parameter names from a call's payload objects."""
+    keys: list[str] = []
+    for m in _JS_PAYLOAD_RE.finditer(window):
+        inner = m.group(1) or m.group(2) or m.group(3) or ""
+        keys.extend(km.group(1) for km in _JS_KEY_RE.finditer(inner))
+        keys.extend(sm.group(1) for sm in _JS_SHORTHAND_RE.finditer(inner))
+    out: list[str] = []
+    seen: set[str] = set()
+    for k in keys:
+        if k.lower() in _JS_NON_PARAM or len(k) > 40 or k in seen:
+            continue
+        seen.add(k)
+        out.append(k)
+        if len(out) >= _JS_SURFACE_MAX_PARAMS:
+            break
+    return out
+
+
+async def extract_js_surface(
+    js_urls: list[str], timeout: float = 10.0, evasion_headers: Optional[dict] = None,
+) -> list[WebEndpoint]:
+    """Recover a SPA's request surface (endpoints + methods + PARAMETERS) from its
+    JS bundles, in pure Python, with no browser.
+
+    Fetches each bundle and reconstructs the HTTP calls the app makes at runtime:
+    the endpoint URL, its method, and the body / query parameter names. These are
+    the input vectors a DOM render would surface via rendered forms — recovered
+    here without the ~150 MB browser download, so the JS-rendered attack surface
+    is never quietly missed on a host that lacks Chromium. Only endpoints that
+    carry at least one parameter are returned (a bare URL is already covered by
+    :func:`extract_js_endpoints`); the result is additive and deduped. Never
+    raises for a single bad bundle — a fetch/parse error skips that bundle only.
+    """
+    import aiohttp
+
+    from heaven.feedback import resolve_js_endpoint
+
+    by_url: dict[str, WebEndpoint] = {}
+    async with _egress_cs(
+        headers=evasion_headers or {},
+        timeout=aiohttp.ClientTimeout(total=timeout),
+        connector=aiohttp.TCPConnector(ssl=False),
+    ) as session:
+        for js_url in js_urls[:_JS_SURFACE_MAX_BUNDLES]:
+            try:
+                async with session.get(js_url) as resp:
+                    if resp.status != 200:
+                        continue
+                    # Never re-mine an HTML shell a server hands back for an
+                    # unknown ".js" path — only real scripts (or untyped bodies).
+                    if "html" in resp.headers.get("Content-Type", "").lower():
+                        continue
+                    content = (await resp.text(errors="replace"))[:_JS_SURFACE_MAX_BYTES]
+            except Exception as e:  # noqa: BLE001 — one bad bundle must not abort the rest
+                logger.debug(f"JS surface fetch error for {js_url}: {e}")
+                continue
+
+            for explicit_method, raw_url, window in _iter_js_calls(content):
+                if len(by_url) >= _JS_SURFACE_MAX_ENDPOINTS:
+                    break
+                resolved = resolve_js_endpoint(raw_url, js_url)
+                if not resolved:
+                    continue
+                params = _params_from_window(window)
+                q_params = [k for k, _ in parse_qsl(urlsplit(resolved).query)]
+                if not params and not q_params:
+                    continue  # bare URL — already covered by extract_js_endpoints
+                inline = _JS_INLINE_METHOD_RE.search(window)
+                method = (explicit_method or (inline.group(1) if inline else None)
+                          or ("POST" if _JS_BODY_HINT_RE.search(window) else "GET")).upper()
+                ep = by_url.get(resolved)
+                if ep is None:
+                    ep = WebEndpoint(url=resolved, status_code=0, technologies=["js-derived"])
+                    by_url[resolved] = ep
+                seen = {(iv.get("method"), iv.get("param")) for iv in ep.input_vectors}
+                for p in params:
+                    if (method, p) not in seen:
+                        ep.input_vectors.append({
+                            "type": "api_param" if method != "GET" else "url_param",
+                            "url": resolved, "method": method, "param": p,
+                            "source": "js-static"})
+                        seen.add((method, p))
+                for p in q_params:
+                    if ("GET", p) not in seen:
+                        ep.input_vectors.append({
+                            "type": "url_param", "url": resolved, "method": "GET",
+                            "param": p, "source": "js-static"})
+                        seen.add(("GET", p))
+    if by_url:
+        total = sum(len(e.input_vectors) for e in by_url.values())
+        logger.info(f"Static SPA analysis: {len(by_url)} endpoint(s), "
+                    f"{total} input vector(s) recovered from JS bundles (no browser)")
+    return list(by_url.values())
 
 
 async def discover_apis(base_url: str, timeout: float = 10.0, evasion_headers: Optional[dict] = None) -> list[WebEndpoint]:
@@ -362,6 +685,9 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
 
     all_endpoints: list[WebEndpoint] = []
     all_js: list[str] = []
+    # Honest coverage notes (never findings): what surface a scan could NOT
+    # reach and how to arm it. Surfaced so a skipped SPA render is disclosed.
+    coverage_notes: list[dict[str, Any]] = []
     # Concurrency scales with the level: paranoid=10 … stealth=50 … aggressive=1000.
     sem = asyncio.Semaphore(max(1, profile.max_concurrent))
 
@@ -369,6 +695,80 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
         await engine.apply_evasion_delay()
         headers = engine.get_http_headers()
         eps = await crawl_url(url, semaphore=sem, evasion_headers=headers, auth_config=auth_config)
+        # SPA escalation: a JS-rendered app hides its routes/forms/input-vectors
+        # from the static shell crawl. We recover that surface in two layers,
+        # additive and deduped:
+        #   (1) STATIC (always, no browser): mine the JS bundles for the app's
+        #       request surface — endpoints + methods + PARAMETERS — in pure
+        #       Python. This is what a DOM render would expose via rendered forms,
+        #       recovered with NO 150 MB download, so the surface is never gated
+        #       on an optional dependency.
+        #   (2) RENDER (superset, when a browser is present or opted in): execute
+        #       the app for the highest-fidelity DOM enumeration.
+        # When no browser is available the static layer has already done the
+        # recovery, so we DISCLOSE only the residual (DOM-only) gap — never a
+        # silent no-op, and never a hard dependency.
+        if _endpoints_look_spa(eps):
+            frameworks = sorted({t for e in eps for t in e.technologies if t in _SPA_TECHS})
+            by_url = {ep.url: ep for ep in eps}
+
+            def _merge_rendered(rendered: list[WebEndpoint]) -> tuple[int, int]:
+                new_count = added_vectors = 0
+                for r in rendered:
+                    existing = by_url.get(r.url)
+                    if existing is None:
+                        eps.append(r)
+                        by_url[r.url] = r
+                        new_count += 1
+                        added_vectors += len(r.input_vectors)
+                    else:
+                        before = len(existing.input_vectors)
+                        _merge_endpoint(existing, r)
+                        added_vectors += len(existing.input_vectors) - before
+                return new_count, added_vectors
+
+            # (1) Browser-free static recovery from the JS bundles.
+            spa_js = list(dict.fromkeys(j for e in eps for j in e.js_files))
+            static_endpoints = static_vectors = 0
+            if spa_js:
+                try:
+                    derived = await extract_js_surface(spa_js, evasion_headers=headers)
+                    static_endpoints, static_vectors = _merge_rendered(derived)
+                    if static_endpoints or static_vectors:
+                        logger.info(
+                            "SPA static analysis on %s: +%d endpoints, +%d input "
+                            "vectors recovered from JS bundles without a browser",
+                            url, static_endpoints, static_vectors)
+                except Exception as exc:  # noqa: BLE001 — recovery must never break the crawl
+                    logger.debug(f"SPA static analysis skipped for {url}: {exc}")
+
+            # (2) Optional higher-fidelity DOM render.
+            ready = _chromium_available()
+            if not ready and _auto_install_browser_enabled():
+                ready = _ensure_chromium_once()  # consented on-demand provision
+            if ready:
+                try:
+                    rendered = await crawl_url_js(
+                        url, max_pages=40, auth_config=auth_config,
+                        evasion_headers=headers)
+                    new_count, added_vectors = _merge_rendered(rendered)
+                    if new_count or added_vectors:
+                        logger.info(
+                            f"SPA render on {url}: +{new_count} client-rendered routes, "
+                            f"+{added_vectors} input vectors beyond the static analysis")
+                except Exception as exc:
+                    logger.debug(f"SPA render skipped for {url}: {exc}")
+            else:
+                # No browser: the static pass already recovered the request surface.
+                # Disclose only the residual DOM-only gap (info, not warning — this
+                # is reduced fidelity, not a missed surface) with the one-command arm.
+                logger.info(
+                    "SPA framework(s) %s on %s analysed statically (+%d endpoints, "
+                    "+%d input vectors from JS). For full DOM-render fidelity arm the "
+                    "browser: `heaven install-tools`, or HEAVEN_AUTO_INSTALL_BROWSER=1.",
+                    ", ".join(frameworks) or "SPA", url, static_endpoints, static_vectors)
+                coverage_notes.append(
+                    _spa_render_gap_note(url, frameworks, static_endpoints, static_vectors))
         api_eps = await discover_apis(url, evasion_headers=headers)
         all_endpoints.extend(eps)
         all_endpoints.extend(api_eps)
@@ -404,6 +804,10 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
         "js_endpoints": js_endpoints,
         "input_vectors": total_vectors,
         "url_forms": url_forms,
+        # Honest disclosure of surface the crawl could not reach (e.g. a SPA whose
+        # JS could not be rendered because no browser is installed). Empty when
+        # nothing was skipped, so consumers can treat it as a plain list.
+        "coverage_notes": coverage_notes,
     }
 
 

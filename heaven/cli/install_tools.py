@@ -6,6 +6,13 @@ so the scanner runs at full power. Idempotent — already-present tools are
 skipped — and driven by the shared catalog in ``heaven.utils.tool_installer``,
 so the tool list and install recipes stay in lock-step with ``heaven doctor``
 and the web System-Health panel.
+
+It also arms the **Playwright Chromium** browser bundle (the one runtime
+capability that is not a PATH binary), because a missing browser caps HEAVEN
+below full power exactly like a missing scanner: without it the JS-rendered
+SPA crawl and the XSS execution proof silently degrade. Folding it in here means
+the single command operators already run for "full power" leaves nothing armed
+only by a separate, easily-missed ``playwright install`` incantation.
 """
 
 from __future__ import annotations
@@ -25,6 +32,11 @@ from heaven.utils.tool_installer import (
     missing_tools,
 )
 
+# Names that select the Playwright browser bundle rather than a PATH binary, so
+# `heaven install-tools browser` (or playwright / chromium) arms just the browser.
+_BROWSER_ALIASES = {"browser", "playwright", "chromium", "playwright-chromium"}
+_BROWSER_NAME = "playwright-chromium"
+
 _STATUS_MARK = {
     "present": "[green]✓[/green]",
     "installed": "[green]✓[/green]",
@@ -41,6 +53,29 @@ _STATUS_WORD = {
 }
 
 
+def _browser_present() -> tuple[bool, str]:
+    """Authoritative (cache-bypassing) check of the Playwright browser bundle."""
+    from heaven.utils.runtime_capabilities import _cached_chromium_status
+    return _cached_chromium_status(use_cache=False)
+
+
+def _browser_result(*, dry_run: bool, as_json: bool) -> InstallResult:
+    """Arm (or preview / report) the Playwright Chromium bundle as an
+    :class:`InstallResult`, so the browser slots into the same plan/preview/
+    result rendering as the PATH tools."""
+    cmd = ["playwright", "install", "chromium"]
+    present, detail = _browser_present()
+    if present:
+        return InstallResult(_BROWSER_NAME, "present", detail=detail)
+    if dry_run:
+        return InstallResult(_BROWSER_NAME, "planned", command=cmd)
+    from heaven.utils.runtime_capabilities import ensure_chromium
+    sink = None if as_json else (lambda ln: _print(f"[dim]{ln}[/dim]"))
+    ok, detail = ensure_chromium(on_output=sink)
+    return InstallResult(_BROWSER_NAME, "installed" if ok else "failed",
+                         command=cmd, detail=detail)
+
+
 @click.command(name="install-tools")
 @click.argument("tools", nargs=-1)
 @click.option("--yes", "-y", is_flag=True,
@@ -50,44 +85,62 @@ _STATUS_WORD = {
 def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
     """Install the external scanner binaries HEAVEN uses (full-power mode).
 
-    With no arguments, installs every tool that is missing. Name specific tools
-    to limit the scope:
+    With no arguments, installs every tool that is missing AND arms the
+    Playwright browser bundle. Name specific tools to limit the scope:
 
-        heaven install-tools                 # everything missing
+        heaven install-tools                 # everything missing + browser
         heaven install-tools sqlmap ffuf     # just these two
+        heaven install-tools browser         # just the Playwright browser
         heaven install-tools --dry-run       # preview the commands
 
     Each tool has an in-house fallback, so HEAVEN works without them, but with
     them installed you get real SQLi proof, content fuzzing, Exploit-DB lookup,
-    SAST and template checks. Uses your package manager (brew / apt / dnf /
+    SAST and template checks. The browser bundle arms the JS-rendered SPA crawl
+    and the XSS execution proof. Uses your package manager (brew / apt / dnf /
     pacman) or pip / go as appropriate.
     """
     as_json = json_output()
 
-    # Resolve the requested subset (validate names) or default to all missing.
-    if tools:
+    # Split any browser aliases out of the requested names so `browser` /
+    # `playwright` / `chromium` select the bundle instead of tripping the
+    # unknown-tool check. With no arguments at all, both the missing tools AND
+    # the browser are in scope (the "full power" default).
+    requested = [t.lower() for t in tools]
+    include_browser = (not tools) or any(t in _BROWSER_ALIASES for t in requested)
+    tool_names = [t for t in tools if t.lower() not in _BROWSER_ALIASES]
+
+    # Resolve the requested tool subset (validate names) or default to all missing.
+    if tool_names:
         specs: list[ToolSpec] = []
         unknown: list[str] = []
-        for name in tools:
+        for name in tool_names:
             spec = get_spec(name)
             (specs.append(spec) if spec else unknown.append(name))  # type: ignore[arg-type]
         if unknown:
-            known = ", ".join(t.name for t in TOOLS)
+            known = ", ".join([*(t.name for t in TOOLS), "browser"])
             msg = f"Unknown tool(s): {', '.join(unknown)}. Known: {known}"
             if as_json:
                 emit_json({"ok": False, "error": msg})
             else:
                 _print(f"[red]✗[/red] {msg}")
             raise SystemExit(2)
+    elif tools and not include_browser:
+        # Names were given but every one resolved away (shouldn't happen) —
+        # nothing to do rather than defaulting to "all missing".
+        specs = []
     else:
         specs = missing_tools()
 
-    # Nothing to do?
     pending = [s for s in specs if not is_present(s.name)]
-    if not pending:
+    browser_missing = include_browser and not _browser_present()[0]
+
+    # Nothing to do?
+    if not pending and not browser_missing:
+        prior = [{"name": s.name, "status": "present"} for s in specs]
+        if include_browser:
+            prior.append({"name": _BROWSER_NAME, "status": "present"})
         if as_json:
-            emit_json({"ok": True, "installed": [], "results":
-                       [{"name": s.name, "status": "present"} for s in specs]})
+            emit_json({"ok": True, "installed": [], "results": prior})
         else:
             _print("[green]✓ All requested tools are already installed.[/green] "
                    "Run [cyan]heaven doctor[/cyan] to confirm.")
@@ -102,16 +155,22 @@ def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
             recipe = " ".join(cmd) if cmd else f"[yellow]manual: {install_hint(s)}[/yellow]"
             _print(f"  [cyan]{s.name:13}[/cyan] {s.purpose}")
             _print(f"  {'':13} [dim]{recipe}[/dim]")
+        if browser_missing:
+            _print(f"  [cyan]{_BROWSER_NAME:13}[/cyan] JS-rendered SPA crawl + XSS execution proof")
+            _print(f"  {'':13} [dim]playwright install chromium[/dim]")
         _print("")
 
     if dry_run:
         results = install_tools(pending, dry_run=True)
+        if browser_missing:
+            results.append(_browser_result(dry_run=True, as_json=as_json))
         _emit_results(results, as_json, dry_run=True)
         return
 
     # Confirm unless --yes (or --json, which is non-interactive by contract).
     if not yes and not as_json:
-        if not click.confirm(f"Install {len(pending)} tool(s) now?", default=True):
+        n = len(pending) + (1 if browser_missing else 0)
+        if not click.confirm(f"Install {n} item(s) now?", default=True):
             _print("[dim]Aborted · nothing was installed.[/dim]")
             return
 
@@ -120,6 +179,10 @@ def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
             _print(f"[dim]{text}[/dim]")
 
     results = install_tools(pending, on_output=None if as_json else _line)
+    # Arm the browser last so its (potentially long) download runs after the
+    # quick package installs and its live output isn't interleaved with theirs.
+    if browser_missing:
+        results.append(_browser_result(dry_run=False, as_json=as_json))
     _emit_results(results, as_json, dry_run=False)
 
     # Non-zero exit when something genuinely failed, so CI/install.sh can react.

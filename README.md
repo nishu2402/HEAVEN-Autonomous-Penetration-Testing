@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3075 tests · 64 CLI commands · 106 API routes · 32 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3179 tests · 66 CLI commands · 106 API routes · 32 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.91 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -21,8 +21,8 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-232-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
-    <img src="https://img.shields.io/badge/CLI_Commands-64-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
+    <img src="https://img.shields.io/badge/Modules-237-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/CLI_Commands-66-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-32-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
     <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.91-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
@@ -89,7 +89,7 @@ HEAVEN is a **production-grade penetration-testing platform** that automates the
 
 It runs three ways from the **same engagement dataset**:
 
-- **CLI**: 64 commands for scriptable, CI-friendly workflows.
+- **CLI**: 66 commands for scriptable, CI-friendly workflows.
 - **Web UI**: a 30-page React command centre (scan launcher, live findings, combined risk, kill-chain, reports).
 - **REST + WebSocket API**: 106 RBAC-protected routes for automation and integration.
 
@@ -110,10 +110,10 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 3075 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 3179 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 232 |
-| ⌨️ **CLI Commands** | 64 |
+| 🧩 **Modules** | 237 |
+| ⌨️ **CLI Commands** | 66 |
 | 🌐 **API Routes** | 106 RBAC-protected routes |
 | 🖥️ **UI Pages** | 32 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
@@ -461,7 +461,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:B8FF00,33:7400B8,66:FF36AB,100:FF6E00"/>
 </p>
 
-64 commands. Run `heaven <command> --help` for full options.
+66 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
 <img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.2.0)" src="docs/screenshots/Heaven_cli.png" />
@@ -783,7 +783,7 @@ The models (~6 MB vector + ~2 MB description) aren't bundled in the wheel or git
 </p>
 
 ```
-heaven/                   ← Python package (232 modules)
+heaven/                   ← Python package (237 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines - Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -794,10 +794,10 @@ heaven/                   ← Python package (232 modules)
 ├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
 ├── api/                  FastAPI server + WebSocket (106 routes)
-└── cli/                  Click CLI - one module per command group (64 commands)
+└── cli/                  Click CLI - one module per command group (66 commands)
 
 heaven-ui/                React + Vite web console (30 pages)
-tests/                    3075 pytest tests + native & DVWA benchmark suites
+tests/                    3179 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -816,7 +816,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (3075 tests)
+pytest tests/                  # full suite, ~3.5 min (3179 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -883,7 +883,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>3075 tests · 232 modules · 64 CLI commands · 106 API routes · 32 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>3179 tests · 237 modules · 66 CLI commands · 106 API routes · 32 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

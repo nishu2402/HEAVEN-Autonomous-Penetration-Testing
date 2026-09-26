@@ -663,6 +663,40 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://wiki.mozilla.org/Security/Server_Side_TLS"],
     },
+    "weak_ssh": {
+        "title": "Weak SSH Cryptographic Configuration",
+        "cwe": "CWE-326",
+        "owasp": "A04:2025 Cryptographic Failures",
+        "mitre": "T1040 · Network Sniffing",
+        "typical_cvss": 5.3,
+        "description": "The SSH server advertises deprecated or weak algorithms — DSA/RSA-SHA1 host keys, SHA-1 or small-group key exchange, 64-bit-block / RC4 / CBC ciphers, or MD5/SHA-1/64-bit MACs.",
+        "impact": "Enables downgrade to breakable cryptography, session decryption, and weakens host and client authentication.",
+        "remediation": (
+            "1. Disable ssh-dss and ssh-rsa (SHA-1); offer only ssh-ed25519, "
+            "ecdsa-sha2-* and rsa-sha2-256/512 host keys.\n"
+            "2. Offer only curve25519-sha256, ecdh-sha2-* and "
+            "diffie-hellman-group14-sha256+ key exchange.\n"
+            "3. Use AEAD/CTR ciphers (chacha20-poly1305, aes*-gcm/ctr) and "
+            "hmac-sha2-*-etm MACs; retire 3DES, RC4, CBC and MD5/SHA-1 MACs."
+        ),
+        "references": ["https://www.ssh-audit.com/hardening_guides.html"],
+    },
+    "vpn_control_exposed": {
+        "title": "VPN Control Channel Not Authenticated",
+        "cwe": "CWE-306",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1190 · Exploit Public-Facing Application",
+        "typical_cvss": 5.3,
+        "description": "The VPN answers unauthenticated control-channel packets (OpenVPN without tls-auth/tls-crypt), exposing its TLS stack directly to any remote peer.",
+        "impact": "Expands the pre-authentication attack surface: control-channel denial of service, resource exhaustion, TLS-stack exploitation and trivial VPN fingerprinting.",
+        "remediation": (
+            "1. Enable tls-crypt (preferred) or tls-auth so the server silently "
+            "drops packets without a valid HMAC.\n"
+            "2. Restrict source addresses at the firewall where feasible.\n"
+            "3. Keep the VPN daemon patched to a current release."
+        ),
+        "references": ["https://openvpn.net/community-resources/hardening-openvpn-security/"],
+    },
     "certificate_issue": {
         "title": "TLS Certificate Issue",
         "cwe": "CWE-295",
@@ -1940,6 +1974,27 @@ _KB: dict[str, dict[str, Any]] = {
             "3. Apply virtual patching/WAF rules as an interim control."
         ),
         "references": ["https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"],
+    },
+    "outdated_patch_level": {
+        "title": "Outdated Software / Firmware Patch Level",
+        "cwe": "CWE-1104",
+        "owasp": "A03:2025 Software Supply Chain Failures",
+        "mitre": "T1190 · Exploit Public-Facing Application",
+        "typical_cvss": 4.0,
+        "description": (
+            "The running version is behind the latest available release for its "
+            "line: a newer patch has been published for some time (per "
+            "endoflife.date), so the host is missing that window of security and "
+            "stability fixes even though the release is not yet end-of-life."
+        ),
+        "impact": "Exposure to vulnerabilities fixed in releases the host has not applied; widening risk as more patches accumulate.",
+        "remediation": (
+            "1. Upgrade to the latest patch release for this line.\n"
+            "2. Establish a regular patch cadence and track vendor advisories.\n"
+            "3. Where the vendor tracks firmware currency, subscribe to release "
+            "notifications so lag is caught early."
+        ),
+        "references": ["https://endoflife.date/"],
     },
     "graphql_introspection": {
         "title": "GraphQL Introspection Enabled",
@@ -3375,22 +3430,42 @@ _ALIASES: dict[str, str] = {
     "poodle": "weak_tls",
     "freak": "weak_tls",
     "logjam": "weak_tls",
+    "weak_dh_params": "weak_tls",
     "drown": "weak_tls",
     "heartbleed": "weak_tls",
     "tls10_only": "weak_tls",
     "tls11_deprecated": "weak_tls",
     "sslv3_enabled": "weak_tls",
     "hsts_short_maxage": "hsts_missing",
+    "hsts_no_include_subdomains": "hsts_missing",
+    "hsts_no_preload": "hsts_missing",
+    # TLS 1.2 legacy signature algorithm (ecdsa_sha1 / rsa_pkcs1_sha1) accepted.
+    "tls_sha1_signature_algorithm": "weak_tls",
+    # SSH transport crypto audit (ssh_audit.py) → the weak_ssh KB entry.
+    "ssh_weak_host_key_algo": "weak_ssh",
+    "ssh_weak_kex": "weak_ssh",
+    "ssh_weak_cipher": "weak_ssh",
+    "ssh_weak_mac": "weak_ssh",
+    "aws_transfer_superseded_policy": "weak_ssh",
+    # OpenVPN control-channel exposure (vpn_scanner.py).
+    "openvpn_unauthenticated_control": "vpn_control_exposed",
     "cert_expired": "certificate_issue",
     "cert_expiring_soon": "certificate_issue",
     "self_signed_cert": "certificate_issue",
     "sha1_signature": "certificate_issue",
+    "md5_signature": "certificate_issue",
+    "weak_cert_key": "certificate_issue",
     "ssl_expired": "certificate_issue",
     "ssl_self_signed": "certificate_issue",
     "unvalidated_redirect": "open_redirect",
     # Live-CVE-feed / version-CVE findings → the outdated-component KB entry.
     # (known_vulnerable_version / outdated_component already aliased below.)
     "vulnerable_service": "vulnerable_component",
+    # Behind-latest currency finding (not yet EOL, not a known CVE) → its own,
+    # lower-severity patch-level entry so it is not inflated to "known-vulnerable".
+    "outdated_patch_level": "outdated_patch_level",
+    "software_behind_latest": "outdated_patch_level",
+    "firmware_out_of_date": "outdated_patch_level",
     # Cloud-misconfiguration finding spellings → canonical KB keys.
     "cloud_metadata_ssrf": "ssrf_cloud_metadata",
     "imds_ssrf": "ssrf_cloud_metadata",
@@ -3650,6 +3725,8 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "docker_socket_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "exposed_rdp": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:H",
     "weak_tls": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "weak_ssh": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "vpn_control_exposed": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
     "certificate_issue": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "no_forward_secrecy": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:L",
     "missing_security_headers": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
@@ -3675,6 +3752,7 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "mass_assignment": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N",
     "race_condition": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
     "vulnerable_component": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "outdated_patch_level": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "graphql_introspection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "graphql_dos": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
     "denial_of_service": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
@@ -3821,6 +3899,8 @@ _CVSS4_VECTOR_BY_KEY: dict[str, str] = {
     "docker_socket_exposed": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
     "exposed_rdp": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
     "weak_tls": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "weak_ssh": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
+    "vpn_control_exposed": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
     "certificate_issue": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
     "no_forward_secrecy": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:L/VI:N/VA:L/SC:N/SI:N/SA:N",
     "missing_security_headers": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N",
@@ -3846,6 +3926,7 @@ _CVSS4_VECTOR_BY_KEY: dict[str, str] = {
     "mass_assignment": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:N/SC:N/SI:N/SA:N",
     "race_condition": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",
     "vulnerable_component": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "outdated_patch_level": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
     "graphql_introspection": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
     "graphql_dos": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
     "denial_of_service": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",

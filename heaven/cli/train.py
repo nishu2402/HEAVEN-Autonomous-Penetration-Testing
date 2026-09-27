@@ -27,25 +27,25 @@ _MODEL_ASSET = "NVD_model.pkl"
 # Release tags known to carry the SHA-256-matching model asset, newest first.
 # With no explicit --tag/--url, `download-model` tries the running version's own
 # tag first and then each of these, installing the first asset whose digest
-# matches _MODEL_SHA256. The model is identical between releases, so if it hasn't
-# been re-attached to the newest release the fetch transparently falls back to a
-# release that has it, and the checksum pin guarantees every candidate is the
-# exact expected model. Prepend a tag here only after attaching the matching
-# NVD_model.pkl to that release.
+# matches _MODEL_SHA256. RETRAINED 2026-09-27 on the full ~304k-CVE NVD corpus
+# (5-fold CV R²=0.99, up from 0.91 on the old 2,788-CVE slice), so the digest
+# below matches ONLY the retrained artifact — older releases carry the previous
+# model and will fail this checksum. Attach the new NVD_model.pkl to the release
+# before/when publishing, and prepend that tag here.
 _MODEL_KNOWN_TAGS = ("v3.1.0",)
-_MODEL_SHA256 = "b6dba49ad45e271a609521ae1292b16734e30e0806ad5350c72225b6149bc525"
-_MODEL_SIZE_BYTES = 5912225
+_MODEL_SHA256 = "715fe8dab8c80c1303bf8d1fddf4374ca9b4f0e33287f1bc192c9c1ae26d58d9"
+_MODEL_SIZE_BYTES = 10352387
 
 # The description/type fallback model (heaven.ml.desc_model). Optional: older
 # releases won't carry it, so download-model fetches it best-effort and never
 # fails the whole command when it is absent.
 _DESC_ASSET = "cvss_text_model.joblib"
 _DESC_META_ASSET = "cvss_text_model.meta.json"
-# Retrained 2026-09-21 on the word 1-3 gram / 100k recipe (deploy R² 0.626→0.640,
-# Spearman ρ=0.80). Re-attach this exact artifact to the release when publishing;
-# the pin below is the local artifact's digest.
-_DESC_SHA256 = "44bfed3f76247a71aa0acd2e2c8a48180f0c52e145fc95c3fd7a1f064404de8e"
-_DESC_SIZE_BYTES = 2054333
+# Retrained 2026-09-27 on the fresh NVD-derived corpus (304,356 real CVEs; deploy
+# R²=0.65, Spearman ρ=0.81, right band 99% within one level). Re-attach this exact
+# artifact to the release when publishing; the pin below is the local digest.
+_DESC_SHA256 = "25bbf56ed428a1a556e7bb75c32275408993acddc48f2669438bd6d5879815c7"
+_DESC_SIZE_BYTES = 2058236
 
 
 def _sha256_file(path: Path) -> str:
@@ -129,7 +129,7 @@ def download_model_cmd(tag: str, url: str | None, dest: str | None,
                        sha_override: str | None, no_verify: bool, force: bool) -> None:
     """Fetch the pre-trained CVSS models instead of training them.
 
-    The vector model (ExtraTrees, ~R²=0.91) and the description/type fallback
+    The vector model (ExtraTrees, ~R²=0.99) and the description/type fallback
     model aren't bundled in the wheel or git, so this pulls them once from the
     GitHub Release and stores them where HEAVEN's loader looks. Verified by
     SHA-256. HEAVEN runs without them (CVSS falls back to each finding's base

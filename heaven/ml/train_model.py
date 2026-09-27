@@ -38,7 +38,7 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
         asyncio.run(pipeline.download_dataset(data_dir))
 
     print("Parsing dataset…")
-    X, y, feature_names = pipeline.parse_dataset(jsonl)
+    X, y, feature_names, years = pipeline.parse_dataset(jsonl, return_years=True)
     if len(y) == 0:
         raise RuntimeError(
             "NVD dataset is empty. Run 'heaven train-model' after downloading the dataset "
@@ -74,8 +74,38 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
     cv_r2_std = float(cv_r2_scores.std())
     cv_mae = float(cv_mae_scores.mean())
 
+    # Temporal holdout — the honest read of whether the learned CVSS mapping
+    # generalises to FUTURE, unseen CVEs (train on every earlier year, test on
+    # the newest year the model never saw), not just to a random slice of the
+    # same pool. Skipped cleanly when the newest year is too thin to measure.
+    temporal: dict[str, float | int] = {}
+    valid = years > 0
+    if valid.any():
+        newest = int(years[valid].max())
+        te = valid & (years == newest)
+        tr = valid & (years < newest)
+        if int(te.sum()) >= 500 and int(tr.sum()) >= 5000:
+            print(f"Temporal holdout: train <{newest} ({int(tr.sum()):,}) → "
+                  f"test {newest} ({int(te.sum()):,}, unseen)…")
+            tmodel = ExtraTreesRegressor(
+                n_estimators=100, max_depth=12, min_samples_leaf=2,
+                n_jobs=-1, random_state=42,
+            )
+            tmodel.fit(X[tr], y[tr])
+            tpred = np.clip(tmodel.predict(X[te]), 0.0, 10.0)
+            temporal = {
+                "temporal_test_year": newest,
+                "temporal_n_train": int(tr.sum()),
+                "temporal_n_test": int(te.sum()),
+                "temporal_r2": round(float(r2_score(y[te], tpred)), 4),
+                "temporal_mae": round(float(np.mean(np.abs(y[te] - tpred))), 4),
+            }
+
     model_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, model_dir / "cvss_regressor.joblib")
+    # compress=3: on the full ~300k-CVE corpus the 100-tree forest is ~32 MB raw;
+    # zlib level 3 shrinks it several-fold with no accuracy change, keeping the
+    # release/download-model asset lean (the desc model is saved the same way).
+    joblib.dump(model, model_dir / "cvss_regressor.joblib", compress=3)
     (model_dir / "feature_names.json").write_text(json.dumps(feature_names))
 
     # Also write NVD_model.pkl to its canonical home (data/models/, next to the
@@ -83,7 +113,7 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
     _repo_root = Path(__file__).parent.parent.parent
     nvd_model_out = _repo_root / "data" / "models" / "NVD_model.pkl"
     nvd_model_out.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, nvd_model_out)
+    joblib.dump(model, nvd_model_out, compress=3)
     feat_json = _repo_root / "nvd_data" / "feature_names_nvd.json"
     feat_json.parent.mkdir(parents=True, exist_ok=True)
     feat_json.write_text(json.dumps(feature_names))
@@ -97,6 +127,8 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
         # Cross-validated (the headline accuracy quoted in docs/model card):
         "cv_r2": round(cv_r2, 4), "cv_r2_std": round(cv_r2_std, 4),
         "cv_mae": round(cv_mae, 4), "cv_folds": 5,
+        # Temporal generalisation to the newest, unseen year (empty if too thin):
+        **temporal,
         "n_samples": int(len(y)),
         # Provenance so a version-skew warning on load is traceable to the trainer:
         "sklearn_version": sklearn.__version__,
@@ -105,6 +137,10 @@ def train_cvss_model(data_dir: Path = Path("nvd_data"),
     (model_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
     print(f"split R²={r2:.4f}  RMSE={rmse:.4f}  MAE={mae:.4f}")
     print(f"5-fold CV R²={cv_r2:.4f}±{cv_r2_std:.4f}  MAE={cv_mae:.4f}  (sklearn {sklearn.__version__})")
+    if temporal:
+        print(f"Temporal holdout → {temporal['temporal_test_year']} (unseen, "
+              f"n={temporal['temporal_n_test']:,}): R²={temporal['temporal_r2']}  "
+              f"MAE={temporal['temporal_mae']}")
     print(f"Model saved: {model_dir}/cvss_regressor.joblib")
     return metrics
 

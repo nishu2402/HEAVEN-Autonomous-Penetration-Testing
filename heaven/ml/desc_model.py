@@ -2,7 +2,7 @@
 HEAVEN — Description/type CVSS fallback model
 
 A scikit-learn text model trained on real NVD CVE data (the
-``NVD_Cybersecurity`` dataset, ~337k scored CVEs) that predicts a CVSS base
+``NVD_Cybersecurity`` dataset, ~304k scored CVEs) that predicts a CVSS base
 score from what ANY finding carries — its description text plus the
 vulnerability-type flags and the text length — WITHOUT needing a CVSS vector.
 
@@ -10,7 +10,7 @@ This is the *fallback* half of HEAVEN's hybrid risk model:
 
   * When a finding carries a real, published CVSS vector or base score, the
     13-feature vector model (:mod:`heaven.ml.risk_model`) is authoritative — it
-    reverse-engineers the CVSS calculator to ~R²=0.91.
+    reverse-engineers the CVSS calculator to ~R²=0.99.
   * When a finding has NO published score (a heuristic web/network finding), the
     vector model can only map the class to a hand-curated constant. THIS model
     instead reads the finding's own description and gives a data-grounded
@@ -18,13 +18,13 @@ This is the *fallback* half of HEAVEN's hybrid risk model:
     text is the dominant signal (a TF-IDF word 1–3 gram + Ridge pipeline over the
     text, with the flags/length as a robust backbone). It is trained and measured
     on the population HEAVEN actually routes to it — findings that carry a real
-    vuln-type signal — where honest 5-fold CV is R²≈0.64, MAE≈0.77, rank
-    correlation (Spearman) ρ≈0.80, and it lands the right severity band ~99% of
+    vuln-type signal — where honest 5-fold CV is R²≈0.65, MAE≈0.68, rank
+    correlation (Spearman) ρ≈0.81, and it lands the right severity band ~99% of
     the time within one level. Because this model is a RANKING AID that never sets
     a badge, the lenses that match its job are the rank correlation (does it order
     findings by true severity?) and the band accuracy, not exact-score R² (a harsh
     lens, since the same vuln class spans a wide CVSS range in real data). The
-    ordering even transfers to unseen future CVEs (temporal holdout: ρ≈0.71,
+    ordering even transfers to unseen future CVEs (temporal holdout: ρ≈0.70,
     within one band ~98%). It never sets a report's badge: the model is pinned to
     the deterministic per-class CVSS score and only orders findings the
     deterministic path could not score.

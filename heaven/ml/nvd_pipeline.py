@@ -185,7 +185,7 @@ class NVDPipeline:
             "baseScore":             v4.get("baseScore"),
         }
 
-    def parse_dataset(self, jsonl_path: Path):
+    def parse_dataset(self, jsonl_path: Path, return_years: bool = False):
         """
         Parse NVD JSONL dataset into feature arrays for model training.
 
@@ -193,6 +193,12 @@ class NVDPipeline:
           - X: numpy array of shape (n_samples, 13) with NVD_model.pkl features
           - y: numpy array of CVSS base scores (regression target)
           - feature_cols: list of the 13 feature names
+
+        With ``return_years=True`` a fourth element is appended — a numpy array of
+        each kept row's CVE publication year (0 when the date is unparseable),
+        aligned row-for-row with X/y. The trainer uses it for an honest temporal
+        holdout (train on older CVEs, test on the newest, unseen year) without a
+        second, drift-prone pass over the file.
         """
         import pandas as pd
 
@@ -242,8 +248,10 @@ class NVDPipeline:
                     try:
                         pub_date = datetime.fromisoformat(published[:10])
                         age_days = (datetime.now() - pub_date).days
+                        pub_year = pub_date.year
                     except Exception:
                         age_days = 365
+                        pub_year = 0
 
                     # Count references and CPE configurations
                     references = cve.get("references", [])
@@ -271,6 +279,7 @@ class NVDPipeline:
                         "epss_score_pct":      0.0,   # populated by fetch_epss post-processing
                         "in_kev":              0.0,   # populated by fetch_kev post-processing
                         "_cvss_base_score":    float(score),
+                        "_pub_year":           int(pub_year),
                     }
                     rows.append(row)
                 except Exception:
@@ -279,7 +288,11 @@ class NVDPipeline:
 
         df = pd.DataFrame(rows)
         feature_cols = self.FEATURE_NAMES
-        return df[feature_cols].values, df["_cvss_base_score"].values, feature_cols
+        X = df[feature_cols].values
+        y = df["_cvss_base_score"].values
+        if return_years:
+            return X, y, feature_cols, df["_pub_year"].values
+        return X, y, feature_cols
 
     async def fetch_epss(self, cve_ids: list[str],
                          session: aiohttp.ClientSession) -> dict[str, float]:

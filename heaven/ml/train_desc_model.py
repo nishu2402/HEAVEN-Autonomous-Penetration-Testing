@@ -1,8 +1,8 @@
 """
 HEAVEN — Description/type CVSS fallback model trainer
 
-Trains a text model on the NVD_Cybersecurity dataset (a CSV of ~1M CVEs, ~337k
-with a published CVSS base score) to predict a CVSS base score from what ANY
+Trains a text model on the NVD_Cybersecurity dataset (now regenerated from the
+full NVD 2.0 pull, ~304k scored CVEs) to predict a CVSS base score from what ANY
 finding carries: its descriptive text plus the seven vulnerability-type flags
 and the text length. This is the fallback half of HEAVEN's hybrid risk model —
 see :mod:`heaven.ml.desc_model`.
@@ -10,14 +10,14 @@ see :mod:`heaven.ml.desc_model`.
 The model is a scikit-learn ``Pipeline``: a TF-IDF vectoriser over the finding's
 description text (word 1–3 grams, 100k features) combined with the seven binary
 vuln-type flags and two length features, fed to a Ridge regressor. The description
-text is the dominant signal — using it lifts honest CV from R²≈0.43 (flags+length
-only) to R²≈0.58 on all real findings and R²≈0.64 on the deployment population.
+text is the dominant signal — using it lifts honest CV up from flags+length
+only to R²≈0.54 on all real findings and R²≈0.65 on the deployment population.
 The flags/length give a robust backbone so a terse finding title still scores
 sensibly when the TF-IDF vocabulary barely fires.
 
 TRAINED ON THE POPULATION HEAVEN ACTUALLY SCORES (measured honestly):
-  * The model is trained and evaluated on the ~316k CVEs with a NON-ZERO CVSS
-    base score — i.e. real, exploitable vulnerabilities. The ~22k CVEs scored
+  * The model is trained and evaluated on the ~304k CVEs with a NON-ZERO CVSS
+    base score — i.e. real, exploitable vulnerabilities. The CVEs scored
     exactly 0.0 (rejected / disputed / purely informational entries) are dropped:
     HEAVEN never routes them to this model (a finding only reaches it when it has
     a real vuln-type signal), and keeping them just inflates R² with trivially
@@ -37,9 +37,9 @@ TRAINED ON THE POPULATION HEAVEN ACTUALLY SCORES (measured honestly):
     CVSS range in real NVD data, so no honest feature available at scan time can
     pin the exact number. This model is a RANKING AID for scoreless findings that
     never sets a badge, so the lenses that match its job are the SEVERITY BAND
-    (right band ~71% of the time, within one band ~99% on the deployment
-    population) and the RANK CORRELATION (Spearman ρ≈0.80 — does it order findings
-    by true severity?). Both hold up under the temporal split (ρ≈0.71, within one
+    (right band ~73% of the time, within one band ~99% on the deployment
+    population) and the RANK CORRELATION (Spearman ρ≈0.81 — does it order findings
+    by true severity?). Both hold up under the temporal split (ρ≈0.70, within one
     band ~98% on the newest, unseen year).
   * The genuine "100%" is the CVSS formula on the actual metric vector (R²=1.0),
     which is what HEAVEN already uses for every finding's REPORTED severity

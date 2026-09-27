@@ -124,12 +124,16 @@ def install_tools_cmd(tools: tuple[str, ...], yes: bool, dry_run: bool) -> None:
             else:
                 _print(f"[red]✗[/red] {msg}")
             raise SystemExit(2)
-    elif tools and not include_browser:
-        # Names were given but every one resolved away (shouldn't happen) —
-        # nothing to do rather than defaulting to "all missing".
-        specs = []
-    else:
+    elif not tools:
+        # No arguments at all → the "full power" default: every missing PATH
+        # tool AND the browser (include_browser already selected the bundle).
         specs = missing_tools()
+    else:
+        # Names were given but every one was a browser alias (e.g. just
+        # `browser` / `playwright` / `chromium`) — only the browser is in
+        # scope, so touch no PATH tool. Falling through to missing_tools()
+        # here would silently reinstall the whole toolchain.
+        specs = []
 
     pending = [s for s in specs if not is_present(s.name)]
     browser_missing = include_browser and not _browser_present()[0]

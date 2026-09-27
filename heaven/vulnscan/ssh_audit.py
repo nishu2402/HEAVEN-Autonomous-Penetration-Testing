@@ -363,13 +363,13 @@ def _run_ssh_audit(host: str, port: int, timeout: float = 8.0) -> SSHAudit:
         try:
             sock.close()
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
         return result
     finally:
         try:
             sock.close()
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     try:
         algos = parse_kexinit(payload)

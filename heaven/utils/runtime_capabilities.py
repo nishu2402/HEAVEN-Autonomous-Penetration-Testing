@@ -225,7 +225,7 @@ def ensure_chromium(on_output: Optional[object] = None) -> tuple[bool, str]:
     ``on_output`` (optional callable) receives each installer line for live
     display; when omitted the child's stdout is captured quietly.
     """
-    import subprocess
+    import subprocess  # nosec B404 -- fixed argv (playwright), no shell
     import sys
 
     present, detail = _cached_chromium_status(use_cache=False)
@@ -240,7 +240,7 @@ def ensure_chromium(on_output: Optional[object] = None) -> tuple[bool, str]:
     env = os.environ.copy()
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     try:
-        proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
+        proc = subprocess.Popen(  # nosec B603 -- fixed argv, no shell
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     except Exception as e:  # noqa: BLE001
         return False, f"could not launch playwright installer: {e!r}"
@@ -254,7 +254,7 @@ def ensure_chromium(on_output: Optional[object] = None) -> tuple[bool, str]:
         try:
             proc.kill()
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
 
     timer = threading.Timer(float(_provision_timeout()), _kill)
     timer.start()
@@ -263,8 +263,8 @@ def ensure_chromium(on_output: Optional[object] = None) -> tuple[bool, str]:
             for line in proc.stdout:
                 try:
                     on_output(line.rstrip())
-                except Exception:  # noqa: BLE001 — a bad sink must not abort the install
-                    pass
+                except Exception:  # noqa: BLE001 -- a bad sink must not abort the install
+                    logger.debug("suppressed non-fatal exception", exc_info=True)
             proc.wait()
         else:
             proc.communicate()

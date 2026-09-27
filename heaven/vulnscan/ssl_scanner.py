@@ -618,7 +618,7 @@ def _recv_handshake_flight(sock: "socket.socket",
         try:
             sock.close()
         except Exception:
-            pass
+            logger.debug("suppressed non-fatal exception", exc_info=True)
     return hs, got_alert
 
 

@@ -132,6 +132,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one rides the existing subdomain path (feedback host-leads, DNS inventory,
   report) and each is recorded under a `vhosts` key for the scan record.
 
+### Changed
+
+- **Both CVSS ML models retrained on a new, authoritative NVD dataset — a genuine
+  accuracy lift with the same model recipes.** The training corpus was rebuilt from
+  the full NVD 2.0 API (**304,430 CVSS-scored CVEs**, up from the previous
+  2,788-CVE in-repo slice), and the description model's dataset is now regenerated
+  from that same pull (`nvd_data/NVD_Cybersecurity_Dataset.csv`), so training no
+  longer depends on any external / user-specific file.
+  - **Vector model** (`NVD_model.pkl`): 5-fold CV **R² 0.913 → 0.990**, MAE
+    0.22 → 0.037. The model reverse-engineers the deterministic CVSS base-score
+    formula, so the dense 304k-CVE grid coverage — not any recipe change (a config
+    sweep confirmed the existing 100 trees / depth 12 / leaf 2 is still optimal) —
+    is what recovers the formula almost exactly. A new **temporal holdout** (train
+    pre-2026 → test the unseen newest year, 68,866 CVEs) scores **R²=0.9695**, now
+    recorded in `metrics.json`. The client-facing badge remains the exact CVSS
+    formula; this model only orders findings.
+  - **Description model** (`cvss_text_model.joblib`): retrained on the same corpus
+    and slightly better on every deployment metric — Spearman **ρ 0.80 → 0.81**,
+    right band within one level **99.0% → 99.2%**, exact band **71% → 73%**,
+    exact-score **R² 0.64 → 0.65**. Text-only scoring keeps its honest information
+    ceiling (~0.65 R²); the headline stays the ranking correlation and band
+    accuracy, since it is a ranking aid that never sets a badge.
+  - The trainer now records a temporal-holdout metric for the vector model,
+    `NVDPipeline.parse_dataset` gained an opt-in `return_years`, both artifacts are
+    saved with `joblib compress=3`, and `download-model`'s SHA-256 pins were
+    updated to the retrained artifacts (re-attach them to the release when
+    publishing). Docs, model card, posters, and UI help text updated to the new
+    figures.
+
 ## [4.2.0]: 2026-09-24
 
 ### Added

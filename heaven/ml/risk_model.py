@@ -2,8 +2,10 @@
 HEAVEN — NVD CVSS Risk Model
 
 Loads the trained NVD ExtraTreesRegressor (13-feature CVSS-v3 predictor,
-5-fold CV R²≈0.91; see data/models/NVD_model.MODEL_CARD.md) and predicts a CVSS
-base score (0–10) for a finding. This is the vector half of the hybrid model
+5-fold CV R²≈0.99 on ~304k NVD CVEs; see data/models/NVD_model.MODEL_CARD.md)
+and predicts a CVSS base score (0–10) for a finding. It reverse-engineers the
+CVSS calculator, so a large, dense sample of real CVEs recovers the base-score
+formula almost exactly. This is the vector half of the hybrid model
 wired into the scan pipeline's ML-scoring phase via ``score_vulnerabilities()``;
 the description/type half lives in :mod:`heaven.ml.desc_model`.
 
@@ -219,7 +221,9 @@ def _extract_nvd_features(finding: dict) -> dict:
     av_num, ac_num, pr_num, ui_num, sc_num = 4, 2, 3, 2, 1
     ci_num, ii_num, ai_num = 1, 1, 1
 
-    cvss_vector = finding.get("cvss_vector", "")
+    # Coerce to str: a finding may carry cvss_vector=None (key present, null value)
+    # rather than omitting it, and None has no .strip(). Matches _has_cvss_signal.
+    cvss_vector = str(finding.get("cvss_vector") or "")
     # A CVSS v4.0 vector uses metrics this v3 parser doesn't understand, so don't
     # misread it — drop it and resolve the class vector below instead.
     if cvss_vector.strip().upper().startswith("CVSS:4"):
@@ -284,11 +288,21 @@ def _extract_nvd_features(finding: dict) -> dict:
             av_num, ac_num, pr_num, ui_num, sc_num = 2, 1, 1, 1, 1  # L/H/H/R/U
             ci_num, ii_num, ai_num = 1, 1, 1                         # N/N/N
 
-    epss      = float(finding.get("epss_score", 0.0))
+    def _num(key: str, default: float) -> float:
+        # A finding may carry these keys as None or a non-numeric string (e.g. a
+        # failed EPSS lookup) rather than omitting them, so coerce defensively
+        # instead of letting float()/min() raise on None.
+        try:
+            v = finding.get(key)
+            return default if v is None else float(v)
+        except (TypeError, ValueError):
+            return default
+
+    epss      = _num("epss_score", 0.0)
     in_kev    = 1.0 if finding.get("in_kev") else 0.0
-    age_days  = float(min(finding.get("vuln_age_days", 30), 3650))
-    ref_count = float(min(finding.get("ref_count", 5), 50))
-    cpe_count = float(min(finding.get("cpe_count", 1), 20))
+    age_days  = float(min(_num("vuln_age_days", 30.0), 3650.0))
+    ref_count = float(min(_num("ref_count", 5.0), 50.0))
+    cpe_count = float(min(_num("cpe_count", 1.0), 20.0))
 
     return {
         "attack_vector":        float(av_num),
@@ -311,8 +325,8 @@ def _has_cvss_signal(finding: dict) -> bool:
     """True when a finding carries a real, published CVSS vector or base score.
 
     Those findings feed the 13-feature vector model, which reverse-engineers the
-    CVSS calculator to ~R²=0.91. Findings WITHOUT a published score instead route
-    to the description/type model, which is grounded in ~337k real CVEs rather
+    CVSS calculator to ~R²=0.99. Findings WITHOUT a published score instead route
+    to the description/type model, which is grounded in ~304k real CVEs rather
     than a hand-curated class constant.
     """
     vec = str(finding.get("cvss_vector") or "")
@@ -335,12 +349,12 @@ async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[
 
     Hybrid routing per finding:
       * a real published CVSS vector/score → the 13-feature vector model
-        (:class:`HeavenRiskModel`, ~R²=0.91 — it reverses the CVSS calculator);
+        (:class:`HeavenRiskModel`, ~R²=0.99 — it reverses the CVSS calculator);
       * otherwise → the description/type model (:mod:`heaven.ml.desc_model`,
-        a TF-IDF + Ridge text model trained on ~316k real CVEs; a ranking aid on
+        a TF-IDF + Ridge text model trained on ~304k real CVEs; a ranking aid on
         the flagged findings HEAVEN actually routes to it, ordering them by true
-        severity at Spearman ρ≈0.80 and landing the right band ~99% within one
-        level, exact-score R²≈0.64) instead of a class constant.
+        severity at Spearman ρ≈0.81 and landing the right band ~99% within one
+        level, exact-score R²≈0.65) instead of a class constant.
     Both degrade cleanly: with no models, each finding keeps its own base score.
     """
     logger.info("Running ML risk scoring with hybrid CVSS model...")
@@ -383,8 +397,14 @@ async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[
                 fe_features = extract_features(f)
                 predicted = model.predict_cvss_score(fe_features.features)
 
-        epss = f.get("epss_score", 0.0)
-        in_kev = f.get("in_kev", False)
+        # epss may be absent, None, or a non-numeric string on a real finding
+        # (e.g. a failed EPSS enrichment); coerce so priority scoring can't raise.
+        try:
+            _e = f.get("epss_score")
+            epss = 0.0 if _e is None else float(_e)
+        except (TypeError, ValueError):
+            epss = 0.0
+        in_kev = bool(f.get("in_kev", False))
         f["predicted_cvss_score"] = round(predicted, 1)
         f["priority_score"] = NVDPipeline.compute_priority_score(predicted, epss, in_kev)
         f["risk_band"] = (

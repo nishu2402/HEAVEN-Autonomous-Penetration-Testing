@@ -131,10 +131,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delta. Discovered virtual hosts are recon assets, never findings: a resolvable
   one rides the existing subdomain path (feedback host-leads, DNS inventory,
   report) and each is recorded under a `vhosts` key for the scan record.
+- **`heaven vault`: an encrypted credential store wired as a real alternative to a
+  plaintext `.env`.** The AES-256-GCM `CredentialVault` shipped as a library but had
+  no operator surface; it now has a full command group (`vault init` · `status` ·
+  `set` · `get` · `list` · `rm` · `rotate` · `import-env` · `load`) and `heaven
+  serve` auto-loads the vault into the process environment on boot, so API keys and
+  integration secrets can live encrypted at rest instead of in cleartext. The
+  master password is never written to disk and secrets are masked in every listing.
+  New coverage in `tests/test_vault.py`.
+- **`heaven mitre`: live MITRE ATT&CK queries over TAXII 2.1.** The `TAXIIClient`
+  was unreachable from the CLI; it now backs `heaven mitre refresh` (pull the
+  current ATT&CK catalog from `attack-taxii.mitre.org`, `--check` compares feed
+  freshness against the embedded CWE→ATT&CK maps) and `heaven mitre technique <ID>`
+  (look up a single technique, with the groups and malware that use it). Results are
+  disk-cached under `data/mitre_cache/`. New coverage in `tests/test_mitre_taxii.py`.
 
 ### Changed
 
-- **Both CVSS ML models retrained on a new, authoritative NVD dataset — a genuine
+- **Both CVSS ML models retrained on a new, authoritative NVD dataset, a genuine
   accuracy lift with the same model recipes.** The training corpus was rebuilt from
   the full NVD 2.0 API (**304,430 CVSS-scored CVEs**, up from the previous
   2,788-CVE in-repo slice), and the description model's dataset is now regenerated
@@ -142,14 +156,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer depends on any external / user-specific file.
   - **Vector model** (`NVD_model.pkl`): 5-fold CV **R² 0.913 → 0.990**, MAE
     0.22 → 0.037. The model reverse-engineers the deterministic CVSS base-score
-    formula, so the dense 304k-CVE grid coverage — not any recipe change (a config
-    sweep confirmed the existing 100 trees / depth 12 / leaf 2 is still optimal) —
+    formula, so the dense 304k-CVE grid coverage (not any recipe change: a config
+    sweep confirmed the existing 100 trees / depth 12 / leaf 2 is still optimal)
     is what recovers the formula almost exactly. A new **temporal holdout** (train
     pre-2026 → test the unseen newest year, 68,866 CVEs) scores **R²=0.9695**, now
     recorded in `metrics.json`. The client-facing badge remains the exact CVSS
     formula; this model only orders findings.
   - **Description model** (`cvss_text_model.joblib`): retrained on the same corpus
-    and slightly better on every deployment metric — Spearman **ρ 0.80 → 0.81**,
+    and slightly better on every deployment metric: Spearman **ρ 0.80 → 0.81**,
     right band within one level **99.0% → 99.2%**, exact band **71% → 73%**,
     exact-score **R² 0.64 → 0.65**. Text-only scoring keeps its honest information
     ceiling (~0.65 R²); the headline stays the ranking correlation and band
@@ -160,6 +174,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     updated to the retrained artifacts (re-attach them to the release when
     publishing). Docs, model card, posters, and UI help text updated to the new
     figures.
+
+### Fixed
+
+- **Six false-positive / silent-miss classes found by a live-target verification
+  pass** (scanme.nmap.org · VAmPI · DVWA · OWASP Juice Shop). Each fix is
+  recall-safe: the finding still surfaces, only a wrong severity, label, or CVE was
+  corrected.
+  - **Client-side SSH CVEs no longer reported against a scanned server.**
+    CVE-2023-38408 (ssh-agent), CVE-2023-51385 (ProxyCommand) and
+    CVE-2020-15778 / CVE-2019-6111 (scp) are exploited against the connecting
+    client, never the listening `sshd`. A new `client_side` flag on the inline CVE
+    records drops them from server findings; server-side issues (Terrapin,
+    username enumeration, regreSSHion) are untouched.
+  - **`dir_fuzzer` ffuf path mislabelled a directory listing as a sensitive file.**
+    The ffuf branch now uses the same status-aware labelling as the native path
+    (`directory_listing` when the path ends in `/`, else `sensitive_file`).
+  - **Non-served directory discoveries no longer inflated to MEDIUM.** A bare
+    `/.svn` 301 with no body is now scored honestly (a status-aware confidence caps
+    the generic CVSS to the detector's band), so it stays informational.
+  - **`nosql_injection` no longer fires on a login-redirect length delta.** The
+    MongoDB-operator probe now bails when the baseline or response looks like a
+    login page or is not a served 200, and requires the return-all operator to beat
+    a non-matching negative control, not just the baseline. First test coverage
+    added for the detector (`tests/test_nosql_injection_fp.py`).
+  - **Reduced-coverage warnings for JavaScript apps are now surfaced.** The crawler
+    already emitted an honest `coverage_notes` entry when a single-page app was seen
+    without a full render, but the orchestrator dropped it; it is now carried into
+    the scan summary and printed by `heaven scan`, so a JS app that could not be
+    fully rendered no longer looks clean by omission.
+  - **A silent single-page-app render failure is now disclosed.** When a browser is
+    reported available but the render fails or returns empty and static recovery is
+    also empty, HEAVEN emits a distinct render-failed coverage note instead of
+    returning a near-empty result with no warning.
 
 ## [4.2.0]: 2026-09-24
 

@@ -9,7 +9,7 @@ honesty rule:
 > reproducible vulnerable lab for its domain, and its label promises exactly
 > what it delivers, no more.
 
-Each lab runs real software with a real misconfiguration — not a responder tuned
+Each lab runs real software with a real misconfiguration, not a responder tuned
 to return whatever HEAVEN wants to see. The scanner performs its normal,
 protocol-correct probe and the service answers as it would in the wild.
 
@@ -26,13 +26,13 @@ protocol-correct probe and the service answers as it would in the wild.
 | **wireless (posture)** | `wireless-compose.yml` | nginx serving an unauthenticated MikroTik RouterOS webfig panel (inert decoy) | `wireless_mgmt_unauthenticated` (high), vendor-fingerprinted |
 | **email (VRFY)** | `smtp-vrfy-compose.yml` | Real aiosmtpd MTA with VRFY enabled against a genuine local-user set | `smtp_user_enumeration` (250 valid vs 550 unknown) |
 | **dos** | `dos-compose.yml` | Single-threaded `http.server` (no header timeout) + memcached with UDP enabled | `slow_http_dos` (medium); memcached amplification best-effort |
-| **web (DOM XSS)** | `juiceshop-compose.yml` | OWASP Juice Shop (real Angular SPA): search `q` rendered to an innerHTML sink via `bypassSecurityTrustHtml` | `xss_dom_execution` proven live — the payload's JavaScript runs in headless Chromium (token-carrying dialog), a client-side DOM sink an HTTP-only scan cannot see |
-| **api** | `vampi-compose.yml` | VAmPI (real third-party OWASP API Top 10) publishing its own OpenAPI contract | `excessive_data_exposure` (`/users/v1/_debug` leaks passwords), `api_broken_auth` (`/users/v1`), `api_docs_exposed` — all via genuine spec-driven endpoint discovery |
+| **web (DOM XSS)** | `juiceshop-compose.yml` | OWASP Juice Shop (real Angular SPA): search `q` rendered to an innerHTML sink via `bypassSecurityTrustHtml` | `xss_dom_execution` proven live: the payload's JavaScript runs in headless Chromium (token-carrying dialog), a client-side DOM sink an HTTP-only scan cannot see |
+| **api** | `vampi-compose.yml` | VAmPI (real third-party OWASP API Top 10) publishing its own OpenAPI contract | `excessive_data_exposure` (`/users/v1/_debug` leaks passwords), `api_broken_auth` (`/users/v1`), `api_docs_exposed`, all via genuine spec-driven endpoint discovery |
 
 ## Safety
 
 Every service binds to **loopback only** (`127.0.0.1`). These stacks are
-deliberately insecure — never publish them on `0.0.0.0`. The container lab's
+deliberately insecure, so never publish them on `0.0.0.0`. The container lab's
 exposed Docker daemon is the *nested* dind daemon, isolated from the host
 daemon; nothing on the host is exposed. The cloud bucket holds a single benign
 marker object, nothing sensitive.
@@ -75,12 +75,12 @@ docker compose -f tests/benchmarks/labs/iot-compose.yml down -v
   is detected on a native-Linux Docker host, but Docker Desktop for Mac's
   userspace UDP NAT drops the reflected datagram, so that vector is asserted
   best-effort. The mode's label promises a susceptibility assessment, never a
-  flood — and it never floods.
+  flood, and it never floods.
 * **api** proves the REST scanner against a third-party app HEAVEN did not
   author (the always-on native fixture is HEAVEN's own). HEAVEN reads VAmPI's
   published OpenAPI contract and probes the endpoints it declares, then confirms
   the password leak, the unauthenticated user collection and the public spec
-  live. BOLA on VAmPI's string-keyed objects is intentionally not asserted — the
+  live. BOLA on VAmPI's string-keyed objects is intentionally not asserted: the
   numeric-ID BOLA probe honestly does not fire on `{username}`/`{book_title}`
   keys, and the lab does not pretend otherwise.
 

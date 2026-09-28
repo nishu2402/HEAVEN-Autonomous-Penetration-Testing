@@ -130,6 +130,27 @@ def test_proxycommand_51385_fixed_in_96_not_flagged():
     assert "CVE-2023-51385" in {r.cve_id for r in lookup_inline_cves("openssh", "9.5p1")}
 
 
+def test_client_side_ssh_cves_dropped_for_scanned_server():
+    # scanme.nmap.org's OpenSSH 6.6.1p1 matches four client-side-only CVEs
+    # (ssh-agent / scp / ProxyCommand). HEAVEN scans the sshd SERVER, which is not
+    # remotely attackable via any of them, so they must not surface as service
+    # findings. The server-side positives (username enum, Terrapin) must remain.
+    raw = {r.cve_id for r in lookup_inline_cves("openssh", "6.6.1p1")}
+    kept = {r.cve_id for r in CM._drop_client_side_only(lookup_inline_cves("openssh", "6.6.1p1"))}
+    for client_side in ("CVE-2023-38408", "CVE-2023-51385", "CVE-2020-15778", "CVE-2019-6111"):
+        assert client_side in raw                # version genuinely matches
+        assert client_side not in kept           # ...but suppressed as client-side
+    assert {"CVE-2018-15473", "CVE-2016-20012", "CVE-2023-48795"} <= kept  # server-side intact
+
+
+def test_client_side_drop_is_unconditional():
+    # Unlike the distro-backport drop, client-side suppression does not depend on
+    # the banner: no version or build makes a scanned server exposed to a purely
+    # client-side bug. A from-source (non-distro) OpenSSH is treated the same.
+    kept = {r.cve_id for r in CM._drop_client_side_only(lookup_inline_cves("openssh", "8.0p1"))}
+    assert "CVE-2020-15778" not in kept          # scp CVE dropped regardless of distro token
+
+
 def test_docker_registry_not_flagged_with_engine_cves():
     # nmap fingerprints a registry:2 service as "Docker Registry 2.0"; that "2.0"
     # is the registry API version, NOT a Docker Engine release, so it must not

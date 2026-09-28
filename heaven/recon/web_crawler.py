@@ -255,30 +255,43 @@ def _ensure_chromium_once() -> bool:
 def _spa_render_gap_note(
     url: str, frameworks: list[str],
     recovered_endpoints: int = 0, recovered_vectors: int = 0,
+    browser_failed: bool = False,
 ) -> dict[str, Any]:
-    """An honest, actionable coverage note for a SPA rendered WITHOUT a browser.
+    """An honest, actionable coverage note for a SPA the crawl could not fully see.
 
-    Emitted (never a finding) when a JS framework is detected but no headless
-    browser is available. The request surface was already recovered statically
-    from the JS bundles (see :func:`extract_js_surface`), so this is not a silent
-    no-op — it discloses the residual gap: DOM-only routes and forms a browser
-    builds at runtime, which static analysis cannot see, plus the one-command arm
-    for full fidelity. The recovered counts make the honest state explicit."""
+    Emitted (never a finding) in two cases: a JS framework is detected but no
+    headless browser is available (``browser_failed=False``), or a browser WAS
+    reported available but the render actually failed and static JS recovery also
+    came up empty (``browser_failed=True``) — the dangerous case, because the app
+    looks 'clean' when really its client-rendered surface was never reached. The
+    recovered counts make the honest state explicit either way."""
     fw = ", ".join(frameworks) if frameworks else "SPA"
+    if browser_failed:
+        impact = (f"{fw} detected. A headless-browser render was attempted but FAILED "
+                  f"and static JS recovery found {recovered_endpoints} endpoint(s) / "
+                  f"{recovered_vectors} vector(s) — the client-rendered attack surface "
+                  "was likely NOT reached, so findings are probably UNDER-REPORTED")
+        remediation = ("repair the Playwright browser: `heaven install-tools` (or "
+                       "`playwright install chromium`); a JS SPA scanned without a "
+                       "working renderer sees only the shell, not the real app")
+    else:
+        impact = (f"{fw} detected. Its request surface was recovered statically from "
+                  f"the JS bundles ({recovered_endpoints} endpoint(s), "
+                  f"{recovered_vectors} input vector(s)), but DOM-rendered routes and "
+                  "runtime-built forms may still be UNDER-REPORTED without the "
+                  "headless-browser renderer")
+        remediation = ("run `heaven install-tools` (or `playwright install chromium`) "
+                       "for full DOM-render fidelity, or set "
+                       "HEAVEN_AUTO_INSTALL_BROWSER=1 to provision it on demand")
     return {
         "type": "spa_render_reduced_fidelity",
         "url": url,
         "frameworks": frameworks,
+        "browser_failed": browser_failed,
         "recovered_endpoints": recovered_endpoints,
         "recovered_input_vectors": recovered_vectors,
-        "impact": (f"{fw} detected. Its request surface was recovered statically from "
-                   f"the JS bundles ({recovered_endpoints} endpoint(s), "
-                   f"{recovered_vectors} input vector(s)), but DOM-rendered routes and "
-                   "runtime-built forms may still be UNDER-REPORTED without the "
-                   "headless-browser renderer"),
-        "remediation": ("run `heaven install-tools` (or `playwright install chromium`) "
-                        "for full DOM-render fidelity, or set "
-                        "HEAVEN_AUTO_INSTALL_BROWSER=1 to provision it on demand"),
+        "impact": impact,
+        "remediation": remediation,
     }
 
 TECH_FINGERPRINTS = {
@@ -746,19 +759,22 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
             ready = _chromium_available()
             if not ready and _auto_install_browser_enabled():
                 ready = _ensure_chromium_once()  # consented on-demand provision
+            render_new = render_vectors = 0
+            render_failed = False
             if ready:
                 try:
                     rendered = await crawl_url_js(
                         url, max_pages=40, auth_config=auth_config,
                         evasion_headers=headers)
-                    new_count, added_vectors = _merge_rendered(rendered)
-                    if new_count or added_vectors:
+                    render_new, render_vectors = _merge_rendered(rendered)
+                    if render_new or render_vectors:
                         logger.info(
-                            f"SPA render on {url}: +{new_count} client-rendered routes, "
-                            f"+{added_vectors} input vectors beyond the static analysis")
+                            f"SPA render on {url}: +{render_new} client-rendered routes, "
+                            f"+{render_vectors} input vectors beyond the static analysis")
                 except Exception as exc:
+                    render_failed = True
                     logger.debug(f"SPA render skipped for {url}: {exc}")
-            else:
+            if not ready:
                 # No browser: the static pass already recovered the request surface.
                 # Disclose only the residual DOM-only gap (info, not warning — this
                 # is reduced fidelity, not a missed surface) with the one-command arm.
@@ -769,6 +785,20 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
                     ", ".join(frameworks) or "SPA", url, static_endpoints, static_vectors)
                 coverage_notes.append(
                     _spa_render_gap_note(url, frameworks, static_endpoints, static_vectors))
+            elif (static_endpoints + static_vectors + render_new + render_vectors) == 0:
+                # A browser was ready but the SPA yielded NO surface beyond the shell —
+                # whether the render raised (render_failed) or returned nothing, and
+                # static JS recovery came up empty too. This is the silent-miss case:
+                # without this note a JS app that was never really reached looks
+                # 'clean'. An SPA essentially always has client-rendered routes, so an
+                # empty result means the crawl could not see the app, not that it is
+                # small. Warn and disclose rather than hide it.
+                logger.warning(
+                    "SPA on %s yielded no surface beyond the shell (render_failed=%s) — "
+                    "the client-rendered app was NOT reached; findings under-reported.",
+                    url, render_failed)
+                coverage_notes.append(_spa_render_gap_note(
+                    url, frameworks, static_endpoints, static_vectors, browser_failed=True))
         api_eps = await discover_apis(url, evasion_headers=headers)
         all_endpoints.extend(eps)
         all_endpoints.extend(api_eps)

@@ -277,12 +277,27 @@ class SelfAuditor:
                             description=f"PBKDF2 iterations: {iterations} (OWASP recommends ≥600,000 for SHA-256)",
                             remediation="Increase PBKDF2_ITERATIONS to at least 600,000",
                         ))
-            self._findings.append(AuditFinding(
-                category="encryption", severity="info",
-                title="Encryption vault present",
-                description="AES-256-GCM credential vault is configured",
-                remediation="",
-            ))
+            # Report the REAL state, not merely that vault.py ships. An
+            # initialised vault leaves an encrypted file on disk; without it,
+            # the vault is available but secrets still come from .env.
+            vault_file = self._root / "data" / "vault.enc"
+            if vault_file.exists():
+                self._findings.append(AuditFinding(
+                    category="encryption", severity="info",
+                    title="Encrypted credential vault in use",
+                    description="An AES-256-GCM vault (data/vault.enc) is initialised; "
+                                "secrets loaded from it never touch the disk in plaintext",
+                    remediation="",
+                ))
+            else:
+                self._findings.append(AuditFinding(
+                    category="encryption", severity="info",
+                    title="Encrypted credential vault available (not in use)",
+                    description="AES-256-GCM vault support ships but no vault is "
+                                "initialised; API keys are read from .env",
+                    remediation="Optional: `heaven vault init` then `heaven vault "
+                                "import-env --purge` to keep secrets encrypted at rest",
+                ))
 
     def _check_file_permissions(self) -> None:
         """Check sensitive file permissions."""

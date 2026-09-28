@@ -33,7 +33,7 @@ competitors, so that comparison is a one-command diff.
 | **CVSS prediction via ML** | ✅ hybrid: vector R²=0.99, text ranking aid Spearman ρ=0.81 / right band 99% within one level (exact-score R²=0.65) | ❌ | ❌ | ❌ | ⚠️ uses NVD | ⚠️ |
 | **EPSS + CISA KEV scoring** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | **Exploit-DB integration** | ✅ | ❌ | ❌ | ❌ | ⚠️ | ❌ |
-| **Post-exploitation** (linpeas / BloodHound / lateral) | ✅ | ❌ | ❌ | ⚠️ via shell | ❌ | ❌ |
+| **Post-exploitation** (self-contained privesc / BloodHound / lateral) | ✅ | ❌ | ❌ | ⚠️ via shell | ❌ | ❌ |
 | **Methodology mapping** (OWASP / NIST / PTES) | ✅ | ⚠️ | ⚠️ | ❌ | ✅ | ✅ |
 | **MITRE ATT&CK mapping** | ✅ | ❌ | ❌ | ❌ | ⚠️ | ✅ |
 | **Web UI** | ✅ React (modern dark) | ✅ Java GUI | ✅ Java GUI | ❌ CLI only | ✅ | ✅ |

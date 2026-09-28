@@ -819,6 +819,19 @@ def scan(
 
     _print_inventory(summary.get("assets"))
 
+    # Honest coverage caveats (e.g. a SPA crawled without a headless browser).
+    # These are never findings, but the operator must SEE them: silently returning
+    # a handful of findings on a JS-heavy app that was never rendered is exactly
+    # the "missed findings" failure the tool exists to prevent.
+    for note in summary.get("coverage_notes", []) or []:
+        impact = str(note.get("impact") or "").strip()
+        remediation = str(note.get("remediation") or "").strip()
+        if not impact:
+            continue
+        _print(f"  [yellow]⚠ Reduced coverage[/yellow] [dim]· {impact}[/dim]")
+        if remediation:
+            _print(f"    [dim]For full coverage:[/dim] [cyan]{remediation}[/cyan]")
+
     if engagement_store:
         scan_id = summary.get("scan_id", orch.scan_id)
         # The orchestrator publishes the SAME deduped list under both

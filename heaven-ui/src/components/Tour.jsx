@@ -22,7 +22,7 @@ const STEPS = [
   { icon: "⚡", title: "Scans", to: "/scans",
     body: "Launch real scans: targets are validated live and gated behind an authorization confirmation, or click 'Run demo scan' to watch the full loop with no target." },
   { icon: "⚠", title: "Findings & Reports", to: "/findings",
-    body: "Triage findings with full evidence and a copy-paste curl repro, then export a deliverable in 8 formats (PDF, HTML, SARIF, Burp XML …)." },
+    body: "Triage findings with full evidence and a copy-paste curl repro, then export a deliverable in 9 formats (PDF, HTML, SARIF, JUnit, Burp XML …)." },
   { icon: "⚙", title: "Settings", to: "/settings",
     body: "Add API keys (Gemini / Anthropic / OpenAI, Shodan, NVD, Jira …) anytime, saved to .env and live across the CLI, API and web UI. All optional." },
   { icon: "🩺", title: "System Health", to: "/health",

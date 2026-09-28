@@ -505,7 +505,7 @@ class DirectoryFuzzer:
             "vuln_type": "directory_listing" if path.endswith("/") else "sensitive_file",
             "title": title,
             "severity": severity,
-            "confidence": 0.90,
+            "confidence": _confidence_for(status),
             "evidence": {
                 "status_code": status,
                 "response_size": size,
@@ -650,10 +650,15 @@ class DirectoryFuzzer:
                     continue
                 findings.append({
                     "target": url,
-                    "vuln_type": "sensitive_file",
+                    # Match the native engine's classification (see _scan_target):
+                    # a served directory (trailing slash) is a directory_listing,
+                    # not a sensitive_file. The ffuf path used to hardcode
+                    # "sensitive_file" for every hit, mislabelling a public
+                    # /images/ autoindex as a sensitive-file exposure.
+                    "vuln_type": "directory_listing" if path.endswith("/") else "sensitive_file",
                     "title": _path_title(path, status, served=_served(status)),
                     "severity": _severity_for(path, status),
-                    "confidence": 0.90,
+                    "confidence": _confidence_for(status),
                     "evidence": {
                         "status_code": status,
                         "response_size": result.get("length", 0),
@@ -867,6 +872,20 @@ def _severity_for(path: str, status: int) -> str:
                                "install", "setup", "readme", "changelog"]):
         return "medium"
     return "info"
+
+
+def _confidence_for(status: int) -> float:
+    """Status-aware confidence, mirroring :func:`_severity_for`.
+
+    A resource actually SERVED (2xx) is a confident exposure. A path that only
+    exists behind an access control (401/403 — the secure state) or that
+    redirects (3xx) is weak discovery, not a confirmed exposure — so it carries a
+    deliberately low confidence (< 0.5, no CVE). That is exactly the signal
+    ``cvss.is_unconfirmed_finding`` keys on to cap the severity to the detector's
+    honest low/info band, instead of letting a generic class CVSS inflate a bare
+    `/.svn` 301 redirect into a MEDIUM "sensitive file". A served hit is
+    unaffected and still reports at full confidence."""
+    return 0.90 if _served(status) else 0.40
 
 
 def _path_title(path: str, status: int, served: bool = True) -> str:

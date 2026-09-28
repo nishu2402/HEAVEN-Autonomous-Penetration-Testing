@@ -212,125 +212,6 @@ def _cyclic_pattern(length: int) -> bytes:
     return b"".join(pattern)[:length]
 
 
-# ── Protocol Fuzzer ──
-
-class ProtocolFuzzer:
-    """Fuzz network protocols for crash/anomaly detection."""
-
-    def __init__(self, timeout: float = 5.0):
-        self.timeout = timeout
-        self.candidates: list[AnomalyCandidate] = []
-
-    async def fuzz_tcp_service(self, host: str, port: int, service: str = "") -> list[AnomalyCandidate]:
-        """Fuzz a TCP service with mutation payloads and monitor for anomalies."""
-        candidates = []
-        mutation = MutationEngine()
-
-        # Buffer overflow probes
-        for i, payload in enumerate(mutation.buffer_overflow_payloads()[:5]):
-            result = await self._send_tcp_probe(host, port, payload)
-            if result:
-                anomaly = self._analyze_response_anomaly(result, "buffer_overflow", len(payload))
-                if anomaly:
-                    anomaly.target = f"{host}:{port}"
-                    anomaly.service = service
-                    anomaly.port = port
-                    candidates.append(anomaly)
-
-        # Format string probes
-        for format_payload in mutation.format_string_payloads()[:5]:
-            result = await self._send_tcp_probe(host, port, format_payload.encode())
-            if result:
-                anomaly = self._analyze_format_string_response(result, format_payload)
-                if anomaly:
-                    anomaly.target = f"{host}:{port}"
-                    anomaly.service = service
-                    anomaly.port = port
-                    candidates.append(anomaly)
-
-        return candidates
-
-    async def _send_tcp_probe(self, host: str, port: int, payload: bytes) -> Optional[dict]:
-        """Send a TCP probe and capture response characteristics."""
-        try:
-            start = time.time()
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port), timeout=self.timeout
-            )
-            writer.write(payload)
-            await writer.drain()
-
-            try:
-                response = await asyncio.wait_for(reader.read(4096), timeout=self.timeout)
-            except asyncio.TimeoutError:
-                response = b""
-
-            elapsed = (time.time() - start) * 1000
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                logger.debug("suppressed non-fatal exception", exc_info=True)
-
-            return {
-                "response": response,
-                "response_len": len(response),
-                "response_time_ms": elapsed,
-                "payload_len": len(payload),
-                "connection_reset": False,
-            }
-        except ConnectionResetError:
-            return {"response": b"", "response_len": 0, "response_time_ms": 0,
-                    "payload_len": len(payload), "connection_reset": True}
-        except Exception:
-            return None
-
-    def _analyze_response_anomaly(self, result: dict, category: str, payload_len: int) -> Optional[AnomalyCandidate]:
-        """Detect anomalous responses that may indicate memory corruption."""
-        # Connection reset after large payload → possible crash
-        if result["connection_reset"] and payload_len > 1024:
-            return AnomalyCandidate(
-                target="", category="buffer_overflow",
-                confidence=0.6, severity="critical",
-                description=f"Service reset after {payload_len}-byte payload (potential buffer overflow)",
-                evidence={"payload_len": payload_len, "connection_reset": True},
-                remediation="Review input validation and buffer bounds checking",
-                cwe_id="CWE-120", technique="protocol_fuzzing",
-            )
-
-        # Abnormally long response time → possible CPU exhaustion
-        if result["response_time_ms"] > 5000:
-            return AnomalyCandidate(
-                target="", category="resource_exhaustion",
-                confidence=0.4, severity="high",
-                description=f"Abnormal response delay ({result['response_time_ms']:.0f}ms) after probe",
-                evidence={"response_time_ms": result["response_time_ms"]},
-                remediation="Investigate timeout handling and resource limits",
-                cwe_id="CWE-400", technique="timing_analysis",
-            )
-
-        return None
-
-    def _analyze_format_string_response(self, result: dict, payload: str) -> Optional[AnomalyCandidate]:
-        """Detect format string vulnerability indicators."""
-        response_text = result["response"].decode("utf-8", errors="replace")
-
-        # Check if response contains memory addresses (format string leak)
-        hex_pattern = re.findall(r"0x[0-9a-fA-F]{6,16}", response_text)
-        pointer_pattern = re.findall(r"(?:0x)?[0-9a-fA-F]{8,16}(?:\.[0-9a-fA-F]{8,16})+", response_text)
-
-        if len(hex_pattern) > 3 or len(pointer_pattern) > 2:
-            return AnomalyCandidate(
-                target="", category="format_string",
-                confidence=0.7, severity="critical",
-                description="Potential format string vulnerability, memory addresses leaked in response",
-                evidence={"leaked_addresses": hex_pattern[:5], "payload": payload[:100]},
-                remediation="Use parameterized format functions. Never pass user input as format strings.",
-                cwe_id="CWE-134", technique="format_string_fuzzing",
-            )
-        return None
-
-
 # ── Web Application Anomaly Probe ──
 
 class WebAnomalyProbe:
@@ -739,15 +620,42 @@ class WebAnomalyProbe:
         Tests JSON operator injection and type confusion.
         CWE-943.
         """
-        candidates = []
+        candidates: list[AnomalyCandidate] = []
         import json
 
+        from heaven.vulnscan.access_control import _looks_like_login
+
         try:
-            # Baseline
+            # Baseline: a specific value → the "one/no record" response shape.
             async with session.request(method, url, params={param: "test"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                base_status = r.status
                 base_body = await r.text()
                 base_len = len(base_body)
+
+            # A NoSQL operator test is only meaningful against a valid data
+            # response. If the baseline is not a served 200 or is a login/auth page
+            # (a weird param bounced us to login), the comparison is invalid — a
+            # length change then reflects the redirect, not injection. Bailing here
+            # is what stops the live DVWA false positive: `file[$exists]` on a
+            # MySQL app returned the 1342-byte login page vs a 436-byte baseline
+            # and was mis-scored CRITICAL on the raw length delta alone.
+            if base_status != 200 or _looks_like_login(base_body):
+                return candidates
+
+            # Negative control: an operator-SHAPED key whose value should match
+            # nothing. If the app returns an equally large response for THIS too,
+            # then "big response" is just how it answers any bracketed param — not
+            # MongoDB operator semantics — so a return-all operator must beat this
+            # control, not merely the baseline, to count as injection.
+            neg_len = base_len
+            try:
+                async with session.request(
+                        method, url, params={param + "[$eq]": "heaven_nx_value_zzz"},
+                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
+                    neg_len = len(await r.text())
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
 
             # MongoDB operator injection via URL parameters
             mongo_payloads = [
@@ -762,8 +670,14 @@ class WebAnomalyProbe:
                     async with session.request(method, url, params=payload_dict,
                                                 timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                         body = await r.text()
-                        # If MongoDB operator returns MORE data than a specific value → injection
-                        if r.status == 200 and len(body) > base_len + 100:
+                        # Real operator injection: a "return-all" operator returns
+                        # substantially MORE than both a specific value (baseline)
+                        # and the non-matching operator-shaped control, and the
+                        # response is real data — never a login/auth page.
+                        if (r.status == 200
+                                and not _looks_like_login(body)
+                                and len(body) > base_len + 100
+                                and len(body) > neg_len + 100):
                             candidates.append(AnomalyCandidate(
                                 target=url, category="nosql_injection",
                                 confidence=0.80, severity="critical",
@@ -803,7 +717,10 @@ class WebAnomalyProbe:
                             timeout=aiohttp.ClientTimeout(total=self.timeout),
                         ) as r:
                             body = await r.text()
-                            if r.status == 200 and len(body) > base_len + 50:
+                            if (r.status == 200
+                                    and not _looks_like_login(body)
+                                    and len(body) > base_len + 50
+                                    and len(body) > neg_len + 50):
                                 candidates.append(AnomalyCandidate(
                                     target=url, category="nosql_injection",
                                     confidence=0.82, severity="critical",
@@ -1323,59 +1240,3 @@ class WebAnomalyProbe:
             logger.debug("suppressed non-fatal exception", exc_info=True)
 
         return candidates
-
-
-# ── Version Regression Analyzer ──
-
-class VersionRegressionAnalyzer:
-    """Detect services running versions with known regression patterns."""
-
-    # Services where specific version transitions introduced vulnerabilities
-    REGRESSION_DB: dict[str, list[dict]] = {
-        "openssh": [
-            {"affected": ["8.5", "8.5p1", "8.6", "8.6p1", "8.7", "8.7p1", "8.8", "8.8p1", "9.0", "9.0p1",
-                          "9.1", "9.1p1", "9.2", "9.2p1", "9.3", "9.3p1", "9.4", "9.4p1", "9.5", "9.5p1",
-                          "9.6", "9.6p1", "9.7", "9.7p1"],
-             "cve": "CVE-2024-6387", "name": "regreSSHion", "severity": "critical",
-             "desc": "Race condition in signal handler allowing RCE"},
-        ],
-        "apache": [
-            {"affected": ["2.4.49", "2.4.50"],
-             "cve": "CVE-2021-41773", "name": "Path Traversal", "severity": "critical",
-             "desc": "Path traversal and file disclosure via crafted request"},
-        ],
-        "nginx": [
-            {"affected": ["1.1.x", "1.17.x"],
-             "cve": "CVE-2021-23017", "name": "DNS Resolver Off-by-One", "severity": "high",
-             "desc": "Off-by-one in DNS resolver allowing memory disclosure"},
-        ],
-        "curl": [
-            {"affected": ["8.0", "8.1", "8.2", "8.3"],
-             "cve": "CVE-2023-38545", "name": "SOCKS5 Heap Overflow", "severity": "critical",
-             "desc": "Heap buffer overflow in SOCKS5 proxy handshake"},
-        ],
-    }
-
-    @classmethod
-    def check(cls, service: str, version: str) -> list[AnomalyCandidate]:
-        """Check a service version against the regression database."""
-        candidates = []
-        service_key = service.lower().replace("-", "").replace("_", "")
-
-        for svc_name, regressions in cls.REGRESSION_DB.items():
-            if svc_name not in service_key and service_key not in svc_name:
-                continue
-            for reg in regressions:
-                for affected_ver in reg["affected"]:
-                    if version.startswith(affected_ver) or version == affected_ver:
-                        candidates.append(AnomalyCandidate(
-                            target="", category="version_regression",
-                            confidence=0.95, severity=reg["severity"],
-                            description=f"{reg['name']}: {reg['desc']} ({reg['cve']})",
-                            evidence={"service": service, "version": version,
-                                      "cve": reg["cve"], "affected_range": reg["affected"][:3]},
-                            remediation=f"Upgrade {service} immediately. Patch for {reg['cve']}.",
-                            cwe_id="CWE-119", technique="version_regression",
-                        ))
-        return candidates
-

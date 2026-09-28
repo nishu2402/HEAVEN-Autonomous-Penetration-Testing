@@ -14,7 +14,6 @@ stream. Otherwise it falls back to fresh entropy each run, preserving
 existing behaviour.
 
 Consumers:
-  - heaven.ml.ai_brain.ScanStrategyOptimizer  (epsilon-greedy / UCB)
   - heaven.recon.evasion_engine               (User-Agent rotation)
   - any future module that needs reproducibility
 """

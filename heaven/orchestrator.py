@@ -1311,6 +1311,11 @@ class ScanOrchestrator:
         elapsed = self.progress.elapsed_seconds
 
         all_vulns, all_assets, all_dns = [], [], []
+        # Honest coverage notes (e.g. a SPA crawled without a headless browser, so
+        # DOM-rendered routes may be under-reported). The crawler emits these but
+        # nothing used to consume them, so the operator never learned coverage was
+        # reduced — a silent under-report on JS-heavy apps. Surface them here.
+        all_coverage_notes: list[dict] = []
         sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
         # CVE id -> {in_kev, epss} from the NVD CPE catalog sweep (Vulnerability
         # Mapping task). Threat-intel enrichment we cross-reference onto the real
@@ -1336,6 +1341,7 @@ class ScanOrchestrator:
             # the summary so the Assets view and the report's DNS section render
             # the attack surface's naming layer, not just host/port inventory.
             all_dns.extend(data.get("dns_records", []))
+            all_coverage_notes.extend(data.get("coverage_notes", []))
             for cve in data.get("nvd_cve_catalog", []):
                 cid = str(cve.get("cve_id") or "").upper()
                 if cid:
@@ -1397,6 +1403,7 @@ class ScanOrchestrator:
             "leads": all_leads,
             "assets": all_assets,
             "dns_records": all_dns,
+            "coverage_notes": all_coverage_notes,
             **sev_counts,
             "results": {r.task_id: r.state.value for r in all_results},
         }

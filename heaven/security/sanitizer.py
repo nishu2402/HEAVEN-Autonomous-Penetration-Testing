@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -306,28 +304,3 @@ class InputSanitizer:
         if errors:
             logger.warning(f"Target sanitization: {len(errors)} errors found")
         return sanitized
-
-
-class RateLimiter:
-    """Token bucket rate limiter per user/API key."""
-
-    def __init__(self, max_requests: int = 100, window_seconds: int = 60):
-        self._max_requests = max_requests
-        self._window = window_seconds
-        self._buckets: dict[str, list[float]] = defaultdict(list)
-
-    def allow(self, key: str) -> bool:
-        now = time.time()
-        bucket = self._buckets[key]
-        # Remove expired entries
-        self._buckets[key] = [t for t in bucket if now - t < self._window]
-        if len(self._buckets[key]) >= self._max_requests:
-            logger.warning(f"Rate limit exceeded for {key}")
-            return False
-        self._buckets[key].append(now)
-        return True
-
-    def remaining(self, key: str) -> int:
-        now = time.time()
-        active = [t for t in self._buckets.get(key, []) if now - t < self._window]
-        return max(0, self._max_requests - len(active))

@@ -90,6 +90,35 @@ def _wait_and_open(host: str, port: int, url: str, timeout: float = 20.0) -> Non
         _print(f"[yellow]Open the Command Centre manually →[/yellow] [cyan]{url}[/cyan]")
 
 
+def _load_vault_secrets() -> None:
+    """Populate the environment from the encrypted vault, if one is in use.
+
+    Best-effort and non-fatal: a vault is optional, and a missing password just
+    means secrets keep coming from ``.env``. Only runs when a vault file exists,
+    so users who never created one pay nothing.
+    """
+    try:
+        from heaven.security import vault as vaultlib
+    except Exception:  # security package unavailable — nothing to do
+        return
+    if not vaultlib.vault_exists():
+        return
+    if not os.environ.get("HEAVEN_VAULT_PASSWORD"):
+        _print("[dim]· Encrypted vault present — set HEAVEN_VAULT_PASSWORD to load its "
+               "keys, or continue with .env.[/dim]")
+        return
+    try:
+        count, message = vaultlib.load_into_env()
+    except Exception as exc:  # a vault hiccup must never stop the server booting
+        logger.debug("serve: vault load failed: %s", exc)
+        _print("[yellow]· Vault present but could not be loaded — continuing with .env.[/yellow]")
+        return
+    if count:
+        _print(f"[green]✓ Loaded {count} credential(s) from the encrypted vault.[/green]")
+    else:
+        _print(f"[dim]· Vault: {message}.[/dim]")
+
+
 @click.command()
 @click.option("--host", default="127.0.0.1",
               help="API server host (default: 127.0.0.1, use 0.0.0.0 only behind a TLS reverse proxy)")
@@ -116,6 +145,11 @@ def serve(host: str, port: int, open_browser: bool) -> None:
         sys.exit(1)
 
     _print(f"[cyan]Starting HEAVEN API server on {host}:{port}[/cyan]")
+
+    # Encrypted credential vault (optional): if one exists, decrypt its keys into
+    # the environment BEFORE the app + LLM gateway boot, so vault-stored secrets
+    # drive the server exactly as .env values would — without plaintext on disk.
+    _load_vault_secrets()
 
     if host == "0.0.0.0":  # intentional all-interfaces bind; user is warned below
         _print("[yellow]⚠  Binding to 0.0.0.0 · make sure you are behind a reverse proxy with TLS.[/yellow]")

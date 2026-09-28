@@ -112,3 +112,34 @@ def test_dedup_preserves_first_and_drops_repeat_targets():
     ]
     out = DirectoryFuzzer._dedup(findings)
     assert [f["target"] for f in out] == ["http://t/a", "http://t/b"]
+
+
+def test_confidence_is_status_aware():
+    # A served resource (2xx) is a confident exposure; a redirect/access-controlled
+    # path is weak discovery and must carry sub-0.5 confidence so the severity
+    # pipeline caps it to the detector's honest band instead of inflating it.
+    assert DF._confidence_for(200) == 0.90
+    assert DF._confidence_for(403) < 0.5
+    assert DF._confidence_for(401) < 0.5
+    assert DF._confidence_for(301) < 0.5
+
+
+def test_svn_301_redirect_not_inflated_to_medium():
+    # Live regression (scanme.nmap.org): a bare /.svn that only 301-redirects (no
+    # content served) was stored as MEDIUM because a flat 0.90 confidence stopped
+    # the severity reconciler from capping the generic sensitive-file class CVSS.
+    # With status-aware confidence it stays INFO — an honest "path exists" note.
+    from heaven.devsecops.vuln_kb import canonical_severity
+    finding = {
+        "vuln_type": "sensitive_file",
+        "severity": DF._severity_for("/.svn", 301),
+        "confidence": DF._confidence_for(301),
+        "evidence": {"predicted_cvss_score": 5.3, "status_code": 301, "cwe": "CWE-548"},
+    }
+    assert canonical_severity(finding) == "info"
+
+
+def test_served_sensitive_file_keeps_full_confidence():
+    # The fix must not weaken a genuine served exposure: a 200 hit still reports at
+    # full confidence so a real backup/.git/.env exposure is never demoted.
+    assert DF._confidence_for(200) == 0.90

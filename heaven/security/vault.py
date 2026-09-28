@@ -179,6 +179,15 @@ class CredentialVault:
         self._unlocked_at = 0.0
         logger.info("Vault locked: encryption keys wiped from memory")
 
+    def save(self) -> None:
+        """Persist the vault to disk.
+
+        Public wrapper over the internal writer so callers can materialise a
+        freshly ``initialize()``-d (still empty) vault — ``store()`` persists on
+        its own, but a brand-new vault has nothing to store yet.
+        """
+        self._save()
+
     def store(self, key: str, value: str, metadata: Optional[dict] = None,
               rotation_days: Optional[int] = None) -> None:
         """Store a credential in the vault."""
@@ -387,3 +396,75 @@ class CredentialVault:
             "auto_lock_seconds": self._auto_lock_seconds,
             "needs_rotation": len(self.check_rotation_status()) if not self.is_locked else "N/A",
         }
+
+
+# ═══════════════════════════════════════════
+# PROCESS INTEGRATION
+# ═══════════════════════════════════════════
+# These bind the vault to the rest of HEAVEN. Every secret in the product is
+# read from ``os.environ`` (through :mod:`heaven.settings_catalog`), so a key
+# placed in the vault and loaded here drives the running scanner, the LLM
+# gateway, NVD enrichment, SIEM/ticketing, etc. exactly as a ``.env`` value
+# would — but it never touches the disk in plaintext.
+
+def default_vault_path() -> Path:
+    """Resolve the vault file: ``HEAVEN_VAULT_PATH`` > config > ``data/vault.enc``."""
+    env = (os.environ.get("HEAVEN_VAULT_PATH") or "").strip()
+    if env:
+        return Path(env)
+    try:
+        from heaven.config import get_config
+
+        return Path(get_config().security.vault_path)
+    except Exception:  # config not importable in a bare context — fall back
+        return Path("data/vault.enc")
+
+
+def vault_exists(path: Optional[Path] = None) -> bool:
+    """True when an initialised vault file is present on disk."""
+    return (path or default_vault_path()).exists()
+
+
+def open_vault(password: str, path: Optional[Path] = None) -> Optional["CredentialVault"]:
+    """Unlock the on-disk vault; return the unlocked instance or ``None`` on failure."""
+    vault = CredentialVault(vault_path=path or default_vault_path())
+    return vault if vault.unlock(password) else None
+
+
+def load_into_env(
+    password: Optional[str] = None,
+    *,
+    path: Optional[Path] = None,
+    override: bool = False,
+) -> tuple[int, str]:
+    """Decrypt the vault and populate ``os.environ`` for the running process.
+
+    This is the seam that makes stored credentials actually take effect. The
+    password comes from the ``password`` argument or ``HEAVEN_VAULT_PASSWORD``.
+    Existing environment values are preserved unless ``override`` is set (so a
+    key already exported in the shell or written to ``.env`` still wins by
+    default). The vault is locked again before returning — nothing is kept
+    unlocked in memory. Returns ``(count_loaded, human_message)``.
+    """
+    pw = password if password is not None else os.environ.get("HEAVEN_VAULT_PASSWORD", "")
+    if not pw:
+        return 0, "no master password (set HEAVEN_VAULT_PASSWORD or pass one)"
+    p = path or default_vault_path()
+    if not p.exists():
+        return 0, f"no vault at {p}"
+    vault = open_vault(pw, p)
+    if vault is None:
+        return 0, "vault unlock failed (wrong password or tampered file)"
+    loaded = 0
+    try:
+        for meta in vault.list_keys():
+            key = meta["key"]
+            if not override and (os.environ.get(key) or "").strip():
+                continue
+            value = vault.retrieve(key)
+            if value is not None:
+                os.environ[key] = value
+                loaded += 1
+    finally:
+        vault.lock()
+    return loaded, f"loaded {loaded} credential(s) from {p}"

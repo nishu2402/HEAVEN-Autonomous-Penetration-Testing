@@ -34,17 +34,17 @@ tests/benchmarks/
 └── reports/                      ← per-run outputs (gitignored)
 ```
 
-## SAST tier — the OWASP Benchmark
+## SAST tier: the OWASP Benchmark
 
 `owasp_benchmark.py` scores HEAVEN's **own** Semgrep-based Java rules (shipped in
 `heaven/vulnscan/sast_rules/java_security.yml`) against the standard
-[OWASP Benchmark](https://owasp.org/www-project-benchmark/) v1.2 — 2 740 real
+[OWASP Benchmark](https://owasp.org/www-project-benchmark/) v1.2: 2,740 real
 Java test cases, each either a genuine vulnerability or a safe look-alike across
 11 CWE classes. It reports the Benchmark's headline metric, the **Youden index**
 `J = TPR − FPR` (0.0 for a tool that flags everything, 1.0 for a perfect tool),
 per category and pooled.
 
-The corpus is **not vendored** — it is GPLv2 and HEAVEN is MIT — so it is fetched
+The corpus is **not vendored** (it is GPLv2 and HEAVEN is MIT), so it is fetched
 (a commit-pinned clone, or a checkout you point at) and its `expectedresults`
 ground truth is read from there, never copied in. The pinned clone is cached under
 `$XDG_CACHE_HOME/heaven/owasp-benchmark` (override with
@@ -189,7 +189,7 @@ Other known caveats:
 4. Run; the same metrics + reporters work unchanged.
 
 OWASP Juice Shop (web DOM-XSS) and VAmPI (OWASP API Top 10) are already wired as
-gated live labs under `tests/benchmarks/labs/` — see that directory's README.
+gated live labs under `tests/benchmarks/labs/`. See that directory's README.
 Suggested further target: **WebGoat** (Java, lesson-based, covers obscure
 classes), though the Java coverage it would add is already scored via the OWASP
 Benchmark SAST tier above.

@@ -178,7 +178,7 @@ if HAS_CLICK:
         ssh as ssh_module,
         status as status_module, tickets,
         train, update as update_module, use as use_module,
-        vpn as vpn_module, watch,
+        vault as vault_module, vpn as vpn_module, watch,
     )
     ai_module.register(cli)
     analyze_module.register(cli)
@@ -226,6 +226,7 @@ if HAS_CLICK:
     train.register(cli)
     update_module.register(cli)
     use_module.register(cli)
+    vault_module.register(cli)
     vpn_module.register(cli)
     watch.register(cli)
 

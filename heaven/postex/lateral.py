@@ -212,7 +212,7 @@ class SMBLateralExecutor:
             raise PermissionError("SMBLateralExecutor requires authorized=True")
         self.timeout = timeout
 
-    def _login_one(  # nosec B107 -- empty-string default, not a secret
+    def _login_one(  # nosec B107 # empty-string default, not a secret
         self, host: str, port: int, user: str, domain: str,
         password: str = "", nthash: str = "",
     ) -> tuple[bool, str]:

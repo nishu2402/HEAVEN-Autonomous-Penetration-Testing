@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 import re
 import shutil
-import subprocess  # nosec B404 — optional binwalk enrichment, fixed argv
+import subprocess  # nosec B404 # optional binwalk enrichment, fixed argv
 from pathlib import Path
 from typing import Any, cast
 
@@ -163,7 +163,7 @@ def _binwalk(path: str) -> list[str]:
     if not shutil.which("binwalk"):
         return []
     try:
-        out = subprocess.run(  # nosec B603 B607 — fixed argv, no shell
+        out = subprocess.run(  # nosec B603 B607 # fixed argv, no shell
             ["binwalk", path], capture_output=True, text=True, timeout=120)
         return [ln for ln in out.stdout.splitlines() if ln.strip()][:200]
     except Exception:

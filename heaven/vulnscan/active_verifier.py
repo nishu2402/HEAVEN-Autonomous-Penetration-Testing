@@ -140,7 +140,7 @@ async def _get(session: Any, url: str, *, headers: Optional[dict] = None,
 
 # The unmistakable first line of a Unix passwd file — the canonical, harmless
 # observable that a path-traversal / file-read flaw actually returned it.
-_PASSWD_MARKER = "root:x:0:0:"  # nosec B105 — detection marker for /etc/passwd, not a secret
+_PASSWD_MARKER = "root:x:0:0:"  # nosec B105 # detection marker for /etc/passwd, not a secret
 
 
 async def _probe_apache_traversal(session: Any, base: str) -> Optional[VerifyResult]:

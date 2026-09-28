@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 import shutil
 import signal
-import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
+import subprocess  # nosec B404 # runs vetted CLI tools, no shell
 import sys
 import threading
 from dataclasses import dataclass
@@ -336,7 +336,7 @@ def _run_install(spec: ToolSpec, cmd: list[str], on_output: Optional[object]) ->
         popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
     try:
-        proc = subprocess.Popen(  # nosec B603 -- fixed argv, no shell
+        proc = subprocess.Popen(  # nosec B603 # fixed argv, no shell
             run_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

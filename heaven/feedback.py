@@ -168,7 +168,7 @@ class ScopeGuard:
 HOST = "host"
 URL = "url"
 CRED = "cred"
-TOKEN = "token"  # nosec B105 — a lead-kind label, not a hardcoded credential
+TOKEN = "token"  # nosec B105 # a lead-kind label, not a hardcoded credential
 
 
 @dataclass(frozen=True)

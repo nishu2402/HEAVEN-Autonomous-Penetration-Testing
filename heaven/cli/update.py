@@ -41,7 +41,7 @@ import asyncio
 import json
 import re
 import shutil
-import subprocess  # nosec B404 -- runs vetted CLI tools (git/pip/npm), never a shell
+import subprocess  # nosec B404 # runs vetted CLI tools (git/pip/npm), never a shell
 import sys
 import time
 from dataclasses import dataclass, field
@@ -110,7 +110,7 @@ def _run_git(root: Path, *args: str, timeout: int = 60) -> tuple[int, str, str]:
     callers can report it honestly instead of crashing the update.
     """
     try:
-        proc = subprocess.run(  # nosec B603 B607 -- fixed 'git' argv, no shell
+        proc = subprocess.run(  # nosec B603 B607 # fixed 'git' argv, no shell
             ["git", "-C", str(root), *args],
             capture_output=True, text=True, timeout=timeout,
         )
@@ -268,7 +268,7 @@ class CodeUpdateResult:
 def _pip_reinstall(root: Path) -> tuple[bool, str]:
     """Re-run the editable install so changed dependencies / entry points land."""
     try:
-        proc = subprocess.run(  # nosec B603 -- sys.executable + fixed pip argv, no shell
+        proc = subprocess.run(  # nosec B603 # sys.executable + fixed pip argv, no shell
             [sys.executable, "-m", "pip", "install", "-e", str(root), "-q"],
             capture_output=True, text=True, timeout=900,
         )
@@ -291,13 +291,13 @@ def _ui_rebuild(root: Path) -> tuple[bool, str]:
         return (False, "npm not on PATH, rebuild later: "
                        "cd heaven-ui && npm install --legacy-peer-deps && npm run build")
     try:
-        inst = subprocess.run(  # nosec B603 B607 -- fixed npm argv, no shell
+        inst = subprocess.run(  # nosec B603 B607 # fixed npm argv, no shell
             ["npm", "install", "--legacy-peer-deps"],
             cwd=str(ui), capture_output=True, text=True, timeout=900,
         )
         if inst.returncode != 0:
             return False, "npm install failed: " + (inst.stderr or inst.stdout or "")[:200]
-        bld = subprocess.run(  # nosec B603 B607 -- fixed npm argv, no shell
+        bld = subprocess.run(  # nosec B603 B607 # fixed npm argv, no shell
             ["npm", "run", "build"],
             cwd=str(ui), capture_output=True, text=True, timeout=900,
         )
@@ -419,7 +419,7 @@ def _update_nuclei() -> tuple[bool, str, int]:
     if not shutil.which("nuclei"):
         return False, "nuclei binary not on PATH", 0
     try:
-        proc = subprocess.run(  # nosec B603 B607 -- fixed argv on PATH, no shell
+        proc = subprocess.run(  # nosec B603 B607 # fixed argv on PATH, no shell
             ["nuclei", "-update-templates", "-silent"],
             capture_output=True, text=True, timeout=120,
         )

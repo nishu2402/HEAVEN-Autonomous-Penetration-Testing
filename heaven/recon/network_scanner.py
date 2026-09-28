@@ -16,10 +16,10 @@ import ipaddress
 import os
 import secrets
 import shutil
-import subprocess  # nosec B404 -- fixed argv, no shell (see _nmap_sudo_prefix)
+import subprocess  # nosec B404 # fixed argv, no shell (see _nmap_sudo_prefix)
 import sys
 import time
-import xml.etree.ElementTree as ET  # nosec B405 -- only ET.ParseError (a type) is used; all parsing goes through defusedxml below
+import xml.etree.ElementTree as ET  # nosec B405 # only ET.ParseError (a type) is used; all parsing goes through defusedxml below
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -255,7 +255,7 @@ def _nmap_sudo_prefix() -> tuple[str, ...]:
         return (sudo, "-n")
     # auto: confirm passwordless sudo actually works, without ever prompting.
     try:
-        probe = subprocess.run(  # nosec B603 -- fixed argv, no shell
+        probe = subprocess.run(  # nosec B603 # fixed argv, no shell
             [sudo, "-n", "true"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

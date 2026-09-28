@@ -970,7 +970,7 @@ def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
             AsyncIOScheduler = getattr(importlib.import_module("apscheduler.schedulers.asyncio"), "AsyncIOScheduler")
         except Exception:
             raise ImportError
-        import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
+        import subprocess  # nosec B404 # runs vetted CLI tools, no shell
         from datetime import datetime
 
         def run_scan_job():
@@ -981,7 +981,7 @@ def schedule(interval_minutes: int, target: tuple[str, ...], mode: str,
                     cmd.extend(["-u", t])
                 else:
                     cmd.extend(["-t", t])
-            subprocess.run(cmd, check=False)  # nosec B603 -- fixed argv, no shell
+            subprocess.run(cmd, check=False)  # nosec B603 # fixed argv, no shell
 
         run_scan_job()  # Run once immediately
 

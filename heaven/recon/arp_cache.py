@@ -18,7 +18,7 @@ resolves the most common makers so the Assets view isn't bare.
 from __future__ import annotations
 
 import re
-import subprocess  # nosec B404 - fixed-argv reads of the local ARP cache only
+import subprocess  # nosec B404 # fixed-argv reads of the local ARP cache only
 import sys
 from typing import Optional
 
@@ -88,7 +88,7 @@ def _read_proc_net_arp() -> dict[str, str]:
 def _run(cmd: list[str], timeout: float) -> str:
     """Run a fixed-argv local command, returning stdout ('' on any failure)."""
     try:
-        proc = subprocess.run(  # nosec B603 - fixed argv, no shell, local only
+        proc = subprocess.run(  # nosec B603 # fixed argv, no shell, local only
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
         return proc.stdout or ""

@@ -64,7 +64,7 @@ T_UAC_BYPASS = "T1548.002"     # Abuse Elevation Control Mechanism: Bypass UAC
 T_WINDOWS_SERVICE = "T1543.003"  # Create or Modify System Process: Windows Service
 T_UNQUOTED_PATH = "T1574.009"  # Path Interception by Unquoted Path
 T_SERVICE_PERMS = "T1574.010"  # Services File Permissions Weakness
-T_TOKEN_IMPERSONATION = "T1134.001"  # nosec B105 -- ATT&CK id (Token Impersonation/Theft)
+T_TOKEN_IMPERSONATION = "T1134.001"  # nosec B105 # ATT&CK id (Token Impersonation/Theft)
 
 # Credential access
 T_VALID_ACCOUNTS = "T1078"     # Valid Accounts

@@ -50,7 +50,7 @@ def set_seed(seed: Optional[int]) -> None:
         _numpy_rng = None
         os.environ.pop("HEAVEN_SEED", None)
         return
-    _random = random.Random(seed)  # nosec B311 -- deterministic seedable repro RNG
+    _random = random.Random(seed)  # nosec B311 # deterministic seedable repro RNG
     try:
         import numpy as np
         _numpy_rng = np.random.default_rng(seed)

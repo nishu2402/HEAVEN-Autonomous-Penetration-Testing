@@ -225,7 +225,7 @@ def ensure_chromium(on_output: Optional[object] = None) -> tuple[bool, str]:
     ``on_output`` (optional callable) receives each installer line for live
     display; when omitted the child's stdout is captured quietly.
     """
-    import subprocess  # nosec B404 -- fixed argv (playwright), no shell
+    import subprocess  # nosec B404 # fixed argv (playwright), no shell
     import sys
 
     present, detail = _cached_chromium_status(use_cache=False)
@@ -240,7 +240,7 @@ def ensure_chromium(on_output: Optional[object] = None) -> tuple[bool, str]:
     env = os.environ.copy()
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     try:
-        proc = subprocess.Popen(  # nosec B603 -- fixed argv, no shell
+        proc = subprocess.Popen(  # nosec B603 # fixed argv, no shell
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     except Exception as e:  # noqa: BLE001
         return False, f"could not launch playwright installer: {e!r}"

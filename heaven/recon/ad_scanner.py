@@ -48,12 +48,12 @@ class ADAttackType(str, Enum):
     GOLDEN_TICKET_RISK = "golden_ticket_risk"
     SILVER_TICKET_RISK = "silver_ticket_risk"
     NTLM_RELAY = "ntlm_relay"
-    PASS_THE_HASH = "pass_the_hash"  # nosec B105 -- attack-technique enum / empty default
+    PASS_THE_HASH = "pass_the_hash"  # nosec B105 # attack-technique enum / empty default
     ACL_ABUSE = "acl_abuse"
     UNCONSTRAINED_DELEG = "unconstrained_delegation"
     CONSTRAINED_DELEG = "constrained_delegation"
     RBCD = "resource_based_constrained_delegation"
-    PASSWORD_SPRAY = "password_spray_risk"  # nosec B105 -- attack-technique enum / empty default
+    PASSWORD_SPRAY = "password_spray_risk"  # nosec B105 # attack-technique enum / empty default
     ADMINSD_HOLDER = "adminsd_holder_abuse"
     GPP_PASSWORDS = "gpp_passwords"
     # Network-layer (pre-auth) AD/SMB posture — what a scan of a DC by IP alone

@@ -354,7 +354,7 @@ def render_pdf(result: dict[str, Any]) -> bytes:
             "(pip install reportlab).")
 
     import io
-    from xml.sax.saxutils import escape as _xesc  # nosec B406 -- escape() is OUTPUT encoding (a security control), not XML parsing
+    from xml.sax.saxutils import escape as _xesc  # nosec B406 # escape() is OUTPUT encoding (a security control), not XML parsing
 
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4

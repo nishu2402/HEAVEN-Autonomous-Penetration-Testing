@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess  # nosec B404 -- runs vetted CLI tools, no shell
+import subprocess  # nosec B404 # runs vetted CLI tools, no shell
 import sys
 from pathlib import Path
 from typing import Optional
@@ -106,7 +106,7 @@ def _ps_profile_path() -> Optional[str]:
     if not exe:
         return None
     try:
-        proc = subprocess.run(  # nosec B603 -- resolved exe, fixed argv, no shell
+        proc = subprocess.run(  # nosec B603 # resolved exe, fixed argv, no shell
             [exe, "-NoProfile", "-NonInteractive", "-Command",
              "$PROFILE.CurrentUserAllHosts"],
             capture_output=True, text=True, timeout=15,
@@ -259,7 +259,7 @@ def _generate_script(shell: str) -> str:
     env = dict(os.environ)
     env["_HEAVEN_COMPLETE"] = f"{shell}_source"
     try:
-        proc = subprocess.run(  # nosec B603 -- fixed argv, no shell
+        proc = subprocess.run(  # nosec B603 # fixed argv, no shell
             [sys.executable, "-m", "heaven.main"],
             env=env, capture_output=True, text=True, timeout=15,
         )

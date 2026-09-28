@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Optional
-from xml.sax.saxutils import escape as _xml_escape  # nosec B406 -- escape() is OUTPUT encoding (a security control), not XML parsing
+from xml.sax.saxutils import escape as _xml_escape  # nosec B406 # escape() is OUTPUT encoding (a security control), not XML parsing
 
 from heaven.devsecops.compliance_report import (
     SEVERITY_META,

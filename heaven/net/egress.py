@@ -48,7 +48,7 @@ import ipaddress
 import logging
 import os
 import shutil
-import subprocess  # nosec B404 -- fixed argv, no shell; see _sudo_prefix / tunnel_*
+import subprocess  # nosec B404 # fixed argv, no shell; see _sudo_prefix / tunnel_*
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,7 +73,7 @@ _IP_ECHO_URLS = (
 
 # Hosts that must NEVER be proxied — the local dashboard/API and loopback, so a
 # proxy can never accidentally route HEAVEN's own control plane.
-_NO_PROXY_HOSTS = "localhost,127.0.0.1,::1,0.0.0.0"  # nosec B104 -- NO_PROXY list, not a bind
+_NO_PROXY_HOSTS = "localhost,127.0.0.1,::1,0.0.0.0"  # nosec B104 # NO_PROXY list, not a bind
 
 
 class EgressError(RuntimeError):
@@ -639,7 +639,7 @@ def _sudo_prefix(policy: str) -> tuple[str, ...]:
     if policy == "always":
         return (sudo, "-n")
     try:
-        probe = subprocess.run(  # nosec B603 -- fixed argv, no shell
+        probe = subprocess.run(  # nosec B603 # fixed argv, no shell
             [sudo, "-n", "true"], stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=5, check=False)
@@ -657,7 +657,7 @@ def _wg_quick_target(cfg: EgressConfig) -> Optional[str]:
 
 def _run(argv: list[str], timeout: float = 30.0) -> tuple[int, str, str]:
     try:
-        p = subprocess.run(  # nosec B603 -- fixed argv, no shell
+        p = subprocess.run(  # nosec B603 # fixed argv, no shell
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=timeout, check=False, text=True)
         return p.returncode, p.stdout or "", p.stderr or ""
@@ -769,7 +769,7 @@ async def _http_ip(proxy: Optional[str], timeout: float) -> Optional[str]:
                     ip = _clean_ip(r.text)
                     if ip:
                         return ip
-                except Exception:  # noqa: BLE001  # nosec B112 -- try the next echo service
+                except Exception:  # noqa: BLE001  # nosec B112 # try the next echo service
                     continue
     except Exception as e:  # noqa: BLE001
         logger.debug("egress IP fetch failed: %s", e)
@@ -813,7 +813,7 @@ async def _aiohttp_socks_ip(cfg: EgressConfig, timeout: float) -> Optional[str]:
                         ip = _clean_ip(await resp.text())
                         if ip:
                             return ip
-                except Exception:  # noqa: BLE001  # nosec B112 — try the next echo
+                except Exception:  # noqa: BLE001  # nosec B112 # try the next echo
                     continue
     except Exception as e:  # noqa: BLE001
         logger.debug("aiohttp SOCKS IP fetch failed: %s", e)

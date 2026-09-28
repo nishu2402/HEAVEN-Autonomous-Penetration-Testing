@@ -15,7 +15,7 @@ rate-limit-free local model with no new Python dependencies.
 from __future__ import annotations
 
 import shutil
-import subprocess  # nosec B404 -- runs the vetted `ollama` CLI, fixed argv, no shell
+import subprocess  # nosec B404 # runs the vetted `ollama` CLI, fixed argv, no shell
 import sys
 from typing import Callable, Optional
 
@@ -132,7 +132,7 @@ def pull_model(model: str, on_output: Optional[Callable[[str], None]] = None,
             on_output(f"ollama not installed: {install_hint()}")
         return False
     try:
-        proc = subprocess.Popen(  # nosec B603 B607 -- fixed argv, vetted tool, no shell
+        proc = subprocess.Popen(  # nosec B603 B607 # fixed argv, vetted tool, no shell
             ["ollama", "pull", model],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, text=True, bufsize=1,
@@ -143,7 +143,7 @@ def pull_model(model: str, on_output: Optional[Callable[[str], None]] = None,
             on_output(f"failed to start ollama pull: {e}")
         return False
     try:
-        assert proc.stdout is not None  # nosec B101 -- PIPE guarantees a stream
+        assert proc.stdout is not None  # nosec B101 # PIPE guarantees a stream
         for line in proc.stdout:
             line = line.rstrip()
             if line and on_output:

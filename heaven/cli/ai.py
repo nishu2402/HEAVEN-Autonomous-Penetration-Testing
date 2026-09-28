@@ -14,7 +14,7 @@ here is immediately live everywhere.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 -- runs the vetted `ollama` installer/CLI, fixed argv
+import subprocess  # nosec B404 # runs the vetted `ollama` installer/CLI, fixed argv
 from typing import Optional
 
 import click
@@ -197,7 +197,7 @@ def ai_setup(provider: str, model: Optional[str], base_url: Optional[str],
         if install and cmd and (yes or click.confirm(f"\nRun `{' '.join(cmd)}` now?", default=True)):
             _print(f"[cyan]Installing Ollama…[/cyan] ({' '.join(cmd)})")
             try:
-                subprocess.run(cmd, check=True)  # nosec B603 -- fixed argv, no shell
+                subprocess.run(cmd, check=True)  # nosec B603 # fixed argv, no shell
             except (subprocess.CalledProcessError, OSError) as e:
                 _print(f"[red]Install failed:[/red] {e}. Install manually, then re-run "
                        "[cyan]heaven ai setup[/cyan].")

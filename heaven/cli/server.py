@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import webbrowser
+from pathlib import Path
 
 import click
 
@@ -125,14 +126,41 @@ def _load_vault_secrets() -> None:
 @click.option("--port", default=8443, type=int, help="API server port")
 @click.option("--open/--no-open", "open_browser", default=True,
               help="Open the Command Centre in your browser once the server is up (default: on).")
-def serve(host: str, port: int, open_browser: bool) -> None:
+@click.option("--tls-cert", "tls_cert", default=None,
+              help="Path to a TLS certificate chain (PEM) to serve HTTPS directly, "
+                   "without a reverse proxy. Also settable via HEAVEN_TLS_CERTFILE. "
+                   "Requires --tls-key.")
+@click.option("--tls-key", "tls_key", default=None,
+              help="Path to the TLS private key (PEM) that pairs with --tls-cert. "
+                   "Also settable via HEAVEN_TLS_KEYFILE.")
+def serve(host: str, port: int, open_browser: bool,
+          tls_cert: str | None, tls_key: str | None) -> None:
     """Start the HEAVEN API server and Command Centre."""
     print_banner()
+
+    # Optional native TLS. When a cert + key are supplied (flag or env), uvicorn
+    # terminates HTTPS itself, so `heaven serve` no longer depends on an external
+    # reverse proxy for encryption. Both halves are required; a lone cert or key
+    # is a configuration error we surface before booting anything.
+    tls_cert = tls_cert or os.environ.get("HEAVEN_TLS_CERTFILE") or None
+    tls_key = tls_key or os.environ.get("HEAVEN_TLS_KEYFILE") or None
+    if bool(tls_cert) != bool(tls_key):
+        _print("[red]✗ TLS needs both a certificate and a key.[/red]")
+        _print("[yellow]  Provide --tls-cert AND --tls-key (or set HEAVEN_TLS_CERTFILE "
+               "and HEAVEN_TLS_KEYFILE).[/yellow]")
+        sys.exit(1)
+    use_tls = bool(tls_cert and tls_key)
+    if use_tls:
+        missing = [p for p in (tls_cert, tls_key) if p and not Path(p).is_file()]
+        if missing:
+            _print(f"[red]✗ TLS file(s) not found: {', '.join(missing)}[/red]")
+            sys.exit(1)
+    scheme = "https" if use_tls else "http"
 
     # Pre-flight: if the port is already taken, stop now with a clear, actionable
     # message rather than booting the app and crashing on uvicorn's raw errno.
     if not _port_available(host, port):
-        reachable = f"http://{_browser_host(host)}:{port}/"
+        reachable = f"{scheme}://{_browser_host(host)}:{port}/"
         _print(f"[red]✗ Cannot start: {host}:{port} is already in use.[/red]")
         _print("[yellow]  Something is already listening there · most likely a HEAVEN "
                "server you started earlier.[/yellow]")
@@ -151,10 +179,15 @@ def serve(host: str, port: int, open_browser: bool) -> None:
     # drive the server exactly as .env values would — without plaintext on disk.
     _load_vault_secrets()
 
+    if use_tls:
+        _print("[green]🔒 TLS enabled · serving HTTPS directly (uvicorn terminates TLS).[/green]")
     if host == "0.0.0.0":  # intentional all-interfaces bind; user is warned below
-        _print("[yellow]⚠  Binding to 0.0.0.0 · make sure you are behind a reverse proxy with TLS.[/yellow]")
+        if use_tls:
+            _print("[yellow]⚠  Binding to 0.0.0.0 · exposed on all interfaces (TLS is on).[/yellow]")
+        else:
+            _print("[yellow]⚠  Binding to 0.0.0.0 · make sure you are behind a reverse proxy with TLS.[/yellow]")
 
-    url = f"http://{_browser_host(host)}:{port}/"
+    url = f"{scheme}://{_browser_host(host)}:{port}/"
 
     try:
         import uvicorn
@@ -180,7 +213,16 @@ def serve(host: str, port: int, open_browser: bool) -> None:
         elif open_browser and headless:
             _print(f"[dim]Headless environment detected · open the Command Centre manually → {url}[/dim]")
 
-        uvicorn.run(app, host=host, port=port, log_level="info")
+        # ssl_certfile / ssl_keyfile default to None (plain HTTP) when TLS is off,
+        # so this call is byte-for-byte the old behaviour unless a cert+key are set.
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            ssl_certfile=tls_cert if use_tls else None,
+            ssl_keyfile=tls_key if use_tls else None,
+        )
     except ImportError:
         _print("[red]Error: uvicorn and fastapi required. Install with: pip install uvicorn fastapi[/red]")
         sys.exit(1)

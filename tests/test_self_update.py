@@ -84,6 +84,8 @@ class FakeGit:
                     f'__version__ = "{self.latest}"\n')
                 return 0, "", ""
             return 1, "", "fatal: Not possible to fast-forward, aborting."
+        if a[:1] == ["checkout"]:                       # checkout -- <path> (reset artifact)
+            return 0, "", ""
         if a[:2] == ["stash", "push"]:
             return 0, "Saved working directory", ""
         if a[:2] == ["stash", "pop"]:
@@ -137,6 +139,27 @@ def test_needs_ui_rebuild_only_on_frontend_source():
     # The built output is gitignored — never a trigger on its own.
     assert not U._needs_ui_rebuild(["heaven-ui/dist/index.html"])
     assert not U._needs_ui_rebuild(["heaven/api/server.py"])
+
+
+def test_porcelain_path_tolerates_stripped_leading_space():
+    """`_run_git` strips the whole status blob, so the FIRST porcelain entry can
+    arrive without its leading space. The path parse must survive that (a fixed
+    slice used to eat the first character, mis-reading the lockfile as an edit)."""
+    assert U._porcelain_path(" M heaven-ui/package-lock.json") == "heaven-ui/package-lock.json"
+    assert U._porcelain_path("M heaven-ui/package-lock.json") == "heaven-ui/package-lock.json"
+    assert U._porcelain_path("?? notes.txt") == "notes.txt"
+    assert U._porcelain_path("A  heaven/new.py") == "heaven/new.py"
+
+
+def test_classify_dirty_splits_regenerable_from_edits():
+    """The npm lockfile (which the build itself rewrites) is regenerable; real
+    source edits block. This split is what stops a fresh install from being
+    permanently un-updatable."""
+    regen, blocking = U._classify_dirty(
+        ["heaven-ui/package-lock.json", "heaven/x.py", "README.md"])
+    assert regen == ["heaven-ui/package-lock.json"]
+    assert blocking == ["heaven/x.py", "README.md"]
+    assert U._classify_dirty([]) == ([], [])
 
 
 # ── check_for_update ─────────────────────────────────────────────────────────
@@ -201,6 +224,63 @@ def test_apply_refuses_dirty_without_force_and_touches_nothing(tmp_path, monkeyp
     # The load-bearing guarantee: no mutating git command was ever issued.
     assert not fake.issued("merge", "--ff-only")
     assert not fake.issued("stash", "push")
+
+
+def test_apply_regenerable_dirt_applies_without_force(tmp_path, monkeypatch):
+    """The core 'every user is blocked' bug: a just-installed tree dirty ONLY on
+    the npm lockfile (rewritten by the install's `npm install`) must update
+    cleanly — the artifact is reset with `git checkout` and the fast-forward
+    proceeds, with NO --force and NO stash needed."""
+    root = _mk_repo(tmp_path, "2.0.0")
+    fake = FakeGit(behind=2, current="2.0.0", latest="2.1.0",
+                   dirty_files=["heaven-ui/package-lock.json"],
+                   changed=["heaven-ui/package-lock.json"])
+    monkeypatch.setattr(U, "_run_git", fake)
+    c = U.check_for_update(root)
+    assert c.dirty is True
+    assert c.dirty_regenerable == ["heaven-ui/package-lock.json"]
+    assert c.dirty_blocking == []
+    res = U.apply_code_update(root, c, force=False)
+    assert res.applied is True
+    assert res.from_version == "2.0.0" and res.to_version == "2.1.0"
+    assert fake.issued("checkout", "--", "heaven-ui/package-lock.json")
+    assert fake.issued("merge", "--ff-only")
+    assert not fake.issued("stash", "push")   # no genuine edits → nothing to stash
+
+
+def test_apply_regenerable_plus_real_edit_still_refuses(tmp_path, monkeypatch):
+    """Lockfile dirt is auto-handled, but a real source edit alongside it still
+    blocks a non-force update, and nothing mutating (not even the artifact reset)
+    is issued."""
+    root = _mk_repo(tmp_path, "2.0.0")
+    fake = FakeGit(behind=2, dirty_files=["heaven-ui/package-lock.json", "heaven/x.py"])
+    monkeypatch.setattr(U, "_run_git", fake)
+    c = U.check_for_update(root)
+    assert c.dirty_regenerable == ["heaven-ui/package-lock.json"]
+    assert c.dirty_blocking == ["heaven/x.py"]
+    res = U.apply_code_update(root, c, force=False)
+    assert res.applied is False and "uncommitted" in res.error.lower()
+    assert not fake.issued("merge", "--ff-only")
+    assert not fake.issued("checkout", "--", "heaven-ui/package-lock.json")
+    assert not fake.issued("stash", "push")
+
+
+def test_force_with_regenerable_resets_it_and_stashes_only_real_edits(tmp_path, monkeypatch):
+    """--force with both lockfile dirt and a real edit: the lockfile is reset (so
+    it can't conflict on stash-pop) and only the real edit is stashed → pulled →
+    popped."""
+    root = _mk_repo(tmp_path, "2.0.0")
+    fake = FakeGit(behind=1, latest="2.1.0",
+                   dirty_files=["heaven-ui/package-lock.json", "heaven/x.py"],
+                   changed=["heaven/x.py"])
+    monkeypatch.setattr(U, "_run_git", fake)
+    c = U.check_for_update(root)
+    res = U.apply_code_update(root, c, force=True)
+    assert res.applied is True and res.stashed is True and res.stash_restored is True
+    assert fake.issued("checkout", "--", "heaven-ui/package-lock.json")
+    seq = [c0[0] for c0 in fake.calls]
+    assert seq.index("stash") < seq.index("merge")
+    assert fake.issued("stash", "pop")
 
 
 def test_force_stashes_pulls_and_pops_nondestructively(tmp_path, monkeypatch):

@@ -120,8 +120,8 @@ export default function UpdateBanner() {
             {status.behind ? (
               <span className="dim"> · {status.behind} commit{status.behind === 1 ? "" : "s"} behind</span>
             ) : null}
-            {isAdmin && !status.can_apply && status.dirty ? (
-              <span className="dim"> · uncommitted changes on the server block auto-apply</span>
+            {isAdmin && !status.can_apply && (status.dirty_blocking?.length) ? (
+              <span className="dim"> · uncommitted changes on the server block auto-apply (Details → Force update)</span>
             ) : null}
           </span>
         )}

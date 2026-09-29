@@ -61,16 +61,19 @@ export default function UpdatesPanel() {
     }, 2000);
   }
 
-  async function updateNow() {
-    if (!window.confirm(
-      "Apply the update now? HEAVEN will fast-forward its code and rebuild on the "
-      + "server. Uncommitted changes are never overwritten. The new version becomes "
-      + "active after you restart the server.")) return;
+  async function updateNow(force = false) {
+    if (!window.confirm(force
+      ? "Force the update? Your uncommitted changes on the server are safely stashed "
+        + "(git stash) before HEAVEN fast-forwards and rebuilds, then restored. If the "
+        + "restore conflicts they stay recoverable in `git stash`. Continue?"
+      : "Apply the update now? HEAVEN will fast-forward its code and rebuild on the "
+        + "server. Uncommitted changes are never overwritten. The new version becomes "
+        + "active after you restart the server.")) return;
     setApplying(true);
     setLog([]);
     setDone(null);
     try {
-      await Update.apply();
+      await Update.apply(force ? { force: true } : {});
       startPoll();
     } catch (e) {
       setApplying(false);
@@ -87,6 +90,11 @@ export default function UpdatesPanel() {
   // side (HEAVEN_DISABLE_WEB_UPDATE). Detection still works; apply must be run
   // from the shell. Only surface the notice when there's actually an update.
   const webApplyOff = status.web_apply_enabled === false;
+  // Only *genuine* edits block a one-click update. Machine-generated build
+  // artifacts (the npm lockfile a fresh install rewrites) are refreshed
+  // automatically, so they must not read as "you have to fix this first".
+  const blocking = status.dirty_blocking || [];
+  const regenerable = status.dirty_regenerable || [];
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -111,10 +119,15 @@ export default function UpdatesPanel() {
         <div style={{ fontSize: 12.5, color: "var(--brand)", fontWeight: 600 }}>
           Update available, {status.behind} commit{status.behind === 1 ? "" : "s"} behind
           {status.upstream ? ` ${status.upstream}` : ""}.
-          {status.dirty ? (
+          {blocking.length ? (
             <span className="dim" style={{ fontWeight: 400 }}>
-              {" "}({status.dirty_files?.length || 0} uncommitted change(s) on the server, 
-              commit/stash them to enable auto-apply.)
+              {" "}({blocking.length} uncommitted change(s) on the server · commit or stash
+              them, or use Force update below.)
+            </span>
+          ) : regenerable.length ? (
+            <span className="dim" style={{ fontWeight: 400 }}>
+              {" "}(auto-generated build file{regenerable.length === 1 ? "" : "s"} will be
+              refreshed automatically · no action needed.)
             </span>
           ) : null}
         </div>
@@ -129,11 +142,19 @@ export default function UpdatesPanel() {
           {checking ? "Checking…" : "Check now"}
         </button>
         {!notGit && status.available && isAdmin && !webApplyOff && (
-          <button type="button" onClick={updateNow}
+          <button type="button" onClick={() => updateNow(false)}
             disabled={applying || !status.can_apply}
             title={status.can_apply ? "" : "Blocked: uncommitted changes or an update already running"}
             style={{ ...btnPrimary, opacity: (applying || !status.can_apply) ? 0.5 : 1 }}>
             {applying ? "Updating…" : "Update now"}
+          </button>
+        )}
+        {!notGit && status.available && isAdmin && !webApplyOff
+          && blocking.length > 0 && !status.apply_running && (
+          <button type="button" onClick={() => updateNow(true)} disabled={applying}
+            title="Stash your uncommitted changes, update, then restore them"
+            style={{ ...btn, opacity: applying ? 0.5 : 1 }}>
+            Force update (stash local changes)
           </button>
         )}
         {!notGit && status.available && isAdmin && webApplyOff && (
@@ -147,6 +168,16 @@ export default function UpdatesPanel() {
           </span>
         )}
       </div>
+
+      {!notGit && status.available && isAdmin && blocking.length > 0 && !applying && !done && (
+        <div className="dim" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+          Uncommitted on the server:{" "}
+          {blocking.slice(0, 8).map((f, i) => (
+            <code key={f} style={{ marginRight: 6 }}>{f}{i < Math.min(blocking.length, 8) - 1 ? "," : ""}</code>
+          ))}
+          {blocking.length > 8 ? `…and ${blocking.length - 8} more` : ""}
+        </div>
+      )}
 
       {(applying || log.length > 0 || done) && (
         <pre style={{

@@ -394,8 +394,15 @@ else
         # Build with errors visible in a log so a failure is diagnosable
         # (the old version hid every error behind 2>/dev/null).
         BUILD_LOG="$INSTALL_DIR/heaven-ui/build.log"
+        # Prefer `npm ci`: it installs strictly from package-lock.json and NEVER
+        # rewrites it, so a fresh install leaves the git tree clean. `npm install`
+        # used to re-pin the tracked lockfile here, which left every new checkout
+        # "dirty" and made `heaven update` / the web "Update now" refuse forever.
+        # Fall back to `npm install` only when there is no lockfile or the lock
+        # has drifted (npm ci refuses that) so the install still succeeds.
         if ( cd "$INSTALL_DIR/heaven-ui" \
-             && npm install --legacy-peer-deps >"$BUILD_LOG" 2>&1 \
+             && { { [ -f package-lock.json ] && npm ci --legacy-peer-deps >"$BUILD_LOG" 2>&1; } \
+                  || npm install --legacy-peer-deps >"$BUILD_LOG" 2>&1; } \
              && npm run build >>"$BUILD_LOG" 2>&1 ) \
            && [ -f "$INSTALL_DIR/heaven-ui/dist/index.html" ]; then
             ok "Frontend built → heaven-ui/dist/"
@@ -403,7 +410,7 @@ else
         else
             warn "Frontend build failed — see $BUILD_LOG"
             echo -e "  ${DIM}UI unavailable but the CLI and API work fine.${NC}"
-            echo -e "  ${DIM}Retry: cd heaven-ui && npm install --legacy-peer-deps && npm run build${NC}"
+            echo -e "  ${DIM}Retry: cd heaven-ui && npm ci --legacy-peer-deps && npm run build${NC}"
         fi
     fi
 fi

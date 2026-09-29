@@ -63,6 +63,50 @@ _VERSION_RE = re.compile(r'^__version__\s*=\s*["\']([^"\']+)["\']', re.M)
 # may have changed → re-run the editable install so they actually land.
 _DEP_FILES = ("pyproject.toml", "setup.py", "setup.cfg")
 
+# Tracked files that HEAVEN's OWN build regenerates deterministically. A fresh
+# `git clone && ./scripts/install.sh` (and the updater's own UI rebuild) used to
+# run `npm install`, which rewrites the tracked lockfile — so a just-installed
+# tree shows up "dirty" on these through no user action, which then made every
+# self-update refuse ("uncommitted changes"). That is the trap essentially every
+# user hits once. These are safe to reset to HEAD before a fast-forward because
+# the post-update rebuild regenerates them from source (package.json), so no real
+# work is lost. NEVER add a hand-edited source file here — only machine-generated
+# build artifacts that happen to be tracked. Builds now prefer `npm ci` (see
+# `_ui_rebuild` / install.sh), which never writes the lockfile, so new installs
+# stop generating this phantom dirt at the source; this list is the bridge for
+# trees already dirtied by an older `npm install`.
+_REGENERABLE_TRACKED = frozenset({
+    "heaven-ui/package-lock.json",
+})
+
+
+def _porcelain_path(line: str) -> str:
+    """Extract the path from a ``git status --porcelain`` line, tolerant of the
+    leading space our :func:`_run_git` strips off the first entry.
+
+    Porcelain v1 lines are ``XY <path>`` (two single-char status columns then a
+    space). Because ``_run_git`` runs ``.strip()`` on the whole blob, the FIRST
+    line can arrive with its leading space removed (``M <path>`` instead of
+    `` M <path>``), so a fixed ``line[3:]`` slice ate the first character of that
+    path. Strip a leading run of status chars followed by a space instead, which
+    is correct whether or not that leading space survived.
+    """
+    return re.sub(r"^[ MADRCUT?!]{1,2} ", "", line)
+
+
+def _classify_dirty(files: list[str]) -> tuple[list[str], list[str]]:
+    """Split dirty paths into ``(regenerable_artifacts, blocking_user_edits)``.
+
+    Regenerable artifacts are machine-generated files the build itself rewrites
+    and can safely reset+regenerate; everything else is treated as genuine work
+    that must never be overwritten without an explicit ``--force``.
+    """
+    regen: list[str] = []
+    blocking: list[str] = []
+    for f in files:
+        (regen if f in _REGENERABLE_TRACKED else blocking).append(f)
+    return regen, blocking
+
 
 def _parse_version(text: str) -> str:
     """Pull ``__version__`` out of a ``heaven/__init__.py`` blob (any source)."""
@@ -137,6 +181,11 @@ class UpdateCheck:
     ahead: int = 0               # local commits not yet pushed
     dirty: bool = False
     dirty_files: list[str] = field(default_factory=list)
+    # `dirty_files` split by whether it actually blocks an update. Machine
+    # generated build artifacts (see _REGENERABLE_TRACKED) are reset+regenerated,
+    # so only `dirty_blocking` (genuine edits) holds a plain update back.
+    dirty_regenerable: list[str] = field(default_factory=list)
+    dirty_blocking: list[str] = field(default_factory=list)
     remote_reachable: bool = True
     available: bool = False      # behind > 0
     error: str = ""
@@ -155,6 +204,8 @@ class UpdateCheck:
             "ahead": self.ahead,
             "dirty": self.dirty,
             "dirty_files": self.dirty_files,
+            "dirty_regenerable": self.dirty_regenerable,
+            "dirty_blocking": self.dirty_blocking,
             "remote_reachable": self.remote_reachable,
             "available": self.available,
             "error": self.error,
@@ -192,8 +243,10 @@ def _inspect_repo(root: Path) -> UpdateCheck:
     rc, out, _ = _run_git(root, "status", "--porcelain")
     files = [ln for ln in out.splitlines() if ln.strip()] if rc == 0 else []
     c.dirty = bool(files)
-    # Porcelain lines are "XY <path>"; strip the 3-char status prefix for display.
-    c.dirty_files = [ln[3:] if len(ln) > 3 else ln for ln in files]
+    # Porcelain lines are "XY <path>"; strip the status prefix (see _porcelain_path
+    # for why a fixed slice is wrong for the first, leading-space-stripped line).
+    c.dirty_files = [_porcelain_path(ln) for ln in files]
+    c.dirty_regenerable, c.dirty_blocking = _classify_dirty(c.dirty_files)
     return c
 
 
@@ -289,12 +342,25 @@ def _ui_rebuild(root: Path) -> tuple[bool, str]:
         return False, "heaven-ui/ not present"
     if shutil.which("npm") is None:
         return (False, "npm not on PATH, rebuild later: "
-                       "cd heaven-ui && npm install --legacy-peer-deps && npm run build")
+                       "cd heaven-ui && npm ci --legacy-peer-deps && npm run build")
     try:
+        # Prefer `npm ci`: it installs strictly from package-lock.json and never
+        # rewrites it, so the rebuild leaves the tree clean and the NEXT update is
+        # not blocked by a lockfile the build itself changed. Fall back to
+        # `npm install` only when there is no lockfile or the lock has drifted out
+        # of sync with package.json (npm ci refuses that) so an install still
+        # succeeds — Layer-2 dirty handling then covers the resulting phantom dirt.
+        used_ci = (ui / "package-lock.json").is_file()
         inst = subprocess.run(  # nosec B603 B607 # fixed npm argv, no shell
-            ["npm", "install", "--legacy-peer-deps"],
+            ["npm", "ci", "--legacy-peer-deps"] if used_ci
+            else ["npm", "install", "--legacy-peer-deps"],
             cwd=str(ui), capture_output=True, text=True, timeout=900,
         )
+        if inst.returncode != 0 and used_ci:
+            inst = subprocess.run(  # nosec B603 B607 # fixed npm argv, no shell
+                ["npm", "install", "--legacy-peer-deps"],
+                cwd=str(ui), capture_output=True, text=True, timeout=900,
+            )
         if inst.returncode != 0:
             return False, "npm install failed: " + (inst.stderr or inst.stdout or "")[:200]
         bld = subprocess.run(  # nosec B603 B607 # fixed npm argv, no shell
@@ -344,14 +410,33 @@ def apply_code_update(root: Path, check: UpdateCheck, *, force: bool = False,
     if not check.available:
         res.notes.append("already up to date")
         return res
-    if check.dirty and not force:
+
+    # Only *genuine* edits block. Machine-generated build artifacts the build
+    # itself rewrote (the npm lockfile) are neither the user's work nor a reason
+    # to refuse: we reset them to HEAD just below and the post-update rebuild
+    # regenerates them. This is what unblocks the "just installed → every update
+    # refused" trap without ever discarding real work.
+    blocking = list(check.dirty_blocking)
+    regen = list(check.dirty_regenerable)
+    if blocking and not force:
         res.error = "uncommitted local changes, refusing to overwrite them (use --force to auto-stash)"
         return res
 
     old_sha = check.current_sha or "HEAD"
 
-    # --force: preserve local changes non-destructively around the pull.
-    if check.dirty and force:
+    # Reset only the allowlisted regenerable artifacts so the fast-forward is
+    # clean. Safe: they are rebuilt from source (package.json) right after.
+    for f in regen:
+        rc, _, err = _run_git(root, "checkout", "--", f)
+        if rc == 0:
+            res.notes.append(f"reset auto-generated {f} (the build regenerates it after update)")
+        else:
+            res.notes.append(f"note: could not reset {f}: {err[:120]}")
+
+    # --force with genuine edits still present: preserve them non-destructively
+    # around the pull. (Regenerable artifacts were reset above, so a lockfile no
+    # longer lands in the stash to conflict on pop.)
+    if blocking and force:
         rc, _, err = _run_git(root, "stash", "push", "--include-untracked",
                               "-m", "heaven-update-autostash")
         if rc != 0:
@@ -535,9 +620,12 @@ def _render_check(c: UpdateCheck) -> None:
         _print(f"  [bold green]Update available:[/bold green] "
                f"v{c.current_version or '?'} → v{c.latest_version or '?'} "
                f"({c.behind} commit(s) behind {c.upstream})")
-        if c.dirty:
-            _print(f"  [yellow]Note:[/yellow] {len(c.dirty_files)} uncommitted change(s) ·  "
+        if c.dirty_blocking:
+            _print(f"  [yellow]Note:[/yellow] {len(c.dirty_blocking)} uncommitted change(s) ·  "
                    "`heaven update` will hold back unless you pass --force.")
+        elif c.dirty_regenerable:
+            _print(f"  [dim]({len(c.dirty_regenerable)} auto-generated build file(s) will be "
+                   "refreshed automatically — no action needed.)[/dim]")
         _print("  Run [bold]heaven update[/bold] to apply.")
     else:
         _print(f"  [green]You're on the latest version[/green] (v{c.current_version or '?'}).")
@@ -577,13 +665,13 @@ def _self_update(summary: UpdateSummary, *, force: bool, skip_ui: bool) -> None:
         _print(f"  [green]✓ Code:[/green] already up to date (v{c.current_version or '?'})")
         summary.code_note = "up to date"
         return
-    if c.dirty and not force:
+    if c.dirty_blocking and not force:
         _print(f"  [yellow]⚠ Code:[/yellow] v{c.latest_version or '?'} is available, but you have "
-               f"{len(c.dirty_files)} uncommitted change(s): not overwriting them.")
-        for f_ in c.dirty_files[:8]:
+               f"{len(c.dirty_blocking)} uncommitted change(s): not overwriting them.")
+        for f_ in c.dirty_blocking[:8]:
             _print(f"      [dim]· {f_}[/dim]")
-        if len(c.dirty_files) > 8:
-            _print(f"      [dim]· …and {len(c.dirty_files) - 8} more[/dim]")
+        if len(c.dirty_blocking) > 8:
+            _print(f"      [dim]· …and {len(c.dirty_blocking) - 8} more[/dim]")
         _print("      Commit/stash them, or re-run with [bold]--force[/bold] (auto-stash).")
         summary.code_note = "held back: uncommitted local changes"
         summary.errors.append("code: uncommitted local changes (use --force)")

@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, cast
 
 from heaven.ai.llm_gateway import (
     LOCAL_PROVIDERS,
@@ -41,6 +41,50 @@ from heaven.ai.llm_gateway import (
 from heaven.utils.logger import get_logger
 
 logger = get_logger("ai.fleet.brain")
+
+
+class _CountingGateway:
+    """A thin wrapper that records every ``acomplete`` a brain-backed agent makes
+    into the fleet metrics, so ``brain_calls`` reflects the LLM work the fleet
+    actually spent — including the calls the wrapped agents (ReconAgent /
+    VulnHypothesisAgent / AttackChainPlanner) make straight through the gateway,
+    which would otherwise bypass :meth:`FleetBrain.think`'s own counter.
+
+    It delegates everything else to the real gateway (the agents only read
+    ``available`` and call ``acomplete``); a general ``__getattr__`` keeps it a
+    faithful stand-in for any other attribute. Counting mirrors ``think``'s
+    semantics exactly (one count per real call, errors included) so the two paths
+    never double-count the same request."""
+
+    def __init__(self, gateway: LLMGateway, metrics: Any = None):
+        self._gw = gateway
+        self._metrics = metrics
+
+    @property
+    def available(self) -> bool:
+        return bool(self._gw.available)
+
+    async def acomplete(self, req: LLMRequest) -> LLMResponse:
+        try:
+            resp = await self._gw.acomplete(req)
+        except Exception:
+            self._note(ok=False, tokens=0)
+            raise
+        self._note(ok=resp.ok(), tokens=int(getattr(resp, "output_tokens", 0) or 0))
+        return resp
+
+    def _note(self, *, ok: bool, tokens: int) -> None:
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.brain(ok=ok, tokens=tokens)
+        except Exception:  # noqa: BLE001 — a metrics failure never breaks a call
+            logger.debug("counting-gateway metrics note failed", exc_info=True)
+
+    def __getattr__(self, name: str) -> Any:
+        # Only reached for attributes not defined above (the gateway's provider,
+        # model, rate_limited, etc.), so the proxy stays a faithful stand-in.
+        return getattr(self._gw, name)
 
 # Providers that require a key and reach an external service. deepseek speaks the
 # OpenAI-compatible HTTP path but is still a remote, keyed provider (Tier 4).
@@ -71,6 +115,20 @@ class FleetBrain:
         self.metrics = metrics
         self._sem: Optional[asyncio.Semaphore] = None
         self._concurrency = _fleet_llm_concurrency()
+        self._agent_gateway: Optional[_CountingGateway] = None
+
+    @property
+    def agent_gateway(self) -> LLMGateway:
+        """The gateway a brain-backed role hands to its underlying agent.
+
+        It is the real gateway wrapped so each ``acomplete`` the agent makes is
+        counted in ``brain_calls`` (the agents call the gateway directly rather
+        than through :meth:`think`, so without this their LLM work would be
+        invisible to the metrics and the Phase-7 benchmark). Cached per brain so a
+        role always gets the same counting view."""
+        if self._agent_gateway is None:
+            self._agent_gateway = _CountingGateway(self.gateway, self.metrics)
+        return cast(LLMGateway, self._agent_gateway)
 
     # ── tier resolution ───────────────────────────────────────────────────
     @property

@@ -189,3 +189,71 @@ async def test_run_fleet_entrypoint_no_targets_is_clean():
     assert summary.total_findings == 0
     assert summary.stop_reason.startswith("converged")
     assert summary.brain  # describe() populated the honest status block
+
+
+# ── scope seeding (honest coverage grade, parity with `heaven scan`) ──────────
+class _ScopeStore(_GrowStore):
+    """Grow-store that also records scope, so scope seeding is observable."""
+
+    def __init__(self, preset=None):
+        super().__init__()
+        self._scope: list[SimpleNamespace] = list(preset or [])
+        self.add_calls = 0
+
+    def list_scope(self, in_scope_only=True):
+        return list(self._scope)
+
+    def add_scope(self, target, kind="host", in_scope=True, notes=""):
+        self.add_calls += 1
+        self._scope.append(SimpleNamespace(target=target, kind=kind))
+        return True
+
+
+async def test_run_fleet_seeds_scope_when_empty():
+    """A fresh engagement gets its seeds recorded as scope, so coverage grading is
+    honest (it is computed from this table) and the dashboard shows real targets."""
+    store = _ScopeStore()
+    await run_fleet(
+        seed_targets={"ips": ["10.0.0.5"], "urls": ["http://app.test/"]},
+        engagement_store=store, base_config=SimpleNamespace(scan_mode=None),
+        active_mode="full", max_iterations=1, time_budget_s=5.0,
+    )
+    recorded = {(s.target, s.kind) for s in store.list_scope()}
+    assert recorded == {("10.0.0.5", "ip"), ("http://app.test/", "url")}
+
+
+async def test_run_fleet_leaves_existing_scope_untouched():
+    """An operator-defined scope is authoritative — the fleet never auto-adds over
+    it, so it cannot silently widen a deliberately narrowed engagement."""
+    preset = [SimpleNamespace(target="only.example.com", kind="host")]
+    store = _ScopeStore(preset=preset)
+    await run_fleet(
+        seed_targets={"ips": ["10.0.0.9"]}, engagement_store=store,
+        base_config=SimpleNamespace(scan_mode=None), active_mode="full",
+        max_iterations=1, time_budget_s=5.0,
+    )
+    assert store.add_calls == 0
+    assert [s.target for s in store.list_scope()] == ["only.example.com"]
+
+
+def test_seed_scope_if_empty_is_idempotent():
+    """Seeding twice must not duplicate: once scope exists, the second call is a
+    no-op (the guard is 'scope already present', not 'this exact seed present')."""
+    from heaven.ai.fleet.coordinator import _seed_scope_if_empty
+
+    store = _ScopeStore()
+    seeds = {"ips": ["10.0.0.5"], "urls": []}
+    _seed_scope_if_empty(store, seeds)
+    _seed_scope_if_empty(store, seeds)
+    assert store.add_calls == 1
+    assert [s.target for s in store.list_scope()] == ["10.0.0.5"]
+
+
+def test_scope_kind_classifies_targets():
+    from heaven.ai.fleet.coordinator import _scope_kind
+
+    assert _scope_kind("scanme.nmap.org") == "host"
+    assert _scope_kind("http://x.com/a") == "url"
+    assert _scope_kind("https://x.com") == "url"
+    assert _scope_kind("10.0.0.1") == "ip"
+    assert _scope_kind("10.0.0.0/24") == "cidr"

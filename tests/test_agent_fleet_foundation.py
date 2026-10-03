@@ -194,6 +194,58 @@ async def test_brain_think_bounded_records_metrics():
     assert m.brain_calls == 1 and m.brain_errors == 0 and m.brain_tokens == 7
 
 
+# ── counting gateway: wrapped-agent LLM calls land in brain_calls ─────────────
+async def test_agent_gateway_counts_wrapped_agent_calls():
+    """A brain-backed agent calls the gateway directly, not think(). The counting
+    gateway makes those calls visible in brain_calls (the metric that proves the
+    fleet used AI and that the Phase-7 benchmark reads)."""
+    m = FleetMetrics()
+    canned = LLMResponse(text="ok", output_tokens=5)
+    brain = FleetBrain(
+        gateway=_FakeGW(available=True, provider="gemini", resp=canned), metrics=m)
+    gw = brain.agent_gateway
+    # delegates the attributes the agents actually read
+    assert gw.available is True
+    assert gw.provider == "gemini"      # via __getattr__
+    resp = await gw.acomplete(LLMRequest(prompt="hi"))
+    assert resp.ok() is True
+    assert m.brain_calls == 1 and m.brain_errors == 0 and m.brain_tokens == 5
+
+
+async def test_agent_gateway_counts_errors_and_reraises():
+    class _Boom:
+        available = True
+        provider = "gemini"
+        model = ""
+        rate_limited = False
+
+        async def acomplete(self, req):
+            raise RuntimeError("boom")
+
+    m = FleetMetrics()
+    brain = FleetBrain(gateway=_Boom(), metrics=m)
+    try:
+        await brain.agent_gateway.acomplete(LLMRequest(prompt="hi"))
+        raised = False
+    except RuntimeError:
+        raised = True
+    assert raised  # the agent's own error handling still sees the exception
+    assert m.brain_calls == 1 and m.brain_errors == 1
+
+
+async def test_agent_gateway_and_think_do_not_double_count():
+    """think() and the counting gateway are separate paths over the same brain and
+    must each count exactly once — never the same request twice."""
+    m = FleetMetrics()
+    canned = LLMResponse(text="ok", output_tokens=1)
+    brain = FleetBrain(
+        gateway=_FakeGW(available=True, provider="ollama", resp=canned), metrics=m)
+    await brain.think(LLMRequest(prompt="a"))            # +1 via think
+    await brain.agent_gateway.acomplete(LLMRequest(prompt="b"))  # +1 via gateway
+    assert brain.agent_gateway is brain.agent_gateway    # cached, one view per brain
+    assert m.brain_calls == 2
+
+
 # ── scheduler ────────────────────────────────────────────────────────────────
 async def test_scheduler_runs_and_isolates_failures():
     async def executor(task: AgentTask) -> dict:

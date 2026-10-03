@@ -403,6 +403,47 @@ def _build_scheduler(
     )
 
 
+def _scope_kind(t: str) -> str:
+    """Classify a seed target for the engagement scope table — mirrors the same
+    helper in ``heaven scan`` so the fleet records scope identically."""
+    t = t.strip()
+    if t.startswith(("http://", "https://")):
+        return "url"
+    if "/" in t and t.replace(".", "").replace("/", "").isdigit():
+        return "cidr"
+    if t and all(ch.isdigit() or ch == "." for ch in t):
+        return "ip"
+    return "host"
+
+
+def _seed_scope_if_empty(store: Any, seed_targets: dict[str, list[str]]) -> None:
+    """Record the operator's seed targets as the engagement scope when it has none.
+
+    Parity with ``heaven scan``'s auto-add (scan.py): a fresh, scope-less engagement
+    cannot meaningfully *filter*, so the targets the operator just named ARE the
+    scope. Recording them makes the coverage grade honest (scope coverage is
+    computed from this table, so an unseeded scope would always read 0%), and makes
+    the dashboard and report show the real targets. Best-effort: it never breaks a
+    run, and it never touches an engagement that already defines its own scope."""
+    if store is None:
+        return
+    try:
+        if store.list_scope():
+            return  # operator-defined scope already present; honour it untouched
+    except Exception:  # noqa: BLE001 — scope is best-effort
+        logger.debug("fleet scope read before seed failed", exc_info=True)
+        return
+    seeds = list(seed_targets.get("ips", []) or []) + list(seed_targets.get("urls", []) or [])
+    for t in seeds:
+        t = str(t).strip()
+        if not t:
+            continue
+        try:
+            store.add_scope(t, kind=_scope_kind(t), notes="auto-added from fleet run")
+        except Exception:  # noqa: BLE001
+            logger.debug("fleet scope auto-add failed for %s", t, exc_info=True)
+
+
 def _authorized_targets(
     seed_targets: dict[str, list[str]], blackboard: Blackboard
 ) -> dict[str, list[str]]:
@@ -484,6 +525,10 @@ async def run_fleet(
     blackboard = Blackboard(engagement_store, engagement_name=engagement_name)
     metrics = FleetMetrics()
     brain = FleetBrain(metrics=metrics)
+    # Record the seeds as the engagement scope when it has none, so the coverage
+    # grade is honest and the dashboard/report show the real targets (parity with
+    # `heaven scan`). A pre-existing operator-defined scope is left untouched.
+    _seed_scope_if_empty(engagement_store, seed_targets)
     # The authorised scope the executor's backstop enforces: the seeds plus the
     # engagement's own in-scope entries (honouring deliberately domain-wide ones).
     authorized_targets = _authorized_targets(seed_targets, blackboard)

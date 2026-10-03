@@ -56,6 +56,14 @@ def _guard(brain: Any):
     return brain.slot() if getattr(brain, "available", False) else _noguard()
 
 
+def _agent_gateway(brain: Any):
+    """The gateway a brain-backed agent should use: the brain's counting view when
+    it has one (so the agent's LLM calls land in ``brain_calls``), falling back to
+    the plain gateway for a brain stub that does not expose one (tests)."""
+    gw = getattr(brain, "agent_gateway", None)
+    return gw if gw is not None else getattr(brain, "gateway", None)
+
+
 def _scan_mode(state: FleetState, is_url: bool) -> str:
     """Keep an emitted scan's mode in lockstep with the active scan mode: a
     focused run scans in that mode; FULL picks web for URLs, full for hosts."""
@@ -126,7 +134,7 @@ class StrategistRole:
             from heaven.ai.attack_chain_planner import AttackChainPlanner
         except Exception:  # noqa: BLE001
             return []
-        planner = AttackChainPlanner(gateway=getattr(brain, "gateway", None))
+        planner = AttackChainPlanner(gateway=_agent_gateway(brain))
         try:
             async with _guard(brain):
                 plan = await planner.plan(
@@ -176,7 +184,7 @@ class HypothesisRole:
             from heaven.ai.vuln_hypothesis import VulnHypothesisAgent
         except Exception:  # noqa: BLE001
             return []
-        agent = VulnHypothesisAgent(gateway=getattr(brain, "gateway", None))
+        agent = VulnHypothesisAgent(gateway=_agent_gateway(brain))
         if not agent.available:
             return []
         endpoints = _web_endpoints(state)

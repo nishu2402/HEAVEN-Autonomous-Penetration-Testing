@@ -168,6 +168,167 @@ def test_no_fallback_when_unconfigured():
     assert not r.ok() and "unreachable" in (r.error or "")
 
 
+# ── auto cloud→local fallback (zero-config) ─────────────────────────────────────
+def _cloud_primary(monkeypatch, *, models, allow=True, auto="1"):
+    """A keyed cloud primary (gemini) that fails every call, with the local-model
+    probe stubbed. ``models`` is what `local_llm.list_models` returns."""
+    from heaven.ai import local_llm
+    monkeypatch.setattr(local_llm, "list_models", lambda timeout=2.0: list(models))
+    monkeypatch.setenv("HEAVEN_LLM_AUTO_FALLBACK", auto)
+    monkeypatch.delenv("HEAVEN_LLM_FALLBACK_PROVIDER", raising=False)
+    gw = LLMGateway.__new__(LLMGateway)
+    gw.provider, gw.model = "gemini", "gemini-2.0"
+    gw._is_local = False
+    gw._client = object()                 # a configured, initialized cloud client
+    gw._allow_fallback = allow
+    gw.fallback_provider = ""
+    gw._fallback_gw = None
+    gw._auto_fallback_resolved = False
+    gw._auto_fallback_provider = ""
+    gw._complete_once = lambda req: LLMResponse(
+        text="", provider="gemini", model="gemini-2.0",
+        error="provider cooling down: skipping LLM call (after: 429 quota)")
+    return gw
+
+
+def test_auto_local_fallback_when_cloud_quota_exhausted(monkeypatch):
+    """A keyed cloud primary with no explicit fallback transparently uses a
+    reachable local model when its own call fails (e.g. free-tier quota)."""
+    gw = _cloud_primary(monkeypatch, models=["qwen2.5:7b"])
+    fb = LLMGateway.__new__(LLMGateway)
+    fb.provider, fb.model, fb._client = "ollama", "qwen2.5:7b", object()
+    fb.complete = lambda req: LLMResponse(text="local answer", provider="ollama", model="qwen2.5:7b")
+    monkeypatch.setattr(gw, "_get_fallback_gateway", lambda: fb)
+    assert gw._auto_local_fallback() == "ollama"
+    assert gw.has_usable_fallback() is True
+    r = gw.complete(LLMRequest(prompt="x"))
+    assert r.ok() and r.provider == "ollama" and r.text == "local answer"
+
+
+def test_auto_local_fallback_noop_without_local_model(monkeypatch):
+    """No reachable local model → no auto fallback, identical to today's degrade."""
+    gw = _cloud_primary(monkeypatch, models=[])
+    assert gw._auto_local_fallback() == ""
+    assert gw.has_usable_fallback() is False
+    r = gw.complete(LLMRequest(prompt="x"))
+    assert not r.ok()
+
+
+def test_auto_local_fallback_disabled_by_env(monkeypatch):
+    """HEAVEN_LLM_AUTO_FALLBACK=0 keeps the gateway strictly single-provider even
+    when a local model is reachable."""
+    gw = _cloud_primary(monkeypatch, models=["qwen2.5:7b"], auto="0")
+    assert gw._auto_local_fallback() == ""
+    assert gw.has_usable_fallback() is False
+
+
+def test_auto_fallback_enabled_accepts_catalog_values(monkeypatch):
+    """The on/off choices surfaced in the Settings catalog map to the parser."""
+    from heaven.ai.llm_gateway import _auto_fallback_enabled
+    for val, expected in (("off", False), ("0", False), ("no", False), ("false", False),
+                          ("on", True), ("1", True), ("", True)):
+        monkeypatch.setenv("HEAVEN_LLM_AUTO_FALLBACK", val)
+        assert _auto_fallback_enabled() is expected, val
+    monkeypatch.delenv("HEAVEN_LLM_AUTO_FALLBACK", raising=False)
+    assert _auto_fallback_enabled() is True   # default on when unset
+
+
+def test_explicit_fallback_wins_over_auto(monkeypatch):
+    """An explicit HEAVEN_LLM_FALLBACK_PROVIDER is honoured without probing local."""
+    from heaven.ai import local_llm
+
+    def _boom(timeout=2.0):
+        raise AssertionError("local probe must not run when an explicit fallback is set")
+
+    monkeypatch.setattr(local_llm, "list_models", _boom)
+    gw = LLMGateway.__new__(LLMGateway)
+    gw.provider, gw.model, gw._is_local, gw._client = "gemini", "g", False, object()
+    gw._allow_fallback = True
+    gw.fallback_provider = "anthropic"
+    gw._fallback_gw = None
+    gw._auto_fallback_resolved = False
+    gw._auto_fallback_provider = ""
+    assert gw._fallback_target() == "anthropic"
+
+
+def test_auto_local_fallback_not_for_local_primary(monkeypatch):
+    """A local primary has no quota to dodge, so it never auto-falls-back."""
+    from heaven.ai import local_llm
+    monkeypatch.setattr(local_llm, "list_models", lambda timeout=2.0: ["qwen2.5:7b"])
+    gw = LLMGateway.__new__(LLMGateway)
+    gw.provider, gw.model, gw._is_local, gw._client = "ollama", "m", True, object()
+    gw._allow_fallback = True
+    gw.fallback_provider = ""
+    gw._auto_fallback_resolved = False
+    gw._auto_fallback_provider = ""
+    assert gw._auto_local_fallback() == ""
+
+
+def test_auto_local_fallback_pins_installed_model(monkeypatch):
+    """The fallback pins a model that is actually installed, not the hard-coded
+    default (which may not be pulled) — the live 404 this prevents."""
+    gw = _cloud_primary(monkeypatch, models=["llama3:latest"])  # default qwen2.5:7b absent
+    assert gw._auto_local_fallback() == "ollama"
+    assert gw._auto_fallback_model == "llama3:latest"
+
+
+def test_auto_local_fallback_prefers_default_when_installed(monkeypatch):
+    """When the curated default is installed it wins over an arbitrary tag."""
+    gw = _cloud_primary(monkeypatch, models=["llama3:latest", "qwen2.5:7b"])
+    assert gw._auto_local_fallback() == "ollama"
+    assert gw._auto_fallback_model == "qwen2.5:7b"
+
+
+def test_auto_fallback_gateway_uses_pinned_model_not_cloud_env(monkeypatch):
+    """The built local fallback gateway uses the installed model, never inheriting
+    a cloud model name from HEAVEN_LLM_MODEL."""
+    monkeypatch.setenv("HEAVEN_LLM_MODEL", "gemini-flash-latest")
+    monkeypatch.delenv("HEAVEN_OLLAMA_HOST", raising=False)
+    gw = _cloud_primary(monkeypatch, models=["llama3:latest"])
+    fb = gw._get_fallback_gateway()
+    assert fb is not None and fb.provider == "ollama"
+    assert fb.model == "llama3:latest"
+
+
+def test_local_timeout_is_more_generous_than_cloud():
+    """A local model gets a longer per-call ceiling so a cold-start on a real
+    prompt does not time out and fall through to deterministic."""
+    from heaven.ai.llm_gateway import (
+        DEFAULT_LLM_TIMEOUT_S,
+        DEFAULT_LOCAL_LLM_TIMEOUT_S,
+        _llm_timeout_s,
+    )
+    assert _llm_timeout_s(is_local=False) == DEFAULT_LLM_TIMEOUT_S
+    assert _llm_timeout_s(is_local=True) == DEFAULT_LOCAL_LLM_TIMEOUT_S
+    assert DEFAULT_LOCAL_LLM_TIMEOUT_S > DEFAULT_LLM_TIMEOUT_S
+
+
+def test_local_timeout_env_override(monkeypatch):
+    """The cloud and local ceilings are independently overridable."""
+    from heaven.ai.llm_gateway import _llm_timeout_s
+    monkeypatch.setenv("HEAVEN_LLM_LOCAL_TIMEOUT", "240")
+    monkeypatch.setenv("HEAVEN_LLM_TIMEOUT", "30")
+    assert _llm_timeout_s(is_local=True) == 240.0
+    assert _llm_timeout_s(is_local=False) == 30.0
+
+
+def test_auto_local_fallback_probe_cached(monkeypatch):
+    """The local-model probe runs once; the resolution is cached thereafter."""
+    from heaven.ai import local_llm
+    calls = {"n": 0}
+
+    def _probe(timeout=2.0):
+        calls["n"] += 1
+        return ["qwen2.5:7b"]
+
+    monkeypatch.setattr(local_llm, "list_models", _probe)
+    gw = _cloud_primary(monkeypatch, models=["qwen2.5:7b"])
+    monkeypatch.setattr(local_llm, "list_models", _probe)  # override the stub set above
+    assert gw._auto_local_fallback() == "ollama"
+    assert gw._auto_local_fallback() == "ollama"
+    assert calls["n"] == 1
+
+
 # ── streaming ───────────────────────────────────────────────────────────────
 def test_stream_falls_back_to_single_chunk_on_native_error():
     gw = LLMGateway.__new__(LLMGateway)

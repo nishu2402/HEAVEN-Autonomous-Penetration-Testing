@@ -31,9 +31,16 @@ _LLM_ENV_VARS = (
 @pytest.fixture(autouse=True)
 def _isolate_llm_env(monkeypatch):
     """Guarantee no ambient/leaked LLM provider key is visible to a test unless
-    that test sets one explicitly. Restored automatically after each test."""
+    that test sets one explicitly. Restored automatically after each test.
+
+    Also pins the auto cloud→local fallback OFF so the suite never reaches a
+    developer's live local Ollama when a primary call fails (which would make a
+    breaker/failure assertion non-deterministic depending on host state). The
+    auto-fallback tests opt back in with ``monkeypatch.setenv(..., "1")`` and stub
+    the model probe, so they stay deterministic AND offline."""
     for var in _LLM_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HEAVEN_LLM_AUTO_FALLBACK", "0")
     yield
 
 

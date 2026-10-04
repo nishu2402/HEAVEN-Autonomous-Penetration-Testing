@@ -39,8 +39,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
+import socket
 import subprocess  # nosec B404 # runs vetted CLI tools (git/pip/npm), never a shell
 import sys
 import time
@@ -165,6 +167,123 @@ def _run_git(root: Path, *args: str, timeout: int = 60) -> tuple[int, str, str]:
         return 1, "", f"{type(e).__name__}: {e}"
 
 
+# ── Pre-flight remote reachability ───────────────────────────────────────────
+# git cannot bound its own TCP connect on every platform: `http.connectTimeout`
+# is a libcurl option only some builds honor (on macOS git 2.54 it is ignored, so
+# a dead host hangs ~21-75s on the kernel's SYN timeout before `git fetch` gives
+# up). That is exactly the long opaque hang users hit when GitHub is blocked by a
+# firewall/VPN or the box is offline. So before the real fetch we do ONE short,
+# bounded TCP connect to the remote host and, if it fails, report an honest,
+# classified, actionable message in seconds instead. The probe FAILS OPEN (treats
+# the remote as reachable) whenever it can't be sure — behind a proxy, a local
+# path remote, or on any probe glitch — so it can never block a legitimate update;
+# it only short-circuits a genuinely unreachable network.
+
+DEFAULT_CONNECT_TIMEOUT_S = 6.0
+_PROXY_ENV_KEYS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+                   "ALL_PROXY", "all_proxy")
+_SCHEME_DEFAULT_PORT = {"https": 443, "http": 80, "ssh": 22, "git": 9418}
+
+
+def _connect_timeout_s() -> float:
+    """Per-probe TCP connect budget (seconds). Override with
+    ``HEAVEN_UPDATE_CONNECT_TIMEOUT``; clamped to a sane 1-30s window."""
+    try:
+        return max(1.0, min(30.0, float(
+            os.environ.get("HEAVEN_UPDATE_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT_S))))
+    except (TypeError, ValueError):
+        return DEFAULT_CONNECT_TIMEOUT_S
+
+
+def _parse_remote_endpoint(url: str) -> Optional[tuple[str, int, str]]:
+    """``(host, port, scheme)`` to TCP-probe for a git remote URL, or ``None`` when
+    it is a local path / unparseable (then the probe is skipped and git just tries).
+
+    Handles ``https`` / ``http`` / ``ssh`` / ``git`` URLs and the scp-like
+    ``git@host:owner/repo.git`` form, stripping any embedded credentials.
+    """
+    url = (url or "").strip()
+    if not url:
+        return None
+    if "://" not in url:
+        # scp-like `[user@]host:path`. Distinguish from a local path (`/repo`,
+        # `./x`) and a Windows drive (`C:\repo`): the part before the first colon
+        # must have no slash AND either carry a `user@` or look like a hostname
+        # (contain a dot), which a bare drive letter never does.
+        head = url.split(":", 1)[0]
+        if ":" in url and "/" not in head and ("@" in head or "." in head):
+            host = head.split("@", 1)[-1]
+            if host:
+                return host, 22, "ssh"
+        return None
+    try:
+        from urllib.parse import urlsplit
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if not host:
+            return None
+        scheme = (parts.scheme or "").lower()
+        port = parts.port or _SCHEME_DEFAULT_PORT.get(scheme, 443)
+        return host, int(port), scheme or "https"
+    except Exception:  # noqa: BLE001 — unparseable URL → skip the probe
+        return None
+
+
+def _probe_tcp(host: str, port: int, timeout: float) -> tuple[bool, str]:
+    """One bounded TCP connect. Returns ``(reachable, reason_if_not)`` with the
+    failure classified so the message can tell network-down from DNS from a block.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True, ""
+    except socket.gaierror:
+        return False, f"DNS lookup for {host} failed"
+    except (socket.timeout, TimeoutError):
+        return False, f"connection to {host}:{port} timed out after {timeout:.0f}s"
+    except ConnectionRefusedError:
+        return False, f"{host}:{port} refused the connection"
+    except OSError as e:  # no route to host, network down, etc.
+        return False, f"{host}:{port} unreachable ({e.strerror or type(e).__name__})"
+
+
+def _proxy_configured(root: Path) -> bool:
+    """A proxy routes git's traffic, so a direct TCP probe would wrongly report the
+    remote unreachable. Detect one (env vars or git's own ``http.proxy``) and skip
+    the probe when present."""
+    if any(os.environ.get(k) for k in _PROXY_ENV_KEYS):
+        return True
+    rc, out, _ = _run_git(root, "config", "--get", "http.proxy")
+    return rc == 0 and bool(out.strip())
+
+
+def _remote_endpoint(root: Path, remote: str) -> Optional[tuple[str, int, str]]:
+    """Resolve the ``remote``'s URL (via git) into a probe endpoint, or ``None``."""
+    rc, url, _ = _run_git(root, "remote", "get-url", remote)
+    if rc != 0 or not url:
+        rc, url, _ = _run_git(root, "config", "--get", f"remote.{remote}.url")
+    return _parse_remote_endpoint(url if rc == 0 else "")
+
+
+def _preflight_remote(root: Path, remote: str) -> tuple[bool, str, str]:
+    """Fast reachability pre-check before the slow ``git fetch``.
+
+    Returns ``(reachable, reason, host)``. Fails OPEN (``reachable=True``) whenever
+    it can't be sure, so it never blocks a real update; it only short-circuits a
+    genuinely dead network with an honest, classified message.
+    """
+    try:
+        if _proxy_configured(root):
+            return True, "", ""
+        ep = _remote_endpoint(root, remote)
+        if ep is None:
+            return True, "", ""
+        host, port, _scheme = ep
+        ok, reason = _probe_tcp(host, port, _connect_timeout_s())
+        return ok, reason, host
+    except Exception:  # noqa: BLE001 — a probe glitch must never block an update
+        return True, "", ""
+
+
 @dataclass
 class UpdateCheck:
     """Result of asking 'is a newer HEAVEN available, and can I take it?'."""
@@ -187,6 +306,7 @@ class UpdateCheck:
     dirty_regenerable: list[str] = field(default_factory=list)
     dirty_blocking: list[str] = field(default_factory=list)
     remote_reachable: bool = True
+    remote_host: str = ""        # host we probed/fetched from (for honest messages)
     available: bool = False      # behind > 0
     error: str = ""
 
@@ -207,6 +327,7 @@ class UpdateCheck:
             "dirty_regenerable": self.dirty_regenerable,
             "dirty_blocking": self.dirty_blocking,
             "remote_reachable": self.remote_reachable,
+            "remote_host": self.remote_host,
             "available": self.available,
             "error": self.error,
         }
@@ -262,6 +383,16 @@ def check_for_update(root: Path, *, fetch: bool = True) -> UpdateCheck:
     c = _inspect_repo(root)
 
     if fetch:
+        # Fail fast on a dead network: a bounded TCP probe (seconds) before the
+        # fetch, which can otherwise hang ~21s+ on a blocked host (see the
+        # pre-flight helpers above). Fails open, so a reachable remote always
+        # proceeds to the real fetch, which still surfaces auth/other errors.
+        reachable, reason, host = _preflight_remote(root, c.remote)
+        c.remote_host = host
+        if not reachable:
+            c.remote_reachable = False
+            c.error = reason or "remote unreachable"
+            return c
         rc, _, err = _run_git(root, "fetch", "--quiet", "--tags", c.remote, timeout=120)
         if rc != 0:
             c.remote_reachable = False
@@ -613,8 +744,11 @@ def _render_check(c: UpdateCheck) -> None:
         _print(_non_git_message())
         return
     if not c.remote_reachable:
-        _print(f"  [yellow]Couldn't reach the remote:[/yellow] {c.error}")
-        _print("  [dim]Check your network / proxy and try again.[/dim]")
+        host = c.remote_host or "the remote"
+        _print(f"  [yellow]Couldn't reach {host}:[/yellow] {c.error}")
+        _print("  [dim]Usually a network, firewall, or proxy issue on this machine, not a[/dim]")
+        _print("  [dim]HEAVEN fault. Check connectivity (or set HTTPS_PROXY behind a proxy),[/dim]")
+        _print("  [dim]then try again.[/dim]")
         return
     if c.available:
         _print(f"  [bold green]Update available:[/bold green] "
@@ -653,7 +787,13 @@ def _self_update(summary: UpdateSummary, *, force: bool, skip_ui: bool) -> None:
         summary.errors.append(f"code: {c.reason}")
         return
     if not c.remote_reachable:
-        _print(f"  [yellow]⚠ Code:[/yellow] couldn't reach the remote ({c.error}) · skipping self-update.")
+        host = c.remote_host or "the remote"
+        _print(f"  [yellow]⚠ Code:[/yellow] couldn't reach {host} ({c.error}) · skipping self-update.")
+        _print("      [dim]Usually a network/firewall/VPN issue on this machine, not a HEAVEN fault:[/dim]")
+        _print("      [dim]· confirm you're online and GitHub isn't blocked here[/dim]")
+        _print("      [dim]· behind a proxy? set HTTPS_PROXY=http://host:port and re-run[/dim]")
+        _print("      [dim]· private repo? make sure git can authenticate (gh auth login / SSH key)[/dim]")
+        _print(f"      [dim]· once connected, update manually: git -C {root} pull --ff-only[/dim]")
         summary.code_note = f"remote unreachable: {c.error}"
         summary.errors.append(f"code: {c.error}")
         return

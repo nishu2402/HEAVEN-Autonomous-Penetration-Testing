@@ -167,8 +167,9 @@ def test_brain_deterministic_floor_when_no_provider():
     assert info["tier"] == TIER_DETERMINISTIC and info["label"] == "deterministic"
     # every key the doctor/UI reads must be present and typed
     for k in ("provider", "model", "available", "rate_limited", "concurrency",
-              "local_enabled", "local_can_enable"):
+              "local_enabled", "local_can_enable", "fallback_active"):
         assert k in info
+    assert info["fallback_active"] is False  # no fallback when no provider at all
 
 
 def test_brain_tier_resolution():
@@ -177,6 +178,40 @@ def test_brain_tier_resolution():
     # rate-limited cloud is configured but not currently usable
     b = FleetBrain(gateway=_FakeGW(available=True, provider="openai", rate_limited=True))
     assert b.tier == TIER_CLOUD and b.available is False
+
+
+class _FakeGWFallback(_FakeGW):
+    """A cloud gateway that is rate-limited but can still serve via a fallback,
+    mirroring the real gateway's `has_usable_fallback` contract."""
+
+    def __init__(self, *, fallback_ready: bool, **kw):
+        super().__init__(**kw)
+        self._fallback_ready = fallback_ready
+
+    def has_usable_fallback(self) -> bool:
+        return self._fallback_ready
+
+
+def test_brain_available_via_fallback_when_cloud_cooling_down():
+    """A quota-exhausted cloud primary keeps the brain available when a keyless
+    local fallback is ready, so the LLM roles stay active on the local model."""
+    gw = _FakeGWFallback(available=True, provider="gemini", rate_limited=True,
+                         fallback_ready=True)
+    brain = FleetBrain(gateway=gw)
+    assert brain.tier == TIER_CLOUD
+    assert brain.available is True            # served by the local fallback
+    info = brain.describe()
+    assert info["rate_limited"] is True and info["fallback_active"] is True
+
+
+def test_brain_unavailable_when_cooling_down_without_fallback():
+    """No usable fallback → the brain stands down to the deterministic floor, the
+    same graceful degrade as before (zero regression without a local model)."""
+    gw = _FakeGWFallback(available=True, provider="gemini", rate_limited=True,
+                         fallback_ready=False)
+    brain = FleetBrain(gateway=gw)
+    assert brain.available is False
+    assert brain.describe()["fallback_active"] is False
 
 
 async def test_brain_think_unavailable_returns_not_ok():

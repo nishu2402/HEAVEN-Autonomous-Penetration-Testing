@@ -24,6 +24,10 @@ import pytest
 
 from heaven.cli import update as U
 
+# Captured before the autouse fixture stubs `_probe_tcp`, so the probe's own unit
+# test can exercise the genuine implementation (its socket layer is patched).
+_REAL_PROBE_TCP = U._probe_tcp
+
 
 # ── fixtures / fakes ─────────────────────────────────────────────────────────
 
@@ -41,7 +45,8 @@ class FakeGit:
 
     def __init__(self, *, dirty_files=None, behind=0, ahead=0, current="2.0.0",
                  latest="2.1.0", ff_ok=True, fetch_ok=True, changed=None,
-                 upstream="origin/main", branch="main"):
+                 upstream="origin/main", branch="main",
+                 remote_url="https://github.com/o/r.git", http_proxy=""):
         self.calls: list[tuple[str, ...]] = []
         self.dirty_files = list(dirty_files or [])
         self.behind = behind
@@ -53,6 +58,8 @@ class FakeGit:
         self.changed = list(changed) if changed is not None else []
         self.upstream = upstream
         self.branch = branch
+        self.remote_url = remote_url
+        self.http_proxy = http_proxy
         self.merged = False
 
     def __call__(self, root, *args, timeout=60):
@@ -69,6 +76,11 @@ class FakeGit:
             return 0, "cccccccccccceeee", ""
         if a[:1] == ["status"]:
             return 0, "\n".join(f" M {f}" for f in self.dirty_files), ""
+        if a[:2] == ["remote", "get-url"]:              # pre-flight URL lookup
+            return (0, self.remote_url, "") if self.remote_url else (1, "", "no such remote")
+        if a[:2] == ["config", "--get"]:                # http.proxy / remote.*.url probe
+            return (0, self.http_proxy, "") if (a[-1] == "http.proxy" and self.http_proxy) \
+                else (1, "", "")
         if a[:1] == ["fetch"]:
             return (0, "", "") if self.fetch_ok else (1, "", "Could not resolve host github.com")
         if a[:1] == ["rev-list"]:
@@ -101,10 +113,14 @@ class FakeGit:
 
 @pytest.fixture(autouse=True)
 def _no_real_subprocess(monkeypatch):
-    """Guarantee no test ever shells out to a real pip/ui build."""
+    """Guarantee no test ever shells out to a real pip/ui build, and that the
+    pre-flight reachability probe never opens a real socket (default: reachable,
+    so the faked `git fetch` still decides the outcome). Tests that exercise the
+    probe override `_probe_tcp` / `_preflight_remote` explicitly."""
     monkeypatch.setattr(U, "_git_available", lambda: True)
     monkeypatch.setattr(U, "_pip_reinstall", lambda root: (True, "OK (stub)"))
     monkeypatch.setattr(U, "_ui_rebuild", lambda root: (True, "OK (stub)"))
+    monkeypatch.setattr(U, "_probe_tcp", lambda host, port, timeout: (True, ""))
 
 
 # ── pure helpers ─────────────────────────────────────────────────────────────
@@ -195,6 +211,142 @@ def test_check_without_git_binary(tmp_path, monkeypatch):
     monkeypatch.setattr(U, "_git_available", lambda: False)
     c = U.check_for_update(root)
     assert c.is_git is False and "git" in c.reason.lower()
+
+
+# ── pre-flight remote reachability (fast-fail before the slow fetch) ──────────
+
+def test_parse_remote_endpoint_handles_every_url_form():
+    assert U._parse_remote_endpoint("https://github.com/o/r.git") == ("github.com", 443, "https")
+    # embedded credentials are stripped off the host.
+    assert U._parse_remote_endpoint(
+        "https://user:tok@github.com/o/r.git") == ("github.com", 443, "https")
+    assert U._parse_remote_endpoint("http://host:8080/o/r.git") == ("host", 8080, "http")
+    assert U._parse_remote_endpoint("ssh://git@host:2222/o/r.git") == ("host", 2222, "ssh")
+    assert U._parse_remote_endpoint("git://host/o/r.git") == ("host", 9418, "git")
+    # scp-like shorthand → ssh/22.
+    assert U._parse_remote_endpoint("git@github.com:o/r.git") == ("github.com", 22, "ssh")
+    # local paths / drive letters / junk → None (probe is skipped, git just tries).
+    assert U._parse_remote_endpoint("/srv/mirrors/heaven.git") is None
+    assert U._parse_remote_endpoint("../other.git") is None
+    assert U._parse_remote_endpoint("C:\\repos\\heaven") is None
+    assert U._parse_remote_endpoint("") is None
+
+
+def test_probe_tcp_classifies_each_failure(monkeypatch):
+    import socket as _s
+
+    def _raise(exc):
+        def _cc(addr, timeout=None):
+            raise exc
+        return _cc
+
+    monkeypatch.setattr(U.socket, "create_connection", _raise(_s.gaierror("no name")))
+    ok, why = _REAL_PROBE_TCP("github.com", 443, 2.0)
+    assert ok is False and "dns" in why.lower()
+
+    monkeypatch.setattr(U.socket, "create_connection", _raise(TimeoutError()))
+    ok, why = _REAL_PROBE_TCP("github.com", 443, 2.0)
+    assert ok is False and "timed out" in why.lower()
+
+    monkeypatch.setattr(U.socket, "create_connection", _raise(ConnectionRefusedError()))
+    ok, why = _REAL_PROBE_TCP("github.com", 443, 2.0)
+    assert ok is False and "refused" in why.lower()
+
+    monkeypatch.setattr(U.socket, "create_connection", _raise(OSError("No route to host")))
+    ok, why = _REAL_PROBE_TCP("github.com", 443, 2.0)
+    assert ok is False and "unreachable" in why.lower()
+
+    # a successful connect returns a context-manageable object.
+    class _Sock:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(U.socket, "create_connection", lambda addr, timeout=None: _Sock())
+    assert _REAL_PROBE_TCP("github.com", 443, 2.0) == (True, "")
+
+
+def test_connect_timeout_env_override_and_clamp(monkeypatch):
+    monkeypatch.delenv("HEAVEN_UPDATE_CONNECT_TIMEOUT", raising=False)
+    assert U._connect_timeout_s() == U.DEFAULT_CONNECT_TIMEOUT_S
+    monkeypatch.setenv("HEAVEN_UPDATE_CONNECT_TIMEOUT", "12")
+    assert U._connect_timeout_s() == 12.0
+    monkeypatch.setenv("HEAVEN_UPDATE_CONNECT_TIMEOUT", "0.1")   # clamped up to 1s
+    assert U._connect_timeout_s() == 1.0
+    monkeypatch.setenv("HEAVEN_UPDATE_CONNECT_TIMEOUT", "9999")  # clamped down to 30s
+    assert U._connect_timeout_s() == 30.0
+    monkeypatch.setenv("HEAVEN_UPDATE_CONNECT_TIMEOUT", "garbage")
+    assert U._connect_timeout_s() == U.DEFAULT_CONNECT_TIMEOUT_S
+
+
+def test_check_fast_fails_when_remote_unreachable_and_skips_fetch(tmp_path, monkeypatch):
+    """The reported bug: a blocked GitHub made `git fetch` hang ~21s. The probe
+    now fails in seconds with a classified, host-named reason, and the slow fetch
+    is never attempted."""
+    root = _mk_repo(tmp_path, "4.2.0")
+    fake = FakeGit(behind=3, current="4.2.0", latest="4.3.0")
+    monkeypatch.setattr(U, "_run_git", fake)
+    monkeypatch.setattr(
+        U, "_probe_tcp",
+        lambda host, port, timeout: (False, f"connection to {host}:{port} timed out after 6s"))
+    c = U.check_for_update(root)
+    assert c.remote_reachable is False
+    assert c.available is False               # never claim an update we couldn't verify
+    assert c.remote_host == "github.com"      # named in the honest message
+    assert "timed out" in c.error.lower()
+    assert not fake.issued("fetch")           # the slow hop was skipped entirely
+
+
+def test_check_proceeds_to_fetch_when_probe_reachable(tmp_path, monkeypatch):
+    root = _mk_repo(tmp_path, "4.2.0")
+    fake = FakeGit(behind=1, current="4.2.0", latest="4.3.0")
+    monkeypatch.setattr(U, "_run_git", fake)
+    monkeypatch.setattr(U, "_probe_tcp", lambda host, port, timeout: (True, ""))
+    c = U.check_for_update(root)
+    assert c.remote_reachable is True and c.available is True
+    assert c.remote_host == "github.com"
+    assert fake.issued("fetch")               # reachable → the real fetch still runs
+
+
+def test_preflight_skipped_behind_a_proxy(tmp_path, monkeypatch):
+    """A proxy routes git's traffic, so a direct TCP probe would wrongly fail.
+    With a proxy configured the probe is skipped and the remote is treated as
+    reachable (git then succeeds through the proxy)."""
+    root = _mk_repo(tmp_path)
+    monkeypatch.setattr(U, "_run_git", FakeGit())
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.local:3128")
+    # Even a hard-failing probe must not be consulted when a proxy is set.
+    monkeypatch.setattr(U, "_probe_tcp", lambda *a: (False, "should not be called"))
+    reachable, reason, host = U._preflight_remote(root, "origin")
+    assert reachable is True and reason == ""
+
+
+def test_preflight_skipped_via_git_http_proxy_config(tmp_path, monkeypatch):
+    root = _mk_repo(tmp_path)
+    for k in U._PROXY_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(U, "_run_git", FakeGit(http_proxy="http://corp-proxy:8080"))
+    monkeypatch.setattr(U, "_probe_tcp", lambda *a: (False, "should not be called"))
+    reachable, _reason, _host = U._preflight_remote(root, "origin")
+    assert reachable is True
+
+
+def test_preflight_fails_open_for_local_path_remote(tmp_path, monkeypatch):
+    """A local-path remote has no host to probe → the probe is skipped (reachable)
+    so a mirror/clone-from-path install is never blocked."""
+    root = _mk_repo(tmp_path)
+    for k in U._PROXY_ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(U, "_run_git", FakeGit(remote_url="/srv/mirror/heaven.git"))
+    monkeypatch.setattr(U, "_probe_tcp", lambda *a: (False, "should not be called"))
+    reachable, reason, host = U._preflight_remote(root, "origin")
+    assert reachable is True and host == ""
+
+
+def test_remote_host_is_reported_in_to_dict(tmp_path, monkeypatch):
+    root = _mk_repo(tmp_path)
+    monkeypatch.setattr(U, "_run_git", FakeGit(behind=0, current="2.1.0", latest="2.1.0"))
+    monkeypatch.setattr(U, "_probe_tcp", lambda *a: (True, ""))
+    d = U.check_for_update(root).to_dict()
+    assert "remote_host" in d and d["remote_host"] == "github.com"
 
 
 # ── apply_code_update ────────────────────────────────────────────────────────

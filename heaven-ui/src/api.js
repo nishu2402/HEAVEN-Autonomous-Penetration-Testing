@@ -408,9 +408,11 @@ export const System = {
 
 // Agent Fleet — GET /api/fleet/status reports the default-on multi-agent engine's
 // state for the Health card: { tier, label, provider, model, available, enabled,
-// local_enabled, local_can_enable, concurrency, modes:[…] }. The fleet runs at
-// full strength with no brain, so this is always an honest "AI optional" picture,
-// never an error. Read-only.
+// local_enabled, local_can_enable, concurrency, rate_limited, fallback_active,
+// modes:[…] }. fallback_active is true when the primary is cooling down but a
+// keyless local model is carrying the AI work. The fleet runs at full strength
+// with no brain, so this is always an honest "AI optional" picture, never an
+// error. Read-only.
 export const Fleet = {
   status: () => api("/fleet/status"),
   // POST /api/fleet/run → { job_id, status } (read-only; runs in the background).

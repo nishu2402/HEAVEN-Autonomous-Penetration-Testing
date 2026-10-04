@@ -215,9 +215,11 @@ export default function Health() {
                       : "Deterministic"}
                 </div>
                 <div className="dim" style={{ fontSize: 11.5 }}>
-                  {fleet.available
-                    ? "AI-assisted planning · deterministic floor always on"
-                    : "rule-based · runs at full strength, AI optional"}
+                  {fleet.fallback_active
+                    ? "primary cooling down · serving via local fallback · deterministic floor always on"
+                    : fleet.available
+                      ? "AI-assisted planning · deterministic floor always on"
+                      : "rule-based · runs at full strength, AI optional"}
                 </div>
               </div>
             </div>

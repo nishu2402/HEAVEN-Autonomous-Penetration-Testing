@@ -140,8 +140,13 @@ def fleet(
            f"auth={'ON' if i_have_authorization else 'read-only'} "
            f"scale={'%d workers' % resolved_workers if resolved_workers > 1 else 'single-process'}")
     _print(f"  Seeds: {', '.join(list(target) + list(url))}")
-    _print(f"  Brain: {brain_info.get('label', 'deterministic')} "
-           f"({'available' if brain_info.get('available') else 'deterministic · AI optional'})")
+    if not brain_info.get("available"):
+        brain_state = "deterministic · AI optional"
+    elif brain_info.get("fallback_active"):
+        brain_state = "available · primary cooling down, serving via local fallback"
+    else:
+        brain_state = "available"
+    _print(f"  Brain: {brain_info.get('label', 'deterministic')} ({brain_state})")
     if objective:
         _print(f"  Objective: {objective}")
     _print("")

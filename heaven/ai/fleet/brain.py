@@ -147,10 +147,28 @@ class FleetBrain:
 
     @property
     def available(self) -> bool:
-        """True when a brain is configured and not currently rate-limited. A role
+        """True when a brain is configured and can serve a call right now. A role
         may still get a not-ok response at call time; it must handle that by
-        falling back to its rule-based path."""
-        return self.tier != TIER_DETERMINISTIC and not getattr(self.gateway, "rate_limited", False)
+        falling back to its rule-based path.
+
+        When the primary provider is cooling down (quota/overload breaker armed)
+        the brain is still available if a keyless local fallback — or an explicitly
+        configured one — is ready to take over, so a quota-exhausted free tier
+        keeps the AI roles active on a local model instead of standing down to the
+        deterministic floor."""
+        if self.tier == TIER_DETERMINISTIC:
+            return False
+        gw = self.gateway
+        if not getattr(gw, "rate_limited", False):
+            return True
+        probe = getattr(gw, "has_usable_fallback", None)
+        if not callable(probe):
+            return False
+        try:
+            return bool(probe())
+        except Exception:  # noqa: BLE001 — availability must never raise
+            logger.debug("fleet brain fallback probe failed", exc_info=True)
+            return False
 
     def describe(self) -> dict:
         """Honest, offline-safe status for ``heaven doctor`` / API health / UI.
@@ -170,7 +188,12 @@ class FleetBrain:
             "concurrency": self._concurrency,
             "local_enabled": False,
             "local_can_enable": False,
+            "fallback_active": False,
         }
+        # When the primary is cooling down but the brain is still available, a
+        # fallback (keyless local or an explicit one) is carrying the AI work — an
+        # honest 'AI still active, now local' signal rather than a dead cloud tier.
+        info["fallback_active"] = bool(info["rate_limited"] and info["available"])
         # Report whether a local brain is present or could be one-tap enabled, so
         # the CLI/UI can offer Tier 2 without the fleet ever blocking on it.
         try:

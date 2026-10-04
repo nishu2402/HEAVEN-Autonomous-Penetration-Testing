@@ -102,6 +102,31 @@ If the primary is unavailable or returns nothing, HEAVEN retries **once** on the
 fallback. A dead local endpoint fails fast (no retry burn), so a scan never
 stalls waiting on a model that isn't running.
 
+## Automatic local fallback when a cloud key is exhausted
+
+A free-tier cloud key eventually hits its daily quota and starts returning 429s.
+When that happens and you have **no** `HEAVEN_LLM_FALLBACK_PROVIDER` set, HEAVEN
+now falls back to a reachable local model on its own: if Ollama is running with a
+model pulled, the AI roles keep working on that local model instead of standing
+down to the deterministic floor. It is keyless and zero-config, probed once and
+cached, and pins a model that is actually installed (so it never 404s on a default
+tag you have not pulled). `heaven doctor` / the Health page show
+`fallback_active` when the primary is cooling down and a local model is carrying
+the AI work.
+
+```ini
+# Default on. Set to 0 to keep the gateway strictly single-provider.
+HEAVEN_LLM_AUTO_FALLBACK=1
+# A local model is CPU-bound and pays a cold-start cost, so it gets a more
+# generous per-call ceiling than a cloud call (seconds; a cap, not the typical
+# latency). Override independently of the cloud HEAVEN_LLM_TIMEOUT.
+HEAVEN_LLM_LOCAL_TIMEOUT=180
+```
+
+An explicit `HEAVEN_LLM_FALLBACK_PROVIDER` always wins over this automatic
+behaviour; the auto fallback only applies to a configured cloud primary (a local
+primary has no quota to dodge).
+
 ## The assistant (chatbot)
 
 - **CLI:** `heaven chat`, streaming REPL. `--once "question"` for one-shot;

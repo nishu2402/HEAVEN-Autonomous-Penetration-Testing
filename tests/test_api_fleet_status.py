@@ -35,8 +35,10 @@ def test_fleet_status_shape(client):
     assert r.status_code == 200, r.text
     d = r.json()
     # Honest status block the UI renders.
-    for key in ("tier", "label", "available", "enabled", "modes", "workers", "scale_out"):
+    for key in ("tier", "label", "available", "enabled", "modes", "workers",
+                "scale_out", "fallback_active"):
         assert key in d, f"missing {key}"
+    assert isinstance(d["fallback_active"], bool)
     assert isinstance(d["enabled"], bool)
     assert isinstance(d["modes"], list)
     # Scale-out is off (single worker) unless the operator opts in.

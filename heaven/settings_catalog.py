@@ -119,6 +119,14 @@ SETTINGS: tuple[SettingSpec, ...] = (
         secret=False, placeholder="gemini",
         choices=("", "ollama", "local", "gemini", "anthropic", "openai", "deepseek"),
     ),
+    SettingSpec(
+        "HEAVEN_LLM_AUTO_FALLBACK", "Auto local fallback", "AI / LLM",
+        "On by default. When a cloud key hits its quota (429) and no explicit "
+        "fallback provider is set, serve the AI roles through a reachable local "
+        "model (Ollama) instead of standing down to the deterministic floor. Set "
+        "to off to keep the gateway strictly single-provider.",
+        secret=False, placeholder="on", choices=("", "on", "off"),
+    ),
 
     # ── Updates ──
     SettingSpec(

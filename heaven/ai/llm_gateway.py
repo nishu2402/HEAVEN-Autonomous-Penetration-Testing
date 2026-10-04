@@ -245,13 +245,21 @@ def _local_base_url(provider: str) -> str:
 # offload, one that froze the whole web server. Overridable via env for slow
 # links or big-reasoning models. Clamped to a sane floor.
 DEFAULT_LLM_TIMEOUT_S = 60.0
+# A local model (Ollama / llama.cpp) is CPU-bound and pays a cold-start cost on its
+# first inference, so a real prompt (an attack-chain plan over dozens of findings)
+# can legitimately exceed the cloud ceiling. The ceiling is a cap, not the typical
+# latency — a warm model answers in seconds — so a more generous local default lets
+# a cold-start succeed instead of timing out and falling through to deterministic.
+DEFAULT_LOCAL_LLM_TIMEOUT_S = 180.0
 
 
-def _llm_timeout_s() -> float:
+def _llm_timeout_s(is_local: bool = False) -> float:
+    env = "HEAVEN_LLM_LOCAL_TIMEOUT" if is_local else "HEAVEN_LLM_TIMEOUT"
+    default = DEFAULT_LOCAL_LLM_TIMEOUT_S if is_local else DEFAULT_LLM_TIMEOUT_S
     try:
-        return max(5.0, float(os.environ.get("HEAVEN_LLM_TIMEOUT", DEFAULT_LLM_TIMEOUT_S)))
+        return max(5.0, float(os.environ.get(env, default)))
     except (TypeError, ValueError):
-        return DEFAULT_LLM_TIMEOUT_S
+        return default
 
 
 # ═══════════════════════════════════════════
@@ -568,6 +576,14 @@ def _overload_cooldown_s() -> float:
     return max(0.0, v)
 
 
+def _auto_fallback_enabled() -> bool:
+    """Whether a keyed cloud primary may auto-fall-back to a reachable local
+    runtime when no explicit ``HEAVEN_LLM_FALLBACK_PROVIDER`` is set. Default on;
+    ``HEAVEN_LLM_AUTO_FALLBACK=0`` keeps the gateway strictly single-provider."""
+    return (os.environ.get("HEAVEN_LLM_AUTO_FALLBACK", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
 # Retry-After hints appear in provider error strings in several shapes:
 #   Gemini:   "... retry in 39.2s"  /  "retryDelay: '40s'"
 #   OpenAI:   "Please try again in 20s"  /  "retry-after: 30"
@@ -794,6 +810,14 @@ class LLMGateway:
         if self.fallback_provider == self.provider:
             self.fallback_provider = ""  # a provider can't fall back to itself
         self._fallback_gw: Optional["LLMGateway"] = None
+        # Auto cloud→local fallback: when a keyed cloud primary has no explicit
+        # fallback configured, a reachable local runtime (Ollama) transparently
+        # takes over so a quota-exhausted free tier degrades to a keyless local
+        # model instead of to the non-LLM path. Probed once, lazily, and cached
+        # (see `_auto_local_fallback`); a no-op when no local model is present.
+        self._auto_fallback_resolved = False
+        self._auto_fallback_provider = ""
+        self._auto_fallback_model = ""
 
         # Cloud providers need a key; local runtimes are keyless (Ollama) or take
         # an optional token, so they initialize on provider alone.
@@ -830,7 +854,7 @@ class LLMGateway:
         return ""
 
     def _init_client(self) -> None:
-        timeout_s = _llm_timeout_s()
+        timeout_s = _llm_timeout_s(is_local=self._is_local)
         try:
             if self.provider == "anthropic":
                 import anthropic  # type: ignore[import-not-found]
@@ -1698,30 +1722,93 @@ class LLMGateway:
 
     # ── hybrid fallback ──────────────────────────────────────────────────────
 
+    def _auto_local_fallback(self) -> str:
+        """Resolve a keyless local runtime to fall back to when a keyed cloud
+        primary is cooling down and no explicit fallback is configured.
+
+        Probed once and cached: a reachable Ollama with at least one model wins,
+        otherwise there is no auto fallback and the caller degrades to its non-LLM
+        path exactly as before. Restricted to a configured cloud primary — a local
+        primary has no quota to dodge and an unconfigured gateway stays
+        deterministic by design. Never raises."""
+        if getattr(self, "_auto_fallback_resolved", False):
+            return getattr(self, "_auto_fallback_provider", "")
+        self._auto_fallback_resolved = True
+        self._auto_fallback_provider = ""
+        # Only a configured, keyed cloud primary benefits (read defensively so a
+        # gateway built via ``__new__`` in tests never AttributeErrors).
+        if (getattr(self, "_is_local", False)
+                or not getattr(self, "_allow_fallback", False)
+                or getattr(self, "_client", None) is None
+                or not _auto_fallback_enabled()):
+            return ""
+        try:
+            from heaven.ai import local_llm
+            models = local_llm.list_models(timeout=2.0)
+            if models:
+                self._auto_fallback_provider = "ollama"
+                # Pin a model that is actually installed: prefer the configured
+                # default when present, else the first available tag. This avoids a
+                # 404 on the hard-coded default (e.g. qwen2.5:7b) when the operator
+                # pulled a different model, and prevents the fallback from
+                # inheriting a cloud model name from HEAVEN_LLM_MODEL.
+                default = PROVIDER_DEFAULT_MODELS.get("ollama", "")
+                self._auto_fallback_model = default if default in models else models[0]
+        except Exception:  # noqa: BLE001 — probe is best-effort; no fallback on error
+            logger.debug("auto local-fallback probe failed", exc_info=True)
+        return self._auto_fallback_provider
+
+    def _fallback_target(self) -> str:
+        """The effective fallback provider: an explicit one wins, else an
+        auto-detected local runtime."""
+        return getattr(self, "fallback_provider", "") or self._auto_local_fallback()
+
     def _should_fallback(self, resp: LLMResponse) -> bool:
         """Fall back only when this gateway allows it, a fallback provider is
-        configured, and the primary result is not usable."""
+        available (explicit or auto-detected local), and the primary result is
+        not usable."""
         if resp.ok():
             return False
         if not getattr(self, "_allow_fallback", False):
             return False
-        return bool(getattr(self, "fallback_provider", ""))
+        return bool(self._fallback_target())
 
     def _get_fallback_gateway(self) -> Optional["LLMGateway"]:
         """Lazily build (and cache) the secondary gateway. Built with
         allow_fallback=False so it can never recurse into another fallback."""
         if getattr(self, "_fallback_gw", None) is not None:
             return self._fallback_gw
-        prov = getattr(self, "fallback_provider", "")
+        prov = self._fallback_target()
         if not prov:
             return None
+        # Pin the installed model only for the auto-detected local fallback, so it
+        # never inherits HEAVEN_LLM_MODEL (a cloud model) or an uninstalled default.
+        # An explicit fallback provider resolves its own model from env/defaults.
+        model = ""
+        if not getattr(self, "fallback_provider", "") and prov == getattr(
+                self, "_auto_fallback_provider", ""):
+            model = getattr(self, "_auto_fallback_model", "") or ""
         try:
-            gw = LLMGateway(provider=prov, allow_fallback=False)
+            gw = LLMGateway(provider=prov, model=model or None, allow_fallback=False)
         except Exception:  # noqa: BLE001 — a broken fallback must never crash the primary
             logger.debug("fallback gateway init failed", exc_info=True)
             return None
         self._fallback_gw = gw
         return gw
+
+    def has_usable_fallback(self) -> bool:
+        """Whether a real fallback (explicit or auto-detected local) is ready to
+        serve a call right now. The fleet brain uses this so a cooling-down cloud
+        primary still reports 'available' when a keyless local model can take
+        over. Cheap after the first call (the probe + gateway are cached)."""
+        if not getattr(self, "_allow_fallback", False):
+            return False
+        try:
+            gw = self._get_fallback_gateway()
+        except Exception:  # noqa: BLE001 — availability must never raise
+            logger.debug("fallback readiness check failed", exc_info=True)
+            return False
+        return gw is not None and gw.available
 
     def _fallback_complete(self, req: LLMRequest) -> Optional[LLMResponse]:
         gw = self._get_fallback_gateway()
@@ -1841,6 +1928,7 @@ _GATEWAY_ENV_KEYS = (
     "HEAVEN_LLM_BASE_URL",          # local: generic OpenAI-compatible endpoint
     "DEEPSEEK_BASE_URL",            # deepseek: base-URL override
     "HEAVEN_LLM_FALLBACK_PROVIDER", # hybrid fallback target
+    "HEAVEN_LLM_AUTO_FALLBACK",     # auto cloud→local fallback on/off
     # Cloud keys + HEAVEN_LLM_API_KEY (local bearer). The "" for keyless Ollama
     # is filtered out — it's not a real env var.
     *(e for e in PROVIDER_KEY_ENVS.values() if e),

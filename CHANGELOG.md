@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Automatic local-model fallback keeps the AI roles active when a cloud key hits
+  its quota.** A free-tier key eventually returns 429s; previously the Agent Fleet
+  then stood down to its deterministic floor even on a machine with a local model
+  running. Now, when a keyed cloud primary is cooling down and no explicit
+  `HEAVEN_LLM_FALLBACK_PROVIDER` is set, the gateway transparently serves through a
+  reachable Ollama model instead. It is keyless and zero-config (default on;
+  `HEAVEN_LLM_AUTO_FALLBACK=0` opts out), probed once and cached, and pins a model
+  that is actually installed so it never 404s on a default tag that was not pulled.
+  The fleet brain reports itself available (not deterministic) while a local model
+  carries the work, and `heaven doctor` / the API `/fleet/status` / the Health page
+  surface a new `fallback_active` flag. A local model also gets a more generous
+  per-call ceiling (`HEAVEN_LLM_LOCAL_TIMEOUT`, default 180s) than a cloud call,
+  because a CPU-bound model pays a cold-start cost on a real prompt, and the
+  earlier 60s cloud ceiling made the first local inference time out. The honesty gate is
+  unchanged: the local model only ever enriches; every finding is still minted by a
+  deterministic oracle. Verified live against a quota-exhausted Gemini key with a
+  real Ollama model serving the fleet's AI calls.
 - **Deep cryptographic and configuration-posture detectors that close a class of
   findings a senior pentester expects but HEAVEN was missing.** These sit
   alongside the existing CVE and classic-vulnerability detectors and only ever
@@ -177,6 +194,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`heaven update` fails fast with an actionable message when GitHub is
+  unreachable, instead of hanging ~21s on an opaque error.** When the remote was
+  blocked by a firewall/VPN or the machine was offline, `git fetch` stalled on the
+  OS TCP timeout (git's own `http.connectTimeout` is honored by libcurl only on
+  some builds, so it could not bound the wait) and then surfaced a bare "couldn't
+  reach the remote" line. The updater now runs one short, bounded TCP pre-flight to
+  the remote host before the fetch: a dead network fails in a few seconds with the
+  cause named (DNS failure, connection timed out, refused, no route) and concrete
+  next steps (check connectivity/firewall, set `HTTPS_PROXY` behind a proxy,
+  authenticate for a private repo, or pull manually). The probe fails open, so it
+  is skipped behind a proxy, for a local-path remote, or on any probe glitch, and a
+  reachable remote always proceeds to the real fetch (which still surfaces
+  auth/other errors). The connect budget is `HEAVEN_UPDATE_CONNECT_TIMEOUT`
+  (default 6s, clamped 1-30s), and the probed host is reported in
+  `/api/update/status`. Deterministic detection is unaffected; this only changes
+  how the self-update reports an unreachable remote.
 - **Six false-positive / silent-miss classes found by a live-target verification
   pass** (scanme.nmap.org · VAmPI · DVWA · OWASP Juice Shop). Each fix is
   recall-safe: the finding still surfaces, only a wrong severity, label, or CVE was

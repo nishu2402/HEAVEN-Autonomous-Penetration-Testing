@@ -41,11 +41,11 @@ _SSH_MSG_KEXINIT = 20
 
 _WEAK_HOSTKEY: dict[str, tuple[str, str]] = {
     "ssh-dss": ("high",
-                "DSA (ssh-dss) — 1024-bit, cryptographically weak; disabled by "
+                "DSA (ssh-dss): 1024-bit, cryptographically weak; disabled by "
                 "default since OpenSSH 7.0"),
     "ssh-dss-cert-v01@openssh.com": ("high", "DSA certificate host key (ssh-dss)"),
     "ssh-rsa": ("medium",
-                "RSA host key with a SHA-1 signature (ssh-rsa) — deprecated and "
+                "RSA host key with a SHA-1 signature (ssh-rsa): deprecated and "
                 "disabled by default since OpenSSH 8.8 (SHA-1 is collision-broken); "
                 "use rsa-sha2-256 / rsa-sha2-512"),
     "ssh-rsa-cert-v01@openssh.com": ("medium",
@@ -66,9 +66,9 @@ _WEAK_KEX: dict[str, tuple[str, str]] = {
 _WEAK_CIPHER: dict[str, tuple[str, str]] = {
     "none": ("critical", "no encryption"),
     "des-cbc": ("high", "DES (56-bit)"),
-    "3des-cbc": ("medium", "3DES — 64-bit block, SWEET32-class birthday attack"),
-    "blowfish-cbc": ("medium", "Blowfish — 64-bit block"),
-    "cast128-cbc": ("medium", "CAST-128 — 64-bit block"),
+    "3des-cbc": ("medium", "3DES: 64-bit block, SWEET32-class birthday attack"),
+    "blowfish-cbc": ("medium", "Blowfish: 64-bit block"),
+    "cast128-cbc": ("medium", "CAST-128: 64-bit block"),
     "arcfour": ("medium", "RC4 stream cipher (broken)"),
     "arcfour128": ("medium", "RC4 (broken)"),
     "arcfour256": ("medium", "RC4 (broken)"),

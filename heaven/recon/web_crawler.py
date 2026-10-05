@@ -794,7 +794,7 @@ async def crawl_targets(urls: list[str], stealth_level: str = "normal",
                 # empty result means the crawl could not see the app, not that it is
                 # small. Warn and disclose rather than hide it.
                 logger.warning(
-                    "SPA on %s yielded no surface beyond the shell (render_failed=%s) — "
+                    "SPA on %s yielded no surface beyond the shell (render_failed=%s): "
                     "the client-rendered app was NOT reached; findings under-reported.",
                     url, render_failed)
                 coverage_notes.append(_spa_render_gap_note(

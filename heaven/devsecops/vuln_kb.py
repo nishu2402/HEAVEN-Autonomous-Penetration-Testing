@@ -669,7 +669,7 @@ _KB: dict[str, dict[str, Any]] = {
         "owasp": "A04:2025 Cryptographic Failures",
         "mitre": "T1040 · Network Sniffing",
         "typical_cvss": 5.3,
-        "description": "The SSH server advertises deprecated or weak algorithms — DSA/RSA-SHA1 host keys, SHA-1 or small-group key exchange, 64-bit-block / RC4 / CBC ciphers, or MD5/SHA-1/64-bit MACs.",
+        "description": "The SSH server advertises deprecated or weak algorithms: DSA/RSA-SHA1 host keys, SHA-1 or small-group key exchange, 64-bit-block / RC4 / CBC ciphers, or MD5/SHA-1/64-bit MACs.",
         "impact": "Enables downgrade to breakable cryptography, session decryption, and weakens host and client authentication.",
         "remediation": (
             "1. Disable ssh-dss and ssh-rsa (SHA-1); offer only ssh-ed25519, "

@@ -570,7 +570,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every phase still in flight to the time that remains, so the run finalises with the
   findings it already has and persists them. It is off by default (a budget of 0
   means unlimited), so an ordinary scan is never shortened. The one place it is
-  enabled is the weekly `Benchmark — HEAVEN vs. DVWA` job, where a slow shared runner
+  enabled is the weekly DVWA benchmark job, where a slow shared runner
   could overrun the harness timeout and be killed with nothing written to disk: a
   900s internal budget, kept 300s below the hard subprocess backstop, now returns a
   real persisted result instead of an empty database. New coverage in
@@ -594,7 +594,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it now requires a genuine desync, where the duplicate smuggles a value into the
   response that a single occurrence does not. No detection changed: each suppressed
   finding was confirmed false against live DVWA, the genuine cases still fire (with
-  new positive-control coverage), and the `Benchmark — HEAVEN vs. DVWA` precision is
+  new positive-control coverage), and the DVWA benchmark precision is
   now a true 100% with recall already at 100%. New
   `tests/test_web_fuzzer_fp_hardening.py`.
 - **A web scan no longer spends minutes fuzzing static documents or re-probing one
@@ -611,7 +611,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wall-budget the anomaly probe already carried. Recall is unchanged (every
   detection-required vector is a parameterised endpoint, still fuzzed): on live DVWA
   the authenticated scan drops from over 15 minutes back to a few, so the weekly
-  `Benchmark — HEAVEN vs. DVWA` run no longer trips its per-scan timeout. New
+  DVWA benchmark run no longer trips its per-scan timeout. New
   `heaven/vulnscan/url_surface.py` and `tests/test_url_surface_and_advanced_scope.py`.
 - **Combined Risk now follows the engagement you are viewing.** Switching the
   active engagement left the Combined Risk page (and the `/api/correlations`,
@@ -822,13 +822,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   services (DNS, DHCP, TFTP, NTP, SNMP, NetBIOS, RPC/portmap, IKE, SIP, mDNS, SSDP,
   syslog, RADIUS …) were never caught. A new `heaven.recon.udp_scanner` probes each
   UDP port with a genuine, service-specific payload and reports a port open **only
-  when a service actually answers** — so a responsive UDP service is found at any
+  when a service actually answers**, so a responsive UDP service is found at any
   privilege level with no invented "open" from silence. The scanner uses nmap `-sU`
   (authoritative state + `-sV` version) when it has raw sockets and the pure-Python
   probes otherwise. It is wired end to end: a `--udp` / `--udp-ports` CLI flag, a
   `scan_udp` / `udp_ports` API field, and a Protocols control in the web launcher,
   all flowing through the orchestrator into the network scan. The privileged nmap
-  `-sU` path is verified live as root against a real UDP responder — it correctly
+  `-sU` path is verified live as root against a real UDP responder: it correctly
   reports a responsive port open, keeps the protocol, and never invents an open
   port from silence. Two robustness guarantees back it: if the privileged UDP scan
   runs out of its per-host time on a slow or heavily-filtered target, it now falls
@@ -838,7 +838,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **SAST rule pack gained PHP coverage, Python string-concatenation SQLi + TLS-
   verification-disabled, and Java unsafe deserialization.** With Semgrep installed,
-  the curated pack had *no* PHP rules and missed those Python/Java classes — so a
+  the curated pack had *no* PHP rules and missed those Python/Java classes, so a
   user who installed Semgrep actually got *less* coverage than HEAVEN's built-in
   offline engine, which already caught them. The semgrep pack now has parity: a
   new `php_security.yml` (command injection, file inclusion, unsafe deserialization,
@@ -852,27 +852,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key files.** A DER/PEM certificate (`.der` / `.pem` / `.crt` / `.cer`) or an
   exported key previously came back as "could not determine artifact type". A new
   `heaven.forensics.certificate` analyzer parses them offline with the bundled
-  `cryptography` library and reports the posture that matters — expired / not-yet-
+  `cryptography` library and reports the posture that matters: expired / not-yet-
   valid, a weak public key (RSA < 2048), a weak signature algorithm (MD5 / SHA-1),
   a self-signed certificate, and a file that is actually private key material
-  (CWE-312) — with no network access and graceful handling of unparseable ASN.1.
+  (CWE-312), with no network access and graceful handling of unparseable ASN.1.
 
 - **Hardened / firewalled Windows hosts are now identified instead of read as
   "down, 0 open ports".** Reproduced live against a Windows 7 box behind Windows
   Firewall (135/139/445/3389 all silently *filtered*, ICMP blocked): a real,
   vulnerable machine that the scanner previously reported as an empty, OS-unknown
   host. Three things fix it, all evidence-based and never fabricated. First, the
-  Windows / Active-Directory management surface that survives on such a host — 
+  Windows / Active-Directory management surface that survives on such a host,
   5357 (WSDAPI Function Discovery), 5985/5986/47001 (WinRM), 2869 (UPnP), the
-  Kerberos / Global-Catalog ports — is now in the always-probe and liveness sets
+  Kerberos / Global-Catalog ports, is now in the always-probe and liveness sets
   and probed common-first by a fast preflight, so the host's one open high port
   is captured in seconds rather than lost to (or cut short before) the slow full
   sweep. Second, a pure-Python **NetBIOS node-status (NBSTAT, UDP/137) enricher**
   recovers the computer name, workgroup/domain and MAC and confirms the OS is
-  Windows — the honest unprivileged win, since NBSTAT answers on the LAN even when
-  every TCP port is filtered — and surfaces them as findings (name/workgroup/MAC
+  Windows (the honest unprivileged win, since NBSTAT answers on the LAN even when
+  every TCP port is filtered) and surfaces them as findings (name/workgroup/MAC
   disclosure, a domain-controller pointer, and an explicit "Windows host, exact
-  version undetermined — re-scan privileged for `-O` or from a segment where SMB
+  version undetermined: re-scan privileged for `-O` or from a segment where SMB
   is reachable" observation so the operator understands why there is no OS-version
   / EOL finding and how to get one). Third, a state-aware connect probe now tells
   *filtered* (silent drop) apart from *closed* (RST), so the packet-filtering
@@ -883,7 +883,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Firewall / IDS evasion is a real technique ladder, not a single flag.** The
   authorized re-probe of a filtered host now escalates through independent packet
-  signatures — standard nmap evasion (fragmentation + trusted source-port 53 +
+  signatures: standard nmap evasion (fragmentation + trusted source-port 53 +
   padding + a decoy cloud), then a pure-Python connect scan (a different,
   OS-stack signature that slips past filters targeting nmap's raw fingerprint),
   then, only when the cheaper rungs found nothing and the scan can run privileged,
@@ -1015,7 +1015,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   well-known location, HEAVEN now reads it and probes the endpoints the API
   itself declares. A new high-confidence detector flags `excessive_data_exposure`
   (API3:2023, CWE-359) when a response serialises a populated credential field
-  (`password`/`secret`/`private_key`) beside an identity key — an unambiguous
+  (`password`/`secret`/`private_key`) beside an identity key: an unambiguous
   leak, guarded against placeholder/sample values, config toggles like
   `password_required`, and identity-less config secrets. Broken-authentication
   detection is extended to the spec-discovered collection paths too. A new
@@ -1023,7 +1023,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OWASP-API-Top-10 target VAmPI; a gated live test
   (`test_vampi_lab_detects_api_flaws`) confirms HEAVEN finds VAmPI's
   `/users/v1/_debug` password leak, its unauthenticated `/users/v1` collection,
-  and its public spec — all through genuine contract-driven discovery, nothing
+  and its public spec, all through genuine contract-driven discovery, nothing
   mocked. This proves the `api` mode against an app HEAVEN did not author,
   complementing the always-on native API fixture. Docker-free unit tests
   (`tests/test_api_excessive_data.py`) lock the precision guards into normal CI.
@@ -1035,7 +1035,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HEAVEN's shipped XSS execution prover (`exploit_proof.prove_finding`, the
   orchestrator's exploit-proof entry) loads the injected route in headless
   Chromium and proves the DOM XSS by observing a dialog carrying a unique per-run
-  token — real client-side JavaScript execution, which a mere reflection cannot
+  token, real client-side JavaScript execution, which a mere reflection cannot
   fake. This complements the DVWA lab (server-reflected/stored XSS): DVWA cannot
   exercise a client-side DOM sink, Juice Shop can, so the `web` mode's proof now
   spans both. The prover also gains an `iframe` `javascript:` payload for
@@ -1044,7 +1044,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanly when the Playwright Chromium bundle is absent. The SPA's toolbar-hidden
   search box is supplied as the known injection point (the JS crawler maps the
   app's routes but does not auto-reveal that input), so the lab asserts the proof
-  — JavaScript actually running — not unassisted input discovery.
+  (JavaScript actually running), not unassisted input discovery.
 
 - **Java SAST rules + OWASP Benchmark scoring (devsecops/ci now GREEN).** HEAVEN's
   static-analysis engine gains a real Java rule pack
@@ -1198,13 +1198,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CVEs.** The ML risk scorer is now two models working together. When a finding
   carries real CVSS metrics, the 13-feature ExtraTrees vector model scores it (as
   before). When a finding has no published score (a heuristic web or network
-  finding), HEAVEN now uses a new text model — a TF-IDF vectoriser over the
-  finding's own description plus vulnerability-type flags, fed to a Ridge regressor —
+  finding), HEAVEN now uses a new text model (a TF-IDF vectoriser over the
+  finding's own description plus vulnerability-type flags, fed to a Ridge regressor)
   trained on the NVD_Cybersecurity dataset. It reads what the finding actually says
   instead of collapsing the class onto a hand-picked constant, so two SQL-injection
   findings with different impact wording get different scores, grounded in how
   hundreds of thousands of real CVEs of that shape scored. It is trained and measured
-  on the population HEAVEN actually routes to it — the 315,648 CVEs with a real
+  on the population HEAVEN actually routes to it: the 315,648 CVEs with a real
   (non-zero) CVSS score, of which the 177,763 that carry a vuln-type flag are the true
   deployment population. On that deployment population honest 5-fold cross-validation
   is R²=0.63 and MAE=0.79, and it lands the right severity band 99% of the time within
@@ -1219,7 +1219,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offline or without the dataset.
 
 - **Severity-band accuracy is now reported for the description model, on the
-  population it actually runs on.** R² is a harsh lens for a CVSS predictor — the same
+  population it actually runs on.** R² is a harsh lens for a CVSS predictor: the same
   vuln class genuinely spans a wide score range in the NVD data, so no honest feature
   available at scan time can pin the exact number. What matters is landing the finding
   in the right severity band, and on the deployment population (flagged findings) the
@@ -1424,7 +1424,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end) came back as a critical "PHP Webshell Named" match. The named-webshell
   signature fired on any of its brand tokens (`c99shell`, `b374k`, `WSO 2`,
   `FilesMan`, `IndoXploit`, `alfa team`) appearing as plain ASCII anywhere in the
-  bytes, with no server-side-script context required — so a codec tag or metadata
+  bytes, with no server-side-script context required, so a codec tag or metadata
   atom inside a binary tripped it, and even the "WSO2" software vendor name in
   benign text would. A named webshell is PHP/JSP/ASP source, so the rule (builtin
   and YARA backends both) now requires a real script context (a `<?php` / `<?=` /
@@ -1445,15 +1445,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A full-port scan of a slow or heavily-filtered host no longer silently
   returns only a handful of ports.** When the deep-scan deadline fired with hosts
-  still in flight, their partial port lists were returned as if final — the "I
+  still in flight, their partial port lists were returned as if final, the "I
   toggled a full-port scan but only got a few ports" symptom. Two fixes: an
-  explicit full-range scan (and any UDP scan) now gets a much larger deadline —
-  up to 60 minutes even at normal stealth — because it is a deliberate "take the
+  explicit full-range scan (and any UDP scan) now gets a much larger deadline,
+  up to 60 minutes even at normal stealth, because it is a deliberate "take the
   time you need" choice; and when a scan *is* cut short, it now emits an honest
   informational finding naming how many hosts were not fully enumerated and how to
   get a complete run, so a partial result can never masquerade as a final one.
   Port customization (fast / full / custom nmap-style spec) was verified end to
-  end against a real host and genuinely honoured — a fast sweep and a full sweep
+  end against a real host and genuinely honoured: a fast sweep and a full sweep
   return different port sets, and a custom high port outside the common range is
   found only when in scope.
 
@@ -1461,7 +1461,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full-pipeline runs against real vulnerable labs.** Each issue below was
   reproduced by running the actual orchestrated scan against a genuinely
   vulnerable target (VAmPI, OWASP Juice Shop, MinIO, a Modbus/OPC-UA stack, an
-  IMDS-SSRF app), root-caused, fixed, and re-verified live — never by weakening a
+  IMDS-SSRF app), root-caused, fixed, and re-verified live, never by weakening a
   detector to hide output.
   - **An exploitation-phase crash no longer silently skips Nuclei and PoC
     validation.** The advanced-attacks task passed recon *endpoint dicts*
@@ -1499,7 +1499,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     name with `403 AccessDenied`, so a bare 403 was reported as an existing private
     bucket for dozens of generated permutations. A calibration probe of a random,
     definitely-absent name now detects such blanket-deny endpoints and, for them,
-    reports only buckets proven listable — while genuine private buckets on an
+    reports only buckets proven listable, while genuine private buckets on an
     endpoint that returns 404 for absent names are still reported.
   - **Findings are no longer duplicated per URL-slash variant.** The same endpoint
     reached as `http://h:5001` and `http://h:5001/` (and the mid-path `//` a
@@ -1520,14 +1520,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API / cloud sweep above: each issue was reproduced against a genuine target
   (a live Samba AD DC, an exposed Docker-in-Docker + registry stack, a
   known-vulnerable dependency corpus audited against live OSV.dev, real strongly-
-  configured mail domains), root-caused, fixed, and re-verified — never by
+  configured mail domains), root-caused, fixed, and re-verified, never by
   weakening a detector.
   - **SCA no longer prints a git commit SHA as the "fixed version".** Some OSV
     advisories carry a `GIT`-type range whose `fixed` event is a 40-char commit
     hash (e.g. urllib3 PYSEC-2023-192); taking the first `fixed` event surfaced
     that hash and produced nonsense remediation ("Upgrade to 644124e… or later").
     The extractor now only accepts version-bearing (`ECOSYSTEM`/`SEMVER`) ranges,
-    rejects anything SHA-shaped, and — when an advisory patches several branches —
+    rejects anything SHA-shaped, and, when an advisory patches several branches,
     recommends the *nearest* safe upgrade above the installed version (so a 1.24.1
     install is told to go to 1.26.17, not jumped to a new major).
   - **The git-secrets scanner no longer flags every UUID as a Heroku key.** The
@@ -1536,11 +1536,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     It now requires a `heroku` / `api-key` context on the line, so real Heroku
     keys still hit while ordinary UUIDs do not.
   - **Anonymous LDAP RootDSE reads are no longer a medium "misconfiguration".**
-    Every LDAP directory — Windows AD included — answers an unauthenticated
+    Every LDAP directory (Windows AD included) answers an unauthenticated
     RootDSE query by design (clients read it to find the naming contexts before
     binding), so a medium "Anonymous LDAP Bind Permitted" fired on secure-by-
     default DCs. It is now an info-level pre-auth metadata disclosure; the genuine
-    finding — anonymous access to the *domain* naming context (user enumeration) —
+    finding, anonymous access to the *domain* naming context (user enumeration),
     keeps its own higher severity and is proven separately.
   - **Container scanning no longer reports Docker-managed volumes as "dangerous
     host mounts".** The check flagged any mount whose source began with `/`, which
@@ -1563,8 +1563,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is killed, crashes, or is closed mid-scan strands the row `running`
   forever and the header badge shows a scan that nothing is driving. A startup
   pass already reconciled these, but a row orphaned while the server keeps
-  running — or one in an engagement DB that happened to be locked when the
-  startup pass ran — would linger. Listing scans now self-heals on read: any
+  running, or one in an engagement DB that happened to be locked when the
+  startup pass ran, would linger. Listing scans now self-heals on read: any
   `running`/`pending` row that no live task in this process is driving (its id is
   in neither the in-memory active-scan map nor the live-task registry) is flipped
   to `interrupted`, so the badge clears on the very next poll without a restart.
@@ -1624,7 +1624,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A generic Denial-of-Service finding is now scored with an availability vector.**
   A bare `denial_of_service` / `dos` / `ddos` finding resolved to a generic high-severity
   vector implying full confidentiality and integrity loss with **no** availability
-  impact (`C:H/I:H/A:N`) — the opposite of what a DoS is — and `denial_of_service`
+  impact (`C:H/I:H/A:N`), the opposite of what a DoS is, and `denial_of_service`
   carried no CWE. It now has its own knowledge-base entry: an availability-impact
   vector (`AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H`, base 7.5), CWE-400 and MITRE T1499,
   with `dos`/`ddos`/`resource_exhaustion` aliased to it. Specific DoS classes
@@ -4839,8 +4839,8 @@ green CI. The complete, itemised history follows.
     false positives on naturally-slow endpoints) (CWE-78).
   - **Remote File Inclusion**: best-effort detection of remote-fetch attempts
     (CWE-98).
-  Verified live against DVWA (`critical lfi — param 'page'`,
-  `critical cmdi — param 'ip'`) and covered by deterministic unit tests
+  Verified live against DVWA (`critical lfi on param 'page'`,
+  `critical cmdi on param 'ip'`) and covered by deterministic unit tests
   (`tests/test_injection_probes.py`). See
   [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md).
 
@@ -5322,7 +5322,7 @@ verified against live DVWA:
   `cookies=` dict (the approach the crawler already used). *This was the single
   biggest blocker to authenticated coverage.* Verified: the scanner now reaches
   DVWA's SQLi page authenticated (HTTP 200) and reports
-  `critical sqli (error-based) — param 'id'`.
+  `critical sqli (error-based) on param 'id'`.
 - **Crawler ignored the auth session.** The orchestrator never passed
   `auth_config` to `crawl_targets`, so the crawl stopped at `/login.php`. Now the
   active session's cookies/headers are plumbed in, verified the crawler

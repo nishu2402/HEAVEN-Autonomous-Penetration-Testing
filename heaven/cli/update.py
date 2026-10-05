@@ -759,7 +759,7 @@ def _render_check(c: UpdateCheck) -> None:
                    "`heaven update` will hold back unless you pass --force.")
         elif c.dirty_regenerable:
             _print(f"  [dim]({len(c.dirty_regenerable)} auto-generated build file(s) will be "
-                   "refreshed automatically — no action needed.)[/dim]")
+                   "refreshed automatically, no action needed.)[/dim]")
         _print("  Run [bold]heaven update[/bold] to apply.")
     else:
         _print(f"  [green]You're on the latest version[/green] (v{c.current_version or '?'}).")

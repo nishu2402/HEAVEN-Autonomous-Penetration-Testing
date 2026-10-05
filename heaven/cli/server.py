@@ -105,14 +105,14 @@ def _load_vault_secrets() -> None:
     if not vaultlib.vault_exists():
         return
     if not os.environ.get("HEAVEN_VAULT_PASSWORD"):
-        _print("[dim]· Encrypted vault present — set HEAVEN_VAULT_PASSWORD to load its "
+        _print("[dim]· Encrypted vault present; set HEAVEN_VAULT_PASSWORD to load its "
                "keys, or continue with .env.[/dim]")
         return
     try:
         count, message = vaultlib.load_into_env()
     except Exception as exc:  # a vault hiccup must never stop the server booting
         logger.debug("serve: vault load failed: %s", exc)
-        _print("[yellow]· Vault present but could not be loaded — continuing with .env.[/yellow]")
+        _print("[yellow]· Vault present but could not be loaded; continuing with .env.[/yellow]")
         return
     if count:
         _print(f"[green]✓ Loaded {count} credential(s) from the encrypted vault.[/green]")

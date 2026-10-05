@@ -65,7 +65,7 @@ def init_cmd() -> None:
         _print("[dim]Delete it manually to start over, or use `heaven vault set` to add keys.[/dim]")
         raise SystemExit(1)
     if not vaultlib.HAS_CRYPTO:
-        _print("[yellow]⚠ 'cryptography' is not installed — the vault would store "
+        _print("[yellow]⚠ 'cryptography' is not installed; the vault would store "
                "credentials in PLAINTEXT.[/yellow]")
         _print("[dim]Install it first:  pip install cryptography[/dim]")
         raise SystemExit(1)
@@ -125,7 +125,7 @@ def set_cmd(key: str, value: Optional[str], rotate_days: Optional[int]) -> None:
         value = click.prompt(f"Value for {key}", hide_input=True, default="",
                             show_default=False)
     if not value.strip():
-        _print("[yellow]Empty value — nothing stored.[/yellow]")
+        _print("[yellow]Empty value; nothing stored.[/yellow]")
         raise SystemExit(1)
     vault.store(key, value, rotation_days=rotate_days)
     vault.lock()
@@ -198,7 +198,7 @@ def rotate_cmd() -> None:
 
 @vault_grp.command(name="import-env")
 @click.option("--purge", is_flag=True,
-              help="After importing, remove the secrets from .env (recommended — "
+              help="After importing, remove the secrets from .env (recommended; "
                    "they then live only in the encrypted vault).")
 def import_env_cmd(purge: bool) -> None:
     """Copy currently-set secret settings from .env / the environment into the vault."""
@@ -213,7 +213,7 @@ def import_env_cmd(purge: bool) -> None:
             imported.append(key)
     vault.lock()
     if not imported:
-        _print("[dim]No secret settings are currently set — nothing to import.[/dim]")
+        _print("[dim]No secret settings are currently set; nothing to import.[/dim]")
         return
     _print(f"[green]✓ Imported[/green] {len(imported)} secret(s) into the vault: "
            f"[dim]{', '.join(imported)}[/dim]")

@@ -172,15 +172,21 @@ def test_slug_detection():
 # FortiOS is tracked WITHOUT a `latest` field but WITH per-cycle release dates, so
 # the release-line currency path uses live dates (nothing hard-coded). Structure
 # mirrors the real endoflife.date/api/fortios.json response.
+# Dates are RELATIVE to today (not fixed calendar dates) so the maturity and EOL
+# relationships never drift into a false verdict as time passes: 8.0 stays "too new
+# to demand" (< 12 months GA), 7.6/7.4/7.2 stay mature newer lines, and every cycle
+# here stays supported (eol far in the future). Hard-coding the dates instead made
+# this fixture a time-bomb (8.0 would cross the 12-month maturity floor, and 7.2's
+# fixed eol would lapse, flipping the assertions below on a specific calendar day).
 _FORTIOS = [
-    {"cycle": "8.0", "releaseDate": "2026-04-21", "eol": "2030-10-21",
-     "support": "2029-04-21", "lts": False},
-    {"cycle": "7.6", "releaseDate": "2024-07-25", "eol": "2030-01-25",
-     "support": "2028-07-25", "lts": False},
-    {"cycle": "7.4", "releaseDate": "2023-05-11", "eol": "2028-11-11",
-     "support": "2027-05-11", "lts": False},
-    {"cycle": "7.2", "releaseDate": "2022-03-31", "eol": "2026-12-30",
-     "support": "2025-03-31", "lts": False},
+    {"cycle": "8.0", "releaseDate": _iso_months_ago(5), "eol": "2999-01-01",
+     "support": "2999-01-01", "lts": False},
+    {"cycle": "7.6", "releaseDate": _iso_months_ago(26), "eol": "2999-01-01",
+     "support": "2999-01-01", "lts": False},
+    {"cycle": "7.4", "releaseDate": _iso_months_ago(42), "eol": "2999-01-01",
+     "support": "2999-01-01", "lts": False},
+    {"cycle": "7.2", "releaseDate": _iso_months_ago(54), "eol": "2999-01-01",
+     "support": "2999-01-01", "lts": False},
 ]
 
 
@@ -209,8 +215,8 @@ def test_fortios_on_newest_mature_line_no_finding(monkeypatch):
 
 def test_fortios_eol_line_takes_priority(monkeypatch):
     # A past-EOL FortiOS line is reported as unsupported, not merely behind.
-    cycles = [{"cycle": "6.4", "releaseDate": "2020-05-01", "eol": "2023-09-28"}] \
-        + _FORTIOS
+    cycles = [{"cycle": "6.4", "releaseDate": _iso_months_ago(78),
+               "eol": "2000-01-01"}] + _FORTIOS
     _mock_feed(monkeypatch, cycles)
     res = _run(eol.scan_eol_from_net(
         _net("FortiGate", "6.4.9", banner="FortiOS 6.4.9", port=443)))

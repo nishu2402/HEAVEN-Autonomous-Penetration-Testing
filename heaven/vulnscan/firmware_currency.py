@@ -39,6 +39,7 @@ letting it drift only costs coverage, never accuracy.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Optional
 
 from heaven.utils.logger import get_logger
@@ -48,7 +49,6 @@ from heaven.utils.logger import get_logger
 from heaven.vulnscan.eol_scanner import (
     _finding,
     _lt,
-    _months_since,
     _parse_version,
 )
 
@@ -56,6 +56,13 @@ logger = get_logger("vulnscan.firmware_currency")
 
 # Month this dataset's "latest" facts were last verified against upstream.
 _DATASET_DATE = "2026-09"
+# Fixed reference day for every age calculation below. Ages are measured against the
+# dataset compile date, never the wall-clock "today", so a frozen "latest" and a
+# frozen set of release dates always yield the same verdict no matter when the scan
+# runs. Measuring against a moving "today" while "latest" stays frozen would let a
+# recent release silently cross the age floor and begin a false nag (exactly what
+# OpenSSH 10.2 did once it passed 360 days old).
+_DATASET_ANCHOR = f"{_DATASET_DATE}-01"
 
 # A version banner this many months old (or older) is reportable, provided a newer
 # release genuinely exists. Deliberately a full year: we never nag about being one
@@ -107,6 +114,21 @@ def _fmt_age(months: int) -> str:
     return f"~{months} month{'s' if months != 1 else ''}"
 
 
+def _months_between(start_iso: str, end_iso: str) -> Optional[int]:
+    """Whole months between two ISO dates (``end - start``), or None if unparseable.
+
+    Mirrors ``eol_scanner._months_since`` (``days // 30``) but takes an explicit end
+    date, so curated-dataset ages anchor to ``_DATASET_ANCHOR`` and never drift with
+    the wall clock.
+    """
+    try:
+        start = date.fromisoformat(start_iso)
+        end = date.fromisoformat(end_iso)
+    except (ValueError, TypeError):
+        return None
+    return max(0, (end - start).days // 30)
+
+
 def _openssh_finding(target: str, obs: tuple[int, ...]) -> Optional[dict]:
     latest_v = _parse_version(_OPENSSH_LATEST)
     if not latest_v or not _lt(obs, latest_v):
@@ -117,7 +139,7 @@ def _openssh_finding(target: str, obs: tuple[int, ...]) -> Optional[dict]:
         # Version older/newer than our history map — be conservative and skip
         # rather than invent an age.
         return None
-    age = _months_since(obs_date)
+    age = _months_between(obs_date, _DATASET_ANCHOR)
     if age is None or age < _MIN_AGE_MONTHS:
         return None
     latest_date = _OPENSSH_RELEASES.get(_OPENSSH_LATEST, "")
@@ -126,7 +148,8 @@ def _openssh_finding(target: str, obs: tuple[int, ...]) -> Optional[dict]:
         target, "outdated_patch_level", "low",
         f"Outdated SSH Version Banner: OpenSSH {obs_label} (current {_OPENSSH_LATEST})",
         f"The SSH service advertises OpenSSH {obs_label}, first released on "
-        f"{obs_date} ({age_txt} ago). The current OpenSSH release is "
+        f"{obs_date}, {age_txt} before HEAVEN's currency dataset was compiled "
+        f"({_DATASET_DATE}). The current OpenSSH release is "
         f"{_OPENSSH_LATEST} (published {latest_date}), so the advertised build is "
         f"well behind the maintained line. Note that Linux distributions frequently "
         "backport security fixes to the packaged OpenSSH without changing this "

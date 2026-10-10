@@ -278,8 +278,12 @@ async def probe_rtsp(host: str, port: int = 554, timeout: float = 4.0) -> Option
         return None
     text = resp.decode(errors="ignore")
     if text.startswith("RTSP/1.0"):
-        code = text.split()[1] if len(text.split()) > 1 else ""
-        return {"status": code, "unauthenticated": "200" in text.split("\r\n")[0]}
+        # Decide "unauthenticated" from the parsed status code, never a substring
+        # of the status line: a reason phrase that merely contains "200" (e.g.
+        # "RTSP/1.0 401 Need token 200ab") must not be read as a 200 OK stream.
+        parts = text.split()
+        code = parts[1] if len(parts) > 1 else ""
+        return {"status": code, "unauthenticated": code == "200"}
     return None
 
 

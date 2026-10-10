@@ -412,7 +412,14 @@ async def validate_xxe(session: aiohttp.ClientSession, url: str,
                                      headers={"Content-Type": "application/xml"},
                                      timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                 body = await resp.text()
-                if canary in body or any(ind in body for ind in ["root:x:0", "/bin/bash", "daemon:x:", "localhost"]):
+                # The unique canary proves internal-entity expansion; the
+                # /etc/passwd markers prove a file read. "localhost" was removed
+                # as an indicator: it is a generic word present in countless
+                # normal response bodies (docs, error pages, JS, CORS messages),
+                # so matching it turned any XML endpoint whose body merely
+                # mentions localhost into a "confirmed" critical XXE.
+                passwd_markers = ("root:x:0", "daemon:x:", "/bin/bash")
+                if canary in body or any(ind in body for ind in passwd_markers):
                     result.result = "confirmed"
                     result.confidence = 0.9
                     result.evidence = {"payload_type": "file_read", "indicator_found": True}
@@ -443,7 +450,13 @@ async def validate_crlf(session: aiohttp.ClientSession, url: str, param: str,
     for payload in payloads:
         status, body, headers = await _evasive_request(
             session, "GET", url, params={param: payload}, timeout=timeout)
-        if canary.lower() in str(headers).lower():
+        # A genuine CRLF header injection makes the canary appear as a *new
+        # response header name*, not merely as a substring somewhere in the
+        # stringified headers. Matching the raw blob false-confirms whenever the
+        # parameter is echoed verbatim into a header value (e.g. a reflecting
+        # Location/redirect header), where the canary text is present but no
+        # header was ever split. Match on the response header keys instead.
+        if any(canary.lower() == k.lower() for k in headers):
             result.result = "confirmed"
             result.confidence = 0.9
             result.evidence = {"payload": payload, "injected_header": canary}

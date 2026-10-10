@@ -41,6 +41,29 @@ def test_esc1_unconfirmed_rights_is_potential_high():
     assert esc1["severity"] == "high" and esc1["confirmed"] is False
 
 
+def test_esc1_restricted_enroll_is_low_not_high():
+    """SD parsed cleanly and no BROAD low-priv principal can enrol: the template
+    is ESC1-shaped but not a confirmed low-priv escalation path, so it must drop
+    to a low-severity shape-only note, NOT the high "rights unconfirmed" verdict
+    that the unparseable (None) case carries, and the wording must not claim the
+    rights could not be confirmed (they were)."""
+    hits = a.classify_template(_tmpl(
+        enrollee_supplies_subject=True, ekus=[a.EKU_CLIENT_AUTH],
+        low_priv_can_enroll=False))
+    esc1 = next(h for h in hits if h["esc"] == "ESC1")
+    assert esc1["severity"] == "low"
+    assert esc1["confirmed"] is False
+    assert esc1["restricted"] is True
+    f = a._finding_for_esc(_tmpl(
+        enrollee_supplies_subject=True, ekus=[a.EKU_CLIENT_AUTH],
+        low_priv_can_enroll=False), esc1)
+    assert f.severity == "low" and f.confidence == 0.3
+    # The false "could not be confirmed" wording of the None case must be gone.
+    assert "could not be confirmed" not in f.description
+    assert "restricted" in f.description.lower()
+    assert f.evidence["enrolment_restricted"] is True
+
+
 def test_esc2_any_purpose_template():
     hits = a.classify_template(_tmpl(ekus=[a.EKU_ANY_PURPOSE]))
     assert "ESC2" in _escs(hits)

@@ -100,6 +100,39 @@ def test_score_vulnerabilities_runs_and_tags_model():
     assert "hybrid" in out["metrics"]
 
 
+def test_published_base_anchors_predicted_score():
+    """A finding with an authoritative published CVSS base but NO vector string
+    (an inline/NVD CVE record carrying only the number) must keep its real base as
+    the predicted score, never collapse to the vector model's generic class
+    constant. Regression: banner CVEs of base 9.8 / 7.0 / 5.9 were all reported as
+    a flat ~7.5 that contradicted the authoritative base and the badge severity."""
+    out = _run(score_vulnerabilities(findings=[
+        {"vuln_type": "vulnerable_service", "severity": "critical", "cvss_base": 9.8,
+         "title": "Apache SSRF in mod_proxy"},
+        {"vuln_type": "vulnerable_service", "severity": "high", "cvss_base": 7.0,
+         "title": "OpenSSH privesc"},
+        {"vuln_type": "vulnerable_service", "severity": "medium",
+         "evidence": {"cvss_base": 5.9}, "title": "Optionsbleed"},
+    ]))
+    scores = {f["title"]: f for f in out["risk_scores"]}
+    assert scores["Apache SSRF in mod_proxy"]["cvss_model"] == "published"
+    assert scores["Apache SSRF in mod_proxy"]["predicted_cvss_score"] == 9.8
+    assert scores["Apache SSRF in mod_proxy"]["risk_band"] == "critical"
+    assert scores["OpenSSH privesc"]["predicted_cvss_score"] == 7.0
+    assert scores["Optionsbleed"]["predicted_cvss_score"] == 5.9  # base read from evidence
+    assert out["metrics"]["hybrid"]["scored_by_published"] == 3
+
+
+def test_published_anchor_keeps_vector_model_when_vector_present():
+    """A finding carrying BOTH a base and a real vector still uses the R²=0.99
+    vector model (it can reconstruct the true score), not the published shortcut."""
+    out = _run(score_vulnerabilities(findings=[
+        {"vuln_type": "vulnerable_service", "severity": "critical", "cvss_base": 9.8,
+         "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+    ]))
+    assert out["risk_scores"][0]["cvss_model"] == "vector"
+
+
 # ── artifact-dependent (skipped when the trained model is absent) ──────────────
 
 _HAS_DESC = get_desc_model().available

@@ -344,6 +344,32 @@ def _has_cvss_signal(finding: dict) -> bool:
     return False
 
 
+def _published_cvss_base(finding: dict) -> float:
+    """Return the authoritative published CVSS base score on a finding (checked
+    top-level then in ``evidence``), or 0.0 when none is present.
+
+    Mirrors :func:`_has_cvss_signal`'s key set. Used to anchor the predicted score
+    to a real published number when the finding has a base score but no
+    machine-readable vector for the model to reconstruct.
+    """
+    ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    for src in (finding, ev):
+        for key in ("cvss_base", "cvss_base_score", "cvss_score", "cvss"):
+            try:
+                v = float(src.get(key))  # type: ignore[union-attr,arg-type]
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if 0.0 < v <= 10.0:
+                return v
+    return 0.0
+
+
+def _has_cvss_vector(finding: dict) -> bool:
+    """True when the finding carries a machine-readable CVSS vector string the
+    13-feature vector model can reconstruct (as opposed to only a base number)."""
+    return str(finding.get("cvss_vector") or "").strip().upper().startswith("CVSS:")
+
+
 async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[Any, Any]]] = None, **kwargs) -> dict[str, Any]:
     """Score vulnerabilities with HEAVEN's hybrid CVSS model (called by orchestrator).
 
@@ -366,36 +392,51 @@ async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[
     from heaven.ml.nvd_pipeline import NVDPipeline
 
     desc_model = get_desc_model()
-    n_vector = n_desc = 0
+    n_vector = n_desc = n_published = 0
 
     for f in findings:
-        # Route to the description model only when (a) no published CVSS exists AND
-        # (b) the finding matches one of the vuln-type flags the model was trained
-        # on. Outside those seven classes the description model has no signal (all
-        # flags zero → a flat generic prediction that would UNDERSTATE, say, an
-        # SSRF), so those findings keep the vector model's curated per-class vector.
-        use_desc = (
-            desc_model.available
-            and not _has_cvss_signal(f)
-            and any(derive_flags(f).values())
-        )
-        predicted = 0.0
-        if use_desc:
-            predicted = desc_model.predict(f)
-            if predicted > 0.0:
-                f["cvss_model"] = "description"
-                n_desc += 1
-        if predicted <= 0.0:
-            # Extract NVD-compatible 13-feature vector for the model
-            nvd_features = _extract_nvd_features(f)
-            predicted = model.predict_cvss_score(nvd_features)
-            f["cvss_model"] = "vector"
-            n_vector += 1
+        # A finding that already carries an authoritative published CVSS base score
+        # but NO machine-readable vector (e.g. an inline/NVD CVE record that lists
+        # only the number) gives the vector model nothing to reconstruct: it would
+        # fall back to the generic per-class vector and collapse every such finding
+        # to a flat ~7.5 that contradicts its real base (a critical 9.8 CVE shown as
+        # 7.5). Anchor to the published score — it is the authoritative value, not a
+        # model guess. A finding WITH a real vector still uses the R²=0.99 vector
+        # model below, which reconstructs that same base.
+        published = _published_cvss_base(f)
+        if published > 0.0 and not _has_cvss_vector(f):
+            predicted = published
+            f["cvss_model"] = "published"
+            n_published += 1
+        else:
+            # Route to the description model only when (a) no published CVSS exists
+            # AND (b) the finding matches one of the vuln-type flags the model was
+            # trained on. Outside those seven classes the description model has no
+            # signal (all flags zero → a flat generic prediction that would
+            # UNDERSTATE, say, an SSRF), so those keep the vector model's curated
+            # per-class vector.
+            use_desc = (
+                desc_model.available
+                and not _has_cvss_signal(f)
+                and any(derive_flags(f).values())
+            )
+            predicted = 0.0
+            if use_desc:
+                predicted = desc_model.predict(f)
+                if predicted > 0.0:
+                    f["cvss_model"] = "description"
+                    n_desc += 1
+            if predicted <= 0.0:
+                # Extract NVD-compatible 13-feature vector for the model
+                nvd_features = _extract_nvd_features(f)
+                predicted = model.predict_cvss_score(nvd_features)
+                f["cvss_model"] = "vector"
+                n_vector += 1
 
-            # Fall back to feature_engine if the NVD model wasn't loaded
-            if predicted == 5.0 and not model._regression_mode:
-                fe_features = extract_features(f)
-                predicted = model.predict_cvss_score(fe_features.features)
+                # Fall back to feature_engine if the NVD model wasn't loaded
+                if predicted == 5.0 and not model._regression_mode:
+                    fe_features = extract_features(f)
+                    predicted = model.predict_cvss_score(fe_features.features)
 
         # epss may be absent, None, or a non-numeric string on a real finding
         # (e.g. a failed EPSS enrichment); coerce so priority scoring can't raise.
@@ -419,6 +460,7 @@ async def score_vulnerabilities(scan_id: str = "", findings: Optional[list[dict[
         "description_model": desc_model.get_metrics(),
         "scored_by_vector": n_vector,
         "scored_by_description": n_desc,
+        "scored_by_published": n_published,
     }
     return {
         "scored": len(scored_findings),

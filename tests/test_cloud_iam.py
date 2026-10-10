@@ -267,6 +267,58 @@ def test_privesc_least_privilege_identity_is_clean():
     assert ci.detect_iam_privesc({"s3:GetObject", "ec2:DescribeInstances"}) == []
 
 
+def test_passrole_family_suppressed_when_passrole_resource_scoped():
+    # The PassRole-family primitives only fire when iam:PassRole is granted on an
+    # unrestricted Resource. With passrole_unrestricted=False (PassRole scoped to a
+    # specific role ARN) they must stay quiet, even though every action is present.
+    acts = {"iam:PassRole", "ec2:RunInstances", "lambda:CreateFunction",
+            "lambda:InvokeFunction", "cloudformation:CreateStack"}
+    assert ci.detect_iam_privesc(acts, passrole_unrestricted=False) == []
+    # The default (and an explicit True) still fires: the pure action-set detector
+    # has no Resource information, so it assumes unrestricted.
+    fired = {p.pid for p in ci.detect_iam_privesc(acts)}
+    assert "PassRoleToEC2" in fired and "PassRoleToLambda" in fired
+    assert {p.pid for p in ci.detect_iam_privesc(acts, passrole_unrestricted=True)} == fired
+
+
+def test_non_passrole_primitives_ignore_the_passrole_flag():
+    # A non-PassRole escalation path must fire regardless of the PassRole scope.
+    got = ci.detect_iam_privesc({"iam:CreateAccessKey"}, passrole_unrestricted=False)
+    assert [p.pid for p in got] == ["CreateAccessKey"]
+
+
+def test_resource_is_unrestricted_passrole_classification():
+    unrestricted = ["*", "arn:aws:iam::123456789012:role/*",
+                    "arn:aws:iam::*:role/*", "arn:aws-cn:iam::123456789012:role/*"]
+    scoped = ["arn:aws:iam::123456789012:role/app-task-role",
+              "arn:aws:iam::123456789012:role/app-*",
+              "arn:aws:iam::123456789012:role/team/*",
+              "arn:aws:iam::123456789012:user/*"]
+    for r in unrestricted:
+        assert ci._resource_is_unrestricted_passrole(r) is True, r
+    for r in scoped:
+        assert ci._resource_is_unrestricted_passrole(r) is False, r
+
+
+def test_passrole_is_unrestricted_reads_statement_resources():
+    def doc(action, resource):
+        return {"Statement": [{"Effect": "Allow", "Action": action,
+                               "Resource": resource}]}
+    # Explicit iam:PassRole on "*" → unrestricted.
+    assert ci._passrole_is_unrestricted([doc("iam:PassRole", "*")]) is True
+    # Scoped to a specific role ARN → not unrestricted (the AWS mitigation).
+    assert ci._passrole_is_unrestricted(
+        [doc("iam:PassRole", "arn:aws:iam::123456789012:role/app-task-role")]) is False
+    # A wildcard iam:* action that covers PassRole, on "*" → unrestricted.
+    assert ci._passrole_is_unrestricted([doc("iam:*", "*")]) is True
+    # A Deny of PassRole on "*" is not an Allow, so it does not count.
+    assert ci._passrole_is_unrestricted(
+        [{"Statement": [{"Effect": "Deny", "Action": "iam:PassRole",
+                         "Resource": "*"}]}]) is False
+    # No PassRole grant at all.
+    assert ci._passrole_is_unrestricted([doc("s3:GetObject", "*")]) is False
+
+
 class _PrivescIAM:
     """A non-admin user whose scoped policy nonetheless permits escalation
     (iam:CreatePolicyVersion on a specific managed policy)."""
@@ -326,3 +378,58 @@ def test_privesc_finding_fires_end_to_end_for_scoped_user(monkeypatch):
     assert e.get("cwe") == "CWE-269"
     assert "A01:2025" in e.get("owasp", "")
     assert e.get("mitre_technique")
+
+
+class _PassRoleIAM:
+    """A user whose inline policy grants iam:PassRole + ec2:RunInstances. The
+    PassRole Resource scope is parametrised so the same mock exercises both the
+    unrestricted ('*') and the scoped (specific role ARN) case."""
+    def __init__(self, passrole_resource):
+        self._res = passrole_resource
+
+    def list_attached_user_policies(self, UserName):
+        return {"AttachedPolicies": []}
+
+    def list_user_policies(self, UserName):
+        return {"PolicyNames": ["launch"]}
+
+    def get_user_policy(self, UserName, PolicyName):
+        return {"PolicyDocument": {"Statement": [
+            {"Effect": "Allow", "Action": "iam:PassRole", "Resource": self._res},
+            {"Effect": "Allow", "Action": "ec2:RunInstances", "Resource": "*"}]}}
+
+    def get_login_profile(self, UserName):
+        raise RuntimeError("NoSuchEntity")
+
+    def list_mfa_devices(self, UserName):
+        return {"MFADevices": [{"SerialNumber": "mfa"}]}
+
+    def list_access_keys(self, UserName):
+        return {"AccessKeyMetadata": []}
+
+    def get_account_summary(self):
+        return {"SummaryMap": {"AccountAccessKeysPresent": 0}}
+
+    def get_account_password_policy(self):
+        return {"PasswordPolicy": {"MinimumPasswordLength": 14,
+                                   "RequireSymbols": True, "RequireNumbers": True,
+                                   "RequireUppercaseCharacters": True,
+                                   "RequireLowercaseCharacters": True}}
+
+
+def test_passrole_privesc_fires_only_on_unrestricted_resource(monkeypatch):
+    # PassRole scoped to a specific role ARN: the AWS-recommended mitigation, so
+    # PassRoleToEC2 must NOT be reported even though ec2:RunInstances is present.
+    _patch_session(monkeypatch, _STS("arn:aws:iam::123456789012:user/Dan"),
+                   _PassRoleIAM("arn:aws:iam::123456789012:role/app-task-role"))
+    scoped = ci.audit_aws_iam()
+    assert scoped["authenticated"] is True
+    assert not [f for f in scoped["findings"]
+                if f.get("privesc_technique") == "PassRoleToEC2"], scoped["findings"]
+
+    # PassRole on "*": the principal can pass any role, so PassRoleToEC2 fires.
+    _patch_session(monkeypatch, _STS("arn:aws:iam::123456789012:user/Dan"),
+                   _PassRoleIAM("*"))
+    unrestricted = ci.audit_aws_iam()
+    assert [f for f in unrestricted["findings"]
+            if f.get("privesc_technique") == "PassRoleToEC2"], unrestricted["findings"]

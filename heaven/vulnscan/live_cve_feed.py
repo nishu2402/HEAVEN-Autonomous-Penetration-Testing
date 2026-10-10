@@ -60,6 +60,10 @@ logger = get_logger("vulnscan.live_cve")
 _CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "cve"
 CIRCL_SEARCH_URL = "https://cve.circl.lu/api/search/{vendor}/{product}"
 _CACHE_TTL_S = 7 * 24 * 3600  # a CVE record is stable enough to cache for a week
+# An EMPTY answer is cached only briefly. A week-long negative cache would freeze
+# a transient feed failure — CIRCL 503, an NVD rate-limit/outage, or a momentarily
+# rejected key — into a permanent "no CVEs" for an otherwise-vulnerable product.
+_NEG_CACHE_TTL_S = 6 * 3600
 # Bump when the cached LiveCVE shape OR the meaning of a field changes, so old
 # entries are treated as a cache miss instead of served stale. v3: version_confirmed
 # now reflects a genuine exact/lower-bounded NVD match (rangeless "before X"
@@ -276,9 +280,16 @@ class LiveCVEFeed:
     def _cache_read(self, key: str) -> Optional[list[LiveCVE]]:
         p = self._cache_path(key)
         try:
-            if not p.exists() or (time.time() - p.stat().st_mtime) > _CACHE_TTL_S:
+            if not p.exists():
+                return None
+            age = time.time() - p.stat().st_mtime
+            if age > _CACHE_TTL_S:
                 return None
             raw = json.loads(p.read_text())
+            # An empty (negative) answer expires far sooner than a real hit, so a
+            # transient outage does not mask a vulnerable product for a week.
+            if not raw and age > _NEG_CACHE_TTL_S:
+                return None
             return [LiveCVE(**r) for r in raw]
         except Exception:
             return None
@@ -440,8 +451,8 @@ class LiveCVEFeed:
     async def _from_circl(self, vendor: str, product: str) -> list[LiveCVE]:
         if httpx is None or not product:
             return []
-        vendor = vendor or _guess_vendor(product)
-        if not vendor:
+        vendor, product = _resolve_vendor_product(product, vendor)
+        if not vendor or vendor == "*":
             return []
         url = CIRCL_SEARCH_URL.format(vendor=vendor, product=product)
         try:
@@ -488,10 +499,42 @@ def _guess_vendor(product: str) -> str:
     return p  # CIRCL often accepts vendor==product for single-name projects
 
 
+def _cpe_token(value: str) -> str:
+    """Normalise a vendor/product/version string into a valid CPE 2.3 component.
+
+    A CPE 2.3 formatted-string component is lowercase and may not contain a raw
+    space: NVD's ``virtualMatchString`` answers such a component with HTTP 404
+    (not 0 results), which previously looked exactly like a rejected API key and
+    zeroed out CVEs for every multi-word product ("apache http server"). Collapse
+    any run of characters outside ``[a-z0-9._-]`` to a single underscore.
+    """
+    token = re.sub(r"[^a-z0-9._-]+", "_", (value or "").strip().lower())
+    return token.strip("_") or "*"
+
+
+def _resolve_vendor_product(product: str, vendor: str = "") -> tuple[str, str]:
+    """Best-effort (vendor, product) as valid CPE/CIRCL tokens.
+
+    Uses the CPE_MAP when the product is known; otherwise, for a multi-word
+    product with no mapping, treats the leading token as the vendor
+    ("apache http server" -> apache / http_server), which is how NVD and CIRCL
+    name such projects. A wrong split cannot fabricate findings: NVD matches the
+    real CPE dictionary, so a non-matching guess just returns 0 results. All
+    tokens are CPE-sanitised so a raw space never reaches the feeds.
+    """
+    prod_raw = product
+    vendor_raw = vendor or _guess_vendor(product)
+    if not vendor and vendor_raw == product.lower():
+        tokens = product.split()
+        if len(tokens) > 1:
+            vendor_raw, prod_raw = tokens[0], "_".join(tokens[1:])
+    return _cpe_token(vendor_raw), _cpe_token(prod_raw)
+
+
 def _guess_cpe(product: str, version: str) -> str:
-    vendor = _guess_vendor(product)
-    ver = version or "*"
-    return f"cpe:2.3:a:{vendor}:{product.lower()}:{ver}:*:*:*:*:*:*:*"
+    vendor, prod = _resolve_vendor_product(product)
+    ver = _cpe_token(version) if version else "*"
+    return f"cpe:2.3:a:{vendor}:{prod}:{ver}:*:*:*:*:*:*:*"
 
 
 async def discover_cves(product: str, version: str = "", **kw: Any) -> dict[str, Any]:

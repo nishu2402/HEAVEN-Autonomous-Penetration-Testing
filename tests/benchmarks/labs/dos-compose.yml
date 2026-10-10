@@ -6,7 +6,10 @@
 #     header-read timeout, so it holds an incomplete request header open
 #     indefinitely — the precondition for a Slowloris / slow-read attack.
 #     HEAVEN reports slow_http_dos (medium, CWE-400) after holding one partial
-#     header ~8s without being dropped.
+#     header past the common header-read-timeout ceiling (~65s, longer than
+#     nginx's 60s / Apache mod_reqtimeout defaults) without being dropped — the
+#     window is above those defaults so a server that merely has a longer-but-real
+#     timeout is NOT flagged.
 #   * memcached with the UDP listener ENABLED (-U 11211) — the real
 #     CVE-2018-1000115 condition. HEAVEN sends one benign `stats` datagram and
 #     measures the reflected reply's amplification factor -> dos_amplification.

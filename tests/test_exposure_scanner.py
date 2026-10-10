@@ -133,3 +133,19 @@ def test_all_findings_content_verified_and_proved():
     for f in res["findings"]:
         assert f["proved"] is True
         assert f["evidence"]["verification"] == "content-verified"
+
+
+def test_phpinfo_verifier_requires_real_version_banner():
+    """A page that merely MENTIONS phpinfo() (a tutorial, a comment, prose about
+    the function) must not be mis-flagged as an exposed configuration dump: real
+    phpinfo() output always prints a numbered 'PHP Version x.y.z' banner."""
+    from heaven.vulnscan.exposure_scanner import _Resp, _v_phpinfo
+    # Prose mentioning the function, or even both words, with no version number.
+    assert _v_phpinfo(_Resp(200, "<html>Call phpinfo() to debug.</html>", "text/html")) is False
+    assert _v_phpinfo(_Resp(
+        200, "<html>To check your PHP version, call phpinfo().</html>", "text/html")) is False
+    # Genuine HTML-mode and text-mode (php -i) phpinfo output both detected.
+    assert _v_phpinfo(_Resp(
+        200, "<head><title>phpinfo()</title></head>PHP Version 8.1.2", "text/html")) is True
+    assert _v_phpinfo(_Resp(
+        200, "phpinfo()\nPHP Version => 8.1.2\nSystem => Linux", "text/plain")) is True

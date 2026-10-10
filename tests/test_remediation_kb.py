@@ -129,9 +129,9 @@ _CVE_FINDINGS = [
     {"vuln_type": "vulnerable_service", "cve": "CVE-2021-41773",
      "title": "Apache path traversal and RCE (mod_cgi)",
      "product": "apache_http_server", "version": "2.4.49", "cwe": "CWE-22"},
-    {"vuln_type": "vulnerable_service", "cve": "CVE-2022-22721",
-     "title": "Apache SSRF via mod_lua",
-     "product": "apache_http_server", "version": "2.4.52", "cwe": "CWE-918"},
+    {"vuln_type": "vulnerable_service", "cve": "CVE-2021-40438",
+     "title": "Apache SSRF in mod_proxy",
+     "product": "apache_http_server", "version": "2.4.48", "cwe": "CWE-918"},
 ]
 
 
@@ -179,11 +179,11 @@ def test_remediation_reads_fields_from_evidence_after_db_roundtrip():
     reconstruct a specific remediation from evidence.product/version/cwe."""
     stored = {
         "vuln_type": "vulnerable_service",
-        "cve_id": "CVE-2022-22721",
-        "title": "Apache SSRF via mod_lua",
-        "evidence": {"product": "apache_http_server", "version": "2.4.52",
+        "cve_id": "CVE-2021-40438",
+        "title": "Apache SSRF in mod_proxy",
+        "evidence": {"product": "apache_http_server", "version": "2.4.48",
                      "cwe": "CWE-918", "exploit_available": False},
     }
     txt = kb.component_remediation(stored)
-    assert "CVE-2022-22721" in txt and "Apache HTTP Server" in txt
+    assert "CVE-2021-40438" in txt and "Apache HTTP Server" in txt
     assert "metadata" in txt.lower() or "egress" in txt.lower()

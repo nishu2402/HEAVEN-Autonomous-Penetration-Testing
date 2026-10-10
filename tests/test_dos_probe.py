@@ -8,6 +8,7 @@ not in CI.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -67,11 +68,75 @@ def test_named_cve_vector_is_always_at_least_high():
 
 
 def test_slow_http_finding_shape():
-    f = d._slow_http_finding("10.0.0.5", 80, False, 8.0)
+    f = d._slow_http_finding("10.0.0.5", 80, False, 66.0)
     assert f["vuln_type"] == "slow_http_dos"
     assert f["severity"] == "medium"
     assert f["evidence"]["cwe"] == "CWE-400"
     assert f["target"] == "http://10.0.0.5:80"
+
+
+def test_slow_http_hold_window_exceeds_common_timeouts():
+    # Regression: the window MUST clear the common header-read-timeout ceiling, or
+    # a server that DOES enforce a timeout (nginx client_header_timeout 60s, Apache
+    # mod_reqtimeout ~20-40s) is falsely flagged. An 8s window tripped on
+    # certifiedhacker's nginx and scanme's Apache live even though both enforce a
+    # real timeout; the window must stay above nginx's 60s default.
+    assert d._SLOW_HTTP_HOLD >= 60.0
+
+
+def test_slow_http_finding_is_honest_about_the_signal():
+    # The claim must match the evidence: it reports the measured hold relative to
+    # the common timeout ceiling and asks for confirmation, rather than asserting a
+    # bare, absolute "no header-read timeout" (which a short hold can't prove) or
+    # claiming exploitation against an event-driven server.
+    f = d._slow_http_finding("10.0.0.5", 80, False, 66.0)
+    desc = f["description"].lower()
+    assert "confirm" in desc and "event-driven" in desc
+    assert f["confidence"] < 0.75  # honest downgrade from the old over-confident 0.75
+
+
+async def _probe_against(handler, hold: float) -> float | None:
+    """Start a localhost TCP server with `handler`, run the slow-HTTP probe
+    against it, and tear the server down — all in one event loop."""
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    host, port = server.sockets[0].getsockname()[:2]
+    try:
+        return await d._slow_http_susceptible(host, port, use_tls=False, hold=hold)
+    finally:
+        server.close()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(server.wait_closed(), timeout=2.0)
+
+
+def test_slow_http_drop_before_window_is_not_flagged():
+    # A server that drops the stalled header before the probe's window models a
+    # protected server (a real, if longer, header-read timeout). It must NOT flag.
+    async def handler(reader, writer):
+        await reader.read(64)          # read the partial header
+        await asyncio.sleep(0.3)       # ... then enforce a "timeout" by closing
+        writer.close()
+    held = asyncio.run(_probe_against(handler, hold=2.0))
+    assert held is None
+
+
+def test_slow_http_indefinite_hold_is_flagged():
+    # A server that never drops the stalled header models the susceptible case
+    # (no effective header-read timeout) and must be flagged.
+    async def handler(reader, writer):
+        # Consume the trickled partial headers but never respond or close, until
+        # the client (the probe) disconnects — then read() returns EOF and we
+        # exit, so the test server never leaks a task.
+        try:
+            while True:
+                data = await reader.read(64)
+                if not data:
+                    break
+        except Exception:
+            pass
+        finally:
+            writer.close()
+    held = asyncio.run(_probe_against(handler, hold=2.0))
+    assert held is not None and held >= 1.0
 
 
 def test_web_targets_dedup_and_scheme_inference():

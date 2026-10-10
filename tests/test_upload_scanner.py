@@ -140,3 +140,63 @@ async def test_blocked_upload_yields_no_finding(monkeypatch):
     _patch_session(monkeypatch, _Session(accept=False))
     res = await scan_upload_forms(_endpoints(), authorized=True)
     assert res.get("findings", []) == []
+
+
+# ── FP guard: a rejection that echoes the filename is NOT an acceptance ────────
+def _filename_of(data) -> str:
+    for opt, _hdrs, _val in getattr(data, "_fields", []):
+        if opt.get("name") == "uploaded":
+            return opt.get("filename", "")
+    return ""
+
+
+class _RejectEchoSession:
+    """Rejects the upload but echoes the filename in the rejection message
+    (e.g. 'x.php: file type not allowed') — the real-world case that used to be
+    mis-read as 'accepted' and reported as a false unrestricted-upload high."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def post(self, url, data=None, timeout=None):
+        name = _filename_of(data)
+        return _Resp(f"{name}: file type not allowed. Only images may be uploaded.")
+
+    def get(self, url, timeout=None):
+        return _Resp("404 Not Found")
+
+
+class _EchoNoStoreSession:
+    """Echoes the filename (no rejection, no success message) but the stored
+    file cannot be retrieved — a reflected filename alone is too weak to assert
+    the flaw, so nothing should be reported."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def post(self, url, data=None, timeout=None):
+        name = _filename_of(data)
+        return _Resp(f"<html>Recent activity: {name}</html>")
+
+    def get(self, url, timeout=None):
+        return _Resp("404 Not Found")   # not actually stored
+
+
+@pytest.mark.asyncio
+async def test_rejection_echoing_filename_is_not_a_finding(monkeypatch):
+    _patch_session(monkeypatch, _RejectEchoSession())
+    res = await scan_upload_forms(_endpoints(), authorized=True)
+    assert res.get("findings", []) == []
+
+
+@pytest.mark.asyncio
+async def test_reflected_filename_without_storage_proof_is_suppressed(monkeypatch):
+    _patch_session(monkeypatch, _EchoNoStoreSession())
+    res = await scan_upload_forms(_endpoints(), authorized=True)
+    assert res.get("findings", []) == []

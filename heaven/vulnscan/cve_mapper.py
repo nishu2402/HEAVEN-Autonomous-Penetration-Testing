@@ -208,12 +208,12 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
         # explicit >=2.4.0 floor — without it a bare "<=2.4.x" ceiling also
         # matched ancient 2.2/2.0 servers (e.g. Metasploitable's 2.2.8), a false
         # positive of a modern-branch CVE on legacy software.
-        CVERecord("CVE-2022-31813", "Apache HTTP request smuggling mod_proxy",
-                  "high", 7.5, [">=2.4.0", "<=2.4.53"], cwe="CWE-444"),
+        CVERecord("CVE-2022-31813", "Apache mod_proxy drops X-Forwarded-* enabling IP authentication bypass",
+                  "high", 7.5, [">=2.4.0", "<=2.4.53"], cwe="CWE-348"),
         CVERecord("CVE-2022-22720", "Apache HTTP request smuggling (incomplete fix)",
                   "high", 7.5, [">=2.4.0", "<=2.4.52"], cwe="CWE-444"),
-        CVERecord("CVE-2022-22721", "Apache SSRF via mod_lua",
-                  "critical", 9.8, [">=2.4.0", "<=2.4.52"], cwe="CWE-918"),
+        CVERecord("CVE-2022-22721", "Apache integer overflow and out-of-bounds write (large request body)",
+                  "critical", 9.8, [">=2.4.0", "<=2.4.52"], cwe="CWE-190"),
         CVERecord("CVE-2021-44224", "Apache server-side request forgery in forward proxy",
                   "high", 8.2, [">=2.4.0", "<=2.4.51"], cwe="CWE-918"),
         CVERecord("CVE-2021-40438", "Apache SSRF in mod_proxy",
@@ -246,10 +246,19 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
     "microsoft_iis": [
         CVERecord("CVE-2017-7269", "IIS 6.0 WebDAV buffer overflow RCE",
                   "critical", 10.0, ["6.0"], exploit_available=True, cwe="CWE-119"),
+        # Both HTTP Protocol Stack (http.sys) RCEs live in the kernel driver that
+        # ships only with IIS 10.0 (Windows 10 2004+/Server 2019+); IIS 6.0/7.x/8.x
+        # run earlier Windows releases that do not contain the affected http.sys
+        # code path. A bare "<=10.0" ceiling (single-ceiling records stay
+        # open-ended-down by design) therefore swept every older IIS generation
+        # into two CRITICAL findings it cannot have. Floor at >=10.0 so only the
+        # IIS 10.0 generation matches. No false negative: no IIS below 10.0 is
+        # affected. The build-level patch state of a given 10.0 host still can't be
+        # read from the banner, which is the usual version-range caveat.
         CVERecord("CVE-2021-31166", "IIS HTTP Protocol Stack RCE",
-                  "critical", 9.8, ["<=10.0"], exploit_available=True, cwe="CWE-416"),
+                  "critical", 9.8, [">=10.0", "<=10.0"], exploit_available=True, cwe="CWE-416"),
         CVERecord("CVE-2022-21907", "IIS HTTP Protocol Stack RCE (worm-level)",
-                  "critical", 9.8, ["<=10.0.19041"], exploit_available=True, cwe="CWE-416"),
+                  "critical", 9.8, [">=10.0", "<=10.0.19041"], exploit_available=True, cwe="CWE-416"),
     ],
     "mysql": [
         # NVD affects two explicit windows — 5.0.0–5.7.41 and 8.0.0–8.0.32 — so a

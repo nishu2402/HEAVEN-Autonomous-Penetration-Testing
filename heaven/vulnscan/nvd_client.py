@@ -68,15 +68,26 @@ class NVDClient:
         self._cache: dict[str, list[CVERecord]] = {}
         self._kev_cves: set[str] = set()
         self._client: Optional[httpx.AsyncClient] = None
+        self._keyless_client: Optional[httpx.AsyncClient] = None
         self._warned_invalid_key = False  # warn once if a set key keeps 404-ing
+        self._key_rejected = False  # proven bad key → run keyless for the session
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             headers = {"Accept": "application/json"}
-            if self.api_key:
+            if self.api_key and not self._key_rejected:
                 headers["apiKey"] = self.api_key
             self._client = httpx.AsyncClient(headers=headers, timeout=30.0)
         return self._client
+
+    async def _get_keyless_client(self) -> httpx.AsyncClient:
+        """A header-free client used once to disambiguate a 404: a rejected key
+        404s, but so does a CPE token NVD cannot parse, and only the former
+        flips to 200 when the apiKey header is dropped."""
+        if self._keyless_client is None:
+            self._keyless_client = httpx.AsyncClient(
+                headers={"Accept": "application/json"}, timeout=30.0)
+        return self._keyless_client
 
     async def _rate_wait(self):
         elapsed = time.time() - self._last_request
@@ -130,17 +141,45 @@ class NVDClient:
             }
             resp = await client.get(NVD_BASE_URL, params=params)
 
+            if resp.status_code == 404 and self.api_key and not self._key_rejected:
+                # A 404 is ambiguous: NVD 404s a rejected apiKey (not 401/403),
+                # but it ALSO 404s a CPE token it cannot parse. Disambiguate with
+                # ONE keyless retry of the same query — only a bad key flips to
+                # 200 once the header is dropped. This stops a valid key being
+                # wrongly blamed for an unmatchable query, and lets a genuinely
+                # bad key degrade gracefully to the keyless tier instead of
+                # silently returning zero CVEs for every product.
+                keyless = await self._get_keyless_client()
+                try:
+                    kr = await keyless.get(NVD_BASE_URL, params=params)
+                except Exception as e:
+                    logger.debug(f"NVD keyless retry failed for {cpe}: {e}")
+                    self._cache[cpe] = []
+                    return []
+                if kr.status_code == 200:
+                    if not self._warned_invalid_key:
+                        self._warned_invalid_key = True
+                        logger.warning(
+                            "NVD rejected the configured API key (404 with key, "
+                            "200 without): continuing keyless at the slower rate. "
+                            "Verify NVD_API_KEY (Settings → Recon enrichment, or "
+                            "`heaven config get NVD_API_KEY`)."
+                        )
+                    self._key_rejected = True
+                    self._rate_limit = 6.0  # keyless tier for the rest of the run
+                    self._client = None     # rebuild without the apiKey header
+                    resp = kr               # serve this query from the retry
+                else:
+                    # Both 404 → the query itself is not matchable; the key is
+                    # not at fault, so stay quiet (common for a guessed CPE).
+                    logger.debug(f"NVD 404 for {cpe} (query not matchable)")
+                    self._cache[cpe] = []
+                    return []
+
             if resp.status_code == 404:
-                # A 404 on a well-formed query almost always means the API key
-                # was rejected — NVD returns 404 (not 401/403) for a bad apiKey.
-                # Without a key a valid query returns 200, so flag the likely cause.
-                if self.api_key and not self._warned_invalid_key:
-                    self._warned_invalid_key = True
-                    logger.warning(
-                        "NVD returned 404 with an API key set: the key is likely "
-                        "invalid or malformed. Verify NVD_API_KEY (Settings → "
-                        "Recon enrichment, or `heaven config get NVD_API_KEY`)."
-                    )
+                # No key (or already keyless): a 404 means NVD could not parse
+                # the CPE/query, never an auth problem.
+                logger.debug(f"NVD 404 for {cpe} (unmatchable query)")
                 self._cache[cpe] = []
                 return []
 
@@ -292,6 +331,9 @@ class NVDClient:
         if self._client:
             await self._client.aclose()
             self._client = None
+        if self._keyless_client:
+            await self._keyless_client.aclose()
+            self._keyless_client = None
 
 
 async def lookup_vulnerabilities(scan_id: str = "", cpes: Optional[list[str]] = None, **kwargs) -> dict[str, Any]:

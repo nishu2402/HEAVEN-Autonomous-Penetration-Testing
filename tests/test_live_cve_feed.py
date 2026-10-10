@@ -10,13 +10,18 @@ httpx → empty, never raises) and for its disk cache round-trip.
 
 from __future__ import annotations
 
+import os
+import time
+
 import heaven.vulnscan.live_cve_feed as lcf
 from heaven.vulnscan.cve_mapper import lookup_inline_cves
 from heaven.vulnscan.live_cve_feed import (
     LiveCVE,
     LiveCVEFeed,
+    _cpe_token,
     _guess_cpe,
     _product_key,
+    _resolve_vendor_product,
     _score_to_severity,
     filter_by_version,
     merge_and_dedupe,
@@ -189,6 +194,34 @@ def test_guess_cpe_shape():
     assert ":*:*:*:*:*:*:*:*" in _guess_cpe("nginx", "")
 
 
+def test_guess_cpe_sanitises_multiword_product():
+    # Regression: "apache http server" must never leak a raw space into the CPE.
+    # NVD answers a space-bearing virtualMatchString with HTTP 404, which the
+    # client used to misread as a rejected API key — zeroing CVEs for every
+    # multi-word product. The leading token becomes the vendor, the rest the
+    # underscored product, matching how NVD names the project.
+    cpe = _guess_cpe("apache http server", "2.4.7")
+    assert cpe == "cpe:2.3:a:apache:http_server:2.4.7:*:*:*:*:*:*:*"
+    assert " " not in cpe
+
+
+def test_cpe_token_collapses_unsafe_chars():
+    assert _cpe_token("Apache HTTP Server") == "apache_http_server"
+    assert _cpe_token("  Node.js  ") == "node.js"
+    assert _cpe_token("foo/bar baz") == "foo_bar_baz"
+    assert _cpe_token("") == "*"
+
+
+def test_resolve_vendor_product_split_and_explicit_vendor():
+    # multi-word, unmapped → first token is the vendor, rest the product
+    assert _resolve_vendor_product("apache http server") == ("apache", "http_server")
+    # an explicit vendor (the scan path) is honoured, never re-split, only sanitised
+    assert _resolve_vendor_product("http server", vendor="apache") == ("apache", "http_server")
+    # single-word unmapped product keeps vendor==product (CIRCL convention)
+    v, p = _resolve_vendor_product("someobscureproduct")
+    assert v == p == "someobscureproduct"
+
+
 # ── LiveCVEFeed graceful degradation + caching ───────────────────────────────
 async def test_feed_without_httpx_is_unavailable_and_returns_empty(monkeypatch):
     monkeypatch.setattr(lcf, "httpx", None)
@@ -223,6 +256,30 @@ def test_cache_round_trip(tmp_path):
 def test_cache_miss_returns_none(tmp_path):
     feed = LiveCVEFeed(cache_dir=tmp_path)
     assert feed._cache_read("never-written") is None
+
+
+def test_negative_cache_expires_before_positive_ttl(tmp_path):
+    # An empty (negative) answer must expire far sooner than the week-long
+    # positive TTL — otherwise a transient feed outage (CIRCL 503, NVD
+    # rate-limit) freezes "no CVEs" for an otherwise-vulnerable product.
+    feed = LiveCVEFeed(cache_dir=tmp_path)
+    feed._cache_write("empty", [])
+    assert feed._cache_read("empty") == []            # fresh empty still served
+    p = feed._cache_path("empty")
+    old = time.time() - (lcf._NEG_CACHE_TTL_S + 60)   # past neg TTL, within pos TTL
+    os.utime(p, (old, old))
+    assert feed._cache_read("empty") is None          # expired → re-query
+
+
+def test_positive_cache_survives_negative_ttl(tmp_path):
+    # A NON-empty hit of the same age is still served — only empties expire early.
+    feed = LiveCVEFeed(cache_dir=tmp_path)
+    feed._cache_write("hit", [LiveCVE("CVE-2021-1", cvss=9.8, source="nvd")])
+    p = feed._cache_path("hit")
+    old = time.time() - (lcf._NEG_CACHE_TTL_S + 60)
+    os.utime(p, (old, old))
+    back = feed._cache_read("hit")
+    assert back is not None and back[0].cve_id == "CVE-2021-1"
 
 
 # ── Engagement persistence (the finding shape must be DB-compatible) ─────────

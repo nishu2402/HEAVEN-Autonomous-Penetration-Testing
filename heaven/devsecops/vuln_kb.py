@@ -4567,6 +4567,30 @@ def _backfill_published_cvss(out: dict, ev: dict) -> None:
             out["evidence"] = ev
 
 
+def canonical_finding(finding: dict) -> dict:
+    """The finding reconciled to its one authoritative severity band AND a CVSS
+    base consistent with that band — the single source both the stored severity
+    label and the stored CVSS base should come from, so every surface (findings
+    list, detail, dashboard tally, report, and the SARIF/JSON/CSV exports) shows
+    the same band and the same number.
+
+    It copies the finding, backfills a real published CVE score, then reconciles:
+    a published score drives the label up or down; an unconfirmed / low-confidence
+    indicator has BOTH its label and its effective base capped to its low band
+    (so a Low badge never ships a 7.5 ``security-severity`` that a consumer like
+    GitHub code-scanning would re-bucket as High); a finding with no resolvable
+    score is left untouched. Pure — it never mutates the caller's dict or its
+    evidence.
+    """
+    from heaven.utils.cvss import reconcile_severity
+    out = dict(finding)
+    ev = dict(out.get("evidence") or {})
+    out["evidence"] = ev
+    _backfill_published_cvss(out, ev)
+    reconcile_severity(out)
+    return out
+
+
 def canonical_severity(finding: dict) -> str:
     """The one authoritative severity band for a finding, shared by every surface
     (findings list, detail, dashboard tally, report) so they can never disagree —
@@ -4580,13 +4604,7 @@ def canonical_severity(finding: dict) -> str:
     the finding and never mutates the caller's dict. Returns "" only when the
     finding carries no severity at all.
     """
-    from heaven.utils.cvss import reconcile_severity
-    out = dict(finding)
-    ev = dict(out.get("evidence") or {})
-    out["evidence"] = ev
-    _backfill_published_cvss(out, ev)
-    reconcile_severity(out)
-    return str(out.get("severity") or "").strip().lower()
+    return str(canonical_finding(finding).get("severity") or "").strip().lower()
 
 
 def enrich_finding(finding: dict) -> dict:

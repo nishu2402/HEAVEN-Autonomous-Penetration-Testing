@@ -12,6 +12,7 @@ network: the HTTP surface is a tiny in-process fake.
 """
 from __future__ import annotations
 
+import re
 import urllib.parse
 
 import pytest
@@ -19,6 +20,7 @@ import pytest
 from heaven.vulnscan.web_fuzzer import (
     _PATH_BYPASS_SUFFIXES,
     _fuzz_403_bypass,
+    _fuzz_mail_header_injection,
     _fuzz_parameters,
     _set_query_param,
 )
@@ -161,3 +163,102 @@ def test_set_query_param_replaces_all_occurrences():
     qs = urllib.parse.parse_qs(urllib.parse.urlparse(out).query)
     assert qs["q"] == ["TOK"], "the control request must carry exactly one value"
     assert qs["z"] == ["9"], "unrelated params are preserved"
+
+
+# ── 4. mail header injection: the UNIQUE canary is the only valid oracle ──────
+@pytest.mark.asyncio
+async def test_mail_header_injection_requires_canary_not_bare_bcc():
+    # A response header that merely contains "bcc:" for an unrelated reason, with
+    # our unique canary ABSENT, means the CRLF split did NOT happen — reporting it
+    # would be a high-severity false positive with no proof.
+    def handler(url):
+        r = _Resp(200, "ok")
+        r.headers = {"X-Mail-Config": "bcc: disabled by site policy"}
+        return r
+
+    findings = await _fuzz_mail_header_injection(
+        _Session(handler), "http://t/contact?email=a")
+    assert findings == [], "a bare 'bcc:' header without the canary is not injection"
+
+
+@pytest.mark.asyncio
+async def test_mail_header_injection_fires_when_canary_reflected_into_headers():
+    # A vulnerable server honours the CRLF split and our unique canary lands in a
+    # response header — the sound oracle, which must still fire.
+    def handler(url):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        val = (q.get("email") or [""])[0]
+        r = _Resp(200, "ok")
+        m = re.search(r"hvn[a-z]{6}@heaven\.invalid", val)
+        if m:
+            r.headers = {"X-Reflected": f"Bcc:{m.group(0)}"}
+        return r
+
+    findings = await _fuzz_mail_header_injection(
+        _Session(handler), "http://t/contact?email=a")
+    assert any(f["vuln_type"] == "smtp_header_injection" for f in findings), (
+        "a canary reflected into the response headers is a genuine injection"
+    )
+
+
+# ── 5. hidden parameter: a length swing within the page's own jitter is not a
+#       discovery (the dynamic-page false-positive the second baseline fixes) ──
+@pytest.mark.asyncio
+async def test_hidden_param_length_jitter_is_not_discovery():
+    # A dynamic page whose body length naturally swings ~500 bytes between two
+    # identical requests. A probed param that neither reflects the probe nor
+    # changes status, and whose length delta stays within that jitter, must NOT be
+    # reported — previously a bare >100-byte diff flagged it.
+    state = {"base_calls": 0}
+
+    def handler(url):
+        if "HEAVEN_PROBE" not in url:                  # a baseline fetch
+            state["base_calls"] += 1
+            n = 1000 if state["base_calls"] == 1 else 1500   # jitter 500 → thr 1000
+            return _Resp(200, "<html>" + ("z" * n) + "</html>")
+        # a param probe: +300 bytes vs base_len, within 2x jitter, no reflection
+        return _Resp(200, "<html>" + ("z" * 1300) + "</html>")
+
+    findings = await _fuzz_parameters(_Session(handler), "http://t/dyn")
+    kinds = {f["vuln_type"] for f in findings}
+    assert "hidden_parameter_discovered" not in kinds, (
+        "a length swing within the page's own jitter is not a discovered parameter"
+    )
+
+
+@pytest.mark.asyncio
+async def test_hidden_param_reflection_fires_despite_jitter():
+    # Even on a jittery page, a verbatim reflection of the unique probe is a strong
+    # processed-parameter signal and must still fire — recall is preserved.
+    state = {"base_calls": 0}
+
+    def handler(url):
+        if "HEAVEN_PROBE" not in url:
+            state["base_calls"] += 1
+            n = 1000 if state["base_calls"] == 1 else 1500
+            return _Resp(200, "<html>" + ("z" * n) + "</html>")
+        if "debug=HEAVEN_PROBE" in url:
+            return _Resp(200, "<html>reflected HEAVEN_PROBE " + ("z" * 1100) + "</html>")
+        return _Resp(200, "<html>" + ("z" * 1300) + "</html>")   # within jitter
+
+    findings = await _fuzz_parameters(_Session(handler), "http://t/dyn")
+    params = {f["evidence"]["param"] for f in findings
+              if f["vuln_type"] == "hidden_parameter_discovered"}
+    assert "debug" in params, "a reflected probe is a discovery even on a noisy page"
+
+
+@pytest.mark.asyncio
+async def test_hidden_param_length_change_on_stable_page_still_fires():
+    # Stable page (zero jitter): a >100-byte length change with no reflection is a
+    # legitimate processed-parameter signal and is preserved (floor stays at 100).
+    def handler(url):
+        if "HEAVEN_PROBE" not in url:
+            return _Resp(200, "<html>" + ("z" * 1000) + "</html>")   # identical both times
+        if "format=HEAVEN_PROBE" in url:
+            return _Resp(200, "<html>" + ("z" * 1400) + "</html>")   # +400 bytes, no reflect
+        return _Resp(200, "<html>" + ("z" * 1000) + "</html>")       # unchanged
+
+    findings = await _fuzz_parameters(_Session(handler), "http://t/dyn")
+    params = {f["evidence"]["param"] for f in findings
+              if f["vuln_type"] == "hidden_parameter_discovered"}
+    assert "format" in params, "a clear length change on a stable page still fires"

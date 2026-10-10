@@ -16,6 +16,7 @@ import json
 import pytest
 
 from heaven.vulnscan.misconfig_scanner import (
+    _collapse_catch_all_hygiene,
     _crack_jwt_secret,
     _jwt_findings,
     _parse_jwt,
@@ -172,3 +173,108 @@ async def test_oob_no_false_positive_on_non_fetching_endpoint():
     with serve() as base, OASTListener() as oast:
         res = await scan_oob([f"{base}/vulnerabilities/xss_r/?name=x"], oast=oast)
     assert _types(res["findings"]) == set()
+
+
+def test_catch_all_hygiene_collapse():
+    """On a soft-404 / catch-all host (every path returns the same page), per-URL
+    page-hygiene findings collapse to ONE per host, so dozens of speculative probe
+    URLs (/graphql, /swagger, /api/v1 …) don't flood a report with identical
+    login-form nags. A non-catch-all host and other finding types are untouched."""
+    base = "https://catchall.example"
+    findings = []
+    for p in ("", "/graphql", "/swagger", "/api/v1", "/xmlrpc"):
+        findings.append({"target": base + p,
+                         "vuln_type": "password_autocomplete_enabled", "severity": "low"})
+        findings.append({"target": base + p,
+                         "vuln_type": "sensitive_cache_control", "severity": "low"})
+    findings.append({"target": "https://real.example/login",
+                     "vuln_type": "password_autocomplete_enabled", "severity": "low"})
+    findings.append({"target": base + "/graphql",
+                     "vuln_type": "graphql_introspection", "severity": "medium"})
+
+    out = _collapse_catch_all_hygiene(findings, {base})
+    pw = [f for f in out if f["vuln_type"] == "password_autocomplete_enabled"
+          and f["target"].startswith(base)]
+    cc = [f for f in out if f["vuln_type"] == "sensitive_cache_control"]
+    assert len(pw) == 1
+    assert pw[0]["target"] == base                      # representative = site root
+    assert pw[0]["evidence"]["catch_all_host"] is True
+    assert pw[0]["evidence"]["duplicate_probe_urls"] == 4
+    assert len(cc) == 1
+    # a genuinely distinct (non-catch-all) host and non-hygiene finding are kept
+    assert any(f["target"] == "https://real.example/login" for f in out)
+    assert any(f["vuln_type"] == "graphql_introspection" for f in out)
+    # a host NOT confirmed catch-all is never collapsed
+    out2 = _collapse_catch_all_hygiene(findings, set())
+    assert sum(1 for f in out2
+               if f["vuln_type"] == "password_autocomplete_enabled") == 6
+
+
+# ── cookie-flag parsing: attribute-scoped, deletion-aware ──────────────────────
+# The flag checks must read the Set-Cookie ATTRIBUTE section only. The old
+# ``"secure" in raw.lower()`` substring test over the whole header let a cookie
+# whose VALUE contained the flag word mask a genuine missing-flag finding, and it
+# warned about logout cookies the server is actively deleting.
+
+class _CookieHdrs:
+    def __init__(self, set_cookies):
+        self._sc = list(set_cookies)
+
+    def getall(self, key, default=None):
+        if key.lower() == "set-cookie":
+            return list(self._sc)
+        return list(default) if default is not None else []
+
+
+class _CookieResp:
+    def __init__(self, set_cookies, content_type="text/html", body=""):
+        self.headers = _CookieHdrs(set_cookies)
+        self.content_type = content_type
+        self._body = body
+
+    async def text(self, *a, **k):
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _CookieSession:
+    def __init__(self, set_cookies):
+        self._sc = set_cookies
+
+    def get(self, url, **kw):
+        return _CookieResp(self._sc)
+
+
+async def _cookie_findings(set_cookies, url="https://h/login"):
+    from heaven.vulnscan.misconfig_scanner import _check_cookies_and_jwt
+    out = await _check_cookies_and_jwt(_CookieSession(set_cookies), url)
+    return [f for f in out if f["vuln_type"] == "insecure_cookie"]
+
+
+async def test_cookie_value_flag_words_do_not_mask_missing_attributes():
+    out = await _cookie_findings(
+        ["sessionid=secure_httponly_samesite_tok_abcdef; Path=/"])
+    assert len(out) == 1
+    assert set(out[0]["evidence"]["missing_flags"]) == {"HttpOnly", "Secure", "SameSite"}
+
+
+async def test_cookie_logout_deletion_not_flagged():
+    out = await _cookie_findings(
+        ["PHPSESSID=deleted; expires=Thu, 01-Jan-1970 00:00:00 GMT; Path=/"])
+    assert out == []
+
+
+async def test_cookie_max_age_zero_clear_not_flagged():
+    out = await _cookie_findings(["sessionid=; Max-Age=0; Path=/"])
+    assert out == []
+
+
+async def test_cookie_fully_secured_not_flagged():
+    out = await _cookie_findings(
+        ["sessionid=abcdef0123456789; Secure; HttpOnly; SameSite=Strict; Path=/"])
+    assert out == []

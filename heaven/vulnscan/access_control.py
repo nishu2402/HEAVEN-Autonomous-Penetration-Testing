@@ -113,7 +113,17 @@ def _similar(a: str, b: str) -> float:
     la, lb = len(a), len(b)
     if min(la, lb) / max(la, lb) < 0.6:
         return 0.0
-    return SequenceMatcher(None, a[:4000], b[:4000]).quick_ratio()
+    sm = SequenceMatcher(None, a[:4000], b[:4000])
+    # quick_ratio() is a fast UPPER BOUND on ratio() (it compares the character
+    # multiset, ignoring order), so use it only to reject cheaply. The decision
+    # that two bodies are "the same page" — which drives the headline *proven*
+    # BAC finding — must use the real, order-sensitive ratio(); otherwise two
+    # different pages that merely share a template and length (common in web
+    # apps) could read as identical and manufacture a false positive.
+    qr = sm.quick_ratio()
+    if qr < _SIMILAR:
+        return qr
+    return sm.ratio()
 
 
 async def _fetch(session: Any, url: str, timeout: float) -> _Resp:

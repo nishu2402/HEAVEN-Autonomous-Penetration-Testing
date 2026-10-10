@@ -105,6 +105,39 @@ class AttackChain:
         return "\\n".join(lines)
 
 
+# Qualitative severity ranking used only by the eligibility gate below. Kept
+# local so this module stays dependency-free.
+_SEV_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2,
+             "info": 1, "informational": 1, "none": 0, "": 0}
+
+
+def _finding_is_eligible(f: dict) -> bool:
+    """A finding may seed or fill an attack-chain node only when it is a real,
+    still-standing weakness.
+
+    Excludes anything HEAVEN already rejected (``suppressed`` or adjudicated a
+    false positive) and informational observations (a healthy posture check
+    reported at info is not a weakness). This mirrors the eligibility gate in
+    ``heaven.vulnscan.correlation`` so the attack-chain engine reasons over the
+    same clean finding set the report shows, instead of resurrecting rejected or
+    info-only findings into a reported kill chain.
+    """
+    if not isinstance(f, dict):
+        return False
+    if f.get("suppressed"):
+        return False
+    if str(f.get("result") or "").lower() == "false_positive":
+        return False
+    if str(f.get("status") or "").lower() == "false_positive":
+        return False
+    # Gate on severity only when one is present, so findings that legitimately
+    # carry no severity field are passed through as before.
+    sev = str(f.get("severity") or "").strip().lower()
+    if sev and _SEV_RANK.get(sev, 0) < _SEV_RANK["low"]:
+        return False
+    return True
+
+
 # ── Vulnerability-to-Tactic Mapping ──
 # Maps vulnerability types to what an attacker gains from them
 
@@ -276,8 +309,13 @@ class AttackChainEngine:
 
     def ingest_findings(self, scan_results: dict) -> None:
         """Convert scan findings into attack graph nodes."""
-        vulns = scan_results.get("vulnerabilities", [])
-        secrets = scan_results.get("secrets", [])
+        # Skip findings HEAVEN already rejected (suppressed / false-positive) or
+        # that are merely informational, so a rejected finding never resurfaces
+        # as a node in a reported attack chain.
+        vulns = [v for v in scan_results.get("vulnerabilities", [])
+                 if _finding_is_eligible(v)]
+        secrets = [s for s in scan_results.get("secrets", [])
+                   if _finding_is_eligible(s)]
         scan_results.get("assets", [])
 
         for i, vuln in enumerate(vulns):

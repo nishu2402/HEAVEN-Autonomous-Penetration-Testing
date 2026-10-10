@@ -86,6 +86,23 @@ def _match_vendor(haystacks: list[str]) -> Optional[str]:
     return None
 
 
+def _serves_login_form(body_lower: str) -> bool:
+    """True if the (already-lowercased) response body presents a login form.
+
+    A password input is the decisive signal: a management panel that serves a
+    login form at HTTP 200 is enforcing authentication, so it is an *exposure*,
+    not unauthenticated admin access. Kept strict (an actual password field, or a
+    login form element) so a genuine no-login admin landing page is not masked.
+    """
+    if 'type="password"' in body_lower or "type='password'" in body_lower:
+        return True
+    if 'name="password"' in body_lower or "name='password'" in body_lower:
+        return True
+    return ("<form" in body_lower
+            and ("login" in body_lower or "sign in" in body_lower
+                 or "passwd" in body_lower))
+
+
 async def _probe_host(session, host: str) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     seen_vendor = False
@@ -145,6 +162,35 @@ async def _probe_host(session, host: str) -> list[dict[str, Any]]:
                 owasp="A02:2025 Security Misconfiguration",
                 mitre="T1133: External Remote Services",
             ))
+        elif status == 200 and _serves_login_form(low):
+            # A vendor panel that serves a LOGIN FORM at 200 is reachable but does
+            # enforce authentication — it is an exposure, not unauthenticated admin
+            # access. Routers and controllers (TP-Link, Netgear, UniFi, …) almost
+            # all return their login page with a 200, so reporting every such page
+            # as "no authentication challenge" would be a false high. Report it at
+            # the same exposure tier as a 401/403 instead.
+            findings.append(_finding(
+                target=f"{host}:{port}",
+                vuln_type="wireless_mgmt_exposed",
+                severity="medium",
+                title=f"Wireless management interface exposed: {vendor}",
+                description=(
+                    f"The {vendor} web management interface is reachable on the network "
+                    f"at {url} and presents a login form (authentication is enforced). "
+                    "Wireless controller/AP admin planes should not be exposed to "
+                    "untrusted networks even when authenticated; combined with weak or "
+                    "default credentials this is a full-network-takeover path."),
+                confidence=0.8,
+                evidence={"url": url, "status": 200, "server": server,
+                          "title": title[:120], "auth": "login form present"},
+                remediation=(
+                    "Restrict the wireless management interface to a dedicated "
+                    "management VLAN / VPN. Change default credentials and enforce "
+                    "MFA where supported. Never expose the controller to the WAN."),
+                cwe="CWE-284",
+                owasp="A02:2025 Security Misconfiguration",
+                mitre="T1133: External Remote Services",
+            ))
         elif status == 200:
             findings.append(_finding(
                 target=f"{host}:{port}",
@@ -153,7 +199,7 @@ async def _probe_host(session, host: str) -> list[dict[str, Any]]:
                 title=f"Unauthenticated wireless management interface: {vendor}",
                 description=(
                     f"The {vendor} web management interface at {url} returned its admin "
-                    "UI with HTTP 200 and no authentication challenge. If the landing "
+                    "UI with HTTP 200 and no login form was presented. If the landing "
                     "page grants configuration access without a login, an attacker on "
                     "this network controls the wireless infrastructure. Confirm whether "
                     "the UI is actually usable before authenticating."),

@@ -127,6 +127,38 @@ def test_login_form_is_not_flagged_as_csrf():
     assert not auth_scanner._get_form_is_state_changing(login["fields"], login["action"])
 
 
+def test_js_login_form_with_unnamed_fields_is_not_flagged():
+    # Regression (live www.certifiedhacker.com): a JS-driven login form — HTML
+    # default GET, action defaulting to the page, inputs with NO `name` attribute
+    # (names assigned at runtime) — was misread as a password-reset state change,
+    # firing a HIGH "CSRF Token Missing in GET Form" on an ordinary SPA login.
+    # With no identifiable user field and an UNNAMED password input, it must not
+    # be flagged.
+    login_spa = {
+        "action": "https://t/",
+        "method": "GET",
+        "fields": [
+            {"name": "", "type": "text"},
+            {"name": "", "type": "password"},
+        ],
+    }
+    assert not auth_scanner._get_form_is_state_changing(
+        login_spa["fields"], login_spa["action"])
+    assert _csrf([login_spa]) == []
+
+
+def test_unnamed_password_reset_action_still_flagged():
+    # The guard is evidence-based, not a blanket mute: a password form reached at
+    # a reset/forgot action path is a genuine state change even when its single
+    # password input is unnamed.
+    reset = {
+        "action": "https://t/account/reset-password",
+        "method": "GET",
+        "fields": [{"name": "", "type": "password"}],
+    }
+    assert auth_scanner._get_form_is_state_changing(reset["fields"], reset["action"])
+
+
 def test_audit_csrf_accepts_inputs_key():
     # Crawler-produced forms carry their fields under "inputs"; the auditor must
     # read them too (this was the wiring gap that silently dropped every form).

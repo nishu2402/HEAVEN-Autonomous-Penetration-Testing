@@ -36,6 +36,7 @@ try:
 except ImportError:  # pragma: no cover
     HAS_AIOHTTP = False
 
+from heaven.utils.domains import same_site as _same_site
 from heaven.utils.logger import get_logger
 
 logger = get_logger("vulnscan.client_audit")
@@ -252,6 +253,19 @@ def _check_flash(target: str, html: str) -> list[dict]:
 async def _fetch(session: "aiohttp.ClientSession", url: str) -> tuple[str, str]:
     try:
         async with session.get(url, allow_redirects=True) as resp:
+            # Off-site-redirect guard: the content read here is attributed to the
+            # requested URL, but allow_redirects follows 30x hops. If the target
+            # bounced off its registered domain (to a CDN / SSO / parking host),
+            # the delivered HTML/JS belongs to THAT origin, so attributing a
+            # leaked secret or a DOM-XSS sink to the in-scope target would be a
+            # wrong-target false positive. Same guard the header/cookie audits
+            # use. A fake/odd response with no .url falls back to the requested
+            # URL (treated same-site).
+            final_url = str(getattr(resp, "url", "") or url)
+            if not _same_site(url, final_url):
+                logger.debug("client_audit: %s redirected off-site to %s: skipping",
+                             url, final_url)
+                return "", ""
             ctype = resp.headers.get("Content-Type", "")
             if resp.status >= 400:
                 return "", ctype

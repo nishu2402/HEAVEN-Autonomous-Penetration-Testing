@@ -308,3 +308,59 @@ def test_spf_softfail_still_distinct_from_neutral(monkeypatch):
     types = _spf_types("v=spf1 a ~all", monkeypatch)
     assert "spf_soft_fail" in types
     assert "spf_neutral" not in types
+
+
+# ── Subdomain-takeover fingerprint FP hardening ───────────────────────────────
+def _patch_takeover(monkeypatch, cname: str, body: str):
+    import urllib.request as _urlreq
+
+    from heaven.recon import dns_recon as _dnsr
+
+    monkeypatch.setattr(
+        _dnsr, "_resolve",
+        lambda name, rdtype, *a, **k: [cname] if rdtype == "CNAME" else [])
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n: int = -1) -> bytes:
+            return body.encode()
+
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **k: _Resp())
+
+
+def test_takeover_table_has_no_generic_patterns():
+    # A critical takeover must rest on a SPECIFIC unclaimed-resource signature;
+    # bare generic tokens matched healthy, claimed pages and fired false criticals.
+    from heaven.recon.dns_recon import _TAKEOVER_FINGERPRINTS
+    generic = {"404", "not found", "netlify", "unknown"}
+    for service, patterns in _TAKEOVER_FINGERPRINTS.items():
+        for p in patterns:
+            assert p.strip().lower() not in generic, f"{service}: generic pattern {p!r}"
+    # Services whose unclaimed response is indistinguishable from a claimed one by
+    # body text are omitted rather than matched on a generic "404"/"Not Found".
+    for omitted in ("netlify", "trafficmanager.net", "azurefd.net"):
+        assert omitted not in _TAKEOVER_FINGERPRINTS, omitted
+
+
+def test_claimed_netlify_site_is_not_a_takeover(monkeypatch):
+    # A live, CLAIMED Netlify site whose page legitimately contains "netlify" and
+    # "Not Found"/"404" must NOT be reported as a takeover.
+    from heaven.recon.dns_recon import _check_subdomain_takeover
+    _patch_takeover(
+        monkeypatch, "my-site.netlify.app",
+        "<html>Powered by netlify. Custom 404 handler. 'Not Found' demo.</html>")
+    assert asyncio.run(_check_subdomain_takeover("www.example.com")) is None
+
+
+def test_genuine_s3_takeover_still_fires(monkeypatch):
+    from heaven.recon.dns_recon import _check_subdomain_takeover
+    _patch_takeover(monkeypatch, "assets.s3.amazonaws.com",
+                    "<Error><Code>NoSuchBucket</Code></Error>")
+    out = asyncio.run(_check_subdomain_takeover("cdn.example.com"))
+    assert out and out["vuln_type"] == "subdomain_takeover"
+    assert out["severity"] == "critical"

@@ -134,11 +134,18 @@ async def _probe_form(session: "aiohttp.ClientSession", form: dict,
             continue
 
         low = body.lower()
-        accepted = (any(s in low for s in _ACCEPT_SIGNALS)
-                    or filename.lower() in low)
         rejected = any(s in low for s in _REJECT_SIGNALS)
-        if not accepted or (rejected and filename.lower() not in low):
-            continue   # this extension was blocked — the secure behaviour; try next
+        success_signal = any(s in low for s in _ACCEPT_SIGNALS)
+        # A rejection message routinely echoes the filename back
+        # ("heaven_probe_x.php: file type not allowed"), so the filename
+        # appearing in the body only counts as acceptance when the response is
+        # NOT a rejection. Otherwise a BLOCKED upload (the secure behaviour)
+        # would be read as accepted and reported as a false unrestricted-upload
+        # high — the extension-validation message contains the extension and the
+        # filename, both of which used to flip the old `accepted` flag.
+        filename_echoed = filename.lower() in low and not rejected
+        if not (success_signal or filename_echoed):
+            continue   # blocked (secure behaviour) or unacknowledged — try next
 
         # Confirm storage/execution by fetching the file back.
         executed = stored = False
@@ -163,9 +170,15 @@ async def _probe_form(session: "aiohttp.ClientSession", form: dict,
             severity, confidence = "high", 0.85
             detail = ("the file is stored and served back verbatim from a "
                       "web-reachable path")
-        else:
+        elif success_signal:
             severity, confidence = "high", 0.7
             detail = "the server reported the upload as accepted"
+        else:
+            # The filename was echoed (and it is not a rejection) but we could
+            # neither retrieve the stored file nor observe an explicit success
+            # message — too weak to assert the flaw, since a reflected filename
+            # alone is not proof the dangerous file was stored.
+            continue
 
         return {
             "target": action,

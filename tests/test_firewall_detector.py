@@ -82,6 +82,27 @@ def test_waf_signature_no_match():
     assert vendor == "" and ind == []
 
 
+def test_waf_signature_vendor_name_in_normal_body_is_not_a_waf():
+    # A normal 200 page that merely mentions a vendor name (a blog post, docs, a
+    # WordPress page referencing Wordfence/ModSecurity) must NOT be fingerprinted
+    # as a WAF in front of the application — only headers/cookies are
+    # authoritative on a passthrough response.
+    for text in ("We proudly use Cloudflare and ModSecurity.",
+                 "<!-- powered by Wordfence --> welcome",
+                 "Our appliance review covers Barracuda and FortiGate."):
+        vendor, ind = waf_signature({"Server": "nginx/1.25"}, 200, body=text)
+        assert vendor == "" and ind == [], text
+
+
+def test_waf_signature_vendor_name_in_block_page_body_is_detected():
+    # On an actual block response the vendor name in the body is authoritative:
+    # a Barracuda block page names itself with a 403.
+    vendor, ind = waf_signature(
+        {"Server": "nginx"}, 403,
+        body="Blocked by Barracuda Web Application Firewall")
+    assert vendor == "Barracuda" and ind
+
+
 def test_classify_unreachable_host_no_false_posture():
     v = classify_perimeter("10.0.0.9", open_count=0, filtered_count=0,
                            closed_count=0, total_probed=1000, reachable=False)

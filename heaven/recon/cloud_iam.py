@@ -128,6 +128,15 @@ class _PrivescPrimitive:
     action_groups: tuple[tuple[str, ...], ...]
     severity: str
     detail: str
+    # True for the iam:PassRole-family primitives: passing a role is only a
+    # privilege-escalation path when iam:PassRole is granted on an *unrestricted*
+    # Resource (``*`` or ``...:role/*``), so the principal can pass ANY role,
+    # including an administrator one. When iam:PassRole is scoped to specific
+    # role ARNs (the AWS-recommended mitigation) the detector stays quiet — it
+    # cannot prove the one passable role is privileged. The pure action-set
+    # detector has no Resource information, so it assumes unrestricted unless the
+    # caller (which does have the policy documents) says otherwise.
+    requires_unrestricted_passrole: bool = False
 
 
 _PRIVESC_PRIMITIVES: tuple[_PrivescPrimitive, ...] = (
@@ -201,30 +210,35 @@ _PRIVESC_PRIMITIVES: tuple[_PrivescPrimitive, ...] = (
         "PassRoleToEC2", "Pass a privileged role to a new EC2 instance",
         (("iam:PassRole", "ec2:RunInstances"),), "high",
         "iam:PassRole + ec2:RunInstances lets the principal launch an instance "
-        "with an administrator instance-profile role and use its credentials."),
+        "with an administrator instance-profile role and use its credentials.",
+        requires_unrestricted_passrole=True),
     _PrivescPrimitive(
         "PassRoleToLambda", "Pass a privileged role to a Lambda and invoke it",
         (("iam:PassRole", "lambda:CreateFunction", "lambda:InvokeFunction"),
          ("iam:PassRole", "lambda:CreateFunction", "lambda:CreateEventSourceMapping")),
         "high",
         "iam:PassRole + lambda:CreateFunction (+ Invoke / EventSourceMapping) lets "
-        "the principal run arbitrary code under an administrator role."),
+        "the principal run arbitrary code under an administrator role.",
+        requires_unrestricted_passrole=True),
     _PrivescPrimitive(
         "PassRoleToCloudFormation", "Pass a privileged role to a CloudFormation stack",
         (("iam:PassRole", "cloudformation:CreateStack"),), "high",
         "iam:PassRole + cloudformation:CreateStack lets the principal deploy a "
-        "stack that acts with an administrator role."),
+        "stack that acts with an administrator role.",
+        requires_unrestricted_passrole=True),
     _PrivescPrimitive(
         "PassRoleToGlue", "Pass a privileged role to a Glue dev endpoint",
         (("iam:PassRole", "glue:CreateDevEndpoint"),), "high",
         "iam:PassRole + glue:CreateDevEndpoint lets the principal open a dev "
-        "endpoint running as an administrator role and SSH into it."),
+        "endpoint running as an administrator role and SSH into it.",
+        requires_unrestricted_passrole=True),
     _PrivescPrimitive(
         "PassRoleToDataPipeline", "Pass a privileged role to a Data Pipeline",
         (("iam:PassRole", "datapipeline:CreatePipeline",
           "datapipeline:PutPipelineDefinition"),), "high",
         "iam:PassRole + datapipeline:CreatePipeline lets the principal run "
-        "commands under an administrator role."),
+        "commands under an administrator role.",
+        requires_unrestricted_passrole=True),
     _PrivescPrimitive(
         "UpdateFunctionCode", "Overwrite the code of a privileged Lambda",
         (("lambda:UpdateFunctionCode",),), "medium",
@@ -280,15 +294,67 @@ def _action_allowed(action: str, allow: set[str], deny: set[str]) -> bool:
     return any(_action_matches(p, action) for p in allow)
 
 
+def _resource_is_unrestricted_passrole(resource: str) -> bool:
+    """True when a PassRole Resource entry lets the principal pass *any* role.
+
+    Only the clearest unrestricted forms count (precision-first): a bare ``*`` or
+    a role wildcard ``arn:aws:iam::<acct-or-*>:role/*``. A specific role ARN, or a
+    narrower wildcard such as ``.../role/app-*`` or a path wildcard
+    ``.../role/team/*``, is treated as scoped and does NOT count — the AWS
+    PassRole mitigation is exactly this kind of scoping, and the detector cannot
+    prove a privileged role matches a narrower pattern."""
+    r = resource.strip()
+    return r == "*" or r.endswith(":role/*")
+
+
+def _passrole_is_unrestricted(documents: list[Any]) -> bool:
+    """True when some Allow statement across a principal's policy documents grants
+    ``iam:PassRole`` on an unrestricted Resource (see
+    ``_resource_is_unrestricted_passrole``). When PassRole is granted only on
+    specific role ARNs, the principal cannot pass an arbitrary privileged role, so
+    the PassRole-family escalation primitives must not fire."""
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        stmts = doc.get("Statement")
+        if isinstance(stmts, dict):
+            stmts = [stmts]
+        if not isinstance(stmts, list):
+            continue
+        for s in stmts:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("Effect", "")).lower() != "allow":
+                continue
+            actions = [a.strip() for a in _as_list(s.get("Action"))]
+            if not any(_action_matches(p, "iam:PassRole") for p in actions):
+                continue
+            resources = [r.strip() for r in _as_list(s.get("Resource"))]
+            if any(_resource_is_unrestricted_passrole(r) for r in resources):
+                return True
+    return False
+
+
 def detect_iam_privesc(allow_patterns: set[str],
-                       deny_patterns: Optional[set[str]] = None
+                       deny_patterns: Optional[set[str]] = None,
+                       *, passrole_unrestricted: bool = True
                        ) -> list[_PrivescPrimitive]:
     """Pure detector: given a principal's effective Allow (and optional Deny)
     action patterns, return the privilege-escalation primitives its own policy
-    permits. Read-only and deterministic — no AWS calls, no side effects."""
+    permits. Read-only and deterministic — no AWS calls, no side effects.
+
+    ``passrole_unrestricted`` reports whether ``iam:PassRole`` is granted on an
+    unrestricted Resource. The pure action-set detector has no Resource
+    information, so the default is ``True`` (assume unrestricted); the real
+    detection path passes the value computed from the policy documents. When it is
+    ``False`` the iam:PassRole-family primitives are suppressed, because passing a
+    role is only an escalation path when the principal can pass an arbitrary
+    privileged role."""
     deny = deny_patterns or set()
     matched: list[_PrivescPrimitive] = []
     for prim in _PRIVESC_PRIMITIVES:
+        if prim.requires_unrestricted_passrole and not passrole_unrestricted:
+            continue
         for group in prim.action_groups:
             if all(_action_allowed(a, allow_patterns, deny) for a in group):
                 matched.append(prim)
@@ -305,7 +371,9 @@ def _privesc_findings(documents: list[Any], target: str,
     mask; we still surface them (they remain true) but the over-privilege finding
     carries the headline severity."""
     allow, deny = _effective_action_sets(documents)
-    matched = detect_iam_privesc(allow, deny)
+    matched = detect_iam_privesc(
+        allow, deny,
+        passrole_unrestricted=_passrole_is_unrestricted(documents))
     if not matched:
         return []
     findings: list[dict] = []
@@ -1064,4 +1132,5 @@ __all__ = [
     "_policy_doc_is_admin", "_statement_is_admin",
     "_gcp_iam_policy_findings", "_azure_rbac_findings",
     "detect_iam_privesc", "_effective_action_sets", "_privesc_findings",
+    "_passrole_is_unrestricted", "_resource_is_unrestricted_passrole",
 ]

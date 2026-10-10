@@ -38,6 +38,7 @@ try:
 except ImportError:  # pragma: no cover - exercised only in minimal installs
     HAS_AIOHTTP = False
 
+from heaven.utils.domains import same_site as _same_site
 from heaven.utils.logger import get_logger
 
 logger = get_logger("vulnscan.misconfig")
@@ -100,6 +101,72 @@ def _dedup(findings: list[dict]) -> list[dict]:
             seen.add(key)
             out.append(f)
     return out
+
+
+# Content-derived checks whose finding is a property of the PAGE / login FORM, not
+# of the individual URL. On a soft-404 / catch-all host (every path returns the
+# same page) these would otherwise fire once per speculative probe URL (/graphql,
+# /swagger, /api/v1 …) — dozens of identical findings for one homepage form.
+_PAGE_HYGIENE_TYPES = frozenset({"password_autocomplete_enabled",
+                                 "sensitive_cache_control"})
+
+
+def _origin_of(target: str) -> str:
+    p = urlparse(str(target or ""))
+    return f"{p.scheme}://{p.netloc}" if p.scheme and p.netloc else ""
+
+
+async def _origin_is_catch_all(session: "aiohttp.ClientSession", origin: str) -> bool:
+    """True when an origin answers 200 with an HTML page for a random, certainly
+    nonexistent path — a shared-hosting catch-all / soft-404 that makes every
+    speculative probe URL look like a real, distinct page. A correct server
+    returns 404 (or a non-HTML error) for such a path."""
+    import secrets
+    probe = f"{origin}/heaven-ca-{secrets.token_hex(8)}"
+    try:
+        async with session.get(probe, allow_redirects=True) as resp:
+            return resp.status == 200 and "html" in (resp.content_type or "")
+    except Exception:  # noqa: BLE001 — a probe failure just means "not proven catch-all"
+        logger.debug("catch-all probe failed for %s", origin, exc_info=True)
+        return False
+
+
+def _collapse_catch_all_hygiene(findings: list[dict],
+                                catch_all_origins: set[str]) -> list[dict]:
+    """Collapse page-hygiene findings on a catch-all origin to one per
+    (origin, vuln_type).
+
+    The representative keeps the most canonical (shortest) URL and records how many
+    probe URLs returned the identical page, so the report states the real config
+    issue once, honestly noting the catch-all, instead of dozens of duplicates.
+    """
+    if not catch_all_origins:
+        return findings
+    groups: dict[tuple[str, str], list[int]] = {}
+    for i, f in enumerate(findings):
+        if f.get("vuln_type") in _PAGE_HYGIENE_TYPES:
+            origin = _origin_of(f.get("target", ""))
+            if origin in catch_all_origins:
+                groups.setdefault((origin, str(f.get("vuln_type"))), []).append(i)
+    drop: set[int] = set()
+    for idxs in groups.values():
+        if len(idxs) < 2:
+            continue
+        rep = min(idxs, key=lambda i: len(str(findings[i].get("target", ""))))
+        others = [i for i in idxs if i != rep]
+        drop.update(others)
+        ev = findings[rep].get("evidence")
+        if not isinstance(ev, dict):
+            ev = {}
+            findings[rep]["evidence"] = ev
+        ev["catch_all_host"] = True
+        ev["duplicate_probe_urls"] = len(others)
+        ev["note"] = ("host returns the same page for any path (catch-all / "
+                      f"soft-404); the identical finding on {len(others)} other "
+                      "probe URL(s) was collapsed into this one")
+    if not drop:
+        return findings
+    return [f for i, f in enumerate(findings) if i not in drop]
 
 
 # ── JWT helpers (in-house, stdlib only) ───────────────────────────────────────
@@ -224,18 +291,39 @@ async def _check_cookies_and_jwt(session: "aiohttp.ClientSession", url: str) -> 
     out: list[dict] = []
     seen_jwts: set[str] = set()
     for raw in set_cookies:
-        name = raw.split("=", 1)[0].strip()
-        value = raw.split("=", 1)[1].split(";", 1)[0] if "=" in raw else ""
-        low = raw.lower()
+        parts = raw.split(";")
+        name, _, value = parts[0].partition("=")
+        name, value = name.strip(), value.strip()
+        attrs = [p.strip() for p in parts[1:]]
+        # The flag checks must read the ATTRIBUTE section only. Testing the whole
+        # header (``"secure" in raw.lower()``) let a cookie whose VALUE merely
+        # contains "secure"/"httponly"/"samesite" (a base64 blob, a JWT) pass as
+        # if the flag were set, silently dropping a genuine missing-flag finding.
+        attr_names = {a.split("=", 1)[0].strip().lower() for a in attrs}
+        # Skip a cookie the server is DELETING (logout): a sentinel value,
+        # Max-Age<=0, or a 1970 Expires. A cleared cookie holds no secret, so
+        # missing-flag warnings on it are noise, not a finding.
+        max_age: int | None = None
+        for a in attrs:
+            if a.lower().startswith("max-age"):
+                try:
+                    max_age = int(a.split("=", 1)[1])
+                except (ValueError, IndexError):
+                    pass
+        if (value.lower() in ("deleted", "expired")
+                or (max_age is not None and max_age <= 0)
+                or any(a.lower().startswith("expires") and "1970" in a.lower()
+                       for a in attrs)):
+            continue
         is_session = any(h in name.lower() for h in _SESSION_COOKIE_HINTS) or bool(
             _parse_jwt(value))
         if is_session:
             missing = []
-            if "httponly" not in low:
+            if "httponly" not in attr_names:
                 missing.append("HttpOnly")
-            if is_https and "secure" not in low:
+            if is_https and "secure" not in attr_names:
                 missing.append("Secure")
-            if "samesite" not in low:
+            if "samesite" not in attr_names:
                 missing.append("SameSite")
             if missing:
                 sev = "medium" if "HttpOnly" in missing else "low"
@@ -261,6 +349,13 @@ async def _check_security_headers(session: "aiohttp.ClientSession", url: str) ->
     try:
         async with session.get(url, allow_redirects=True) as resp:
             if resp.status >= 400 or "html" not in (resp.content_type or ""):
+                return []
+            # Off-site redirect (target → CDN / SSO / parking host): these headers
+            # describe a DIFFERENT server, so a "missing CSP" anchored to the
+            # target origin would be a wrong-target finding. Same guard the auth
+            # scanner's header audit applies. (A response with no ``.url`` falls
+            # back to the requested URL, i.e. treated as same-site.)
+            if not _same_site(url, str(getattr(resp, "url", "") or url)):
                 return []
             h = {k.lower() for k in resp.headers.keys()}
     except Exception as e:  # noqa: BLE001
@@ -300,6 +395,10 @@ async def _check_server_banner(session: "aiohttp.ClientSession", url: str) -> li
     try:
         async with session.get(url, allow_redirects=True) as resp:
             if resp.status >= 500:
+                return []
+            # A cross-site redirect means this Server/X-Powered-By banner is a
+            # different host's — never attribute it to the in-scope target.
+            if not _same_site(url, str(getattr(resp, "url", "") or url)):
                 return []
             disclosed = {}
             for hdr in _BANNER_HEADERS:
@@ -373,6 +472,10 @@ async def _check_clickjacking(session: "aiohttp.ClientSession", url: str) -> lis
         async with session.get(url, allow_redirects=True) as resp:
             if resp.status >= 400 or "html" not in (resp.content_type or ""):
                 return []
+            # Off-site redirect → these anti-framing headers belong to another
+            # host; don't anchor a clickjacking finding to the target origin.
+            if not _same_site(url, str(getattr(resp, "url", "") or url)):
+                return []
             xfo = resp.headers.get("X-Frame-Options", "").strip().lower()
             csp = resp.headers.get("Content-Security-Policy", "").lower()
     except Exception as e:  # noqa: BLE001
@@ -409,6 +512,13 @@ async def _check_login_form(session: "aiohttp.ClientSession", url: str) -> list[
     try:
         async with session.get(url, allow_redirects=True) as resp:
             if resp.status >= 400 or "html" not in (resp.content_type or ""):
+                return []
+            # Off-site redirect guard: a target whose /login 30x-redirects to an
+            # external IdP (Okta / Azure AD / Auth0) would otherwise get that
+            # provider's autocomplete / cacheability posture attributed to the
+            # in-scope target. Same guard the header / banner / clickjacking
+            # checks use; a fake response with no .url falls back to the request.
+            if not _same_site(url, str(getattr(resp, "url", "") or url)):
                 return []
             body = await resp.text(errors="replace")
             cache_control = resp.headers.get("Cache-Control", "").lower()
@@ -754,6 +864,26 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
                 findings.extend(await _check_crossdomain(session, origin))
 
         await asyncio.gather(*[_xd(o) for o in origins], return_exceptions=True)
+
+        # Soft-404 / catch-all guard: only the origins that actually produced
+        # multiple page-hygiene findings are worth a catch-all probe, and only a
+        # confirmed catch-all collapses them (a site with genuinely distinct login
+        # pages keeps one finding per page).
+        hygiene_origins = {
+            o for o in origins
+            if sum(1 for f in findings
+                   if f.get("vuln_type") in _PAGE_HYGIENE_TYPES
+                   and _origin_of(f.get("target", "")) == o) > 1
+        }
+        catch_all_origins: set[str] = set()
+
+        async def _ca(origin: str) -> None:
+            async with sem:
+                if await _origin_is_catch_all(session, origin):
+                    catch_all_origins.add(origin)
+
+        await asyncio.gather(*[_ca(o) for o in hygiene_origins], return_exceptions=True)
+        findings = _collapse_catch_all_hygiene(findings, catch_all_origins)
 
     findings = _dedup(findings)
     logger.info("Misconfig scan → %d finding(s) across %d URL(s)", len(findings), len(unique))

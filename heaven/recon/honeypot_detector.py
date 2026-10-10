@@ -37,6 +37,21 @@ CTF_FLAG_PATTERNS = [
     r"(?:challenge|puzzle|solve)\s+(?:me|this)",
 ]
 
+# A subset of the signature patterns are banners a honeypot emits by MIMICKING a
+# real product, so they collide one-for-one with genuine devices: a real Synology
+# NAS answers FTP with "220 DiskStation", a real Siemens PLC reports "Siemens,
+# SIMATIC", and "Blog Comments" appears on countless real blog pages. Matching one
+# is honeypot-CONSISTENT but never conclusive (you cannot tell a honeypot
+# mimicking the product from the real product by banner alone), so these must
+# contribute only a weak score and must NOT trip the near-conclusive banner floor
+# in analyze_host. The honest verdict then comes from the composite (timing, port
+# profile, consistency) rather than from one ambiguous banner. The unique
+# honeypot-software NAMES (cowrie, kippo, dionaea, conpot, glastopf, honeyd, …)
+# stay strong: a genuine service never calls itself by the honeypot's name.
+_AMBIGUOUS_HONEYPOT_BANNERS = frozenset({
+    r"220 DiskStation", r"Siemens, SIMATIC", r"Blog Comments",
+})
+
 # Typical honeypot port profiles
 HONEYPOT_PORT_PROFILES = [
     {21, 22, 23, 25, 80, 110, 143, 443, 993, 995, 3306, 3389, 5900},  # All common ports
@@ -69,7 +84,18 @@ def analyze_banners(host: str, port_results: list[dict]) -> tuple[float, list[st
         # Check known honeypot signatures
         for hp_name, patterns in HONEYPOT_SIGNATURES.items():
             for pat in patterns:
-                if re.search(pat, banner, re.IGNORECASE):
+                if not re.search(pat, banner, re.IGNORECASE):
+                    continue
+                if pat in _AMBIGUOUS_HONEYPOT_BANNERS:
+                    # Collides with a real product (Synology NAS / Siemens PLC /
+                    # any blog). Weak signal only, and the indicator is deliberately
+                    # worded WITHOUT "signature" so it does not trip the 0.85 floor.
+                    score += 0.15
+                    indicators.append(
+                        f"Honeypot-consistent banner ({hp_name} mimicry) on port "
+                        f"{port_info.get('port')}; this banner is also emitted by a "
+                        f"genuine device, so it is not conclusive on its own")
+                else:
                     score += 0.4
                     indicators.append(f"Banner matches {hp_name} signature on port {port_info.get('port')}")
 

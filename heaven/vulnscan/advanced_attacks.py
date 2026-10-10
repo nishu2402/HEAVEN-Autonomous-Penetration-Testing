@@ -154,21 +154,44 @@ class JWTAttacker:
         except Exception:
             return findings
 
-        # Test 1: Algorithm None
+        # Test 1: Algorithm None. A bare 200 to the alg=none forgery is NOT
+        # proof: the endpoint may be public, or may ignore the token entirely,
+        # in which case ANY token (even one whose signature is pure garbage)
+        # also returns 200. Establish a broken-signature baseline first — only
+        # when the server REJECTS a tampered-signature token but ACCEPTS the
+        # alg=none forgery has it genuinely trusted the "none" algorithm. This
+        # removes the false critical where a public / token-agnostic endpoint
+        # was flagged merely for answering 200.
         none_token = cls.forge_none_algorithm(token)
+        _tp = token.split(".")
+        tampered_token = f"{_tp[0]}.{_tp[1]}.{secrets.token_urlsafe(18)}"
+
+        async def _probe(tok: str) -> tuple[int, str]:
+            async with session.get(
+                url, headers={"Authorization": f"Bearer {tok}"},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                return resp.status, await resp.text(errors="replace")
+
         try:
-            async with session.get(url, headers={"Authorization": f"Bearer {none_token}"},
-                                    timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    findings.append(AdvancedFinding(
-                        target=url, vuln_type="jwt_none_algorithm", severity="critical",
-                        title="JWT Algorithm None Attack",
-                        description="Server accepts JWT with alg=none, allowing arbitrary token forgery",
-                        confidence=0.95,
-                        evidence={"forged_token": none_token[:50] + "..."},
-                        remediation="Explicitly validate JWT algorithm. Reject 'none' algorithm.",
-                        cwe="CWE-347",
-                    ))
+            tampered_status, _ = await _probe(tampered_token)
+            none_status, none_body = await _probe(none_token)
+            _reject = ("invalid", "expired", "malformed", "unauthor",
+                       "forbidden", "denied", "signature")
+            none_accepted = (none_status == 200
+                             and not any(w in none_body.lower() for w in _reject))
+            if none_accepted and tampered_status != 200:
+                findings.append(AdvancedFinding(
+                    target=url, vuln_type="jwt_none_algorithm", severity="critical",
+                    title="JWT Algorithm None Attack",
+                    description="Server accepts JWT with alg=none, allowing arbitrary token forgery",
+                    confidence=0.95,
+                    evidence={"forged_token": none_token[:50] + "...",
+                              "none_status": none_status,
+                              "invalid_signature_status": tampered_status},
+                    remediation="Explicitly validate JWT algorithm. Reject 'none' algorithm.",
+                    cwe="CWE-347",
+                ))
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
 
@@ -513,9 +536,15 @@ class CredentialSprayer:
 
                     if success and status in (302, 303):
                         location = resp.headers.get("Location", "")
-                        # Must redirect to an authed area AND differ from where
-                        # a known-bad credential lands.
-                        if (location != baseline_location and
+                        # Must redirect to an authed area AND land somewhere
+                        # different from where a known-bad credential lands.
+                        # Compare PATHS, not full URLs: a success that returns to
+                        # the same page as a failed login, differing only by a
+                        # ?error= / ?locked= query string, is not proof of a
+                        # valid login — comparing the raw strings used to flag it
+                        # as a critical default-credential hit.
+                        from urllib.parse import urlparse as _urlparse
+                        if (_urlparse(location).path != _urlparse(baseline_location).path and
                                 any(x in location.lower()
                                     for x in ["dashboard", "admin", "home", "panel"])):
                             findings.append(AdvancedFinding(

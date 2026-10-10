@@ -8,6 +8,8 @@ never probing without authorization. See ``heaven.vulnscan.active_verifier``.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from heaven.utils.cvss import confirmation_status, is_confirmed_finding
@@ -147,27 +149,56 @@ async def test_apache_traversal_probe_negative_stays_potential():
     assert rec["probed"] is True and rec["proved"] is False
 
 
-@pytest.mark.asyncio
-async def test_shellshock_probe_confirms_on_canary_reflection():
-    """The injected canary echoed back in the body confirms Shellshock."""
-    captured: dict[str, str] = {}
+def _shellshock_potential():
+    return {"host": "10.0.0.5", "port": 80, "vuln_type": "vulnerable_service",
+            "cve": "CVE-2014-6271", "severity": "critical", "source": "inline_db",
+            "evidence": {}}
 
+
+# The injected marker: ``echo <rid>$((a*b))``. A vulnerable bash RUNS it and
+# prints ``<rid><product>``; a reflecting server shows the literal expression.
+_SHOCK_RE = re.compile(r"echo (HVN[0-9a-f]+)\$\(\((\d+)\*(\d+)\)\)")
+
+
+@pytest.mark.asyncio
+async def test_shellshock_probe_confirms_on_execution():
+    """A genuinely vulnerable CGI runs the arithmetic echo and returns the
+    computed PRODUCT, which promotes Potential -> Confirmed."""
     def body_for(url, headers):
         ua = headers.get("User-Agent", "")
-        # A vulnerable CGI executes the payload and echoes the canary.
-        if "HVNSHOCK:" in ua and "/cgi-bin/" in url:
-            token = ua.split("HVNSHOCK:")[-1]
-            captured["token"] = token
-            return 200, f"Content-Type: text/plain\n\nHVNSHOCK:{token}\n"
+        m = _SHOCK_RE.search(ua)
+        if m and "/cgi-bin/" in url:
+            rid, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+            # Real execution: bash evaluates the arithmetic and echoes product.
+            return 200, f"Content-type: text/plain\n\n{rid}{a * b}\n"
         return 404, "nope"
 
-    f = {"host": "10.0.0.5", "port": 80, "vuln_type": "vulnerable_service",
-         "cve": "CVE-2014-6271", "severity": "critical", "source": "inline_db",
-         "evidence": {}}
     session = _FakeSession(body_for)
-    out = await verify_finding(f, session=session, authorized=True)
+    out = await verify_finding(_shellshock_potential(), session=session,
+                               authorized=True)
     assert is_confirmed_finding(out)
     assert out["evidence"]["active_verification"]["technique"] == "shellshock_env_injection"
+
+
+@pytest.mark.asyncio
+async def test_shellshock_probe_reflection_only_not_confirmed():
+    """A CGI/error page that merely REFLECTS the raw User-Agent (the classic
+    ``test-cgi`` env dump) echoes the literal ``$((a*b))`` back, NOT the
+    product. That is not execution and must never be promoted to Confirmed."""
+    def body_for(url, headers):
+        ua = headers.get("User-Agent", "")
+        if "/cgi-bin/" in url:
+            # Reflect the header verbatim, as test-cgi / many error pages do.
+            return 200, f"CGI/1.1 test script report:\nHTTP_USER_AGENT={ua}\n"
+        return 404, "nope"
+
+    f = _shellshock_potential()
+    session = _FakeSession(body_for)
+    out = await verify_finding(f, session=session, authorized=True)
+    assert confirmation_status(out) == "Potential"
+    assert not is_confirmed_finding(out)
+    rec = out["evidence"]["active_verification"]
+    assert rec["probed"] is True and rec["proved"] is False
 
 
 @pytest.mark.asyncio

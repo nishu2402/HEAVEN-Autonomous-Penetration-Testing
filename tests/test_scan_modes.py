@@ -304,6 +304,33 @@ def test_dnp3_crc_matches_spec_check_value():
     assert int.from_bytes(m._dnp3_crc(b"123456789"), "little") == 0xEA82
 
 
+def test_rtsp_unauthenticated_uses_status_code_not_substring():
+    """probe_rtsp must flag an unauthenticated stream only on a real 200 status
+    code, never because the status line's reason phrase happens to contain the
+    substring '200' — otherwise an auth-protected 401 camera would be reported
+    HIGH as an open stream (a false positive)."""
+    from heaven.recon import iot_scanner as m
+
+    async def auth_protected(*a, **k):
+        # A 401 whose reason phrase contains "200" must NOT read as a 200 stream.
+        return b"RTSP/1.0 401 Need token 200ab\r\nCSeq: 1\r\n\r\n"
+
+    async def open_stream(*a, **k):
+        return (b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n"
+                b"Content-Type: application/sdp\r\n\r\nv=0\r\n")
+
+    with mock.patch.object(m, "_tcp_query", auth_protected):
+        ev = asyncio.run(m.probe_rtsp("1.2.3.4"))
+        assert ev is not None and ev["status"] == "401"
+        assert ev["unauthenticated"] is False, (
+            "a 401 with '200' in its reason phrase is not an open stream")
+
+    with mock.patch.object(m, "_tcp_query", open_stream):
+        ev = asyncio.run(m.probe_rtsp("1.2.3.4"))
+        assert ev is not None and ev["unauthenticated"] is True, (
+            "a genuine 200 OK DESCRIBE is an unauthenticated stream")
+
+
 # ── container: local-host posture never attributed to a remote target ─────
 def test_container_remote_target_never_reports_local_socket():
     from heaven.recon import container_scanner as c

@@ -508,6 +508,25 @@ def test_idor_verdict_requires_evidence():
     assert v and v[0] == "idor" and v[1] == "medium"
 
 
+def test_idor_verdict_ignores_shared_page_furniture():
+    from heaven.vulnscan.idor_scanner import _idor_verdict
+    # Two different public objects that merely share a site-wide footer email.
+    # A changed-ID response that differs but exposes no NEW sensitive data is an
+    # enumerable reference (info), never an IDOR data leak.
+    orig = "<html>product 1 <footer>support@shop.example</footer></html>" + "x" * 80
+    test = "<html>product 2 <footer>support@shop.example</footer></html>" + "y" * 80
+    v = _idor_verdict(200, orig, 200, test)
+    assert v and v[0] == "enumerable_reference" and v[1] == "info"
+    # But a genuinely new record's data (absent from the attacker's own view) IS IDOR,
+    # even though the shared footer email appears in both responses.
+    leaky = "<html>user 2 <span>victim@example.com</span>" \
+            "<footer>support@shop.example</footer></html>" + "y" * 40
+    v2 = _idor_verdict(200, orig, 200, leaky)
+    assert v2 and v2[0] == "idor" and v2[1] == "medium"
+    assert "victim@example.com" in v2[3]["sensitive_markers"]
+    assert "support@shop.example" not in v2[3]["sensitive_markers"]
+
+
 def test_mass_assignment_field_value_binding():
     from heaven.vulnscan.idor_scanner import _field_value_bound
     assert _field_value_bound('{"admin":"1","x":2}', "admin", "1")

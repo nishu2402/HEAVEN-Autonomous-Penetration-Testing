@@ -18,37 +18,18 @@ try:
 except ImportError:
     HAS_AIOHTTP = False
 
-from heaven.utils.domains import registered_domain as _registered_domain
+from heaven.utils.domains import registered_domain as _registered_domain  # noqa: F401  (re-exported for callers/tests that assert cross-module parity)
+from heaven.utils.domains import same_site as _same_site
 from heaven.utils.logger import get_logger
 from heaven.vulnscan import proof_capture
 
 logger = get_logger("auth_scanner")
 
-# ``_registered_domain`` (imported above) is the eTLD+1 helper shared with the
-# orchestrator via one module so the two can never drift. Used here to decide
-# whether a redirect stayed on the in-scope site (see _same_site).
-
-
-def _same_site(requested_url: str, final_url: str) -> bool:
-    """True when a response was NOT redirected off the requested site — i.e. the
-    final response host shares the requested host's registered domain (an apex↔www
-    or http→https hop stays "same site"). A cross-registered-domain redirect
-    (target → CDN / parking / SSO / marketing host) means the response headers
-    describe a *different* server, so header-derived findings must not be
-    attributed to the in-scope target. Fails safe to True when either host can't
-    be resolved to a registered domain (IP targets, single-label hosts)."""
-    try:
-        req_host = urllib.parse.urlparse(requested_url).hostname or ""
-        fin_host = urllib.parse.urlparse(final_url).hostname or ""
-    except Exception:
-        return True
-    if not fin_host or fin_host == req_host:
-        return True
-    req_dom = _registered_domain(req_host)
-    fin_dom = _registered_domain(fin_host)
-    if req_dom is None or fin_dom is None:
-        return True  # can't compare (IP / intranet) — don't over-suppress
-    return req_dom == fin_dom
+# ``_same_site`` (imported above) is the scanner's shared off-site-redirect guard,
+# consolidated in heaven.utils.domains so auth_scanner and misconfig_scanner can
+# never drift (same reason registered_domain lives there). Re-exported under the
+# original private name so existing imports keep working. Used to decide whether a
+# redirect stayed on the in-scope site before trusting its headers/cookies.
 
 
 def _dedup(findings: list[dict]) -> list[dict]:
@@ -85,6 +66,11 @@ _PASS_FIELDS  = re.compile(r"pass(word)?|pwd|secret|credential", re.IGNORECASE)
 _CSRF_FIELDS  = re.compile(r"csrf|_token|authenticity_token|__RequestVerificationToken|nonce",
                             re.IGNORECASE)
 _CSRF_HEADERS = re.compile(r"x-csrf|x-xsrf|x-anti-forgery", re.IGNORECASE)
+# A reset/change password action path — positive evidence that a password-bearing
+# form really changes state, used to tell a genuine reset from a JS login form
+# whose inputs simply carry no `name` attribute.
+_RESET_HINT = re.compile(r"reset|forgot|recover|change[-_/]?pass|password[-_/]?change",
+                          re.IGNORECASE)
 
 # Field names that mark a GET form as state-changing (worth a CSRF check). A GET
 # form is normally safe (search, filter, navigation) and must NOT be flagged, or
@@ -116,7 +102,20 @@ def _get_form_is_state_changing(fields: list[dict], action: str) -> bool:
     if has_user and has_pw:
         return False  # login / authentication form, not a CSRF state change
     if has_pw:
-        return True   # password change / reset (no user field present)
+        # A password field with no identifiable user field is ambiguous. Treat it
+        # as a password change / reset (a real state change) ONLY with positive
+        # evidence: a NAMED password input (password_new, newpass, …), two
+        # password inputs (new + confirm), or a reset/change action path. A lone,
+        # UNNAMED password input is a JS-driven LOGIN form whose username field
+        # simply carries no `name` attribute (names assigned at runtime, action
+        # defaulting to the page) — flagging that as a forgeable state change was
+        # a false positive (a HIGH "CSRF Token Missing in GET Form" on every SPA
+        # login page).
+        named_pw = any((f.get("type") or "").lower() == "password"
+                       and _PASS_FIELDS.search(f.get("name") or "") for f in fields)
+        pw_count = sum(1 for f in fields if (f.get("type") or "").lower() == "password")
+        reset_action = bool(_RESET_HINT.search(action or ""))
+        return named_pw or pw_count >= 2 or reset_action
     return any(_STATE_CHANGE_FIELD.search(n) for n in names)
 
 
@@ -171,18 +170,71 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
     findings: list[dict] = []
     try:
         async with session.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            # Same off-site-redirect guard the header audit applies: if the
+            # target redirected to a different registered domain (SSO / CDN /
+            # parking host), the Set-Cookie headers on the final response are
+            # THAT host's cookies, not the in-scope target's. Attributing e.g. a
+            # Microsoft SSO cookie's missing SameSite flag to the target is a
+            # wrong-target false positive, so emit no cookie findings for this URL.
+            # (A response with no ``.url`` falls back to the requested URL.)
+            final_url = str(getattr(resp, "url", "") or url)
+            if not _same_site(url, final_url):
+                logger.debug(
+                    "cookie audit: %s redirected off-site to %s: skipping cookie "
+                    "findings (they describe a different host)", url, final_url)
+                return findings
             raw_hdrs = resp.headers.getall("Set-Cookie", [])
 
             for raw in raw_hdrs:
-                raw_lower = raw.lower()
-                # Extract cookie name
-                name_match = re.match(r"([^=]+)=", raw)
-                name = name_match.group(1).strip() if name_match else "unknown"
+                # Parse "name=value; Attr; Attr=v" into the value and the attribute
+                # tokens, and test the ATTRIBUTE section (never the value) for the
+                # flags. A cookie whose VALUE merely contains "secure" / "httponly"
+                # / "samesite" (a base64 blob, a JWT) used to be mistaken for having
+                # the flag set, silently dropping a genuine missing-flag finding.
+                # Splitting on ';' is safe for one Set-Cookie header: an Expires date
+                # carries a comma but never a semicolon, and aiohttp returns each
+                # cookie as its own getall entry rather than comma-joining them.
+                parts = raw.split(";")
+                head = parts[0]
+                if "=" in head:
+                    name, _, val = head.partition("=")
+                    name = name.strip() or "unknown"
+                    val = val.strip()
+                else:
+                    name, val = "unknown", ""
+                attrs = [p.strip() for p in parts[1:]]
+                attr_names = {a.split("=", 1)[0].strip().lower() for a in attrs}
+
+                # A Set-Cookie that DELETES the cookie (a logout response) carries a
+                # sentinel, not a live session id: PHP emits `PHPSESSID=deleted`,
+                # other stacks use an empty value with Max-Age=0 or a 1970 Expires.
+                # Such a cookie holds no secret, so none of its flags or its length
+                # is a real finding. Scoring it produced a HIGH "Short Session ID
+                # (brute-forceable)" FP and spurious missing-flag reports on every
+                # logout response, so skip a clearly-cleared cookie outright. The
+                # live cookie is set with a real value on login via a separate
+                # Set-Cookie header, which is still assessed on its own.
+                max_age: Optional[int] = None
+                for a in attrs:
+                    if a.lower().startswith("max-age"):
+                        try:
+                            max_age = int(a.split("=", 1)[1])
+                        except (ValueError, IndexError):
+                            pass
+                expires_1970 = any(
+                    a.lower().startswith("expires") and "1970" in a.lower()
+                    for a in attrs
+                )
+                is_cleared = (val.lower() in ("deleted", "expired")
+                              or (max_age is not None and max_age <= 0)
+                              or expires_1970)
+                if is_cleared:
+                    continue
 
                 is_session = bool(_SESSION_COOKIE_NAMES.search(name))
                 severity   = "high" if is_session else "medium"
 
-                if "secure" not in raw_lower:
+                if "secure" not in attr_names:
                     findings.append(_make_finding(
                         url, "cookie_no_secure", severity,
                         f"Cookie '{name}' Missing Secure Flag",
@@ -191,7 +243,7 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                         confidence=0.97,
                         evidence={"cookie_name": name, "raw": raw[:200]},
                     ))
-                if "httponly" not in raw_lower:
+                if "httponly" not in attr_names:
                     findings.append(_make_finding(
                         url, "cookie_no_httponly", severity,
                         f"Cookie '{name}' Missing HttpOnly Flag",
@@ -200,7 +252,7 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                         confidence=0.97,
                         evidence={"cookie_name": name, "raw": raw[:200]},
                     ))
-                if "samesite" not in raw_lower:
+                if "samesite" not in attr_names:
                     findings.append(_make_finding(
                         url, "cookie_no_samesite", "medium",
                         f"Cookie '{name}' Missing SameSite Attribute",
@@ -210,8 +262,6 @@ async def _audit_cookies(session: "aiohttp.ClientSession", url: str) -> list[dic
                         evidence={"cookie_name": name},
                     ))
                 # Check for short session IDs (<128 bits of entropy)
-                val_match = re.match(r"[^=]+=([^;]+)", raw)
-                val = val_match.group(1).strip() if val_match else ""
                 if is_session and val and len(val) < 16:
                     findings.append(_make_finding(
                         url, "weak_session_id", "high",
@@ -937,6 +987,17 @@ async def _audit_wstg_surrogates(session: "aiohttp.ClientSession",
         try:
             _u = origin.rstrip("/") + path
             async with session.get(_u, allow_redirects=True) as r:
+                # Off-site redirect guard: a surrogate path (/register, /reset,
+                # /api/login) that 30x-redirects to an external IdP would
+                # otherwise get that provider's registration / reset / alt-auth
+                # posture attributed to the in-scope target. Return the error
+                # sentinel so every surrogate check below skips it. A fake
+                # response with no .url falls back to the requested URL.
+                final_url = str(getattr(r, "url", "") or _u)
+                if not _same_site(_u, final_url):
+                    logger.debug("auth surrogate: %s redirected off-site to %s: skipping",
+                                 _u, final_url)
+                    return 0, "", {}
                 body = await r.text(errors="replace") if r.status < 400 else ""
                 proof_capture.record(_u, r.status, body)
                 return r.status, body, dict(r.headers)

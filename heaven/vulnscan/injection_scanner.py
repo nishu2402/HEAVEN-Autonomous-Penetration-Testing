@@ -164,21 +164,26 @@ XSS_PROBES: list[tuple[str, str]] = [
 ]
 
 
-def _xss_is_executable(payload: str, body: str) -> bool:
+def _xss_is_executable(payload: str, body: str, canary: str = _XSS_CANARY) -> bool:
     """True only when the XSS payload reflects in a form that can EXECUTE.
 
-    The plain canary appearing in the body proves input reaches output, but a
-    correctly-escaping app reflects `&lt;script&gt;...h3av3n...` — the canary is
-    still present yet nothing executes. Flagging that is a false positive.
-    A finding requires the payload's raw markup (intact `<`,`>`) to survive.
+    ``canary`` is the unique token the payload carries: the reflected probes use
+    the shared ``_XSS_CANARY``, while the stored-XSS check passes its own
+    per-submission canary. The token appearing in the body proves input reaches
+    output, but a correctly-escaping app reflects `&lt;script&gt;...token...` —
+    the token is still present yet nothing executes. Flagging that is a false
+    positive. A finding requires the payload's raw markup (intact `<`,`>`) to
+    survive around the token.
     """
-    if _XSS_CANARY not in body:
+    if canary not in body:
         return False
     low = body.lower()
+    cl = canary.lower()
     # Dangerous fragments that, reflected verbatim (unescaped), can execute.
     markers = [
-        f'<script>alert("{_XSS_CANARY}")'.lower(),
-        f"<{_XSS_CANARY}>".lower(),
+        f'<script>alert("{cl}")',   # reflected script_tag probe
+        f"<{cl}>",                   # reflected bare_tag probe
+        f"<script>{cl}",             # stored <script>TOKEN… survived unescaped
         "<img src=x onerror=",
         "<svg/onload=",
     ]
@@ -1124,7 +1129,7 @@ class InjectionScanner:
             if self._delay:
                 await asyncio.sleep(self._delay)
             _, refetched = await self._get_rec(session, url, self._headers)
-        if canary in refetched and _xss_is_executable(payload, refetched):
+        if canary in refetched and _xss_is_executable(payload, refetched, canary):
             self._add_finding(
                 target=url,
                 vuln_type="xss_stored",

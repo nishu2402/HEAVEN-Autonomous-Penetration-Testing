@@ -584,16 +584,25 @@ class WebAnomalyProbe:
             async with session.request(method, url, params={param: "x' or '1'='1"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                 true_body = await r.text()
+                true_status = getattr(r, "status", 200)
             async with session.request(method, url, params={param: "x' or '1'='2"},
                                         timeout=aiohttp.ClientTimeout(total=self.timeout)) as r:
                 false_body = await r.text()
+                false_status = getattr(r, "status", 200)
             true_len = len(_strip_reflection(true_body, "x' or '1'='1"))
             false_len = len(_strip_reflection(false_body, "x' or '1'='2"))
 
-            # The tautology must return materially more content than the
-            # contradiction AND both must differ from the baseline (so a static
-            # page that ignores the parameter can't false-positive).
-            if (true_len > false_len + 200
+            # Both probes must return the SAME successful (2xx) status. Otherwise a
+            # status divergence (e.g. the tautology tripping a 500 stack-trace page
+            # while the contradiction stays 200) inflates the length differential
+            # for reasons unrelated to XPath evaluation — the same guard the LDAP
+            # boolean differential above uses. The tautology must then return
+            # materially more content than the contradiction AND both must differ
+            # from the baseline (so a static page that ignores the parameter can't
+            # false-positive).
+            same_ok_status = (true_status == false_status and 200 <= true_status < 300)
+            if (same_ok_status
+                    and true_len > false_len + 200
                     and true_len > len(base_stripped)
                     and false_len != len(base_stripped)):
                 return AnomalyCandidate(
@@ -602,10 +611,12 @@ class WebAnomalyProbe:
                     description=(
                         f"Boolean XPath Injection on param '{param}': tautology "
                         f"(' or '1'='1) returns {true_len - false_len} more bytes "
-                        f"than a contradiction: the query logic is attacker-controlled."
+                        f"than a contradiction, both at HTTP {true_status}: the query "
+                        f"logic is attacker-controlled."
                     ),
                     evidence={"param": param, "true_len": true_len,
-                              "false_len": false_len, "baseline_len": len(base_stripped)},
+                              "false_len": false_len, "baseline_len": len(base_stripped),
+                              "status": true_status},
                     remediation="Use parameterised XPath; escape XPath metacharacters.",
                     cwe_id="CWE-643", technique="xpath_boolean_differential",
                 )

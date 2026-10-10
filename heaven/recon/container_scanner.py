@@ -78,6 +78,19 @@ def _is_local_target(host: str) -> bool:
     return False
 
 
+def _k8s_list_kind(data: object) -> str:
+    """The ``kind`` a Kubernetes list response declares (``""`` if absent).
+
+    The kube-apiserver and the kubelet always stamp ``kind`` (``NamespaceList`` /
+    ``SecretList`` / ``PodList``) on a list response. A 200 whose JSON does NOT
+    carry the expected kind is a non-Kubernetes host answering on the probed
+    path, not an exposed cluster — gating on it kills a status-200-alone false
+    critical (the ``/api/v1/secrets`` check previously fired on a bare 200 with
+    no content parse at all).
+    """
+    return data.get("kind", "") if isinstance(data, dict) else ""
+
+
 @dataclass
 class ContainerFinding:
     target: str
@@ -139,8 +152,12 @@ class DockerScanner:
                     async with _egress_cs() as session:
                         url = f"http://{host}:{port}/version"
                         async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
+                            # A genuine Docker /version always carries ApiVersion;
+                            # a non-Docker host answering 200 JSON on :2375 does
+                            # not, so gate on it rather than raise a bogus
+                            # "Docker API v? accessible without auth" critical.
+                            data = await resp.json() if resp.status == 200 else {}
+                            if isinstance(data, dict) and data.get("ApiVersion"):
                                 findings.append(ContainerFinding(
                                     target=host, vuln_type="docker_api_exposed",
                                     severity="critical",
@@ -221,8 +238,8 @@ class KubernetesScanner:
                         f"{api_url}/api/v1/namespaces",
                         timeout=aiohttp.ClientTimeout(total=5), ssl=False,
                     ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
+                        data = await resp.json() if resp.status == 200 else {}
+                        if _k8s_list_kind(data) == "NamespaceList":
                             ns_count = len(data.get("items", []))
                             findings.append(ContainerFinding(
                                 target=host, vuln_type="k8s_anon_auth",
@@ -240,7 +257,11 @@ class KubernetesScanner:
                         f"{api_url}/api/v1/secrets",
                         timeout=aiohttp.ClientTimeout(total=5), ssl=False,
                     ) as resp:
-                        if resp.status == 200:
+                        # Confirm the 200 is a real SecretList, not a non-k8s host
+                        # answering 200 on this path (the old bare-status check
+                        # raised this critical with no content verification at all).
+                        sdata = await resp.json() if resp.status == 200 else {}
+                        if _k8s_list_kind(sdata) == "SecretList":
                             findings.append(ContainerFinding(
                                 target=host, vuln_type="k8s_secrets_exposed",
                                 severity="critical",
@@ -261,8 +282,10 @@ class KubernetesScanner:
                         f"http://{host}:{etcd_port}/version",
                         timeout=aiohttp.ClientTimeout(total=3),
                     ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
+                        # A real etcd /version always carries ``etcdserver``; gate
+                        # on it so a non-etcd 200 JSON can't raise "Etcd v? …".
+                        data = await resp.json() if resp.status == 200 else {}
+                        if isinstance(data, dict) and data.get("etcdserver"):
                             findings.append(ContainerFinding(
                                 target=host, vuln_type="etcd_exposed",
                                 severity="critical",
@@ -285,8 +308,8 @@ class KubernetesScanner:
                         f"{kscheme}://{host}:{kubelet_port}/pods",
                         timeout=aiohttp.ClientTimeout(total=3), ssl=False,
                     ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
+                        data = await resp.json() if resp.status == 200 else {}
+                        if _k8s_list_kind(data) == "PodList":
                             pod_count = len(data.get("items", []))
                             findings.append(ContainerFinding(
                                 target=host, vuln_type="kubelet_exposed",
@@ -310,8 +333,8 @@ class KubernetesScanner:
                     f"http://{host}:8080/api/v1/namespaces",
                     timeout=aiohttp.ClientTimeout(total=4),
                 ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
+                    data = await resp.json() if resp.status == 200 else {}
+                    if _k8s_list_kind(data) == "NamespaceList":
                         ns = len(data.get("items", []))
                         findings.append(ContainerFinding(
                             target=host, vuln_type="k8s_insecure_port",

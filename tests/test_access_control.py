@@ -151,3 +151,16 @@ def test_findings_carry_owasp_and_cwe_taxonomy():
     for f in res["findings"]:
         assert f["cwe"] == "CWE-284"
         assert f["owasp"].startswith("A01")
+
+
+def test_similar_uses_true_ratio_not_upper_bound():
+    # Two pages with an identical character multiset and length but a completely
+    # different order (what two different records rendered through the same
+    # template look like to quick_ratio). quick_ratio() would call them identical
+    # (1.0); the real order-sensitive ratio() must keep them well below the
+    # sameness threshold so the proven BAC finding is not manufactured.
+    from heaven.vulnscan.access_control import _SIMILAR, _similar
+    a = "A" * 2000 + "B" * 2000
+    b = "B" * 2000 + "A" * 2000
+    assert _similar(a, b) < _SIMILAR
+    assert _similar(a, a) >= _SIMILAR  # genuinely identical content still matches

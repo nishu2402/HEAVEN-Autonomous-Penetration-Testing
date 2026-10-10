@@ -107,6 +107,25 @@ class TestScope:
         assert store.is_in_scope("10.0.0.1")
         assert not store.is_in_scope("10.0.0.99")
 
+    def test_url_target_matches_hostname_scope(self, store):
+        """A URL / host:port / host-with-path target is authorized when its HOST
+        is in scope, so `scope add www.example.com` then
+        `scan -u https://www.example.com` is not dropped as out-of-scope. Matching
+        is exact-host: a parent domain never pulls in a subdomain, and a scoped URL
+        authorizes its own bare host."""
+        store.add_scope("www.example.com", kind="host")
+        assert store.is_in_scope("https://www.example.com")
+        assert store.is_in_scope("http://www.example.com/path?q=1")
+        assert store.is_in_scope("www.example.com:443")
+        assert store.is_in_scope("www.example.com")
+        # exact host only — no subdomain widening, no unrelated host
+        assert not store.is_in_scope("evil.example.com")
+        assert not store.is_in_scope("https://evil.com")
+        # a scoped URL authorizes its bare host and deeper paths
+        store.add_scope("https://api.example.com", kind="url")
+        assert store.is_in_scope("api.example.com")
+        assert store.is_in_scope("https://api.example.com/v1/users")
+
     def test_ip_inside_scoped_cidr_is_in_scope(self, store):
         """Adding a CIDR to scope authorizes every host inside it — so a
         `scan -t 192.168.1.0/24` run under an engagement whose scope is that
@@ -241,6 +260,43 @@ class TestFindingDedup:
         # classification sanity
         assert is_host_level("no_x_content_type") and is_host_level("xml_accepted")
         assert not is_host_level("xss") and not is_host_level("sqli") and not is_host_level("idor")
+
+    def test_weak_password_policy_collapses_per_host(self):
+        """Regression (live www.certifiedhacker.com): the auth password-policy
+        probe builds its register URLs from absolute paths and runs once per
+        crawled URL, so on a catch-all / soft-404 host (every path answers 200)
+        the identical INFO observation landed on /register, /signup and
+        /user/new and persisted as up to three copies. It is a property of the
+        site's registration, not of one URL, so it must collapse to ONE per host
+        — while the distinct per-account cloud finding stays separate and the
+        surviving copy keeps its honest caveat."""
+        from collections import Counter
+
+        from heaven.engagement import dedup_findings, is_host_level
+        findings = []
+        for path in ("/register", "/signup", "/user/new"):
+            findings.append({
+                "target": f"http://cat/{path.lstrip('/')}",
+                "vuln_type": "weak_password_policy", "severity": "info",
+                "confidence": 0.4,
+                "evidence": {"path": path, "unconfirmed": True},
+            })
+        # A genuinely distinct cloud-IAM policy finding must NOT be folded in.
+        findings.append({
+            "target": "aws://acct-123", "vuln_type": "cloud_iam_weak_password_policy",
+            "severity": "medium", "confidence": 0.8,
+        })
+        out = dedup_findings(findings)
+        c = Counter(f["vuln_type"] for f in out)
+        assert c["weak_password_policy"] == 1, (
+            f"catch-all register paths must collapse to 1, got {c['weak_password_policy']}")
+        assert c["cloud_iam_weak_password_policy"] == 1, "cloud finding must survive"
+        # classification: the web finding is host-level; the cloud one is left alone.
+        assert is_host_level("weak_password_policy")
+        assert not is_host_level("cloud_iam_weak_password_policy")
+        # the surviving web copy keeps its honest, caveated evidence.
+        survivor = next(f for f in out if f["vuln_type"] == "weak_password_policy")
+        assert survivor.get("evidence", {}).get("unconfirmed") is True
 
     def test_potential_rollups_per_product_do_not_collide(self):
         """Regression: two DIFFERENT products' version-undetermined roll-ups on one
@@ -384,6 +440,67 @@ class TestFindingDedup:
         # Status & notes preserved across re-scan
         assert f.status == "false_positive"
         assert f.operator_notes == "not exploitable"
+
+
+class TestStoredCvssMatchesBand:
+    """The persisted CVSS base must sit in the SAME band as the persisted
+    (reconciled) severity label, so every read surface — the findings list, the
+    report, and the SARIF / JSON / CSV exports — shows one consistent number.
+
+    Regression: upsert_finding used to store the reconciled LABEL but keep the
+    raw, higher cvss_base in evidence. An unconfirmed finding capped to Low still
+    carried its class base of 7.5, so a SARIF export's ``security-severity`` read
+    7.5 — which GitHub code-scanning re-buckets as High — while HEAVEN's own badge
+    said Low (and even the SARIF record's own ``level`` disagreed with its
+    ``security-severity``)."""
+
+    def _stored_dict(self, store, fid):
+        f = store.get_finding(fid)
+        return {"id": f.id, "target": f.target, "vuln_type": f.vuln_type,
+                "title": f.title, "severity": f.severity, "confidence": f.confidence,
+                "cve_id": f.cve_id, "risk_score": f.risk_score, "evidence": f.evidence}
+
+    def test_unconfirmed_base_is_capped_to_the_label_band(self, store):
+        from heaven.utils.cvss import objective_base_score, severity_from_score
+        # A weak "Potential" indicator: class base is High (7.5) but the detector
+        # deliberately badges it Low. The stored base must be capped into Low.
+        fid = store.upsert_finding("s1", {
+            "target": "http://h/x", "vuln_type": "potential_vulnerable_service",
+            "title": "Potential Vulnerable Service (nginx)",
+            "severity": "low", "confidence": 0.3,
+            "evidence": {"product": "nginx"},
+        })
+        d = self._stored_dict(store, fid)
+        assert d["severity"] == "low"
+        base = objective_base_score(d)
+        assert base <= 3.9, f"stored base {base} escapes the Low band"
+        assert severity_from_score(base) == "low"
+
+    def test_sarif_level_and_security_severity_agree(self, store):
+        from heaven.devsecops.ci_export import findings_to_sarif
+        fid = store.upsert_finding("s1", {
+            "target": "http://h/x", "vuln_type": "potential_vulnerable_service",
+            "title": "Potential Vulnerable Service (nginx)",
+            "severity": "low", "confidence": 0.3, "evidence": {"product": "nginx"},
+        })
+        sarif = findings_to_sarif([self._stored_dict(store, fid)])
+        res = sarif["runs"][0]["results"][0]
+        assert res["level"] == "note"                       # Low → note
+        assert float(res["properties"]["security-severity"]) <= 3.9
+        assert res["properties"]["severity"] == "low"
+
+    def test_published_cve_score_is_preserved_not_capped(self, store):
+        # The cap is one-directional and anti-over-claim only: a real published
+        # Critical score must round-trip unchanged (never demoted by the band cap).
+        from heaven.utils.cvss import objective_base_score
+        fid = store.upsert_finding("s1", {
+            "target": "h:443", "vuln_type": "vulnerable_service",
+            "title": "Log4Shell", "severity": "critical", "confidence": 0.9,
+            "cve": "CVE-2021-44228", "cvss_base": 10.0,
+        })
+        d = self._stored_dict(store, fid)
+        assert d["severity"] == "critical"
+        assert objective_base_score(d) == 10.0
 
 
 # ── Status workflow ────────────────────────────────────────────────────

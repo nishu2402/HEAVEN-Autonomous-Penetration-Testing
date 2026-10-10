@@ -1386,7 +1386,41 @@ class ScanOrchestrator:
                     f["in_kev"] = True
                 if ti["epss"] and not f.get("epss") and not f.get("epss_score"):
                     f["epss_score"] = ti["epss"]
+        # Reconcile each finding to the authoritative, CVSS-aligned severity band
+        # AND a CVSS base consistent with it — the SAME reconciliation
+        # upsert_finding persists and the findings list / report render. Without
+        # this the JSON summary and the live tally kept the raw detector label, so
+        # a weak-signal finding could read High in the scan JSON yet Medium
+        # everywhere that loads the engagement DB (an SSH weak-host-key finding:
+        # High in -o json, Medium in the saved report). The base matters too:
+        # anything built straight off this summary (the report JSON, the aggregator
+        # SARIF/HTML) reads cvss_base via objective_base_score, so a finding capped
+        # to Low that kept its raw 7.5 base would show "Low" badge next to a 7.5
+        # CVSS column (and a 7.5 security-severity GitHub buckets as High). Mutate
+        # both here so the summary is self-consistent. The KB is optional, so a
+        # failure must never block a scan — keep the raw label/base.
+        try:
+            from heaven.devsecops.vuln_kb import canonical_finding
+        except Exception:  # noqa: BLE001 — KB optional
+            canonical_finding = None  # type: ignore[assignment]
         for f in all_vulns:
+            if canonical_finding is not None:
+                try:
+                    canon = canonical_finding(f)
+                    canon_sev = str(canon.get("severity") or "").strip().lower()
+                    if canon_sev:
+                        f["severity"] = canon_sev
+                    rb = (canon.get("evidence") or {}).get("cvss_base")
+                    if rb is None:
+                        rb = canon.get("cvss_base")
+                    if isinstance(rb, (int, float)) and 0.0 < float(rb) <= 10.0:
+                        ev = f.get("evidence")
+                        if not isinstance(ev, dict):
+                            ev = {}
+                            f["evidence"] = ev
+                        ev["cvss_base"] = round(float(rb), 1)
+                except Exception:  # noqa: BLE001 — never block on one finding
+                    logger.debug("canonical reconciliation failed for a finding", exc_info=True)
             sev = (f.get("severity") or "info").lower()
             if sev in sev_counts:
                 sev_counts[sev] += 1
@@ -3280,11 +3314,10 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         if not targets.get("auto_prove"):
             return {"skipped": True, "reason": "--auto-prove flag not set"}
         try:
-            from heaven.vulnscan.exploit_proof import prove_finding
+            from heaven.vulnscan.exploit_proof import prove_finding, provable_category
         except Exception as e:
             return {"skipped": True, "reason": f"exploit_proof unimportable: {e}"}
 
-        provable_categories = ("sqli", "cmdi", "rce", "ssrf", "xss")
         candidates = []
         for tid, res in orch.results.items():
             if res.state != TaskState.COMPLETED or not res.data:
@@ -3295,7 +3328,11 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                       + data.get("validated_findings", [])):
                 vt = (f.get("vuln_type") or f.get("type") or "").lower()
                 conf = float(f.get("confidence") or 0)
-                if conf >= 0.8 and any(cat in vt for cat in provable_categories):
+                # Whole-token match (provable_category), not a raw substring, so a
+                # finding whose type merely contains the letters "rce" (e.g.
+                # resource_based_constrained_delegation) is never fed to the RCE
+                # command-execution prover.
+                if conf >= 0.8 and provable_category(vt):
                     candidates.append(f)
         if not candidates:
             return {"skipped": True, "reason": "no high-confidence findings to prove"}

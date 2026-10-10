@@ -78,11 +78,49 @@ def test_apache_2430_still_matches_24_cves():
     assert "CVE-2021-40438" in ids   # mod_proxy SSRF, <=2.4.48
 
 
+def test_apache_cve_titles_and_cwes_match_the_real_vulnerability():
+    """Two inline records carried the wrong vulnerability class — a client who
+    looked the CVE up would find an unrelated description. CVE-2022-22721 is an
+    integer overflow (CWE-190), NOT "SSRF via mod_lua" (CWE-918); CVE-2022-31813
+    is an IP-auth bypass via dropped X-Forwarded-* headers (CWE-348), NOT HTTP
+    request smuggling (CWE-444). Pin the corrected metadata."""
+    recs = {r.cve_id: r for r in lookup_inline_cves("apache_http_server", "2.4.7")}
+    overflow = recs["CVE-2022-22721"]
+    assert overflow.cwe == "CWE-190"
+    assert "ssrf" not in overflow.title.lower() and "mod_lua" not in overflow.title.lower()
+    assert "overflow" in overflow.title.lower()
+    authbypass = recs["CVE-2022-31813"]
+    assert authbypass.cwe == "CWE-348"
+    assert "smuggling" not in authbypass.title.lower()
+    assert "x-forwarded" in authbypass.title.lower() or "authentication bypass" in authbypass.title.lower()
+
+
 def test_apache_2453_above_ceiling_not_matched():
     # A patched 2.4.60 must not pick up ceilings it is above.
     ids = {r.cve_id for r in lookup_inline_cves("apache_http_server", "2.4.60")}
     assert "CVE-2019-10082" not in ids
     assert "CVE-2021-40438" not in ids
+
+
+# ── IIS HTTP Protocol Stack (http.sys) RCEs are IIS 10.0-only ─────────────────
+# CVE-2021-31166 / CVE-2022-21907 live in the http.sys driver that ships only
+# with IIS 10.0 (Windows 10 2004+/Server 2019+). A bare "<=10.0" ceiling swept
+# IIS 6.0/7.5/8.5 into two CRITICAL findings those older generations cannot have.
+def test_iis_older_generations_not_flagged_with_httpsys_rce():
+    for ver in ("7.5", "8.5"):
+        ids = {r.cve_id for r in lookup_inline_cves("microsoft_iis", ver)}
+        assert "CVE-2021-31166" not in ids, f"http.sys RCE FP on IIS {ver}"
+        assert "CVE-2022-21907" not in ids, f"http.sys RCE FP on IIS {ver}"
+    # IIS 6.0 keeps only its own WebDAV RCE, not the http.sys criticals.
+    ids6 = {r.cve_id for r in lookup_inline_cves("microsoft_iis", "6.0")}
+    assert ids6 == {"CVE-2017-7269"}
+
+
+def test_iis_100_still_flagged_with_httpsys_rce():
+    # The IIS 10.0 generation (the real affected set) must still match both.
+    ids = {r.cve_id for r in lookup_inline_cves("microsoft_iis", "10.0")}
+    assert "CVE-2021-31166" in ids
+    assert "CVE-2022-21907" in ids
 
 
 def test_openssh_47_not_flagged_with_62plus_cve():

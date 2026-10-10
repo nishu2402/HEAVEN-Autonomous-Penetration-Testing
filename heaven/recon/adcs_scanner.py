@@ -136,6 +136,31 @@ def _is_any_purpose(ekus: list[str]) -> bool:
     return (not ekus) or (EKU_ANY_PURPOSE in set(ekus))
 
 
+def _enroll_outcome(can_enroll: Optional[bool]) -> dict:
+    """Map the parsed ``low_priv_can_enroll`` tri-state onto an ESC1/2/3 verdict.
+
+    Three genuinely different states must not collapse together:
+
+    * ``True``  — a broad low-privileged principal (Authenticated Users, Domain
+      Users, Everyone, …) can enrol: the escalation path is CONFIRMED → critical.
+    * ``None``  — the security descriptor could not be parsed (impacket missing or
+      the attribute was not returned), so the enrolment rights are genuinely
+      UNKNOWN → high "potential", honest that we could not confirm.
+    * ``False`` — the descriptor parsed cleanly and NONE of the broad low-priv
+      principals the tool models holds enrolment rights. The template is
+      ESC-shaped but is NOT confirmed enrollable by an unprivileged attacker, so
+      it must not carry a high "potential" verdict (and must not claim the rights
+      "could not be confirmed" — they were). It still surfaces, but as a LOW note:
+      a custom, non-well-known group could still be effectively low-privileged, so
+      we flag the shape for manual ACL review rather than dropping it silently.
+    """
+    if can_enroll is True:
+        return {"severity": "critical", "confirmed": True, "restricted": False}
+    if can_enroll is None:
+        return {"severity": "high", "confirmed": False, "restricted": False}
+    return {"severity": "low", "confirmed": False, "restricted": True}
+
+
 def classify_template(template: dict) -> list[dict]:
     """Classify one certificate template against the ESC abuse categories.
 
@@ -147,8 +172,10 @@ def classify_template(template: dict) -> list[dict]:
 
     ``low_priv_can_enroll`` / ``low_priv_can_write`` may be None when the security
     descriptor could not be parsed — the result is then downgraded to "potential"
-    (a real configuration weakness, unconfirmed enrolment rights). Returns a list
-    of ``{esc, severity, confirmed}`` descriptors (possibly empty).
+    (a real configuration weakness, unconfirmed enrolment rights); when it is
+    False (parsed, no broad low-priv enrolment) the result is a low-severity
+    shape-only note (see :func:`_enroll_outcome`). Returns a list of
+    ``{esc, severity, confirmed, restricted}`` descriptors (possibly empty).
     """
     out: list[dict] = []
     if not template.get("enabled", True):
@@ -167,25 +194,20 @@ def classify_template(template: dict) -> list[dict]:
 
     # ESC1 — enrollee supplies subject + authentication EKU.
     if unrestricted_enroll and ess and _has_authentication_eku(ekus):
-        confirmed = can_enroll is True
-        out.append({"esc": "ESC1", "severity": "critical" if confirmed else "high",
-                    "confirmed": confirmed})
+        out.append({"esc": "ESC1", **_enroll_outcome(can_enroll)})
 
     # ESC2 — Any-Purpose / no-EKU (SubCA-like) template.
     if unrestricted_enroll and _is_any_purpose(ekus) and not ess:
-        confirmed = can_enroll is True
-        out.append({"esc": "ESC2", "severity": "critical" if confirmed else "high",
-                    "confirmed": confirmed})
+        out.append({"esc": "ESC2", **_enroll_outcome(can_enroll)})
 
     # ESC3 — Certificate Request Agent (Enrollment Agent) EKU.
     if unrestricted_enroll and EKU_CERT_REQUEST_AGENT in set(ekus):
-        confirmed = can_enroll is True
-        out.append({"esc": "ESC3", "severity": "critical" if confirmed else "high",
-                    "confirmed": confirmed})
+        out.append({"esc": "ESC3", **_enroll_outcome(can_enroll)})
 
     # ESC4 — a low-priv principal can rewrite the template's configuration.
     if can_write is True:
-        out.append({"esc": "ESC4", "severity": "high", "confirmed": True})
+        out.append({"esc": "ESC4", "severity": "high", "confirmed": True,
+                    "restricted": False})
 
     return out
 
@@ -461,16 +483,39 @@ def _finding_for_esc(tmpl: dict, hit: dict) -> ADCSFinding:
     esc = hit["esc"]
     vuln_type, mitre, blurb = _ESC_META[esc]
     confirmed = hit["confirmed"]
+    restricted = hit.get("restricted", False)
     name = tmpl["name"]
-    status = "confirmed" if confirmed else "potential (enrolment rights unconfirmed)"
+    if confirmed:
+        status = "confirmed"
+        middle = "A low-privileged principal can enrol this template"
+        title = f"AD CS {esc}: certificate template '{name}' is escalatable"
+        confidence = 0.9
+    elif restricted:
+        # SD parsed, no broad low-priv principal can enrol: shape-only note, not an
+        # asserted escalation. Severity is low; wording states what we actually saw.
+        status = "potential (enrolment restricted to specific principals)"
+        middle = ("The template has an escalatable configuration, but the security "
+                  "descriptor shows none of the broad low-privileged groups "
+                  "(Authenticated Users, Domain Users, Everyone) can enrol it. A "
+                  "custom group with enrolment rights could still be low-privileged, "
+                  "so review the template's enrolment ACL")
+        title = (f"AD CS {esc}: certificate template '{name}' has an escalatable "
+                 f"configuration (enrolment restricted)")
+        confidence = 0.3
+    else:
+        status = "potential (enrolment rights unconfirmed)"
+        middle = ("The template configuration is abusable, but enrolment rights "
+                  "could not be confirmed from the security descriptor")
+        title = f"AD CS {esc}: certificate template '{name}' is escalatable"
+        confidence = 0.55
     return ADCSFinding(
         target=f"template:{name}", vuln_type=vuln_type, severity=hit["severity"],
-        title=f"AD CS {esc}: certificate template '{name}' is escalatable",
-        description=(f"{blurb}. {('A low-privileged principal can enrol this template' if confirmed else 'The template configuration is abusable, but enrolment rights could not be confirmed from the security descriptor')}. "
+        title=title,
+        description=(f"{blurb}. {middle}. "
                      f"An attacker who can enrol obtains a certificate that "
                      f"authenticates as a chosen principal, enabling privilege "
                      f"escalation up to Domain Admin ({status})."),
-        confidence=0.9 if confirmed else 0.55,
+        confidence=confidence,
         mitre_technique=mitre, remediation=_ESC_REMEDIATION[esc],
         evidence={"esc": esc, "template": name,
                   "enrollee_supplies_subject": tmpl["enrollee_supplies_subject"],
@@ -479,7 +524,8 @@ def _finding_for_esc(tmpl: dict, hit: dict) -> ADCSFinding:
                   "ekus": tmpl["ekus"],
                   "low_priv_can_enroll": tmpl["low_priv_can_enroll"],
                   "low_priv_can_write": tmpl["low_priv_can_write"],
-                  "confirmed": confirmed},
+                  "confirmed": confirmed,
+                  "enrolment_restricted": restricted},
     )
 
 

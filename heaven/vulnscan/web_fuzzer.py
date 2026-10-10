@@ -764,14 +764,27 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
     """
     findings: list[dict] = []
 
-    # Baseline
+    # Baseline — fetched TWICE so the page's own request-to-request length jitter
+    # (timestamps, CSRF tokens, ads, rotating content) is measured. A dynamic page
+    # routinely varies by >100 bytes between two identical requests, so a bare
+    # length-diff against a single baseline would flag every probed name as a
+    # "discovered" hidden parameter. The length signal must exceed this jitter, not
+    # just a fixed floor (same noise-floor discipline the injection boolean oracle
+    # and cache-poison checks use).
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
             base_status = r.status
             base_body   = await r.text()
             base_len    = len(base_body)
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r2:
+            base_len2 = len(await r2.text())
     except Exception:
         return findings
+    jitter = abs(base_len - base_len2)
+    # Required absolute length change: the larger of a fixed floor and twice the
+    # observed jitter, so a stable page keeps the sensitive 100-byte floor while a
+    # noisy page demands a change clearly beyond its own variance.
+    len_threshold = max(100, jitter * 2)
 
     # Parameters already present in the URL are not "hidden" — they are visible,
     # in-request inputs (and are covered by the injection/redirect scanners). Only
@@ -793,15 +806,19 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
                                        timeout=aiohttp.ClientTimeout(total=8)) as r:
                     body = await r.text()
                     body_len = len(body)
-                    # Significant response change = parameter is processed
+                    # Processed-parameter signals: a verbatim reflection of our
+                    # unique probe (strong), a status change, or a length change
+                    # that clears the page's measured jitter floor (weak but no
+                    # longer a bare 100-byte fixed cut on a noisy page).
+                    reflected = "HEAVEN_PROBE" in body
                     if (r.status != base_status or
-                            abs(body_len - base_len) > 100 or
-                            "HEAVEN_PROBE" in body):
+                            abs(body_len - base_len) > len_threshold or
+                            reflected):
                         interesting.append({
                             "param": param,
                             "status": r.status,
                             "len_diff": abs(body_len - base_len),
-                            "reflected": "HEAVEN_PROBE" in body,
+                            "reflected": reflected,
                         })
             except Exception:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -943,9 +960,12 @@ async def _fuzz_mail_header_injection(session: "aiohttp.ClientSession",
                     hdr_blob = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
             except Exception:
                 return
-            # If our injected header/canary lands in the RESPONSE headers, the
-            # CRLF split was honoured — the mail routine will accept it too.
-            if canary in hdr_blob or "bcc:" in hdr_blob.lower():
+            # The CRLF split was honoured only when our UNIQUE canary lands in the
+            # response headers (whether as a Bcc value or a split-off header). A
+            # bare "bcc:" substring is NOT a valid oracle: a response header can
+            # carry it for unrelated reasons while the injection never worked, so
+            # keying off it alone fabricated a high-severity finding with no proof.
+            if canary in hdr_blob:
                 findings.append(_finding(
                     url, "smtp_header_injection", "high",
                     f"Mail (SMTP/IMAP) header injection via '{param}'",

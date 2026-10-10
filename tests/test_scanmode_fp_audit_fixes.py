@@ -235,6 +235,49 @@ async def test_ldap_boolean_diff_fires_on_same_status_differential():
     assert cand is not None and cand.category == "ldap_injection"
 
 
+# ── 7b. xpath boolean-diff gets the SAME same-successful-status guard ────────
+@pytest.mark.asyncio
+async def test_xpath_boolean_diff_suppressed_on_status_mismatch():
+    # The tautology tripping a long 500 stack-trace page while the contradiction
+    # stays a short 200 is a status/error artifact, not XPath evaluation — it
+    # must not be read as a boolean XPath injection (parity with the LDAP guard).
+    from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
+    probe = WebAnomalyProbe()
+
+    def handler(method, url, params, kwargs):
+        val = params.get("id", "")
+        if val == "x' or '1'='1":
+            return _Resp(500, "E" * 60000)     # tautology: long 500 error page
+        if val == "x' or '1'='2":
+            return _Resp(200, "")               # contradiction: short 200
+        return _Resp(200, "baseline body")
+
+    cand = await probe._test_xpath_injection(_Session(handler), "http://t/createdb",
+                                             "id", "GET")
+    assert cand is None, "a 500-vs-200 gap is an error artifact, not XPath injection"
+
+
+@pytest.mark.asyncio
+async def test_xpath_boolean_diff_fires_on_same_status_differential():
+    from heaven.vulnscan.anomaly_probe import WebAnomalyProbe
+    probe = WebAnomalyProbe()
+
+    def handler(method, url, params, kwargs):
+        val = params.get("id", "")
+        if val == "xtestx":
+            return _Resp(200, "one row")
+        if val == "x' or '1'='1":
+            return _Resp(200, "R" * 60000)     # tautology matches everything (200)
+        if val == "x' or '1'='2":
+            return _Resp(200, "")               # contradiction: empty (200)
+        return _Resp(200, "baseline body")
+
+    cand = await probe._test_xpath_injection(_Session(handler), "http://t/search",
+                                             "id", "GET")
+    assert cand is not None and cand.category == "xpath_injection"
+    assert cand.technique == "xpath_boolean_differential"
+
+
 # ── 8. security-header audit ignores a 5xx error page ────────────────────────
 @pytest.mark.asyncio
 async def test_security_headers_skipped_on_server_error():

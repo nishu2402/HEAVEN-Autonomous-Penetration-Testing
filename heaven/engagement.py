@@ -361,6 +361,15 @@ HOST_LEVEL_VULN_TYPES = frozenset({
     # server-wide config disclosure
     "dangerous_http_method", "directory_listing", "server_banner",
     "version_disclosure",
+    # password-policy fingerprint: a property of the site's registration, not of
+    # one URL. The auth probe builds its register URLs from absolute paths
+    # (urljoin(url, "/register" | "/signup" | ...)) and runs once per crawled URL,
+    # so on a catch-all / soft-404 host (every path answers 200) the identical
+    # observation lands on several register paths and used to persist as up to one
+    # copy per crawled URL. Dedup per host (not the matched register path) so it
+    # reports once. NOTE: the exact string only — ``cloud_iam_weak_password_policy``
+    # is a distinct per-account finding and is intentionally left untouched.
+    "weak_password_policy",
 })
 
 # Substring signals for host/domain-level posture findings. The exact vuln_type
@@ -1418,12 +1427,15 @@ class EngagementStore:
     def is_in_scope(self, target: str) -> bool:
         """Check if a target is explicitly authorized in this engagement.
 
-        Matches exactly first (covers URLs / hostnames / an exact IP or CIDR
-        entry). Then, for an IP or CIDR target, also authorizes it when it falls
-        *inside* an in-scope CIDR — so adding ``192.168.1.0/24`` to scope covers
-        every host in it, and a bare IP within a scoped range passes. This only
-        ever authorizes a target contained by an authorized range; it never
-        widens scope to something broader than what was authorized."""
+        Matches exactly first (an identical URL / hostname / IP / CIDR entry),
+        then by host, so a scope entry and a target that name the same host match
+        across forms (``www.example.com`` in scope authorizes
+        ``https://www.example.com`` and ``www.example.com:443``, and a scoped URL
+        authorizes its bare host). Host matching is exact and never widens scope:
+        a scoped ``example.com`` does not authorize ``sub.example.com``. Finally,
+        an IP or CIDR target is authorized when it falls *inside* an in-scope CIDR
+        — so adding ``192.168.1.0/24`` covers every host in it — but never when it
+        is broader than what was authorized."""
         import ipaddress
         from urllib.parse import urlparse
 
@@ -1434,25 +1446,45 @@ class EngagementStore:
             if row is not None:
                 return bool(row["in_scope"])
 
-            # Range containment: derive an IP/CIDR from the target (a bare IP or
-            # CIDR, or the host of a URL). A non-IP hostname can't be
-            # range-matched, so it's out of scope unless matched exactly above.
+            # Host match, then range containment. A target is authorized when it
+            # names the SAME host as a scope entry — so adding `www.example.com`
+            # authorizes `https://www.example.com`, `www.example.com:443` and
+            # `www.example.com/path`, and a scoped URL authorizes its bare host —
+            # or when it is an IP/CIDR contained by an in-scope range. Host
+            # matching is EXACT: a scoped `example.com` never pulls in
+            # `sub.example.com`, so scope is matched here, never widened (the
+            # orchestrator's ScopeGuard governs hosts discovered mid-scan).
+            def _host_key(s: str) -> str:
+                s = (s or "").strip().lower()
+                if not s:
+                    return ""
+                try:
+                    return urlparse(s if "://" in s else "//" + s).hostname or ""
+                except ValueError:
+                    return ""
+
+            t_host = _host_key(target)
             probe = target
             if "://" in probe:
                 probe = urlparse(probe).hostname or ""
             try:
                 t_net = ipaddress.ip_network(probe, strict=False)
             except ValueError:
-                return False
+                t_net = None
 
             for r in c.execute(
                 "SELECT target FROM scope WHERE in_scope = 1"
             ).fetchall():
                 cand = r["target"]
-                if "://" in cand:
-                    cand = urlparse(cand).hostname or ""
+                if t_host and _host_key(cand) == t_host:
+                    return True
+                if t_net is None:
+                    continue
+                cand_net = cand
+                if "://" in cand_net:
+                    cand_net = urlparse(cand_net).hostname or ""
                 try:
-                    c_net = ipaddress.ip_network(cand, strict=False)
+                    c_net = ipaddress.ip_network(cand_net, strict=False)
                 except ValueError:
                     continue
                 try:
@@ -1871,27 +1903,46 @@ class EngagementStore:
                 prob, audit = calibrated_confidence({**finding, "evidence": evidence})
                 evidence["calibrated_confidence"] = prob
                 evidence["calibration"] = audit
+            # Persist the AUTHORITATIVE severity AND a CVSS base consistent with
+            # it, both resolved in ONE reconciliation pass. The band is reconciled
+            # against the finding's real CVSS base (a published CVE score drives
+            # the label; an unconfirmed indicator is capped to its low band).
+            # Storing the reconciled band is what keeps the findings list,
+            # dashboard tally, severity filter/sort and the detail/report in
+            # agreement — they used to disagree because only the detail/report
+            # reconciled on read (an LFI at CVSS 8.1 showed as Critical in the list
+            # but High on its detail page). Crucially, we also persist the
+            # reconciled cvss_base: storing only the capped LABEL while leaving the
+            # raw, higher base in evidence made the export surfaces drift — a
+            # finding capped to Low still carried its class base of 7.5, so a SARIF
+            # export's security-severity read 7.5 (GitHub code-scanning buckets
+            # that as High) while HEAVEN's own badge said Low. The KB is optional,
+            # so a failure here must never block persisting a finding: fall back to
+            # the raw label/base.
+            severity = finding.get("severity", "info")
+            scored_finding = finding
+            with suppress(Exception):
+                from heaven.devsecops.vuln_kb import canonical_finding
+                reconciled = canonical_finding({**finding, "evidence": evidence})
+                canon = str(reconciled.get("severity") or "").strip().lower()
+                if canon:
+                    severity = canon
+                rb = (reconciled.get("evidence") or {}).get("cvss_base")
+                if rb is None:
+                    rb = reconciled.get("cvss_base")
+                if isinstance(rb, (int, float)) and 0.0 < float(rb) <= 10.0:
+                    evidence["cvss_base"] = round(float(rb), 1)
+                # Score the risk column off the reconciled finding too, so the
+                # dashboard's per-finding risk matches the badge instead of the
+                # pre-cap base.
+                scored_finding = reconciled
+
             evidence_json = json.dumps(evidence)
-            risk_score = _risk_value(finding)
+            risk_score = _risk_value(scored_finding)
             confidence = float(finding.get("confidence", 0.0) or 0.0)
             confidence_bucket = (
                 finding.get("confidence_bucket") or _confidence_bucket(confidence)
             )
-            # Persist the AUTHORITATIVE severity, not the raw detector label: the
-            # band reconciled against the finding's real CVSS base (a published CVE
-            # score drives the label; an unconfirmed indicator is capped to its low
-            # band). Storing the reconciled band is what keeps the findings list,
-            # dashboard tally, severity filter/sort and the detail/report in
-            # agreement — they used to disagree because only the detail/report
-            # reconciled on read (an LFI at CVSS 8.1 showed as Critical in the list
-            # but High on its detail page). The KB is optional, so a failure here
-            # must never block persisting a finding: fall back to the raw label.
-            severity = finding.get("severity", "info")
-            with suppress(Exception):
-                from heaven.devsecops.vuln_kb import canonical_severity
-                canon = canonical_severity({**finding, "evidence": evidence})
-                if canon:
-                    severity = canon
 
             if existing:
                 # Dedup — refresh last_seen_at + seen_count + the (re-computed) risk

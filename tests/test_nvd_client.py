@@ -143,14 +143,41 @@ def test_version_bounded_false_when_no_version_queried():
     assert recs[0].version_bounded is False
 
 
-def test_search_404_with_key_flags_invalid_key():
+def test_search_404_bad_key_falls_back_keyless():
+    """A 404 WITH a key that becomes 200 WITHOUT it proves the key is rejected.
+    HEAVEN must then degrade gracefully — serve the keyless result and keep
+    running keyless — instead of silently returning zero CVEs for the product."""
+    payload = {"vulnerabilities": [{"cve": {
+        "id": "CVE-2021-41773",
+        "descriptions": [{"lang": "en", "value": "Apache path traversal"}],
+        "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8,
+                    "vectorString": "AV:N"}, "baseSeverity": "CRITICAL"}]},
+        "weaknesses": [{"description": [{"value": "CWE-22"}]}],
+    }}]}
     client = NVDClient()
     client.api_key = "bad-key"
-    client._client = _FakeClient(_FakeResp(404))
+    client._client = _FakeClient(_FakeResp(404))           # keyed -> rejected
+    client._keyless_client = _FakeClient(_FakeResp(200, payload))  # keyless works
+
+    recs = asyncio.run(client.search_by_cpe("cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*"))
+    assert len(recs) == 1 and recs[0].cve_id == "CVE-2021-41773"
+    assert client._warned_invalid_key is True              # honest, provable warning
+    assert client._key_rejected is True                    # stays keyless afterwards
+    assert client._rate_limit == 6.0                        # dropped to the keyless tier
+
+
+def test_search_404_both_does_not_blame_key():
+    """A 404 that persists WITHOUT the key is an unmatchable query (e.g. a CPE
+    NVD cannot parse), NOT an auth problem — the valid key must not be blamed."""
+    client = NVDClient()
+    client.api_key = "good-key"
+    client._client = _FakeClient(_FakeResp(404))           # keyed -> 404
+    client._keyless_client = _FakeClient(_FakeResp(404))   # keyless -> 404 too
 
     recs = asyncio.run(client.search_by_cpe("cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*"))
     assert recs == []
-    assert client._warned_invalid_key is True
+    assert client._warned_invalid_key is False             # no false accusation
+    assert client._key_rejected is False
 
 
 # ── test_connectivity diagnoses key state ───────────────────────────

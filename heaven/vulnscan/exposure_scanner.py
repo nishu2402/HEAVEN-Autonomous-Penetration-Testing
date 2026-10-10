@@ -98,7 +98,16 @@ def _v_htpasswd(r: _Resp) -> bool:
 
 
 def _v_phpinfo(r: _Resp) -> bool:
-    return "phpinfo()" in r.body or "PHP Version" in r.body and "<title>phpinfo" in r.body.lower()
+    # Real phpinfo() output always renders the "PHP Version x.y.z" banner with a
+    # concrete version number, in both the HTML page (<title>phpinfo()</title> +
+    # the version table) and the text `php -i` form ("phpinfo()\nPHP Version =>
+    # 8.1.2"). Gate on that numbered banner so a page that merely MENTIONS the
+    # string "phpinfo()" (or the words "PHP version" in prose) is not mis-flagged
+    # as an exposed configuration dump.
+    low = r.body.lower()
+    if not re.search(r"php version\s*(?:=>)?\s*\d", low):
+        return False
+    return "phpinfo()" in r.body or "<title>phpinfo" in low
 
 
 _VERIFIERS = {

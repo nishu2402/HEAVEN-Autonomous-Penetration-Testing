@@ -151,10 +151,18 @@ def waf_signature(
         hay.append(f"{name}: {val}")
         hay.append(val)
     body_low = (body or "").lower()
+    # A WAF/CDN identifies itself authoritatively through response HEADERS and
+    # cookies, which are trustworthy on any status. A vendor name in the response
+    # BODY only identifies a WAF on an actual block response (a Cloudflare /
+    # Incapsula / Sucuri block page names the vendor); on a normal page the same
+    # substring is just content ("we use Cloudflare", a blog post mentioning
+    # ModSecurity, a WordPress page that references Wordfence) and must not be read
+    # as a WAF in front of the application.
+    body_trustworthy = status in _WAF_BLOCK_STATUSES
 
     for name, needles in _WAF_SIGNATURES.items():
         for needle in needles:
-            if any(needle in h for h in hay) or needle in body_low:
+            if any(needle in h for h in hay) or (body_trustworthy and needle in body_low):
                 vendor = name
                 indicators.append(f"WAF fingerprint: '{needle}' → {name}")
                 break

@@ -45,9 +45,21 @@ logger = get_logger("vulnscan.dos_probe")
 # path answers in well under a second; anything slower we treat as "no reflector".
 _UDP_TIMEOUT = 2.5
 # Slow-HTTP: how long we let the server hold a partial-header connection open
-# before we call it susceptible. A hardened server (mod_reqtimeout, nginx
-# client_header_timeout, a reverse proxy) drops a stalled header well before this.
-_SLOW_HTTP_HOLD = 8.0
+# before we call it susceptible. This window MUST exceed the common header-read
+# timeouts, or a server that *does* protect itself — just on a longer clock — is
+# falsely flagged: nginx's client_header_timeout defaults to 60s and Apache's
+# mod_reqtimeout header stage to ~20-40s. An 8s window (the earlier value) tripped
+# on nginx-default and Apache-default alike — essentially every server that lacks a
+# sub-8s timeout, which is almost all of them (verified live: certifiedhacker's
+# nginx and scanme's Apache both "held" 8s though both enforce a real, longer
+# timeout). A genuinely susceptible server (Apache prefork with no mod_reqtimeout,
+# a single-threaded http.server) holds the partial header open indefinitely, so a
+# window past the common ceiling cleanly separates the two: a protected server
+# drops within its timeout and the probe early-exits (fast, not flagged), an
+# unprotected one holds the full window (flagged). 65s clears the nginx 60s
+# default while staying far inside the DoS task's 300s budget (endpoints probed
+# concurrently).
+_SLOW_HTTP_HOLD = 65.0
 
 # A reflector with BAF at or above this is a genuinely usable DDoS weapon.
 _BAF_HIGH = 10.0
@@ -391,13 +403,18 @@ def _slow_http_finding(host: str, port: int, use_tls: bool, held: float) -> dict
         severity="medium",
         title="Slow-HTTP (Slowloris) Denial-of-Service Susceptibility",
         description=(
-            f"The web server held an incomplete request header open for {held:.0f}s "
-            f"without enforcing a header-read timeout. A Slowloris / slow-read "
-            f"attacker can hold many connections open with trickled partial "
-            f"headers, exhausting the server's connection pool and denying service "
-            f"to legitimate users: all from a single low-bandwidth host."
+            f"The web server held an incomplete request header open for {held:.0f}s, "
+            f"longer than the common header-read timeouts (Apache mod_reqtimeout "
+            f"~20-40s, nginx client_header_timeout 60s), so it enforces no effective "
+            f"header-read timeout. A Slowloris / slow-read attacker can hold many "
+            f"connections open with trickled partial headers, exhausting a "
+            f"connection-per-thread server's pool and denying service to legitimate "
+            f"users: all from a single low-bandwidth host. Confirm the impact with a "
+            f"sustained multi-connection slow-read test before reporting it as "
+            f"exploitable, since an event-driven server (nginx, Apache event MPM) "
+            f"holds the idle connection cheaply."
         ),
-        confidence=0.75,
+        confidence=0.6,
         evidence={
             "vector": "slow-http (Slowloris)",
             "protocol": scheme,
@@ -407,8 +424,8 @@ def _slow_http_finding(host: str, port: int, use_tls: bool, held: float) -> dict
             "capec": "CAPEC-469",
             "proof": (
                 f"Sent an incomplete HTTP request header to {scheme}://{host}:{port} "
-                f"and the server kept the connection open {held:.0f}s without a "
-                f"header-read timeout."
+                f"and the server kept the connection open {held:.0f}s — past the "
+                f"common header-read-timeout ceiling — without dropping it."
             ),
         },
     )

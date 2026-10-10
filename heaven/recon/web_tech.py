@@ -33,6 +33,7 @@ import re
 from typing import Any, Awaitable, Callable, Mapping, Optional
 from urllib.parse import urlparse
 
+from heaven.utils.domains import same_site as _same_site
 from heaven.utils.logger import get_logger
 
 try:
@@ -183,6 +184,17 @@ async def _default_header_fetch(session: "aiohttp.ClientSession", url: str,
             timeout=aiohttp.ClientTimeout(total=timeout),
         ) as resp:
             if resp.status >= 500:
+                return None
+            # Off-site redirect guard: if the target bounced off its registered
+            # domain (to a CDN / parking / SSO host), the response headers
+            # describe a DIFFERENT server. Mapping that host's Server /
+            # X-Powered-By version into the target origin's EOL + CVE findings
+            # would be a wrong-target false positive. Same guard the web
+            # misconfig / header audits use.
+            final_url = str(getattr(resp, "url", "") or url)
+            if not _same_site(url, final_url):
+                logger.debug("web-tech: %s redirected off-site to %s: skipping headers",
+                             url, final_url)
                 return None
             # Materialise into a plain dict so the value outlives the response.
             return {k: v for k, v in resp.headers.items()}

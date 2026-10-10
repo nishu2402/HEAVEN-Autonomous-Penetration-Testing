@@ -69,6 +69,28 @@ def _lt(version: tuple[int, ...], cutoff: tuple[int, ...]) -> bool:
     return v < c
 
 
+def _version_adjacent(hay: str, pattern: str) -> Optional[tuple[int, ...]]:
+    """The dotted-numeric version sitting next to the product token ``pattern``
+    matches in ``hay``.
+
+    ``hay`` is ``"{product} {version} {banner}"`` for ONE service, and a single
+    nmap service line routinely names several products: an Apache port advertises
+    ``Apache httpd 2.4.7 ((Ubuntu) PHP/5.5.9)``. The structured ``version`` field
+    (2.4.7) belongs to the PRIMARY product, so reading it for a SECONDARY product
+    matched in the banner (here PHP) invents a nonexistent "PHP 2.4.7" that is
+    always below the cutoff. Taking the number that follows the matched token
+    instead keeps each product's version its own. Returns None when no version
+    sits beside the token, so a cutoff rule never fires on an unrelated number.
+    """
+    m = re.search(pattern, hay)
+    if not m:
+        return None
+    # Start at the token (the ``apache/\d`` branch consumes the first version
+    # digit, so starting after the match would drop it) and take the first
+    # dotted-numeric run within a short window.
+    return _parse_version(hay[m.start():m.start() + 40])
+
+
 # ── OS end-of-life table (regex on the OS guess → date + note) ───────────────
 # Ordered most-specific first; the first match wins.
 _OS_EOL: list[tuple[str, str, str, str]] = [
@@ -185,8 +207,11 @@ def _product_findings(target: str, product: str, version: str,
             continue
         detected_ver = ""
         if cutoff is not None:
-            # Prefer the structured version field, fall back to the banner text.
-            v = _parse_version(version) or _parse_version(banner)
+            # Read the version that sits NEXT TO this product's token, so a banner
+            # naming several products attributes each its own release (and a
+            # secondary match like PHP in an Apache service's extrainfo never
+            # borrows the primary product's version).
+            v = _version_adjacent(hay, pattern)
             if v is None or not _lt(v, cutoff):
                 continue
             detected_ver = ".".join(str(x) for x in v)
@@ -428,6 +453,67 @@ def _release_line_currency_finding(target: str, display: str, slug: str,
          "source_feed": "endoflife.date"})
 
 
+# ── Recently-superseded (fast-cadence) EOL vs genuine abandonment ────────────
+# Some products ship release *lines* on a fast cadence and mark a branch
+# end-of-life the moment a newer branch supersedes it — nginx is the archetype:
+# branch 1.29 (shipped 2025-06, EOL 2026-05 after ~11 months) was retired simply
+# because 1.31 shipped, while 1.30/1.31 remain supported. A branch like that is a
+# *patch-currency* gap (move to the supported line) rather than the abandoned,
+# no-patches-ever exposure that CWE-1104 ``unsupported_software`` describes (Flash,
+# Windows XP, a decade-dead Apache 2.2). Reporting the former as
+# ``unsupported_software`` lets reconcile_severity escalate it to the full
+# abandoned-software band (class base 7.4 → High), over-stating a server that is
+# only a line or two behind a current release. We keep it honest: a recently
+# superseded, short-lived branch in a still-maintained product is reported as
+# ``outdated_patch_level`` (medium); everything else stays ``unsupported_software``.
+_RECENT_EOL_MONTHS = 18        # EOL older than this is treated as real abandonment
+_SHORT_SUPPORT_MONTHS = 15     # a branch supported longer than this is a real LTS line
+
+
+def _recently_superseded(cycle: dict, detected_cycle: str, eol_date: str,
+                         cycles: list[dict]) -> Optional[tuple[str, str]]:
+    """When an EOL branch was *recently superseded* by a still-supported newer
+    line in a fast-cadence product, return that ``(newer_cycle, newer_release)``;
+    otherwise ``None``. All three conditions must hold, so nothing genuinely
+    abandoned is ever softened:
+
+      1. the branch's EOL date is real and within ``_RECENT_EOL_MONTHS`` (a
+         vendor-marked ``eol: true`` with no date, or a long-past EOL, never
+         qualifies — those are abandonment);
+      2. the branch had a *short* support lifetime (``eol - releaseDate`` ≤
+         ``_SHORT_SUPPORT_MONTHS``) — a fast-cadence release line, not a multi-year
+         long-term-support line (a PostgreSQL major, an OS/appliance line) that
+         reached a genuine end of support; and
+      3. the product is still actively maintained — a non-EOL cycle strictly newer
+         than the host's branch exists (a product with no supported line left is
+         itself abandoned).
+    """
+    months = _months_since(eol_date)
+    if months is None or months > _RECENT_EOL_MONTHS:
+        return None
+    try:
+        born = date.fromisoformat(str(cycle.get("releaseDate") or ""))
+        died = date.fromisoformat(eol_date)
+    except (ValueError, TypeError):
+        return None                                   # no reliable support lifetime
+    if (died - born).days > _SHORT_SUPPORT_MONTHS * 30:
+        return None                                   # a real long-term-support line
+    dv = _parse_version(detected_cycle)
+    if dv is None:
+        return None
+    best: Optional[tuple[tuple[int, ...], str, str]] = None
+    for c in cycles:
+        st = _cycle_status(c)
+        if st is None or st[2]:                       # unknown status or itself EOL
+            continue
+        cv = _parse_version(str(c.get("cycle", "")))
+        if cv is None or not _lt(dv, cv):             # must be a line newer than host's
+            continue
+        if best is None or cv > best[0]:
+            best = (cv, str(c.get("cycle", "")), str(c.get("releaseDate") or ""))
+    return (best[1], best[2]) if best else None
+
+
 async def _dynamic_eol_finding(target: str, product: str, version: str,
                                banner: str) -> Optional[dict]:
     """Flag an EOL *or* out-of-date component via endoflife.date.
@@ -457,6 +543,35 @@ async def _dynamic_eol_finding(target: str, product: str, version: str,
     status = _cycle_status(cycle)
     if status and status[2]:                       # is_eol
         eol_date, cycle_label, _ = status
+        # A short-lived branch that was recently superseded by a still-supported
+        # newer line (fast-cadence products such as nginx) is a patch-currency gap,
+        # not abandoned software — report it as such (medium) so reconcile_severity
+        # does not escalate it to the full unsupported_software band. Genuine
+        # abandonment (vendor-marked EOL, a long-past EOL, a multi-year support line,
+        # or no supported successor) falls through to the finding below.
+        recent = _recently_superseded(cycle, cycle_label, eol_date, cycles)
+        if recent:
+            newer_label, newer_date = recent
+            months = _months_since(eol_date) or 0
+            age = f"~{months} month{'s' if months != 1 else ''}"
+            return _finding(
+                target, "outdated_patch_level", "medium",
+                f"Outdated Release Line: {display} {cycle_label} "
+                f"(end-of-life, current line {newer_label})",
+                f"{display} release line {cycle_label} reached end-of-life on "
+                f"{eol_date} ({age} ago) according to endoflife.date and was "
+                f"superseded by the still-supported {newer_label} line. {display} "
+                "retires release lines on a fast cadence, so a recently superseded "
+                "branch is a patch-currency gap rather than abandoned software: move "
+                f"it to a vendor-supported line ({newer_label}) to keep receiving "
+                "security fixes.",
+                0.8,
+                {"product": display, "detected_version": detected,
+                 "detected_cycle": cycle_label, "newer_cycle": newer_label,
+                 "newer_cycle_release_date": newer_date, "eol_date": eol_date,
+                 "recently_superseded": True, "months_since_eol": months,
+                 "kind": "software_component", "cwe": "CWE-1104",
+                 "source_feed": "endoflife.date"})
         when = f" on {eol_date}" if eol_date else ""
         return _finding(
             target, "unsupported_software", "medium",

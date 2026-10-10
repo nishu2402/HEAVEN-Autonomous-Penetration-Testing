@@ -119,17 +119,25 @@ _SENSITIVE_MARKERS: list[re.Pattern] = [
 ]
 
 
-def _sensitive_markers(body: str) -> list[str]:
-    """Return snippets of any sensitive-data markers found in a response body —
+def _sensitive_markers(body: str, *, limit: int = 8) -> list[str]:
+    """Return distinct snippets of any sensitive-data markers in a response body —
     the signal that an altered-ID response actually exposed a record's private
-    data rather than merely returning a different (possibly public) object."""
+    data rather than merely returning a different (possibly public) object.
+
+    Every distinct match is collected (not just the first per pattern) so the
+    IDOR verdict can diff the altered-object response against the attacker's own:
+    a marker present in BOTH (a site-wide footer email, a published contact
+    address) is page furniture, not another user's record, and must not count."""
     found: list[str] = []
+    seen: set[str] = set()
     for rx in _SENSITIVE_MARKERS:
-        m = rx.search(body or "")
-        if m:
-            found.append(m.group(0)[:48])
-        if len(found) >= 5:
-            break
+        for m in rx.finditer(body or ""):
+            snippet = m.group(0)[:48]
+            if snippet not in seen:
+                seen.add(snippet)
+                found.append(snippet)
+            if len(found) >= limit:
+                return found
     return found
 
 
@@ -144,10 +152,16 @@ def _idor_verdict(orig_status: int, orig_body: str,
     if not (test_status == 200 and orig_status == 200
             and _body_differs(orig_body, test_body)):
         return None
-    markers = _sensitive_markers(test_body)
-    if markers:
+    # Only sensitive values that appear in the ALTERED-id response but NOT in the
+    # attacker's own (original) response signal a cross-record leak. Markers common
+    # to both responses — a site-wide footer email, a contact phone number — are
+    # page furniture present on every object and would otherwise flag ordinary
+    # public enumeration (e.g. /product/1 → /product/2) as a false IDOR.
+    orig_markers = set(_sensitive_markers(orig_body))
+    new_markers = [m for m in _sensitive_markers(test_body) if m not in orig_markers]
+    if new_markers:
         return ("idor", "medium", 0.6,
-                {"signals": ["sensitive_data_exposed"], "sensitive_markers": markers})
+                {"signals": ["sensitive_data_exposed"], "sensitive_markers": new_markers})
     return ("enumerable_reference", "info", 0.4,
             {"signals": ["object_enumerable"],
              "note": ("A different object was returned for the altered ID, but no "
@@ -436,26 +450,43 @@ class IDORScanner:
             status_a, body_a = await _get(session, url, self._base_headers)
             status_b, body_b = await _get(session, url, self._alt_headers)
 
-        if (status_a == 200 and status_b == 200
+        if not (status_a == 200 and status_b == 200
                 and not _body_differs(body_a, body_b)):
-            # Both tokens get the same response → same object
-            self._add(
-                target=url,
-                vuln_type="idor",
-                title="IDOR: Horizontal privilege escalation (dual-session access)",
-                severity="critical",
-                confidence=0.92,
-                evidence={
-                    "probe_type": "horizontal_privesc",
-                    "param": "session_token",
-                    "detail": "Alternate user token can access this resource with identical response",
-                },
-                remediation=(
-                    "Ensure server-side ownership checks are applied to every object request. "
-                    "Never rely solely on the object ID for authorization."
-                ),
-                cwe="CWE-639",
-            )
+            return
+
+        # Both authenticated users see the same object — but that is only IDOR if
+        # the resource is genuinely access-controlled. Confirm an UNAUTHENTICATED
+        # request is denied (or served different content) first: if an anonymous
+        # client gets the same body, the resource is public/shared (a catalog item,
+        # a published page) and two users seeing it is expected, not a broken-
+        # authorization finding. This mirrors the anon-denied proof the multi-role
+        # access_control audit requires and removes a critical-severity false
+        # positive on shared, ID-bearing endpoints.
+        no_auth = {"User-Agent": "HEAVEN-Scanner/1.0"}
+        async with self._slot():
+            status_anon, body_anon = await _get(session, url, no_auth)
+        if status_anon == 200 and not _body_differs(body_a, body_anon):
+            return  # resource is public, not an authorization break
+
+        self._add(
+            target=url,
+            vuln_type="idor",
+            title="IDOR: Horizontal privilege escalation (dual-session access)",
+            severity="critical",
+            confidence=0.92,
+            evidence={
+                "probe_type": "horizontal_privesc",
+                "param": "session_token",
+                "anonymous_status": status_anon,
+                "detail": "Alternate user token reads this access-controlled resource "
+                          "with an identical response (an anonymous request is denied).",
+            },
+            remediation=(
+                "Ensure server-side ownership checks are applied to every object request. "
+                "Never rely solely on the object ID for authorization."
+            ),
+            cwe="CWE-639",
+        )
 
     # ── Mass assignment probe ─────────────────────────────────────
 

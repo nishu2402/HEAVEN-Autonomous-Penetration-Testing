@@ -156,7 +156,66 @@ async def test_spf_missing_when_no_spf_txt(monkeypatch):
     assert "spf_missing" in _types(s._findings)
 
 
+def test_spf_dns_lookup_count_counts_terms_not_types():
+    from heaven.recon.email_scanner import _spf_dns_lookup_count
+    # Ten includes + an `a` + an `mx` = 12 DNS-querying terms. The old code
+    # counted distinct mechanism *types* present (here: include, a, mx = 3) and
+    # could never exceed its threshold, so the over-limit check was dead.
+    rec = ("v=spf1 " + " ".join(f"include:spf{i}.example.com" for i in range(10))
+           + " a mx ip4:1.2.3.4 -all")
+    assert _spf_dns_lookup_count(rec) == 12
+    # ip4/ip6/all and the v= tag do not query DNS; a qualifier does not change
+    # what a mechanism is.
+    assert _spf_dns_lookup_count("v=spf1 ip4:1.2.3.4 ip6:::1 ~all") == 0
+    assert _spf_dns_lookup_count("v=spf1 +a -mx ?include:x.com redirect=y.com") == 4
+
+
+@pytest.mark.asyncio
+async def test_spf_excessive_lookups_flagged_and_severity_floored(monkeypatch):
+    # A record that technically ends in -all (which alone would be `info`) but
+    # needs more than 10 DNS lookups PermErrors at every receiver, so SPF gives
+    # no protection — it must be reported, not shown as cleanly configured.
+    rec = "v=spf1 " + " ".join(f"include:spf{i}.example.com" for i in range(11)) + " -all"
+    _install_dns(monkeypatch, {("example.com", "TXT"): [_TXT(rec)]})
+    s = EmailSecurityScanner()
+    await s.check_spf("example.com")
+    spf = [f for f in s._findings if f.vuln_type == "spf_analysis"][0]
+    assert any("PermError" in i for i in spf.evidence["issues"])
+    assert spf.severity == "medium"  # floored up from the bare -all `info`
+
+
+@pytest.mark.asyncio
+async def test_spf_normal_lookup_count_not_flagged(monkeypatch):
+    rec = "v=spf1 include:_spf.google.com include:mail.example.com -all"
+    _install_dns(monkeypatch, {("example.com", "TXT"): [_TXT(rec)]})
+    s = EmailSecurityScanner()
+    await s.check_spf("example.com")
+    spf = [f for f in s._findings if f.vuln_type == "spf_analysis"][0]
+    assert not any("PermError" in i for i in spf.evidence["issues"])
+    assert spf.severity == "info"
+
+
 # ── DMARC subdomain policy ──────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_dmarc_apex_none_with_strong_subdomain_policy_is_high(monkeypatch):
+    # Regression: the apex policy is p=none (the domain's own mail is spoofable)
+    # while sp=reject only protects subdomains. A substring test for "p=reject"
+    # also matches "sp=reject", which would misread this as a reject policy and
+    # report a spoofable domain as fully protected. The apex policy must be read
+    # as none → high.
+    _install_dns(monkeypatch, {
+        ("_dmarc.example.com", "TXT"):
+            [_TXT("v=DMARC1; p=none; sp=reject; rua=mailto:d@example.com")],
+    })
+    s = EmailSecurityScanner()
+    await s.check_dmarc("example.com")
+    dmarc = [f for f in s._findings if f.vuln_type == "dmarc_analysis"][0]
+    assert dmarc.evidence["policy"] == "none"
+    assert dmarc.severity == "high"
+    # sp is stronger than the apex, so the "subdomain weaker" finding must NOT fire.
+    assert "dmarc_subdomain_policy_weak" not in _types(s._findings)
+
+
 @pytest.mark.asyncio
 async def test_dmarc_subdomain_policy_weaker_than_domain(monkeypatch):
     _install_dns(monkeypatch, {

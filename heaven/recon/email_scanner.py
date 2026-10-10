@@ -43,6 +43,25 @@ class EmailFinding:
         }
 
 
+def _spf_dns_lookup_count(record: str) -> int:
+    """Count the DNS-querying terms in an SPF record (RFC 7208 §4.6.4).
+
+    Each ``include``, ``a``, ``mx``, ``ptr`` and ``exists`` mechanism, plus the
+    ``redirect`` modifier, costs one DNS lookup toward the limit of 10; ``ip4``,
+    ``ip6``, ``all`` and the ``v=`` tag do not query DNS. A qualifier
+    (``+ - ~ ?``) on a mechanism does not change what it is, so it is stripped
+    first. (The previous implementation counted how many distinct mechanism
+    *types* appeared — at most five — so the over-limit check could never fire.)
+    """
+    count = 0
+    for term in record.split():
+        mech = term[1:] if term[:1] in "+-~?" else term
+        name = re.split(r"[:/=]", mech, maxsplit=1)[0].lower()
+        if name in ("include", "a", "mx", "ptr", "exists", "redirect"):
+            count += 1
+    return count
+
+
 class EmailSecurityScanner:
     """Comprehensive email security scanner."""
 
@@ -143,11 +162,16 @@ class EmailSecurityScanner:
                 issues.append("SPF record has no 'all' mechanism")
                 severity = "medium"
 
-            # Check for too many DNS lookups (max 10)
-            lookup_count = sum(1 for mech in ["include:", "a:", "mx:", "ptr:", "redirect="]
-                               if mech in spf_record)
-            if lookup_count > 8:
-                issues.append(f"SPF has {lookup_count} DNS lookups (max 10 allowed)")
+            # RFC 7208 §4.6.4 caps SPF at 10 DNS-querying terms; exceeding it makes
+            # every receiver return PermError and ignore SPF entirely, so the domain
+            # becomes spoofable regardless of the `all` qualifier.
+            lookup_count = _spf_dns_lookup_count(spf_record)
+            if lookup_count > 10:
+                issues.append(
+                    f"SPF requires {lookup_count} DNS lookups, over the RFC 7208 "
+                    "limit of 10; receivers return PermError and ignore SPF entirely")
+                if severity in ("info", "low"):
+                    severity = "medium"
 
             self._findings.append(EmailFinding(
                 target=domain, vuln_type="spf_analysis",
@@ -310,14 +334,17 @@ class EmailSecurityScanner:
                 ))
                 return
 
-            # Parse policy
+            # Parse the apex policy (the `p=` tag). Match only a genuine `p=` tag
+            # (record start or immediately after a `;`), never the `p=` that sits
+            # inside the subdomain-policy tag `sp=`. A plain substring test for
+            # "p=reject" also matches "sp=reject", so a record like
+            # "p=none; sp=reject" would be misread as a reject policy and a
+            # spoofable apex domain reported as fully protected.
             policy = "none"
-            if "p=reject" in dmarc_record:
-                policy = "reject"
-            elif "p=quarantine" in dmarc_record:
-                policy = "quarantine"
-            elif "p=none" in dmarc_record:
-                policy = "none"
+            _pm = re.search(r"(?:^|;)\s*p\s*=\s*(none|quarantine|reject)",
+                            dmarc_record, re.I)
+            if _pm:
+                policy = _pm.group(1).lower()
 
             severity = "info" if policy == "reject" else ("medium" if policy == "quarantine" else "high")
 

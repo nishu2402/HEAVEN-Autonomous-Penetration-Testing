@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress
 from typing import Optional
+from urllib.parse import urlparse
 
 # Multi-part public suffixes where the registrable domain is the last THREE
 # labels, not two. A naive ``split('.')[-2:]`` collapses ``example.co.uk`` to the
@@ -119,3 +120,33 @@ def registered_domain(host: str) -> Optional[str]:
             return None
         return ".".join(parts[-3:])
     return ".".join(parts[-2:])
+
+
+def same_site(requested_url: str, final_url: str) -> bool:
+    """True when a response was NOT redirected off the requested site.
+
+    The final response host must share the requested host's registered domain —
+    an apex↔www or http→https hop stays "same site". A cross-registered-domain
+    redirect (target → CDN / parking / SSO / marketing host) means the response
+    headers and cookies describe a *different* server, so anything derived from
+    them must not be attributed to the in-scope target.
+
+    Fails safe to ``True`` when either host can't be reduced to a registered
+    domain (IP targets, single-label intranet hosts) so it never over-suppresses.
+
+    This is the single source of truth for the scanner's off-site-redirect guard
+    (``auth_scanner`` and ``misconfig_scanner`` both import it) — the same reason
+    :func:`registered_domain` is consolidated here rather than copied per module.
+    """
+    try:
+        req_host = urlparse(requested_url).hostname or ""
+        fin_host = urlparse(final_url).hostname or ""
+    except Exception:
+        return True
+    if not fin_host or fin_host == req_host:
+        return True
+    req_dom = registered_domain(req_host)
+    fin_dom = registered_domain(fin_host)
+    if req_dom is None or fin_dom is None:
+        return True  # can't compare (IP / intranet) — don't over-suppress
+    return req_dom == fin_dom

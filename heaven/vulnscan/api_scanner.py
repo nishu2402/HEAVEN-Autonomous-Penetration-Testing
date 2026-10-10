@@ -226,11 +226,21 @@ class GraphQLScanner:
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         if resp.status == 200:
-                            data = await resp.json()
-                            if "__schema" in str(data):
-                                schema = data.get("data", {}).get("__schema", {})
-                                types = schema.get("types", [])
-                                mutations = schema.get("mutationType", {})
+                            data = await resp.json(content_type=None)
+                            # Positive evidence only: a real introspection
+                            # response carries a populated ``types`` list under
+                            # ``data.__schema``. A server with introspection
+                            # DISABLED still answers 200 and echoes the field
+                            # name "__schema" back inside an ``errors`` message,
+                            # so a substring match on the whole response body is
+                            # a false positive ("Introspection Enabled: 0 types").
+                            inner = data.get("data") if isinstance(data, dict) else None
+                            schema = inner.get("__schema") if isinstance(inner, dict) else None
+                            types = schema.get("types") if isinstance(schema, dict) else None
+                            if isinstance(types, list) and types:
+                                mutations = schema.get("mutationType") or {}
+                                type_names = [t.get("name") for t in types[:20]
+                                              if isinstance(t, dict)]
                                 findings.append(APIFinding(
                                     target=url, vuln_type="graphql_introspection",
                                     severity="medium", endpoint=endpoint,
@@ -243,7 +253,7 @@ class GraphQLScanner:
                                     confidence=0.95,
                                     evidence={"types_count": len(types),
                                               "has_mutations": bool(mutations),
-                                              "type_names": [t["name"] for t in types[:20]]},
+                                              "type_names": type_names},
                                     remediation="Disable introspection in production.",
                                     cwe="CWE-200",
                                     owasp_api="API3:2023 Broken Object Property Level Authorization",

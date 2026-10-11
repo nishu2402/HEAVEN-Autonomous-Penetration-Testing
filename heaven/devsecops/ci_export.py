@@ -68,7 +68,15 @@ _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
 def _sev(finding: dict[str, Any]) -> str:
-    return str(finding.get("severity") or "info").strip().lower()
+    """The finding's severity band. Prefer the explicit label; when a finding
+    carries a CVSS score but no ``severity`` label, derive the band from the
+    score. Otherwise a scored-but-unlabelled finding is silently bucketed
+    ``info`` and slips under a CI gate as a false pass (the SARIF level, the
+    JUnit ``<failure>`` decision, and the gate summary all read this)."""
+    raw = str(finding.get("severity") or "").strip().lower()
+    if raw:
+        return raw
+    return severity_from_score(objective_base_score(finding) or 0.0)
 
 
 def _sarif_level(severity: str) -> str:
@@ -258,7 +266,10 @@ def summarize_gate(findings: list[dict[str, Any]], *, fail_on: str = "high") -> 
     for f in findings or []:
         if not isinstance(f, dict):
             continue
-        sev = severity_from_score(objective_base_score(f)) if not _sev(f) else _sev(f)
+        # _sev already derives the band from the CVSS score when a finding has no
+        # explicit severity label, so a scored-but-unlabelled finding is counted
+        # in its real band (not silently dropped to 'info' below the gate).
+        sev = _sev(f)
         counts[sev] = counts.get(sev, 0) + 1
         if _SEV_RANK.get(sev, 4) <= fail_rank:
             breaching += 1

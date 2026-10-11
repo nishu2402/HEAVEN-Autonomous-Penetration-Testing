@@ -8,6 +8,7 @@ Generates ATT&CK Navigator heatmap layers for visualization.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -16,6 +17,19 @@ from typing import Optional
 from heaven.utils.logger import get_logger
 
 logger = get_logger("mitre.mapper")
+
+
+def _vtype_matches(vtype: str, vuln_type: str) -> bool:
+    """Whether the short vuln_type key ``vtype`` appears in a finding's
+    ``vuln_type`` as a whole identifier token, not a bare substring.
+
+    A plain ``vtype in vuln_type`` test mislabels findings: the key ``rce`` is a
+    substring of ``source`` / ``resource`` / ``force``, so ``source_code_disclosure``
+    would map to T1059 Command and Scripting Interpreter (Execution) with a 1.5x
+    risk multiplier. An identifier boundary ( start / end / any non-alphanumeric,
+    so ``_`` and ``-`` separate tokens ) keeps ``stored_xss`` / ``blind_sqli`` /
+    ``http_request_smuggling`` matching while dropping the substring collisions."""
+    return re.search(rf"(?<![a-z0-9]){re.escape(vtype)}(?![a-z0-9])", vuln_type) is not None
 
 
 class Tactic(str, Enum):
@@ -276,7 +290,7 @@ class MITREAttackMapper:
         # Fallback to vuln_type mapping
         if not techniques and vuln_type:
             for vtype, techs in VULN_TYPE_TO_ATTACK.items():
-                if vtype in vuln_type:
+                if _vtype_matches(vtype, vuln_type):
                     for tech in techs:
                         tid = tech["id"]
                         sub_id = None

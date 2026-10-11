@@ -307,6 +307,29 @@ async def _resolve_subdomain(fqdn: str, sem: asyncio.Semaphore) -> Optional[Disc
 
 # ── JavaScript Secret Extraction ──
 
+def _js_secret_is_placeholder(value: str) -> bool:
+    """True when a captured JS 'secret' value is template scaffolding or an
+    obvious doc stub rather than a live credential: ${API_KEY}, {{token}},
+    <your-key>, %(secret)s, a YOUR_* stub, or an example/dummy/sample/redacted/
+    changeme filler. Mirrors the git_secrets / client_audit placeholder screen so
+    a config template or example baked into a JS bundle is not reported as a leak.
+    A bare '$' or '<' is NOT a signal (a real value may carry them); 'test' and
+    'xxx' are deliberately excluded here to avoid screening a live sk_test_ key or
+    an 'attestation' token on the bare value."""
+    v = value.strip()
+    low = v.lower()
+    if "${" in v or "{{" in v or "}}" in v:
+        return True
+    if "<" in v and ">" in v:
+        return True
+    if "%(" in low or "%s" in low or "%d" in low:
+        return True
+    if low.startswith("your"):
+        return True
+    return any(w in low for w in ("example", "placeholder", "redacted",
+                                  "dummy", "sample", "changeme", "changethis"))
+
+
 JS_SECRET_PATTERNS = [
     (r"(?:api[_-]?key|apikey)\s*[:=]\s*['\"]([a-zA-Z0-9_\-]{20,})['\"]", "api_key"),
     (r"(?:secret|token|password|passwd|pwd)\s*[:=]\s*['\"]([^'\"]{8,})['\"]", "secret"),
@@ -345,8 +368,12 @@ async def extract_js_secrets(session: aiohttp.ClientSession, url: str,
                 for pattern, secret_type in JS_SECRET_PATTERNS:
                     matches = re.findall(pattern, content, re.IGNORECASE)
                     for match in matches:
-                        # Filter false positives
-                        if len(match) < 8 or match in ("undefined", "null", "true", "false"):
+                        # Filter false positives: too short, JS literals, or a
+                        # template placeholder / example stub (${API_KEY},
+                        # {{token}}, <your-key>, example-api-key) that carries no
+                        # live secret.
+                        if (len(match) < 8 or match in ("undefined", "null", "true", "false")
+                                or _js_secret_is_placeholder(match)):
                             continue
                         secrets.append(DiscoveredAsset(
                             asset_type="secret", value=match[:50],

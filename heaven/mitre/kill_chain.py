@@ -21,12 +21,28 @@ Phases (Lockheed CKC v1):
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Iterable
 
 from heaven.utils.logger import get_logger
+
+
+def _token_present(needle: str, haystack: str) -> bool:
+    """True when ``needle`` starts at an identifier/word boundary in
+    ``haystack`` (start of string, or after any non-alphanumeric so ``_`` and
+    spaces separate tokens).
+
+    A bare ``needle in haystack`` lets a short key like ``rce`` match inside
+    ``source`` / ``resource`` / ``force``, lighting Exploitation+Installation
+    for a plain source-code-disclosure or resource-exhaustion finding. Only the
+    LEFT boundary is required, so trailing variation is still tolerated
+    (``missing_security_header`` resolves ``missing_security_headers``, ``sql``
+    resolves ``sql_injection``) — that suffix tolerance is the whole point of the
+    substring pass; only the mid-token collisions are removed."""
+    return re.search(rf"(?<![a-z0-9]){re.escape(needle)}", haystack) is not None
 
 logger = get_logger("mitre.kill_chain")
 
@@ -351,7 +367,7 @@ class KillChainAnalyzer:
             phases.update(VULN_KILLCHAIN_MAP[vuln_type])
         elif vuln_type:
             for key, kphases in VULN_KILLCHAIN_MAP.items():
-                if key in vuln_type:
+                if _token_present(key, vuln_type):
                     phases.update(kphases)
 
         # 2. By MITRE technique ID if present
@@ -387,7 +403,10 @@ class KillChainAnalyzer:
         if not phases:
             if any(k in text for k in ("phishing", "spear", "drive-by")):
                 phases.add(KillChainPhase.DELIVERY)
-            elif any(k in text for k in ("rce", "remote code execution", "exploit")):
+            elif ("remote code execution" in text or "exploit" in text
+                  or _token_present("rce", text)):
+                # 'rce' via _token_present, never a bare substring: otherwise a
+                # 'Source code disclosure' title ("sou[rce]") lights Exploitation.
                 phases.add(KillChainPhase.EXPLOITATION)
             elif any(k in text for k in ("persistence", "backdoor", "scheduled task", "service install")):
                 phases.add(KillChainPhase.INSTALLATION)

@@ -79,3 +79,42 @@ def test_missing_response_url_treated_as_same_site():
     # A fake/odd response with no .url must not suppress (falls back to request).
     out = _run(C.audit_url(_NoUrlSession(_LEAKY), "https://target.example/"))
     assert any(f["vuln_type"] == "source_comment_disclosure" for f in out), out
+
+
+# ── password_assignment placeholder screening ─────────────────────────────────
+# The value-bearing password/key pattern is the one secret rule loose enough to
+# fire on a commented-out config *example*. A templated placeholder value must
+# NOT raise a high-severity disclosure, while a real credential still does.
+
+def test_templated_placeholder_credential_not_disclosed():
+    # A commented-out example config with placeholder values is not a leak.
+    for placeholder in (
+        '<!-- api_key: "YOUR_API_KEY_HERE" -->',
+        '<!-- password = "<your-password>" -->',
+        '<!-- secret: "{{SESSION_SECRET}}" -->',
+        '<!-- pwd = "xxxxxxxx" -->',
+        '<!-- api-key="example-key-value" -->',
+    ):
+        out = C._review_source("https://target.example/", f"<html>{placeholder}</html>")
+        assert out == [], (placeholder, out)
+
+
+def test_real_weak_default_credential_still_disclosed():
+    # Real shipped credentials, including weak defaults, must still fire high.
+    for real in (
+        '<!-- password = "Sup3rSecret123" -->',
+        '<!-- password: "changeme" -->',
+        '<!-- admin pwd="admin" -->',
+    ):
+        out = C._review_source("https://target.example/", f"<html>{real}</html>")
+        assert any(f["vuln_type"] == "source_comment_disclosure"
+                   and f["severity"] == "high" for f in out), (real, out)
+
+
+def test_real_secret_next_to_placeholder_in_same_comment_still_caught():
+    # A placeholder sitting beside a genuine credential must not mask it.
+    html = ('<html><!-- sample: api_key="YOUR_KEY_HERE" ; '
+            'live password="R3alP@ssw0rd!" --></html>')
+    out = C._review_source("https://target.example/", html)
+    assert any(f["vuln_type"] == "source_comment_disclosure"
+               and f["severity"] == "high" for f in out), out

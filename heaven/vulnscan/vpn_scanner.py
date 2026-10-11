@@ -67,6 +67,23 @@ def response_opcode(data: bytes, proto: str) -> Optional[int]:
     return data[0] >> 3
 
 
+def _is_server_reset(data: bytes, proto: str) -> Optional[int]:
+    """Return the server hard-reset opcode (2 or 8) only when the reply is
+    structurally an OpenVPN server reset: the opcode's top-5 bits match AND the
+    datagram is long enough to carry the opcode byte plus the mandatory 8-byte
+    server session id. The length guard rejects a stray one-off datagram from an
+    unrelated UDP service that merely happens to start with a matching bit
+    pattern, so the reply opcode and packet shape together are the evidence and
+    the finding stays deterministic."""
+    op = response_opcode(data, proto)
+    if op not in _SERVER_RESET_OPCODES:
+        return None
+    base = 2 if proto == "tcp" else 0      # TCP frames with a 2-byte length prefix
+    if len(data) < base + 1 + 8:           # opcode(1) + server session_id(8)
+        return None
+    return op
+
+
 def _openvpn_exchange(host: str, port: int, proto: str,
                       timeout: float = 5.0) -> Optional[bytes]:
     """Send one hard-reset and return the raw reply bytes (or None)."""
@@ -123,8 +140,9 @@ def _run_openvpn_scan(host: str, port: int = 1194,
     op = response_opcode(reply, proto)
     findings: list[dict] = []
     detected = op in _OPENVPN_OPCODES if op is not None else False
-    if op in _SERVER_RESET_OPCODES:
-        findings.append(_finding(host, port, proto, op))
+    reset_op = _is_server_reset(reply, proto) if reply else None
+    if reset_op is not None:
+        findings.append(_finding(host, port, proto, reset_op))
     return {
         "target": f"{host}:{port}/{proto}",
         "openvpn_detected": detected,

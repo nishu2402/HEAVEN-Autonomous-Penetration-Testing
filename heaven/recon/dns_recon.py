@@ -433,6 +433,17 @@ async def _scan_email_security(domain: str) -> list[dict]:
         ))
     else:
         for sel, record in dkim_found:
+            # The "<1024 bits = factorizable" heuristic only holds for RSA keys.
+            # A k=ed25519 key (RFC 8463) is 256 bits by design and is an elliptic
+            # curve, not an RSA modulus, so it is not factorizable — sizing it
+            # against the RSA threshold flags a modern, correct key as weak (a
+            # false positive). Anchor the k= tag to a tag boundary so base64 in the
+            # p= value cannot be mistaken for it, and default to RSA when absent.
+            ktype_m = re.search(r"(?:^|[;\s\"])k\s*=\s*([A-Za-z0-9]+)",
+                                record, re.IGNORECASE)
+            ktype = ktype_m.group(1).lower() if ktype_m else "rsa"
+            if ktype != "rsa":
+                continue
             key_match = re.search(r"p=([A-Za-z0-9+/=]+)", record)
             if key_match:
                 key_b64 = key_match.group(1)

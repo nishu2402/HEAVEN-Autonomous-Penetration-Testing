@@ -80,6 +80,30 @@ def test_jsp_webshell_detected():
     assert "JSP_Webshell" in _rules(Y.scan_bytes(body))
 
 
+def test_aspx_webshell_detected():
+    # A genuine ASPX shell: a process launch fed from a request value.
+    body = ('<%@ Page Language="C#" %><% System.Diagnostics.Process.Start('
+            '"cmd.exe", "/c " + Request["cmd"]); %>')
+    assert "ASPX_Webshell" in _rules(Y.scan_bytes(body))
+    # eval-from-request is also caught.
+    body2 = '<% eval(Request.QueryString["x"]); %>'
+    assert "ASPX_Webshell" in _rules(Y.scan_bytes(body2))
+
+
+def test_legit_process_start_is_not_a_webshell():
+    # System.Diagnostics.Process.Start is a ubiquitous legitimate .NET API; its
+    # presence WITHOUT a request-value source must not raise a critical webshell.
+    for body in (
+        'var p = System.Diagnostics.Process.Start("notepad.exe");',
+        'Process.Start(new ProcessStartInfo { FileName = "backup.sh" });'
+        ' System.Diagnostics.Process.Start("backup.sh");',
+        '<% System.Diagnostics.Process.Start("report-generator.exe"); %>',
+    ):
+        hits = [m for m in Y.scan_bytes(body)
+                if m.severity in ("critical", "high")]
+        assert hits == [], (body, hits)
+
+
 def test_benign_content_has_no_critical_match():
     body = ("<?php\n// A normal controller.\n"
             "function index($request) { return view('home', ['user' => $request]); }\n?>")

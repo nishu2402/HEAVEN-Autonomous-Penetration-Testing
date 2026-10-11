@@ -127,3 +127,74 @@ def test_summary_exposes_domain_context_fields():
     out = s.summary()
     assert out["domain_info"]["forest"] == "lab.local"
     assert out["domain_info"]["functional_level"] == "Windows Server 2016+"
+
+
+# ── Duck-typed ldap3 Connection for the authenticated-check FP tests ──
+# The real checks only call .search(base, filter, **kw) then read .entries, so a
+# tiny fake directory exercises the production code path with no live DC.
+
+
+class _FakeAttr:
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return str(self.value)
+
+    @property
+    def values(self):
+        return self.value if isinstance(self.value, list) else [self.value]
+
+
+class _FakeEntry:
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, _FakeAttr(v))
+
+
+class _FakeConn:
+    def __init__(self, entries):
+        self._entries = entries
+        self.entries: list = []
+        self.filters: list[str] = []
+
+    def search(self, base, search_filter, **kw):
+        self.filters.append(search_filter)
+        self.entries = self._entries
+
+
+def test_unconstrained_delegation_excludes_domain_controllers():
+    # Writable DCs legitimately carry unconstrained delegation, so the LDAP
+    # query must exclude DC computer objects (SERVER_TRUST_ACCOUNT 0x2000) to
+    # avoid a guaranteed critical FP on every domain, while still flagging a
+    # genuine non-DC host.
+    s = ADScanner(domain="lab.local", dc_host="dc01")
+    s.domain_dn = "DC=lab,DC=local"
+    s._conn = _FakeConn([_FakeEntry(sAMAccountName="WEBSRV$")])
+    asyncio.run(s.check_delegation_abuse())
+    assert any("1.2.840.113556.1.4.803:=8192" in f for f in s._conn.filters), \
+        "delegation query must exclude DCs via the SERVER_TRUST_ACCOUNT bit"
+    deleg = [f for f in s._findings
+             if f.attack_type == ADAttackType.UNCONSTRAINED_DELEG]
+    assert deleg and deleg[0].severity == "critical"
+    assert "WEBSRV$" in deleg[0].affected_objects   # recall preserved for non-DCs
+
+
+def test_dcsync_admincount_is_not_a_confirmed_critical_right():
+    # adminCount=1 is set by AdminSDHolder on every built-in privileged account,
+    # so reporting it as a critical, confirmed DCSync right is a universal FP. It
+    # must be surfaced only as a medium ACL-audit pointer with honest wording.
+    s = ADScanner(domain="lab.local", dc_host="dc01")
+    s.domain_dn = "DC=lab,DC=local"
+    s._conn = _FakeConn([_FakeEntry(sAMAccountName="Administrator"),
+                         _FakeEntry(sAMAccountName="krbtgt")])
+    asyncio.run(s.check_dcsync_rights())
+    dc = [f for f in s._findings if f.attack_type == ADAttackType.DCSYNC_RISK]
+    assert dc, "privileged accounts should still be surfaced for the ACL review"
+    f = dc[0]
+    assert f.severity != "critical"
+    assert f.confidence < 0.8
+    # Wording must correct the adminCount=1 -> DCSync misconception, not assert it.
+    low = f.description.lower()
+    assert "adminsdholder" in low and "not" in low
+    assert "Administrator" in f.affected_objects

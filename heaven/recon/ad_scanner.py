@@ -952,15 +952,22 @@ class ADScanner:
                 findings.append(ADFinding(
                     target=self.domain,
                     attack_type=ADAttackType.DCSYNC_RISK,
-                    severity="critical",
-                    title=f"DCSync Risk: {len(admin_accounts)} privileged accounts identified",
+                    severity="medium",
+                    title=(f"Replication ACL review: {len(admin_accounts)} privileged "
+                           "accounts (DCSync rights not confirmed)"),
                     description=(
-                        f"Found {len(admin_accounts)} accounts with adminCount=1 that may have "
-                        "DS-Replication-Get-Changes rights. Compromising any of these accounts "
-                        "could allow DCSync to extract all domain password hashes."
+                        f"Identified {len(admin_accounts)} accounts with adminCount=1. "
+                        "That attribute only marks an account as protected by "
+                        "AdminSDHolder because it belongs to a privileged group; it is "
+                        "not evidence that a DS-Replication-Get-Changes right has been "
+                        "delegated. A genuine DCSync exposure is a non-default principal "
+                        "granted the replication extended rights on the domain head, "
+                        "which has to be confirmed from the domain object security "
+                        "descriptor. Treat this as a pointer for that ACL review, not a "
+                        "confirmed delegated right."
                     ),
                     affected_objects=admin_accounts[:20],
-                    confidence=0.80,
+                    confidence=0.5,
                     remediation=(
                         "Audit replication rights with: Get-ACL 'AD:\\DC=domain,DC=local'. "
                         "Remove unnecessary replication permissions. "
@@ -982,10 +989,18 @@ class ADScanner:
 
         findings = []
         try:
-            # Unconstrained delegation (UAC 0x80000 = TRUSTED_FOR_DELEGATION)
+            # Unconstrained delegation (UAC 0x80000 = TRUSTED_FOR_DELEGATION) on a
+            # NON-DC computer. Writable Domain Controllers legitimately carry
+            # unconstrained delegation (it is how a DC operates), so including them
+            # is a guaranteed false positive on every domain. DC computer objects
+            # are exactly the ones with SERVER_TRUST_ACCOUNT (0x2000) set, so
+            # exclude that bit and keep only the dangerous non-DC case. (RODCs do
+            # not set TRUSTED_FOR_DELEGATION, so they never reach this filter.)
             self._conn.search(
                 self.domain_dn,
-                "(&(objectClass=computer)(userAccountControl:1.2.840.113556.1.4.803:=524288))",
+                "(&(objectClass=computer)"
+                "(userAccountControl:1.2.840.113556.1.4.803:=524288)"
+                "(!(userAccountControl:1.2.840.113556.1.4.803:=8192)))",
                 search_scope=SUBTREE,
                 attributes=["sAMAccountName", "dNSHostName"],
             )

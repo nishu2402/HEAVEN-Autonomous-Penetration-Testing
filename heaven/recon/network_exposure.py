@@ -1192,6 +1192,14 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
             continue
         pairs = _port_service_pairs(host)
         ports = {p for p, _ in pairs}
+        # Per-port banner/product/version, so the cleartext check can tell an FTP
+        # that advertises AUTH TLS (FTPS) from a plain one.
+        port_meta: dict[int, dict] = {}
+        for _p in host.get("open_ports", []):
+            try:
+                port_meta[int(_p.get("port", 0) or 0)] = _p
+            except (TypeError, ValueError):
+                continue
 
         # 1) Cleartext / legacy protocols (port OR nmap service name)
         for port, svc in pairs:
@@ -1206,14 +1214,34 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                         break
             if spec:
                 label, sev, why, _names = spec
+                desc = (why + " Disable it and use an encrypted equivalent "
+                        "(SSH/SFTP/HTTPS) restricted to a management network.")
+                ev = {"port": port, "service": svc or label.lower(),
+                      "protocol": label}
+                # An FTP that advertises AUTH TLS (FTPS) still accepts plaintext
+                # logins unless TLS is enforced, so it stays a finding — but the
+                # banner shows SSL/TLS support, so do not baldly assert the
+                # service is cleartext-only. Word it precisely and recommend
+                # enforcing TLS instead.
+                if label == "FTP":
+                    _m = port_meta.get(port, {})
+                    _b = (f"{_m.get('product','')} {_m.get('version','')} "
+                          f"{_m.get('banner','')} {_m.get('service_version','')}").lower()
+                    if "ssl" in _b or "tls" in _b or "ftps" in _b:
+                        desc = (
+                            "This FTP service advertises AUTH TLS (FTPS), but "
+                            "unless TLS is enforced it still accepts plaintext "
+                            "logins and data transfers, so credentials can be "
+                            "sniffed. Require TLS for every session (e.g. "
+                            "Pure-FTPd TLSRequired / vsftpd force_... ) or move "
+                            "clients to SFTP/HTTPS.")
+                        ev["tls_advertised"] = True
                 findings.append(_finding(
                     f"{ip}:{port}", "cleartext_service", sev,
                     f"Cleartext Service Exposed: {label} (port {port})",
-                    why + " Disable it and use an encrypted equivalent "
-                    "(SSH/SFTP/HTTPS) restricted to a management network.",
+                    desc,
                     confidence=0.85,
-                    evidence={"port": port, "service": svc or label.lower(),
-                              "protocol": label},
+                    evidence=ev,
                 ))
 
         # 1a) Backdoor shells & RCE-by-design services (any network — a backdoor

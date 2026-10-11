@@ -261,6 +261,57 @@ class TestFindingDedup:
         assert is_host_level("no_x_content_type") and is_host_level("xml_accepted")
         assert not is_host_level("xss") and not is_host_level("sqli") and not is_host_level("idor")
 
+    def test_terrapin_cve_collapses_across_cvemapper_and_nuclei(self):
+        """Regression (live scanme.nmap.org): Terrapin (CVE-2023-48795) was
+        reported twice — cve_mapper's banner-version copy carried host:22, the
+        nuclei copy carried no port — so the (host, port, CVE) identities
+        differed and did not collapse. With nuclei lifting the port from
+        matched-at both are one finding; the actively-detected nuclei copy
+        (richer evidence) is kept."""
+        from heaven.engagement import dedup_findings
+        out = dedup_findings([
+            {"target": "scanme.nmap.org:22", "host": "scanme.nmap.org", "port": 22,
+             "vuln_type": "vulnerable_service", "cve": "CVE-2023-48795",
+             "severity": "medium", "confidence": 0.9, "evidence": {"cvss_base": 5.9}},
+            {"target": "scanme.nmap.org", "port": 22, "vuln_type": "nuclei",
+             "cve": "CVE-2023-48795", "severity": "medium", "confidence": 0.9,
+             "evidence": {"template": "CVE-2023-48795", "matched": "scanme.nmap.org:22",
+                          "extracted": ["Vulnerable to Terrapin"]}},
+        ])
+        assert len([f for f in out if f.get("cve") == "CVE-2023-48795"]) == 1
+        # A port-less nuclei copy (pre-fix) does NOT collapse — proving the port
+        # lifted from matched-at is what unifies the two identities.
+        out_noport = dedup_findings([
+            {"target": "scanme.nmap.org:22", "host": "scanme.nmap.org", "port": 22,
+             "vuln_type": "vulnerable_service", "cve": "CVE-2023-48795",
+             "severity": "medium", "confidence": 0.9},
+            {"target": "scanme.nmap.org", "vuln_type": "nuclei",
+             "cve": "CVE-2023-48795", "severity": "medium", "confidence": 0.9},
+        ])
+        assert len([f for f in out_noport if f.get("cve") == "CVE-2023-48795"]) == 2
+
+    def test_spf_softfail_consolidates_into_spf_analysis(self):
+        """Regression (live nmap.org): email_scanner's comprehensive spf_analysis
+        and dns_recon's per-qualifier spf_soft_fail both flagged the SAME ~all
+        record, so one domain's SPF was reported twice (two mediums). When
+        spf_analysis is present it subsumes the per-qualifier copy, which is
+        dropped; a DNS-only scan (no spf_analysis) keeps spf_soft_fail."""
+        from heaven.engagement import dedup_findings
+        both = dedup_findings([
+            {"target": "nmap.org", "vuln_type": "spf_analysis", "severity": "medium",
+             "confidence": 0.95, "evidence": {"issues": ["~all softfail"]}},
+            {"target": "nmap.org", "vuln_type": "spf_soft_fail", "severity": "medium",
+             "confidence": 0.95, "evidence": {"spf": "v=spf1 ... ~all"}},
+        ])
+        kinds = [f["vuln_type"] for f in both]
+        assert "spf_analysis" in kinds and "spf_soft_fail" not in kinds
+        # DNS-only: no spf_analysis present → the per-qualifier finding survives.
+        dns_only = dedup_findings([
+            {"target": "nmap.org", "vuln_type": "spf_soft_fail", "severity": "medium",
+             "confidence": 0.95, "evidence": {"spf": "v=spf1 ... ~all"}},
+        ])
+        assert [f["vuln_type"] for f in dns_only] == ["spf_soft_fail"]
+
     def test_weak_password_policy_collapses_per_host(self):
         """Regression (live www.certifiedhacker.com): the auth password-policy
         probe builds its register URLs from absolute paths and runs once per

@@ -707,6 +707,7 @@ class DirectoryFuzzer:
                             f"{len(targets)} targets")
                 deduped_ffuf = self._dedup(all_findings)
                 await self._capture_responses(deduped_ffuf)
+                deduped_ffuf = self._collapse_soft200_catchall(deduped_ffuf)
                 return {"findings": deduped_ffuf,
                         "urls_tested": len(targets), "error": None}
             logger.info("DirFuzzer: ffuf unavailable/failed for %d/%d target(s): "
@@ -736,6 +737,7 @@ class DirectoryFuzzer:
 
         deduped = self._dedup(all_findings)
         await self._capture_responses(deduped)
+        deduped = self._collapse_soft200_catchall(deduped)
         logger.info(f"DirFuzzer: {len(deduped)} unique paths found")
         return {"findings": deduped, "urls_tested": len(targets), "error": None}
 
@@ -792,6 +794,51 @@ class DirectoryFuzzer:
                 seen.add(key)
                 deduped.append(f)
         return deduped
+
+    @staticmethod
+    def _collapse_soft200_catchall(findings: list[dict]) -> list[dict]:
+        """Collapse per-host status-200 hits that return a BYTE-IDENTICAL body.
+
+        A server answering several probed paths with the same 200 page is a
+        catch-all for that path family: a live scan of www.certifiedhacker.com
+        returned the identical cPanel-redirect page for /cpanel, /whm AND the
+        non-existent /controlpanel, so three "sensitive path discovered"
+        findings triple-counted one resource and asserted a path (/controlpanel)
+        that is not really there. Keep ONE representative (shortest path) per
+        identical 200 body on a host and record the siblings under
+        ``evidence.also_served``.
+
+        The random-path wildcard filter misses this because random probes land
+        on the real site (SPA/404), not on this narrower cPanel-alias catch-all.
+        Scoped to 200 on purpose: a shared 401/403/301 body is the server's
+        generic auth/redirect page, where each protected or redirected path is a
+        real, distinct observation, so those are left untouched. A finding whose
+        body was not captured is also left as-is (nothing to compare)."""
+        by_body: dict[tuple[str, str], list[dict]] = {}
+        passthrough: list[dict] = []
+        for f in findings:
+            ev = f.get("evidence") if isinstance(f, dict) else None
+            body = (ev or {}).get("response_body") if isinstance(ev, dict) else None
+            if isinstance(ev, dict) and ev.get("status_code") == 200 and body:
+                host = urlparse(f.get("target", "")).netloc
+                by_body.setdefault((host, body), []).append(f)
+            else:
+                passthrough.append(f)
+        if not any(len(g) > 1 for g in by_body.values()):
+            return findings  # nothing to collapse — preserve original list/order
+        out: list[dict] = list(passthrough)
+        for group in by_body.values():
+            if len(group) == 1:
+                out.append(group[0])
+                continue
+            rep = min(group, key=lambda g: len(
+                (g.get("evidence") or {}).get("path") or g.get("target") or ""))
+            siblings = sorted({
+                (g.get("evidence") or {}).get("path") or g.get("target", "")
+                for g in group if g is not rep})
+            rep.setdefault("evidence", {})["also_served"] = siblings
+            out.append(rep)
+        return out
 
 
 # ─────────────────────────────────────────────────────────────────

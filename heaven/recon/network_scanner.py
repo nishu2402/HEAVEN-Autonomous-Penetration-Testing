@@ -563,7 +563,12 @@ def _device_type_from_mac_vendor(vendor: str) -> str:
 _SERVICE_DEVICE_TYPES: list[tuple[str, set[int], str]] = [
     ("industrial control system", {502}, "any"),       # Modbus
     ("industrial control system", {102}, "any"),        # Siemens S7
-    ("industrial control system", {44818, 2222}, "any"),  # EtherNet/IP
+    # EtherNet/IP: key on 44818 (explicit-messaging TCP port), which real CIP
+    # devices virtually always expose. Port 2222 (implicit messaging) is NOT a
+    # usable sole signal — it is overwhelmingly SSH-alt / cPanel's SSH in the
+    # wild, so triggering on 2222 alone misclassified ordinary web/cPanel hosts
+    # (e.g. a Bluehost box with an alternate SSH port) as industrial controllers.
+    ("industrial control system", {44818}, "any"),  # EtherNet/IP (explicit msg)
     ("industrial control system", {20000}, "any"),      # DNP3
     ("industrial control system", {47808}, "any"),      # BACnet
     ("printer", {9100}, "any"),                          # JetDirect raw print

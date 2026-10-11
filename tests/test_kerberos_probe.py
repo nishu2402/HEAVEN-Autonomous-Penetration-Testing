@@ -105,7 +105,9 @@ def test_candidate_list_is_bounded(monkeypatch):
     asyncio.run(k.kerberos_preauth_probe(
         "corp.local", "10.0.0.10",
         extra_users=[f"u{i}" for i in range(500)], max_users=10))
-    assert len(seen) == 10
+    # Exactly 10 bounded candidates were probed (plus one separate oracle canary,
+    # which does not count against the candidate budget).
+    assert sum(1 for u in seen if u.startswith("u")) == 10
 
 
 # ── _probe_one classifier against genuine KDC bytes ──────────────────────────
@@ -140,6 +142,66 @@ def test_probe_one_kerberos_errors_classify(monkeypatch):
     assert k._probe_one("ghost", "HEAVEN.LOCAL", "127.0.0.1")["state"] == "absent"
     monkeypatch.setattr(k, "sendReceive", _raise(k._ERR_CLIENT_REVOKED))
     assert k._probe_one("locked", "HEAVEN.LOCAL", "127.0.0.1")["state"] == "revoked"
+
+
+def test_probe_one_garbage_reply_is_error(monkeypatch):
+    # A reply that decodes as neither KRB-ERROR nor AS-REP (truncated read, a
+    # middlebox banner, raw garbage) must classify as "error" — never roastable.
+    # The old code fell straight through to roastable, emitting a HIGH-severity
+    # AS-REP-roasting finding (hash=None) on bytes it never parsed.
+    garbage = b"\x30\x05\x02\x01\x01\x04\x00not-a-kerberos-message"
+    monkeypatch.setattr(k, "sendReceive", lambda msg, dom, kdc: garbage)
+    res = k._probe_one("alice", "HEAVEN.LOCAL", "127.0.0.1")
+    assert res["state"] == "error"
+    assert "hash" not in res
+
+
+def test_masking_kdc_suppresses_user_enumeration(monkeypatch):
+    # A KDC that answers PREAUTH_REQUIRED ("exists") for EVERY name — including the
+    # known-nonexistent oracle canary — is not leaking account existence, so the
+    # enumeration oracle is unreliable and no "valid users" finding may be emitted.
+    monkeypatch.setattr(k, "_probe_one",
+                        lambda user, domain, kdc: {"state": "exists"})
+    findings = asyncio.run(k.kerberos_preauth_probe(
+        "corp.local", "10.0.0.10",
+        extra_users=["definitely_fake_zzz9981", "krbtgt", "administrator"]))
+    assert [f for f in findings if f["vuln_type"] == "kerberos_user_enumeration"] == []
+
+
+def test_masking_kdc_still_reports_genuine_roastable(monkeypatch):
+    # Even when the enumeration oracle is masked, a genuine AS-REP cannot be forged
+    # for an account the KDC holds no key for, so a roastable account is still a
+    # real finding. Enumeration is suppressed; AS-REP roasting survives.
+    def _probe(user, domain, kdc):
+        if user == "svc_roast":
+            return {"state": "roastable",
+                    "hash": "$krb5asrep$23$svc_roast@CORP.LOCAL:aa$bb"}
+        return {"state": "exists"}  # masks everything else, canary included
+
+    monkeypatch.setattr(k, "_probe_one", _probe)
+    findings = asyncio.run(k.kerberos_preauth_probe(
+        "corp.local", "10.0.0.10", extra_users=["svc_roast", "administrator"]))
+    vtypes = [f["vuln_type"] for f in findings]
+    assert "asrep_roasting" in vtypes
+    assert "kerberos_user_enumeration" not in vtypes
+
+
+def test_working_oracle_keeps_user_enumeration(monkeypatch):
+    # When the canary gets PRINCIPAL_UNKNOWN ("absent"), the oracle distinguishes
+    # real from fake accounts, so a valid-user list is trustworthy and reported.
+    def _probe(user, domain, kdc):
+        if user.startswith("zz"):          # the oracle canary
+            return {"state": "absent"}
+        if user == "alice":
+            return {"state": "exists"}
+        return {"state": "absent"}
+
+    monkeypatch.setattr(k, "_probe_one", _probe)
+    findings = asyncio.run(k.kerberos_preauth_probe(
+        "corp.local", "10.0.0.10", extra_users=["alice", "ghost"]))
+    enum = [f for f in findings if f["vuln_type"] == "kerberos_user_enumeration"]
+    assert len(enum) == 1
+    assert enum[0]["evidence"]["valid_users"] == ["alice"]
 
 
 def test_format_asrep_hash_rc4_and_aes():

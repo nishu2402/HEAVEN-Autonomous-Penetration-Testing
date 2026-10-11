@@ -102,6 +102,24 @@ def test_apache_2453_above_ceiling_not_matched():
     assert "CVE-2021-40438" not in ids
 
 
+def test_cve_2020_13950_floored_at_introduced_version():
+    """CVE-2020-13950's mod_proxy_http NULL-deref code path was introduced in
+    2.4.41 (NVD window 2.4.41-2.4.46, fixed 2.4.47), so a bare >=2.4.0 branch
+    floor flagged ubiquitous older 2.4 builds — a live full scan of
+    scanme.nmap.org reported it as a HIGH on Apache 2.4.7 (Ubuntu 14.04), which
+    predates the vulnerable code by 34 point releases. Floor at the
+    introduced-in version so only the real 2.4.41-2.4.46 window matches."""
+    for safe in ("2.4.7", "2.4.30", "2.4.40"):
+        ids = {r.cve_id for r in lookup_inline_cves("apache_http_server", safe)}
+        assert "CVE-2020-13950" not in ids, f"{safe} predates the 2.4.41 code path"
+    for vuln in ("2.4.41", "2.4.43", "2.4.46"):
+        ids = {r.cve_id for r in lookup_inline_cves("apache_http_server", vuln)}
+        assert "CVE-2020-13950" in ids, f"{vuln} is inside the real affected window"
+    # The fixed release (2.4.47) is above the ceiling.
+    assert "CVE-2020-13950" not in {
+        r.cve_id for r in lookup_inline_cves("apache_http_server", "2.4.47")}
+
+
 # ── IIS HTTP Protocol Stack (http.sys) RCEs are IIS 10.0-only ─────────────────
 # CVE-2021-31166 / CVE-2022-21907 live in the http.sys driver that ships only
 # with IIS 10.0 (Windows 10 2004+/Server 2019+). A bare "<=10.0" ceiling swept
@@ -262,6 +280,44 @@ def test_live_feed_version_confirmed_hit_emitted_individually():
     assert len(hits) == 1
     assert hits[0]["vuln_type"] == "vulnerable_service"
     assert hits[0]["confidence"] == 0.85
+
+
+def test_client_side_cve_ids_cover_inline_and_live_only():
+    ids = CM._client_side_cve_ids()
+    assert "CVE-2025-26465" in ids          # live-only addition (VerifyHostKeyDNS MITM)
+    assert "CVE-2023-38408" in ids          # inline ssh-agent client CVE
+    assert "CVE-2020-15778" in ids          # inline scp client CVE
+    # Server-side 2025 OpenSSH CVEs must NOT be in the client-side set.
+    assert "CVE-2025-26466" not in ids      # pre-auth ping/pong DoS (server)
+    assert "CVE-2025-32728" not in ids      # DisableForwarding sshd (server)
+
+
+def test_live_feed_drops_client_side_cve_on_server():
+    """Regression (live www.certifiedhacker.com, OpenSSH 9.9): the live NVD path
+    has no client_side flag, so CVE-2025-26465 (VerifyHostKeyDNS MITM — a CLIENT
+    weakness) was asserted as a medium server 'vulnerable_service' on port 22.
+    The client-side filter now drops it from the live path while keeping the
+    genuinely server-side OpenSSH CVEs."""
+    class Feed:
+        available = True
+
+        async def discover_for_service(self, service, banner="", version=""):
+            return [
+                _FakeLiveCVE("CVE-2025-26465", 6.8, True),   # client-side → drop
+                _FakeLiveCVE("CVE-2025-26466", 5.9, True),   # server DoS → keep
+                _FakeLiveCVE("CVE-2025-32728", 4.3, True),   # server config → keep
+            ]
+
+    host = {"host": "www.certifiedhacker.com", "open_ports": [
+        {"port": 22, "service": "ssh", "banner": "SSH-2.0-OpenSSH_9.9",
+         "version": "9.9", "product": "OpenSSH"},
+    ]}
+    out = asyncio.run(CM.map_vulnerabilities([host], nvd_client=None,
+                                             live_feed=Feed(), max_live_lookups=5))
+    cves = {v.get("cve") for v in out}
+    assert "CVE-2025-26465" not in cves          # client-side dropped
+    assert "CVE-2025-26466" in cves              # server-side kept
+    assert "CVE-2025-32728" in cves              # server-side kept
 
 
 # ── 4. Old-version live-feed fallback (`not inline_cves`, not `product not in DB`) ─

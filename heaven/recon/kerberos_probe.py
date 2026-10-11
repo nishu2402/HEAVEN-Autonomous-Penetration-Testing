@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import random
+import secrets
 import socket
 from typing import Optional
 
@@ -157,10 +158,19 @@ def _probe_one(username: str, domain_upper: str, kdc_host: str) -> dict:
     try:
         decoder.decode(reply, asn1Spec=KRB_ERROR())[0]
     except Exception:
-        # not a KRB-ERROR → it really is an AS-REP (fall through)
-        logger.debug("reply did not decode as KRB-ERROR; treating as AS-REP", exc_info=True)
+        # not a KRB-ERROR → fall through and confirm it is a real AS-REP
+        logger.debug("reply did not decode as KRB-ERROR; checking for AS-REP", exc_info=True)
     else:
         return {"state": "exists"}  # swallowed PREAUTH_REQUIRED → account is protected
+    # Not a KRB-ERROR. Only call it roastable when the buffer is a *decodable*
+    # AS-REP: a truncated or malformed reply (garbage off the wire, a middlebox
+    # banner, a partial read) must never be reported as a crackable ticket — that
+    # would be a high-severity false positive on bytes we never parsed.
+    try:
+        decoder.decode(reply, asn1Spec=AS_REP())[0]
+    except Exception:
+        logger.debug("reply decoded as neither KRB-ERROR nor AS-REP", exc_info=True)
+        return {"state": "error"}
     # A genuine AS-REP came back → the account does not require pre-auth.
     h = _format_asrep_hash(reply, username, domain_upper)
     return {"state": "roastable", "hash": h}
@@ -195,19 +205,29 @@ async def kerberos_preauth_probe(domain: str, dc_host: str,
         if len(candidates) >= max_users:
             break
 
-    def _run() -> list[tuple[str, dict]]:
+    # A high-entropy name that cannot correspond to a real account. It is used as
+    # an enumeration-oracle control: a KDC that leaks account existence answers
+    # PRINCIPAL_UNKNOWN ("absent") for a name this random. If instead it classifies
+    # the canary the same way it classifies the real candidates (PREAUTH_REQUIRED,
+    # i.e. "exists"), its errors do not distinguish real from fake accounts, so the
+    # enumeration oracle is not actually working and any "valid user" list would be
+    # fabricated. Probed separately from ``candidates`` so it never pollutes counts.
+    canary = "zz" + secrets.token_hex(12)
+
+    def _run() -> tuple[list[tuple[str, dict]], dict]:
         results: list[tuple[str, dict]] = []
         old_timeout = socket.getdefaulttimeout()
         socket.setdefaulttimeout(timeout)
         try:
             for user in candidates:
                 results.append((user, _probe_one(user, domain_upper, dc_host)))
+            canary_res = _probe_one(canary, domain_upper, dc_host)
         finally:
             socket.setdefaulttimeout(old_timeout)
-        return results
+        return results, canary_res
 
     try:
-        results = await asyncio.to_thread(_run)
+        results, canary_res = await asyncio.to_thread(_run)
     except Exception:
         logger.debug("Kerberos probe thread failed", exc_info=True)
         return []
@@ -231,7 +251,18 @@ async def kerberos_preauth_probe(domain: str, dc_host: str,
     if not conclusive:
         return []
 
-    if valid_users:
+    # Suppress the enumeration finding when the oracle is unreliable: a KDC that
+    # returns an "exists"-class response for the known-nonexistent canary is not
+    # leaking account existence, so the valid-user list cannot be trusted. The
+    # AS-REP-roasting findings below are unaffected — a genuine AS-REP cannot be
+    # forged for an account the KDC holds no key for, so they stand on their own.
+    oracle_masked = canary_res.get("state") in ("exists", "revoked", "roastable")
+    if oracle_masked:
+        logger.debug(
+            "Kerberos enumeration oracle masked (canary classified as %s); "
+            "suppressing user-enumeration finding", canary_res.get("state"))
+
+    if valid_users and not oracle_masked:
         findings.append({
             "target": dc_host,
             "vuln_type": "kerberos_user_enumeration",

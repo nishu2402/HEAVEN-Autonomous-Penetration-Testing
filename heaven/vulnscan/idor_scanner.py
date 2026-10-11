@@ -119,7 +119,8 @@ _SENSITIVE_MARKERS: list[re.Pattern] = [
 ]
 
 
-def _sensitive_markers(body: str, *, limit: int = 8) -> list[str]:
+def _sensitive_markers(body: str, *, limit: int = 8,
+                       strong_only: bool = False) -> list[str]:
     """Return distinct snippets of any sensitive-data markers in a response body —
     the signal that an altered-ID response actually exposed a record's private
     data rather than merely returning a different (possibly public) object.
@@ -127,10 +128,19 @@ def _sensitive_markers(body: str, *, limit: int = 8) -> list[str]:
     Every distinct match is collected (not just the first per pattern) so the
     IDOR verdict can diff the altered-object response against the attacker's own:
     a marker present in BOTH (a site-wide footer email, a published contact
-    address) is page furniture, not another user's record, and must not count."""
+    address) is page furniture, not another user's record, and must not count.
+
+    ``strong_only`` drops the bare-email pattern (``_SENSITIVE_MARKERS[0]``),
+    which matches a contact address anywhere in free text. The unauthenticated-
+    access check has no second response to diff furniture away against (its auth
+    and unauth bodies are identical by construction), so a site-wide footer email
+    on a public page would otherwise read as a protected record. It instead
+    requires a *structured record* marker (a JSON key such as ``"ssn":`` /
+    ``"first_name":`` / ``"credit_card":``) that does not appear on an ordinary
+    public page carrying only a contact email."""
     found: list[str] = []
     seen: set[str] = set()
-    for rx in _SENSITIVE_MARKERS:
+    for rx in (_SENSITIVE_MARKERS[1:] if strong_only else _SENSITIVE_MARKERS):
         for m in rx.finditer(body or ""):
             snippet = m.group(0)[:48]
             if snippet not in seen:
@@ -546,7 +556,11 @@ class IDORScanner:
         the "authed" and "unauthed" requests are identical, so every id'd 200 URL
         would look like unauth access (a critical-severity false positive). And an
         identical body that carries no sensitive data is just a public page, not a
-        broken-access-control finding.
+        broken-access-control finding. The sensitive-data gate requires a
+        *structured record* marker (``strong_only``) rather than a bare email: a
+        public id'd page (``/blog/42``) that merely shows a contact address in its
+        footer returns the same body with or without auth and would otherwise fire
+        this critical finding, which is page furniture, not a protected object.
         """
         if not self._has_auth:
             return
@@ -563,7 +577,7 @@ class IDORScanner:
 
         if (auth_status == 200 and unauth_status == 200
                 and not _body_differs(auth_body, unauth_body)
-                and _sensitive_markers(unauth_body)):
+                and _sensitive_markers(unauth_body, strong_only=True)):
             self._add(
                 target=url,
                 vuln_type="idor",

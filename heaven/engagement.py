@@ -839,6 +839,42 @@ _HEADER_BUNDLE_COVERAGE = {
 }
 
 
+# dns_recon emits a per-qualifier SPF finding (spf_soft_fail / spf_neutral /
+# spf_open_relay) while email_scanner emits one comprehensive ``spf_analysis``
+# that assesses the SAME published record. On a full scan both run, so one
+# domain's SPF ``all`` qualifier is reported twice under different vuln_types,
+# which identity-based dedup cannot merge (different vuln_type = different
+# identity by design). spf_analysis subsumes each per-qualifier case and is at
+# least as severe for every qualifier (critical for +all, high for ?all, and
+# email_scanner's deliberate low for the widely-accepted ~all), so the
+# per-qualifier copy is the redundant one.
+_SPF_QUALIFIER_TYPES = frozenset({"spf_soft_fail", "spf_neutral", "spf_open_relay"})
+
+
+def _consolidate_spf_family(findings: list) -> list:
+    """Drop dns_recon's per-qualifier SPF finding for a domain when
+    email_scanner's comprehensive ``spf_analysis`` is present for it.
+
+    Conservative by construction: the per-qualifier copy is removed only when
+    ``spf_analysis`` covers the SAME host, so a DNS-only scan (where
+    email_scanner never runs) keeps its SPF finding and loses no coverage."""
+    analysed_hosts = {
+        _host_key(str(f.get("target", "")))
+        for f in findings
+        if isinstance(f, dict) and str(f.get("vuln_type", "")) == "spf_analysis"
+    }
+    if not analysed_hosts:
+        return findings
+    out: list = []
+    for f in findings:
+        if (isinstance(f, dict)
+                and str(f.get("vuln_type", "")) in _SPF_QUALIFIER_TYPES
+                and _host_key(str(f.get("target", ""))) in analysed_hosts):
+            continue
+        out.append(f)
+    return out
+
+
 def _consolidate_header_family(findings: list) -> list:
     """Drop the misconfig header *bundle* / duplicate clickjacking for a host
     when auth_scanner's granular per-header findings already cover it.
@@ -918,7 +954,7 @@ def dedup_findings(findings: list) -> list:
         if is_host_level(vuln_type):
             best[key]["target"] = _host_key(target)
     deduped = [best[k] for k in order if k not in suppressed_keys]
-    return _consolidate_header_family(deduped)
+    return _consolidate_header_family(_consolidate_spf_family(deduped))
 
 
 # Human-readable phrasing for the suppressor's machine reason codes, so a lead's

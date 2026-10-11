@@ -551,16 +551,36 @@ _UNCONFIRMED_MARKERS = (
 
 def is_unconfirmed_finding(finding: dict[str, Any]) -> bool:
     """True when the detector itself signals this is a weak / unconfirmed
-    detection — a heuristic 'indicator / possible / potential' finding, or an
-    explicit low confidence with no authoritative CVE backing it. These must not
-    be scored as if the confirmed weakness class were proven present."""
+    detection — a heuristic 'indicator / possible / potential' finding, or a low
+    confidence (raw *or* calibrated) with no authoritative CVE backing it. These
+    must not be scored as if the confirmed weakness class were proven present."""
     hay = " ".join(str(finding.get(k) or "") for k in ("vuln_type", "type", "title")).lower()
     if any(m in hay for m in _UNCONFIRMED_MARKERS):
         return True
-    conf = _finding_and_evidence_num(finding, ("confidence",))
     ev = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
     has_cve = bool(finding.get("cve") or finding.get("cve_id") or ev.get("cve"))
-    return conf is not None and 0.0 < conf < 0.5 and not has_cve
+    # A published CVE is authoritative for *impact* (HEAVEN scores severity =
+    # impact-if-true); its *likelihood* is carried by the Confirmed/Potential
+    # status and the shown confidence, never by capping the band. So a CVE-backed
+    # finding is never treated as unconfirmed here — a banner-matched Critical RCE
+    # stays "Critical (Potential)", it does not get demoted to a Low number.
+    if has_cve:
+        return False
+    conf = _finding_and_evidence_num(finding, ("confidence",))
+    if conf is not None and 0.0 < conf < 0.5:
+        return True
+    # Second, independent weak-signal read: the additive ML calibrator
+    # (``evidence.calibrated_confidence``, see vulnscan/calibration.py). When it
+    # places a no-CVE finding in lead territory (sub-0.40 calibrated) even though
+    # the adjudicated ``confidence`` cleared the bar — e.g. a fuzzing anomaly or a
+    # version-banner class finding the calibrator rates ~0.3 — the hot class band
+    # over-claims. Treat it as unconfirmed so the CVSS number is pulled to the
+    # detector's own band and the finding reads Potential, not Confirmed. The
+    # calibrator lifts a validated PoC well above 0.40, so this never touches
+    # proven findings; and leaving ``confidence`` itself untouched preserves the
+    # zero-FP adjudication the calibration layer is deliberately additive to.
+    cal = _finding_and_evidence_num(finding, ("calibrated_confidence",))
+    return cal is not None and 0.0 < cal < 0.40
 
 
 def _has_published_score(finding: dict[str, Any]) -> bool:

@@ -35,6 +35,38 @@ def _is_noise_template(template_id: str, name: str) -> bool:
     return bool(_NUCLEI_NOISE_NAME_RE.match(name or ""))
 
 
+def _host_port_from_matched(matched: str) -> tuple[str, str]:
+    """Pull ``(host, port)`` out of Nuclei's ``matched-at`` string.
+
+    ``matched-at`` is either a URL (``http://host[:port]/path`` — the scheme's
+    default port when none is explicit) or a bare ``host:port`` for network
+    templates (the SSH Terrapin check reports ``scanme.nmap.org:22``). Recording
+    the port lets a service CVE dedup against the banner-version copy that
+    cve_mapper emits for the SAME ``(host, port, CVE)``: without it the nuclei
+    copy has an empty port, hashes to a different identity and the one CVE shows
+    twice. Returns ``("", "")`` when neither form yields a port (e.g. a bracketed
+    IPv6 authority), leaving the finding port-less exactly as before."""
+    m = (matched or "").strip()
+    if not m:
+        return "", ""
+    if "://" in m:
+        from urllib.parse import urlsplit
+        try:
+            u = urlsplit(m)
+            host = u.hostname or ""
+            if u.port:
+                return host, str(u.port)
+        except ValueError:
+            return "", ""
+        return host, {"https": "443", "http": "80"}.get(u.scheme, "")
+    # Bare host:port (exactly one colon → not a bracket-less IPv6 address).
+    if m.count(":") == 1:
+        host, _, port = m.partition(":")
+        if port.isdigit():
+            return host, port
+    return "", ""
+
+
 def _parse_nuclei_output(stdout: bytes) -> list[dict[str, Any]]:
     """Parse Nuclei ``-jsonl`` stdout into findings, tolerant of malformed lines.
 
@@ -108,6 +140,13 @@ def _parse_nuclei_output(stdout: bytes) -> list[dict[str, Any]]:
         if isinstance(cve_id, str) and cve_id.strip():
             finding["cve"] = cve_id.strip().upper()
             finding["evidence"]["cve"] = cve_id.strip().upper()
+
+        # Record the port the template matched on (parsed from matched-at) so a
+        # service CVE dedups against cve_mapper's banner-version copy of the same
+        # (host, port, CVE) instead of surfacing twice.
+        _m_host, _m_port = _host_port_from_matched(data.get("matched-at", ""))
+        if _m_port:
+            finding["port"] = int(_m_port)
 
         findings.append(finding)
     return findings

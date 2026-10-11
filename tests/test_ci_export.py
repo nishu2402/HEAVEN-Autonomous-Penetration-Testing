@@ -109,3 +109,44 @@ def test_summarize_gate_counts_breaching():
     assert g["breaching"] == 1          # only the critical
     assert g["passed"] is False
     assert g["by_severity"]["critical"] == 1
+
+
+# ── Scored-but-unlabelled finding must not slip under the gate (FP Audit 16) ──
+# A finding that carries a CVSS score but no explicit `severity` label was
+# bucketed `info` (the `or "info"` default), so a high-scoring finding passed a
+# `fail_on=high` gate as a false green. The band is now derived from the score.
+
+def _unlabelled_critical():
+    # No "severity" key at all, but a genuine 9.8 base score.
+    return [{"id": "u1", "vuln_type": "rce", "title": "Unlabelled RCE",
+             "target": "http://10.0.0.9", "cvss_base": 9.8, "confidence": 0.9}]
+
+
+def test_gate_counts_scored_unlabelled_finding_as_breaching():
+    g = summarize_gate(_unlabelled_critical(), fail_on="high")
+    assert g["by_severity"].get("critical") == 1, g["by_severity"]
+    assert g["breaching"] == 1
+    assert g["passed"] is False
+
+
+def test_junit_fails_scored_unlabelled_finding():
+    xml = findings_to_junit(_unlabelled_critical(), fail_on="high")
+    assert 'failures="1"' in xml
+    assert xml.count("<failure") == 1
+
+
+def test_sarif_level_follows_score_when_unlabelled():
+    run = findings_to_sarif(_unlabelled_critical())["runs"][0]
+    r0 = run["results"][0]
+    assert r0["level"] == "error"                       # critical → error, not note
+    assert r0["properties"]["security-severity"] == "9.8"
+
+
+def test_explicit_info_severity_is_respected_over_score():
+    # An explicit label always wins; an explicitly-info finding stays info even
+    # if some score is present.
+    f = [{"id": "i1", "vuln_type": "x", "severity": "info", "title": "note",
+          "target": "h", "cvss_base": 9.8}]
+    g = summarize_gate(f, fail_on="high")
+    assert g["by_severity"].get("info") == 1
+    assert g["breaching"] == 0

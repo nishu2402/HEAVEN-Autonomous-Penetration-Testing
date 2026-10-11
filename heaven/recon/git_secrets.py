@@ -33,7 +33,12 @@ SECRET_PATTERNS: list[tuple[str, str, str]] = [
     ("Slack Webhook", r"hooks\.slack\.com/services/T[0-9A-Z]{8}/B[0-9A-Z]{8}/[a-zA-Z0-9]{24}", "slack_token"),
     ("Private Key", r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----", "private_key"),
     ("JWT Secret", r"""(?:jwt[_-]?secret|JWT_SECRET)['":\s=]+['"]([^'"]{8,})['"]\s""", "jwt_secret"),
-    ("Database URL", r"(?:mysql|postgres|postgresql|mongodb)://[^\s'\"]{10,}", "database_url"),
+    # A connection string is a leaked secret only when it embeds a credential
+    # (user:password@host). A credential-less URL — postgres://localhost:5432/db,
+    # mongodb://mongo:27017/orders — is a plain host reference that litters
+    # docker-compose / config files; requiring the `:pass@` component keeps real
+    # embedded-credential URLs while dropping that furniture.
+    ("Database URL", r"(?:mysql|postgres|postgresql|mongodb)://[^\s'\":/@]*:[^\s'\"@/]+@[^\s'\"]{3,}", "database_url"),
     ("Password Assignment", r"""(?:password|passwd|pwd)['":\s=]+['"]([^'"]{8,})['"]""", "password"),
     ("Twilio Key", r"SK[0-9a-fA-F]{32}", "generic_secret"),
     ("SendGrid Key", r"SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}", "generic_secret"),
@@ -57,6 +62,24 @@ def shannon_entropy(data: str) -> float:
         freq[c] = freq.get(c, 0) + 1
     length = len(data)
     return -sum((count / length) * math.log2(count / length) for count in freq.values())
+
+
+def _is_template_placeholder(value: str) -> bool:
+    """True when a captured credential value is template scaffolding rather than
+    a live secret: ${VAR}, {{ token }}, <your-pass>, %(name)s. The whole-match
+    word filter in scan_file already screens example/test/dummy/sample; this
+    covers the interpolation delimiters that list misses, mirroring
+    client_audit._is_placeholder_value so both secret surfaces agree. A bare '$'
+    or '<' is NOT a signal (real values carry them, e.g. leetspeak P@$$w0rd)."""
+    v = value.strip()
+    low = v.lower()
+    if "${" in v or "{{" in v or "}}" in v:
+        return True
+    if "<" in v and ">" in v:
+        return True
+    if "%(" in low or "%s" in low or "%d" in low:
+        return True
+    return low.startswith("your")
 
 
 @dataclass
@@ -100,6 +123,11 @@ def scan_file(file_path: Path, base_dir: Optional[Path] = None) -> list[SecretFi
                     continue
                 # Skip common false positives
                 if any(fp in secret_text.lower() for fp in ["example", "placeholder", "xxx", "test", "dummy", "sample"]):
+                    continue
+                # Value-bearing patterns (password / jwt_secret / aws_secret
+                # capture the credential in group 1): skip template placeholders
+                # like ${DB_PASSWORD} or <your-pass> that carry no live secret.
+                if match.groups() and _is_template_placeholder(match.group(1)):
                     continue
 
                 snippet = line_stripped[:200]

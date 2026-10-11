@@ -123,3 +123,49 @@ def test_docker_api_real_version_flagged(monkeypatch):
     assert any(f.vuln_type == "docker_api_exposed" for f in findings)
     f = next(f for f in findings if f.vuln_type == "docker_api_exposed")
     assert f.evidence["api"] == "1.43"
+
+
+# ── cAdvisor: :4194 must answer with cAdvisor's own container-array shape ──────
+
+def test_cadvisor_bare_200_json_not_flagged(monkeypatch):
+    # Some other service answers 200 + application/json on :4194 but the body is
+    # not cAdvisor's array of named container objects: must not disclose.
+    _JSON = {"Content-Type": "application/json"}
+
+    def route(url):
+        if ":4194" in url:
+            return _Resp(200, '{"status":"ok"}', _JSON)   # dict, not a container array
+        return _Resp(404, "")
+
+    _patch_session(monkeypatch, route)
+    findings = _run(KubernetesScanner.check_api_server("10.0.0.5", 6443))
+    assert not any(f.vuln_type == "cadvisor_exposed" for f in findings)
+
+
+def test_cadvisor_empty_array_not_flagged(monkeypatch):
+    # An empty array discloses no containers, so it is not the exposure claimed.
+    _JSON = {"Content-Type": "application/json"}
+
+    def route(url):
+        if ":4194" in url:
+            return _Resp(200, "[]", _JSON)
+        return _Resp(404, "")
+
+    _patch_session(monkeypatch, route)
+    findings = _run(KubernetesScanner.check_api_server("10.0.0.5", 6443))
+    assert not any(f.vuln_type == "cadvisor_exposed" for f in findings)
+
+
+def test_cadvisor_real_container_array_flagged(monkeypatch):
+    # Genuine cAdvisor: a JSON array of container objects carrying "name".
+    _JSON = {"Content-Type": "application/json"}
+
+    def route(url):
+        if ":4194" in url:
+            return _Resp(200, '[{"name":"/docker/abc","spec":{},"stats":[]}]', _JSON)
+        return _Resp(404, "")
+
+    _patch_session(monkeypatch, route)
+    findings = _run(KubernetesScanner.check_api_server("10.0.0.5", 6443))
+    cad = [f for f in findings if f.vuln_type == "cadvisor_exposed"]
+    assert cad and cad[0].evidence["containers"] == 1

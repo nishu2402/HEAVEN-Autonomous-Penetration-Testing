@@ -70,6 +70,27 @@ def test_ack_only_reply_detected_but_no_reset_finding(monkeypatch):
     assert res["findings"] == []
 
 
+def test_no_reset_finding_on_truncated_opcode_byte(monkeypatch):
+    # A stray one-byte datagram whose first byte happens to carry opcode 8 in its
+    # top-5 bits is NOT an OpenVPN server reset: a genuine HARD_RESET_SERVER_V2
+    # always carries the mandatory 8-byte server session id, so a reply too short
+    # to hold it must not produce the unauthenticated-control finding.
+    monkeypatch.setattr(vpn, "_openvpn_exchange",
+                        lambda h, p, pr, timeout=5.0: bytes([8 << 3]))
+    res = vpn._run_openvpn_scan("vpn.example", 1194, "udp")
+    assert res["findings"] == []
+
+
+def test_no_reset_finding_on_truncated_tcp_reset(monkeypatch):
+    # TCP reply with opcode 8 but only 4 bytes after the 2-byte length prefix:
+    # too short for opcode + 8-byte session id → no finding.
+    monkeypatch.setattr(vpn, "_openvpn_exchange",
+                        lambda h, p, pr, timeout=5.0:
+                        struct.pack(">H", 5) + bytes([8 << 3]) + b"\x00" * 4)
+    res = vpn._run_openvpn_scan("vpn.example", 1194, "tcp")
+    assert res["findings"] == []
+
+
 def test_scan_openvpn_both_protocols(monkeypatch):
     calls = []
 

@@ -114,6 +114,48 @@ def test_dedup_preserves_first_and_drops_repeat_targets():
     assert [f["target"] for f in out] == ["http://t/a", "http://t/b"]
 
 
+def test_soft200_catchall_collapses_identical_200_bodies():
+    """Regression (live www.certifiedhacker.com): /cpanel, /whm and the
+    non-existent /controlpanel all returned the byte-identical 'cPanel Redirect'
+    page, so three 'sensitive path discovered' findings triple-counted one
+    catch-all resource. Identical 200 bodies on a host collapse to one
+    representative with the siblings recorded under evidence.also_served."""
+    cp = "<html><title>cPanel Redirect</title>...</html>"
+    findings = [
+        {"target": "https://h/whm",
+         "evidence": {"status_code": 200, "path": "/whm", "response_body": cp}},
+        {"target": "https://h/cpanel",
+         "evidence": {"status_code": 200, "path": "/cpanel", "response_body": cp}},
+        {"target": "https://h/controlpanel",
+         "evidence": {"status_code": 200, "path": "/controlpanel", "response_body": cp}},
+        # A DISTINCT 200 body is its own resource — never collapsed.
+        {"target": "https://h/admin",
+         "evidence": {"status_code": 200, "path": "/admin",
+                      "response_body": "<html>Admin Login</html>"}},
+        # Two protected files sharing the generic 403 page stay DISTINCT (403, not 200).
+        {"target": "https://h/.htaccess",
+         "evidence": {"status_code": 403, "path": "/.htaccess", "response_body": "403 Forbidden"}},
+        {"target": "https://h/.htpasswd",
+         "evidence": {"status_code": 403, "path": "/.htpasswd", "response_body": "403 Forbidden"}},
+    ]
+    out = DirectoryFuzzer._collapse_soft200_catchall(findings)
+    paths = sorted((f.get("evidence") or {}).get("path") for f in out)
+    assert paths == ["/.htaccess", "/.htpasswd", "/admin", "/whm"]
+    rep = next(f for f in out if f["evidence"]["path"] == "/whm")
+    assert rep["evidence"]["also_served"] == ["/controlpanel", "/cpanel"]
+
+
+def test_soft200_catchall_leaves_single_hits_untouched():
+    # No identical-body group → list returned unchanged (same objects, same order).
+    findings = [
+        {"target": "https://h/a",
+         "evidence": {"status_code": 200, "path": "/a", "response_body": "AAA"}},
+        {"target": "https://h/b",
+         "evidence": {"status_code": 200, "path": "/b", "response_body": "BBB"}},
+    ]
+    assert DirectoryFuzzer._collapse_soft200_catchall(findings) is findings
+
+
 def test_confidence_is_status_aware():
     # A served resource (2xx) is a confident exposure; a redirect/access-controlled
     # path is weak discovery and must carry sub-0.5 confidence so the severity

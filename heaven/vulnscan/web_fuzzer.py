@@ -793,6 +793,31 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
         urllib.parse.parse_qs(urllib.parse.urlparse(url).query).keys()
     )
 
+    # Negative control: probe a random, almost-certainly-nonexistent parameter.
+    # Many pages echo the whole query string into a canonical <link>, a form
+    # action, or a self-referential URL, so appending ANY name grows the body by a
+    # constant amount; others gate every query on auth and flip to a 401/403 for
+    # any param. Without this control the discovery fired on every probed name with
+    # an identical len_diff (observed live: debug/internal/test all len_diff=121),
+    # or on a param that merely flipped the response to a denial. A real hidden
+    # parameter must move the response MORE than a junk name does, or produce a
+    # status/reflection the junk name does not. (Same control discipline as the HPP
+    # check below.)
+    ctrl_status = base_status
+    ctrl_len_diff = 0
+    ctrl_reflected = False
+    try:
+        ctrl_name = "hvn_" + secrets.token_hex(4)
+        ctrl_url = url + ("&" if "?" in url else "?") + f"{ctrl_name}=HEAVEN_PROBE"
+        async with session.get(ctrl_url,
+                               timeout=aiohttp.ClientTimeout(total=8)) as rc:
+            ctrl_body = await rc.text()
+            ctrl_status = rc.status
+            ctrl_len_diff = abs(len(ctrl_body) - base_len)
+            ctrl_reflected = "HEAVEN_PROBE" in ctrl_body
+    except Exception:
+        logger.debug("suppressed non-fatal exception", exc_info=True)
+
     sem = asyncio.Semaphore(10)
     interesting: list[dict] = []
 
@@ -809,16 +834,22 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
                     # Processed-parameter signals: a verbatim reflection of our
                     # unique probe (strong), a status change, or a length change
                     # that clears the page's measured jitter floor (weak but no
-                    # longer a bare 100-byte fixed cut on a noisy page).
+                    # longer a bare 100-byte fixed cut on a noisy page). Each signal
+                    # must EXCEED the junk-param control, otherwise it is structural
+                    # (the page reacts the same way to any appended query param) and
+                    # names no actual hidden parameter.
                     reflected = "HEAVEN_PROBE" in body
-                    if (r.status != base_status or
-                            abs(body_len - base_len) > len_threshold or
-                            reflected):
+                    status_signal = (r.status != base_status
+                                     and r.status != ctrl_status)
+                    len_signal = (abs(body_len - base_len)
+                                  > max(len_threshold, ctrl_len_diff + jitter))
+                    refl_signal = reflected and not ctrl_reflected
+                    if status_signal or len_signal or refl_signal:
                         interesting.append({
                             "param": param,
                             "status": r.status,
                             "len_diff": abs(body_len - base_len),
-                            "reflected": reflected,
+                            "reflected": refl_signal,
                         })
             except Exception:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -1115,7 +1146,20 @@ async def _fuzz_method_override(session: "aiohttp.ClientSession",
                     # flagged method-override on every dynamic app — a medium FP on
                     # normal pages. A real override changes what the server DOES,
                     # which shows up as a different (non-error) status.
-                    if (r.status not in (404, 405, 501)
+                    #
+                    # "Accepted" also requires the override to have been PROCESSED,
+                    # not rejected: a denial on the override request (401/403, or any
+                    # 4xx/5xx) is the server REFUSING the header, the opposite of
+                    # honouring it, and a denial *baseline* (plain POST already
+                    # 401/403) means the endpoint flaps between auth states so a flip
+                    # to 200 is noise, not a bypass. The documented scenario is "POST
+                    # is allowed, DELETE/PUT is not" — plain POST is a success there —
+                    # so require BOTH the baseline and the override response to be
+                    # success/redirect (200-399) and to differ. This drops the
+                    # cPanel-port FPs where a plain POST 200 flipped to a 401 on the
+                    # override (and vice-versa) with no method actually honoured.
+                    if (200 <= base_status < 400
+                            and 200 <= r.status < 400
                             and r.status != base_status):
                         findings.append(_finding(
                             url, "method_override_accepted", "medium",

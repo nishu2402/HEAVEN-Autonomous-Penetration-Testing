@@ -358,7 +358,15 @@ class KubernetesScanner:
                     timeout=aiohttp.ClientTimeout(total=3),
                 ) as resp:
                     ctype = (resp.headers.get("Content-Type") or "").lower()
-                    if resp.status == 200 and "json" in ctype:
+                    # cAdvisor's /subcontainers returns a JSON array of container
+                    # objects, each carrying a "name" (e.g. "/docker/<id>"). A bare
+                    # 200+JSON from some other service on :4194 does not, so verify
+                    # the shape before disclosing, the same body-evidence rule the
+                    # k8s / etcd / registry probes above apply.
+                    cdata = (await resp.json()
+                             if resp.status == 200 and "json" in ctype else None)
+                    if (isinstance(cdata, list) and cdata
+                            and isinstance(cdata[0], dict) and "name" in cdata[0]):
                         findings.append(ContainerFinding(
                             target=host, vuln_type="cadvisor_exposed",
                             severity="medium",
@@ -366,6 +374,7 @@ class KubernetesScanner:
                             description=("cAdvisor metrics API is publicly reachable, discloses "
                                          "running containers, images and host resource layout."),
                             confidence=0.85,
+                            evidence={"containers": len(cdata)},
                             remediation="Bind cAdvisor to localhost or require auth; do not expose 4194.",
                             cwe="CWE-200", mitre="T1526",
                         ))

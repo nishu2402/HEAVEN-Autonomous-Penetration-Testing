@@ -144,14 +144,30 @@ class FPReviewer:
 
     @staticmethod
     def apply(finding: dict, verdict: FPReviewVerdict) -> dict:
-        """Apply the verdict in-place. Mirrors fp_suppress.apply_verdict shape."""
+        """Apply the verdict in-place. Mirrors fp_suppress.apply_verdict shape.
+
+        The reviewer is advisory. Just as it never un-suppresses a hard FP, it
+        never overrides a hard CONFIRMATION: a finding established by direct
+        observation or active validation (``is_confirmed_finding``) is never
+        flipped to ``false_positive`` on an LLM opinion of a truncated evidence
+        blob, and the advisory pass may only RAISE such a finding's confidence,
+        never demote directly-observed evidence below its deterministic score.
+        The verdict's ``keep`` / reasoning / signals are still recorded so the
+        operator sees the dissent. Potential (unconfirmed) findings keep the
+        full suppress-and-nudge behaviour.
+        """
+        from heaven.utils.cvss import is_confirmed_finding
+        confirmed = is_confirmed_finding(finding)
         old_conf = float(finding.get("confidence", 0))
-        new_conf = max(0.0, min(1.0, old_conf + verdict.confidence_delta))
+        delta = verdict.confidence_delta
+        if confirmed and delta < 0:
+            delta = 0.0
+        new_conf = max(0.0, min(1.0, old_conf + delta))
         finding["confidence"] = round(new_conf, 3)
         finding["llm_review_kept"] = verdict.keep
         finding["llm_review_reasoning"] = verdict.reasoning
         finding["llm_review_signals"] = verdict.notable_signals
-        if not verdict.keep:
+        if not verdict.keep and not confirmed:
             finding["suppressed"] = True
             finding["result"] = "false_positive"
         return finding

@@ -158,6 +158,26 @@ def test_cms_xmlrpc_only_medium_without_pingback():
     assert xr["evidence"]["pingback_ping"] is False
 
 
+def test_cms_xmlrpc_banner_only_medium_does_not_overclaim_rpc():
+    # xmlrpc.php returns only WordPress's GET banner (POST listMethods never
+    # yields a methodResponse). The endpoint is proven enabled by the banner, but
+    # we never observed it ANSWER an RPC, so the finding must not claim it did.
+    routes = _wordpress_routes()
+    routes["/xmlrpc.php"] = (200, {"Content-Type": "text/plain"},
+                             "XML-RPC server accepts POST requests only.")
+
+    async def _go():
+        async with MockHTTP(routes) as srv:
+            return await scan_cms([srv.base + "/"])
+    res = _run(_go())
+    xr = next(f for f in res["findings"] if f["vuln_type"] == "xmlrpc_enabled")
+    assert xr["severity"] == "medium"
+    assert xr["evidence"]["answers_rpc"] is False
+    # Honest wording: enabled is claimed, an observed RPC answer is NOT.
+    assert "answering remote procedure" not in xr["description"].lower()
+    assert "enabled" in xr["description"].lower()
+
+
 # ── server-banner version exposure (misconfig scanner) ───────────────────────
 def test_banner_version_disclosure_flagged():
     routes = {"/": (200, {"Content-Type": "text/html", "Server": "nginx/1.22.1",

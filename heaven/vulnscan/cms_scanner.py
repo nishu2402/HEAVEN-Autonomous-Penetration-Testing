@@ -196,12 +196,17 @@ async def _check_xmlrpc(session, origin: str) -> list[dict]:
             {"answers_rpc": answers_rpc, "pingback_ping": True,
              "method_count": len(methods), "url": url})]
     # RPC is reachable but pingback not confirmed present — still worth a medium.
+    # Keep the prose accurate for BOTH confirmation paths: a listMethods RPC
+    # answer (answers_rpc True) and a GET that only returned WordPress's XML-RPC
+    # banner (answers_rpc False). Asserting the endpoint "answered RPC" in the
+    # banner-only case would overstate what we observed, so claim only that it is
+    # enabled (which the banner alone proves).
     return [_finding(
         url, "xmlrpc_enabled", "medium",
         "WordPress XML-RPC Endpoint Enabled",
-        "The XML-RPC interface (/xmlrpc.php) is enabled and answering remote "
-        "procedure calls. Even without pingback, XML-RPC broadens the attack "
-        "surface (brute-force via system.multicall) and is best disabled unless "
+        "The XML-RPC interface (/xmlrpc.php) is enabled. Even without the "
+        "pingback methods, XML-RPC broadens the attack surface (brute-force "
+        "amplification via system.multicall) and is best disabled unless it is "
         "actively required.",
         0.8,
         {"answers_rpc": answers_rpc, "pingback_ping": False,

@@ -79,6 +79,36 @@ class TestBurpExport:
         body_section = request.split("\r\n\r\n", 1)[1]
         assert "username=" in body_section
 
+    def test_no_captured_response_emits_empty_not_fake_http_0(self):
+        """A finding with no captured HTTP exchange must not get a fabricated
+        'HTTP/1.1 0' response (FP Audit 16) — same honesty rule as the main
+        report. A real captured response is still rendered."""
+        from heaven.devsecops.burp_export import export_burp_xml
+        import xml.etree.ElementTree as ET
+        findings = [{
+            "id": "p1", "target": "https://x.test/", "vuln_type": "clickjacking",
+            "severity": "medium", "method": "GET",
+            "evidence": {},  # no status / body / headers captured
+        }]
+        root = ET.fromstring(export_burp_xml(findings))
+        resp_el = root.find(".//response")
+        raw = base64.b64decode((resp_el.text or "").strip()).decode() if resp_el.text else ""
+        assert "HTTP/1.1 0" not in raw
+        assert raw == ""        # empty response, not a fabricated reply
+
+    def test_captured_response_still_rendered(self):
+        from heaven.devsecops.burp_export import export_burp_xml
+        import xml.etree.ElementTree as ET
+        findings = [{
+            "id": "p2", "target": "https://x.test/", "vuln_type": "xss",
+            "severity": "high", "method": "GET",
+            "evidence": {"status": 200, "response_body": "<html>hi</html>"},
+        }]
+        root = ET.fromstring(export_burp_xml(findings))
+        raw = base64.b64decode(root.find(".//response").text.strip()).decode()
+        assert raw.startswith("HTTP/1.1 200 OK")
+        assert "<html>hi</html>" in raw
+
     def test_skips_findings_without_url(self):
         """Findings on raw IPs without scheme can't be Burp-imported."""
         from heaven.devsecops.burp_export import export_burp_xml

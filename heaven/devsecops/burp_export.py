@@ -157,7 +157,15 @@ def export_burp_xml(findings: Iterable[dict],
         status = int(evidence.get("status", 0) or 0)
         response_body = evidence.get("response_body", "") or evidence.get("response_excerpt", "")
         response_headers = evidence.get("response_headers", {}) or {}
-        raw_response = _build_http_response(status, response_headers, response_body)
+        # Only synthesise a raw response when HEAVEN actually captured one. A
+        # posture/config finding derived without a live HTTP exchange has no
+        # status/body/headers; emitting an empty response keeps Burp showing "no
+        # response" instead of a fabricated "HTTP/1.1 0" reply the target never
+        # sent (same honesty rule as the main report's killed fake-HTTP-0).
+        if status or response_body or response_headers:
+            raw_response = _build_http_response(status, response_headers, response_body)
+        else:
+            raw_response = ""
         response_length = len(response_body.encode()) if response_body else 0
 
         # Determine mimetype guess

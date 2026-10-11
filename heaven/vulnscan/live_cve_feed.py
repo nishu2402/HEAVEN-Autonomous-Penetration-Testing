@@ -213,11 +213,17 @@ def merge_and_dedupe(records: list[LiveCVE]) -> list[LiveCVE]:
             (r.cvss, r.version_confirmed, -src_rank.get(r.source, 3))
             > (cur.cvss, cur.version_confirmed, -src_rank.get(cur.source, 3))
         )
-        # Preserve a KEV / version-confirmed flag from whichever record had it.
-        r.in_kev = r.in_kev or cur.in_kev
-        cur.in_kev = r.in_kev
+        # Preserve a KEV / version-confirmed flag from whichever record had it,
+        # onto BOTH records so the survivor keeps it regardless of which wins the
+        # `better` comparison. A version-confirmed NVD record that loses on CVSS
+        # to a higher-scored CIRCL record (CIRCL often carries a v4 score, NVD a
+        # v3) must not have its confirmation dropped — that would silently demote
+        # a confirmed CVE to a 0.55 "potential" in to_finding().
+        confirmed = r.version_confirmed or cur.version_confirmed
+        in_kev = r.in_kev or cur.in_kev
+        r.in_kev = cur.in_kev = in_kev
+        r.version_confirmed = cur.version_confirmed = confirmed
         if better:
-            r.version_confirmed = r.version_confirmed or cur.version_confirmed
             best[r.cve_id] = r
     ordered = sorted(best.values(),
                      key=lambda c: (c.in_kev, c.cvss), reverse=True)

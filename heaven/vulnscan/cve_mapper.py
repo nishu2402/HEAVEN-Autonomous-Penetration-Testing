@@ -218,8 +218,14 @@ INLINE_CVE_DB: dict[str, list[CVERecord]] = {
                   "high", 8.2, [">=2.4.0", "<=2.4.51"], cwe="CWE-918"),
         CVERecord("CVE-2021-40438", "Apache SSRF in mod_proxy",
                   "critical", 9.0, [">=2.4.0", "<=2.4.48"], exploit_available=True, cwe="CWE-918"),
+        # The crashing code path (mod_proxy_http mishandling a request that
+        # carries BOTH Content-Length and Transfer-Encoding) was introduced in
+        # 2.4.41 and fixed in 2.4.47, so the NVD CPE window is 2.4.41–2.4.46. A
+        # bare ">=2.4.0" branch floor flagged every older 2.4 release (e.g. a
+        # 2.4.7 on Ubuntu 14.04) that predates the vulnerable code by 34 point
+        # releases — a false positive. Floor at the introduced-in version.
         CVERecord("CVE-2020-13950", "Apache mod_proxy_http NULL pointer dereference DoS",
-                  "high", 7.5, [">=2.4.0", "<=2.4.46"], cwe="CWE-476"),
+                  "high", 7.5, [">=2.4.41", "<=2.4.46"], cwe="CWE-476"),
         CVERecord("CVE-2019-10082", "Apache mod_http2 read-after-free",
                   "high", 7.5, [">=2.4.17", "<=2.4.39"], cwe="CWE-416"),
         # These two genuinely span the 2.2 AND 2.4 lines, so both branch windows
@@ -1082,6 +1088,29 @@ def _drop_client_side_only(cves: list[CVERecord]) -> list[CVERecord]:
     return [c for c in cves if not c.client_side]
 
 
+# Recent CLIENT-side OpenSSH CVEs the inline DB does not carry, so the LIVE NVD
+# path (which has no client_side flag) can drop them the way
+# _drop_client_side_only drops the inline ones. CVE-2025-26465 is the
+# VerifyHostKeyDNS machine-in-the-middle: the victim is the ssh CLIENT verifying
+# a host key (only when the non-default VerifyHostKeyDNS is on), never the
+# scanned sshd — so a version-confirmed hit on an OpenSSH 9.9 SERVER inverts who
+# is at risk. A live scan of www.certifiedhacker.com surfaced exactly this as a
+# medium "vulnerable_service" on port 22.
+_EXTRA_CLIENT_SIDE_CVES: frozenset[str] = frozenset({
+    "CVE-2025-26465",
+})
+
+
+def _client_side_cve_ids() -> frozenset[str]:
+    """IDs of CVEs that are client-side-only: every inline ``client_side`` record
+    plus :data:`_EXTRA_CLIENT_SIDE_CVES`. The live NVD path filters confirmed
+    hits against this so a client-side CVE is never asserted as a server
+    exposure, mirroring :func:`_drop_client_side_only` for the inline path."""
+    inline = {r.cve_id.upper() for recs in INLINE_CVE_DB.values()
+              for r in recs if r.client_side}
+    return frozenset(inline | _EXTRA_CLIENT_SIDE_CVES)
+
+
 def lookup_inline_cves(product_key: str, version: str) -> list[CVERecord]:
     """Return CVEs from INLINE_CVE_DB matching product and version.
 
@@ -1196,6 +1225,7 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
     """
     all_vulns: list[dict] = []
     live_used = 0
+    client_side_ids = _client_side_cve_ids()
 
     for host in host_results:
         for port_info in host.get("open_ports", []):
@@ -1273,6 +1303,12 @@ async def map_vulnerabilities(host_results: list[dict], nvd_client: Any = None,
                     confirmed = [lc for lc in live_hits if lc.version_confirmed]
                     unconfirmed = [lc for lc in live_hits if not lc.version_confirmed]
                     for lc in confirmed:
+                        # A client-side-only CVE (e.g. CVE-2025-26465, the
+                        # VerifyHostKeyDNS MITM) describes risk to hosts CONNECTING
+                        # with this tooling, not to the scanned server, so it never
+                        # belongs in a server service-version finding.
+                        if (lc.cve_id or "").upper() in client_side_ids:
+                            continue
                         lc_score, lc_sev = _score_and_severity(lc.cvss, lc.severity)
                         all_vulns.append({
                             "host": host_name,

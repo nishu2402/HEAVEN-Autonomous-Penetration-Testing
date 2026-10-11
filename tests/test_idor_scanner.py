@@ -80,3 +80,33 @@ def test_horizontal_privesc_requires_alt_token():
     s = IDORScanner(auth_headers={"Authorization": "A"})  # no alt token
     asyncio.run(s._test_horizontal_privesc(_Session({"": (200, "x" * 80)}), _URL))
     assert s._findings == []
+
+
+# ── Unauthenticated-access check: structured-record gate, not a footer email ──
+
+def _scan_unauth(by_auth: dict):
+    s = IDORScanner(auth_headers={"Authorization": "A"})
+    asyncio.run(s._test_unauth_access(_Session(by_auth), _URL))
+    return s._findings
+
+
+def test_unauth_access_public_page_with_footer_email_not_flagged():
+    # A public id'd page returns the same body with or without auth (auth is
+    # irrelevant to it) and carries only a site-wide contact email in its footer.
+    # A bare email is page furniture, not a protected record: no critical finding.
+    page = ("<html><body>Public catalog item #123 — in stock."
+            "<footer>Contact us: hello@shop.example</footer></body></html>")
+    findings = _scan_unauth({"A": (200, page), "": (200, page)})
+    assert findings == [], findings
+
+
+def test_unauth_access_protected_record_still_flagged():
+    # The same body with and without auth, but it is a structured data record
+    # (a JSON user object) — a genuine broken-authentication exposure.
+    record = ('{"account":123,"first_name":"Jane","last_name":"Roe",'
+              '"balance":"12430.55"}')
+    findings = _scan_unauth({"A": (200, record), "": (200, record)})
+    assert len(findings) == 1, findings
+    assert findings[0]["severity"] == "critical"
+    assert findings[0]["vuln_type"] == "idor"
+    assert findings[0]["evidence"]["probe_type"] == "unauth_access"

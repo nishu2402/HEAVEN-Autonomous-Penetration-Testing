@@ -19,11 +19,24 @@ from heaven.utils.logger import get_logger
 logger = get_logger("ssl_scanner")
 
 # ── Weak cipher patterns ───────────────────────────────────────────────────────
+# Suites with a genuine, named cryptographic weakness: broken, NULL, export or
+# anonymous key exchange / MAC, plus the 64-bit block ciphers (3DES / IDEA) that
+# SWEET32 attacks. Deliberately excluded: SEED and Camellia-128. Both are
+# 128-bit-secure block ciphers with no practical break (OpenSSL rates Camellia-128
+# at HIGH strength), so flagging them as "weak" and claiming they "enable
+# decryption attacks" was a false positive.
 _WEAK_CIPHER_PATTERNS = [
     "NULL", "EXPORT", "LOW", "RC2", "RC4", "DES", "MD5",
     "anon", "aNULL", "eNULL", "ADH", "AECDH",
-    "3DES", "IDEA", "SEED", "CAMELLIA128",
+    "3DES", "IDEA",
 ]
+
+
+def _is_weak_cipher(cipher: str) -> bool:
+    """True when an OpenSSL cipher-suite name carries a known cryptographic
+    weakness (see _WEAK_CIPHER_PATTERNS). Substring match on the suite name,
+    mirroring how testssl/sslyze classify the enumerable TLS <=1.2 suites."""
+    return any(p in cipher for p in _WEAK_CIPHER_PATTERNS)
 _FORWARD_SECRECY_KEXES = {"ECDHE", "DHE", "ECDH", "EDH"}
 # 64-bit block ciphers whose birthday bound makes long TLS sessions decryptable
 # (SWEET32, CVE-2016-2183). 3DES is the one still commonly negotiated; IDEA is
@@ -386,7 +399,7 @@ def _get_ciphers(host: str, port: int, timeout: float = 5.0) -> tuple[list[str],
             with socket.create_connection((host, port), timeout=timeout) as raw:
                 with test_ctx.wrap_socket(raw, server_hostname=host):
                     supported.append(cipher)
-                    if any(p in cipher for p in _WEAK_CIPHER_PATTERNS):
+                    if _is_weak_cipher(cipher):
                         weak.append(cipher)
         except Exception:
             logger.debug("suppressed non-fatal exception", exc_info=True)
@@ -909,7 +922,11 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             "BEAST: TLS 1.0 CBC Vulnerability (CVE-2011-3389)",
             "TLS 1.0 with CBC cipher suites is susceptible to chosen-plaintext attacks via BEAST.",
             cve="CVE-2011-3389"))
-    if result.tls10 and not result.tls12 and not result.tls13:
+    # Require TLS 1.1 to also be absent: otherwise "TLS 1.0 Only" is literally
+    # false and would fire alongside the tls11_deprecated finding below (a
+    # self-contradicting pair). A server that speaks TLS 1.1 is handled there.
+    if (result.tls10 and not result.tls11
+            and not result.tls12 and not result.tls13):
         F.append(_make_finding(host, port, "tls10_only", "high",
             "TLS 1.0 Only: Deprecated Protocol",
             "Server only supports TLS 1.0 which is deprecated by RFC 8996 and PCI DSS 3.2.",

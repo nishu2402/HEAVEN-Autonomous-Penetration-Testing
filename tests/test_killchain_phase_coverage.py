@@ -91,6 +91,44 @@ def test_substring_resolver_maps_variant_slugs():
     assert KillChainPhase.DELIVERY in _phases_for("missing_security_headers")
 
 
+# ── The resolver no longer matches a short key MID-token (FP Audit 16) ───────
+# The `rce` key is a substring of `source` / `resource` / `force`. A bare
+# substring test lit Exploitation+Installation for a plain source-code-disclosure
+# or resource-exhaustion finding, inflating the kill-chain posture with a false
+# code-execution foothold. The left-boundary resolver drops those collisions.
+
+def test_source_disclosure_does_not_light_exploitation():
+    phases = _phases_for("source_code_disclosure")
+    assert KillChainPhase.EXPLOITATION not in phases
+    assert KillChainPhase.INSTALLATION not in phases
+    # Degrades to the honest Reconnaissance default, not a false foothold.
+    assert phases == {KillChainPhase.RECONNAISSANCE}
+
+
+def test_resource_exhaustion_does_not_light_exploitation():
+    phases = _phases_for("resource_exhaustion")
+    assert KillChainPhase.EXPLOITATION not in phases
+    assert KillChainPhase.INSTALLATION not in phases
+
+
+def test_source_disclosure_title_heuristic_not_misread_as_rce():
+    # Even with no mapped vuln_type, the free-text fallback must not read the
+    # 'rce' inside 'Source code disclosure' as remote code execution.
+    an = KillChainAnalyzer()
+    an.ingest([{"vuln_type": "", "title": "Source code disclosure on /app.js",
+                "severity": "low", "target": "10.0.0.1"}])
+    lit = {p for p, cov in an._coverage.items() if cov.findings}
+    assert KillChainPhase.EXPLOITATION not in lit
+
+
+def test_real_rce_title_still_maps_to_exploitation():
+    an = KillChainAnalyzer()
+    an.ingest([{"vuln_type": "", "title": "Confirmed RCE via upload",
+                "severity": "critical", "target": "10.0.0.1"}])
+    lit = {p for p, cov in an._coverage.items() if cov.findings}
+    assert KillChainPhase.EXPLOITATION in lit
+
+
 # ── A realistic finding set lights every reachable phase, not just Recon ─────
 
 def test_realistic_findings_cover_all_seven_phases():

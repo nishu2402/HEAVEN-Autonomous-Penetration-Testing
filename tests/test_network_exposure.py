@@ -63,6 +63,40 @@ def test_telnet_on_nonstandard_port_matched_by_service_name():
     assert any(f["vuln_type"] == "cleartext_service" for f in res["findings"])
 
 
+def test_ftps_banner_gets_precise_wording_not_bald_cleartext_claim():
+    """Regression (live www.certifiedhacker.com): port 21 fingerprinted as
+    'Pure-FTPd (with SSL/TLS)' still produced the absolute 'FTP authenticates
+    and transfers data in cleartext' text, contradicting the banner. The finding
+    stays (plaintext is still accepted unless TLS is enforced) but is worded
+    precisely and flags that TLS is advertised."""
+    net = {"hosts": [{"ip": "198.51.100.5", "open_ports": [
+        {"port": 21, "service": "ftp", "product": "Pure-FTPd",
+         "banner": "(with SSL/TLS)"},
+    ]}]}
+    res = _run(nx.analyze_network_exposure(net, active_snmp=False,
+                                           active_probes=False))
+    ct = [f for f in res["findings"] if f["vuln_type"] == "cleartext_service"]
+    assert len(ct) == 1
+    f = ct[0]
+    assert f["evidence"].get("tls_advertised") is True
+    assert "advertises AUTH TLS" in f["description"]
+    assert "transfers data in cleartext" not in f["description"]
+
+
+def test_plain_ftp_keeps_cleartext_wording():
+    # A plain FTP (no SSL/TLS in the banner) keeps the original absolute wording
+    # and carries no tls_advertised marker.
+    net = {"hosts": [{"ip": "198.51.100.6", "open_ports": [
+        {"port": 21, "service": "ftp", "product": "ProFTPD", "version": "1.3.5"},
+    ]}]}
+    res = _run(nx.analyze_network_exposure(net, active_snmp=False,
+                                           active_probes=False))
+    ct = [f for f in res["findings"] if f["vuln_type"] == "cleartext_service"]
+    assert len(ct) == 1
+    assert "tls_advertised" not in ct[0]["evidence"]
+    assert "cleartext" in ct[0]["description"].lower()
+
+
 def test_backdoor_bind_shell_flagged_critical():
     # Metasploitable's 1524 "root shell" bind shell: the banner/label advertises
     # an unauthenticated shell — an unambiguous critical backdoor.

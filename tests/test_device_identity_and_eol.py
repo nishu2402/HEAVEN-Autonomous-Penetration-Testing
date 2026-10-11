@@ -60,6 +60,18 @@ def test_device_type_from_services():
     assert _device_type_from_services([554]) == "IP camera"
     assert _device_type_from_services([502, 80]) == "industrial control system"
     assert _device_type_from_services([1883]) == "IoT device"
+    # EtherNet/IP is keyed on 44818 (explicit messaging). Port 2222 alone is
+    # overwhelmingly SSH-alt / cPanel SSH, NOT EtherNet/IP implicit messaging, so
+    # it must not infer an industrial controller — a live scan of
+    # www.certifiedhacker.com (a cPanel/Bluehost web host with 2222 open) was
+    # mislabelled "industrial control system" by the old {44818, 2222} rule.
+    assert _device_type_from_services([44818]) == "industrial control system"
+    assert _device_type_from_services([2222, 44818]) == "industrial control system"
+    assert _device_type_from_services([22, 2222]) == ""
+    # The certifiedhacker port family (2222 open, no 44818) reads as a database
+    # server (3306/5432 exposed), never ICS.
+    assert _device_type_from_services(
+        [21, 22, 25, 53, 80, 443, 2222, 3306, 5432]) == "database server"
     # An ambiguous/plain web host yields nothing rather than a guess.
     assert _device_type_from_services([80, 443]) == ""
     assert _device_type_from_services([]) == ""

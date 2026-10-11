@@ -5,7 +5,10 @@ Guards the fix for the class of bug where a non-object JSON line or a null
 only caught ``json.JSONDecodeError``).
 """
 
-from heaven.vulnscan.nuclei_scanner import _parse_nuclei_output
+from heaven.vulnscan.nuclei_scanner import (
+    _host_port_from_matched,
+    _parse_nuclei_output,
+)
 
 
 def _b(*lines: str) -> bytes:
@@ -129,3 +132,47 @@ def test_missing_classification_leaves_taxonomy_fields_absent():
     ev = enriched.get("evidence", {})
     assert enriched.get("owasp") or ev.get("owasp")       # OWASP floor present
     assert ev.get("remediation")                          # actionable guidance present
+
+
+# ── port recorded from matched-at (so a service CVE dedups against cve_mapper) ──
+# A live scan of scanme.nmap.org reported Terrapin (CVE-2023-48795) TWICE: once
+# from cve_mapper (banner version OpenSSH 6.6.1p1, identity host|22|CVE) and once
+# from nuclei. The nuclei finding carried no port, so its identity was host||CVE
+# and the two did not collapse. Nuclei puts the port only in matched-at, so the
+# parser now lifts it onto the finding.
+def test_host_port_from_matched_forms():
+    assert _host_port_from_matched("scanme.nmap.org:22") == ("scanme.nmap.org", "22")
+    assert _host_port_from_matched("https://h:2096/x") == ("h", "2096")
+    assert _host_port_from_matched("http://h/index") == ("h", "80")
+    assert _host_port_from_matched("https://h/") == ("h", "443")
+    # No port derivable → empty (leaves the finding port-less as before).
+    assert _host_port_from_matched("scanme.nmap.org") == ("", "")
+    assert _host_port_from_matched("[2001:db8::1]:443") == ("", "")
+    assert _host_port_from_matched("") == ("", "")
+
+
+def test_network_template_finding_carries_port_from_matched_at():
+    out = _parse_nuclei_output(_b(
+        '{"host":"scanme.nmap.org","template-id":"CVE-2023-48795",'
+        '"matched-at":"scanme.nmap.org:22",'
+        '"info":{"severity":"medium","name":"OpenSSH Terrapin Attack - Detection",'
+        '"classification":{"cve-id":["CVE-2023-48795"]}}}'
+    ))
+    assert len(out) == 1
+    assert out[0]["port"] == 22
+    assert out[0]["cve"] == "CVE-2023-48795"
+
+
+def test_http_template_finding_carries_default_port():
+    out = _parse_nuclei_output(_b(
+        '{"host":"h","template-id":"t","matched-at":"http://h/index",'
+        '"info":{"severity":"info","name":"n"}}'
+    ))
+    assert out[0]["port"] == 80
+
+
+def test_no_port_field_when_matched_at_yields_none():
+    out = _parse_nuclei_output(_b(
+        '{"host":"h","template-id":"t","matched-at":"h","info":{"name":"n"}}'
+    ))
+    assert "port" not in out[0]

@@ -101,6 +101,23 @@ def test_merge_preserves_kev_flag_from_either_record():
     assert out[0].in_kev is True  # KEV must survive the merge
 
 
+def test_merge_preserves_version_confirmed_from_losing_record():
+    # NVD confirmed the version range (bounded match) but scores this CVE lower
+    # than CIRCL's record for the same id (CIRCL often carries a higher v4 score).
+    # The higher-CVSS CIRCL record wins the merge, but the confirmation must not be
+    # dropped — otherwise to_finding() silently demotes a confirmed CVE to a 0.55
+    # "potential".
+    recs = [
+        LiveCVE("CVE-2021-1", cvss=7.5, source="nvd", version_confirmed=True),
+        LiveCVE("CVE-2021-1", cvss=9.8, source="circl", version_confirmed=False),
+    ]
+    out = merge_and_dedupe(recs)
+    assert len(out) == 1
+    assert out[0].cvss == 9.8                 # higher-scored record's details kept
+    assert out[0].version_confirmed is True   # confirmation survived the merge
+    assert out[0].to_finding("t", "p", "1.0")["confidence"] == 0.9
+
+
 def test_merge_breaks_cvss_tie_by_nvd_over_circl():
     recs = [
         LiveCVE("CVE-2021-1", cvss=7.0, source="circl"),

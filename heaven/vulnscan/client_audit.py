@@ -72,7 +72,7 @@ _SECRET_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("slack_token", re.compile(r"xox[baprs]-[0-9A-Za-z\-]{10,}")),
     ("bearer_token", re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{20,}")),
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}")),
-    ("password_assignment", re.compile(r"(?i)(?:password|passwd|pwd|secret|api[_\-]?key)\s*[:=]\s*['\"][^'\"\s]{4,}['\"]")),
+    ("password_assignment", re.compile(r"(?i)(?:password|passwd|pwd|secret|api[_\-]?key)\s*[:=]\s*['\"]([^'\"\s]{4,})['\"]")),
     ("basic_auth_url", re.compile(r"(?i)https?://[^\s:@/]+:[^\s:@/]+@")),
     ("private_ip", re.compile(r"\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|\b192\.168\.\d{1,3}\.\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b")),
 )
@@ -83,6 +83,40 @@ _DEV_NOTE_RE = re.compile(
     r"(?:password|secret|token|key|admin|auth|creds?|credential|disable|bypass|hardcod)"
 )
 
+# The password_assignment pattern is the one value-bearing match loose enough to
+# fire on a commented-out config *example*, so its captured value is screened
+# here before it can raise a high-severity disclosure. A placeholder is template
+# text, not a live credential: a format/template delimiter, a "YOUR_..." stub, a
+# fill run (xxxx / **** / ...), or an obvious placeholder word. Real weak defaults
+# ("admin", "changeme", "password") are NOT placeholders and still fire, matching
+# the example/dummy screening the git_secrets scanner already applies.
+_PLACEHOLDER_WORDS = (
+    "example", "placeholder", "redacted", "insert", "sample", "changethis",
+    "yourkey", "apikeyhere", "todo",
+)
+_FILL_VALUE_RE = re.compile(r"(?:[xX]{4,}|\*{4,}|\.{3,})")
+
+
+def _is_placeholder_value(val: str) -> bool:
+    """True when a captured secret value is an obvious template placeholder
+    rather than a live credential."""
+    v = val.strip()
+    low = v.lower()
+    # Template interpolation / angle-bracket stubs: ${SECRET}, {{token}},
+    # %(password)s, <your-password>. A bare '$' or '<' is NOT a signal, since real
+    # values carry them (leetspeak P@$$w0rd, a bcrypt "$2a$..." hash).
+    if "${" in v or "{{" in v or "}}" in v:
+        return True
+    if "<" in v and ">" in v:
+        return True
+    if "%s" in low or "%d" in low or "%(" in low:   # printf / %(name)s templates
+        return True
+    if _FILL_VALUE_RE.fullmatch(v):           # xxxx, ****, ...
+        return True
+    if low.startswith("your"):                # YOUR_API_KEY, your-token
+        return True
+    return any(w in low for w in _PLACEHOLDER_WORDS)
+
 
 def _review_source(target: str, html: str) -> list[dict]:
     out: list[dict] = []
@@ -91,6 +125,17 @@ def _review_source(target: str, html: str) -> list[dict]:
     for m in _HTML_COMMENT_RE.finditer(html):
         body = m.group(1)
         for label, pat in _SECRET_PATTERNS:
+            if label == "password_assignment":
+                # Screen the captured value: a templated example in a comment is
+                # not a leaked credential. Scan all matches so a real secret that
+                # sits next to a placeholder in the same comment is still caught.
+                for sm in pat.finditer(body):
+                    if _is_placeholder_value(sm.group(1)):
+                        continue
+                    hits.append({"where": "html_comment", "kind": label,
+                                 "snippet": body.strip()[:160]})
+                    break
+                continue
             sm = pat.search(body)
             if sm:
                 hits.append({"where": "html_comment", "kind": label,
@@ -131,10 +176,16 @@ _EXEC_SINKS = (
     r"\$\(\s*[^)]*\)\.append", r"\.setAttribute\s*\(\s*['\"]on",
 )
 _EXEC_SINK_RE = re.compile("|".join(_EXEC_SINKS))
-# Resource-loading sinks (client-side resource manipulation).
+# Resource-loading sinks (client-side resource manipulation). The bare-"="
+# assignment sinks carry a negative-lookahead (?!=) so an equality or strict
+# equality COMPARISON (location.href === a.href, el.src == want) is not mistaken
+# for an assignment into the sink: without it, the "=" in "===" matched, and
+# read-only nav-highlight code — `if (document.location.href === a.href)` — was
+# reported as client-side resource manipulation. A single "=" (a real
+# assignment) still matches, so no true positive is lost.
 _RES_SINKS = (
-    r"\.src\s*=", r"\.setAttribute\s*\(\s*['\"]src['\"]", r"\.href\s*=",
-    r"\.action\s*=", r"importScripts\s*\(", r"\.setAttribute\s*\(\s*['\"]href['\"]",
+    r"\.src\s*=(?!=)", r"\.setAttribute\s*\(\s*['\"]src['\"]", r"\.href\s*=(?!=)",
+    r"\.action\s*=(?!=)", r"importScripts\s*\(", r"\.setAttribute\s*\(\s*['\"]href['\"]",
 )
 _RES_SINK_RE = re.compile("|".join(_RES_SINKS))
 _PROXIMITY = 200   # chars between a source and a sink to count as a flow

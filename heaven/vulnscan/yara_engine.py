@@ -127,9 +127,13 @@ _RULES: tuple[_Rule, ...] = (
           all_of=(_ci(r"Runtime\.getRuntime\(\)\.exec"),
                   _ci(r"request\.getParameter")),),
     _Rule("ASPX_Webshell", "critical",
-          "ASP.NET webshell: process launch or code eval from a request value.",
-          any_of=(_ci(r"System\.Diagnostics\.Process\.Start"),
-                  _ci(r"eval\s*\(\s*Request")),),
+          "ASP.NET webshell: a process launch or code eval together with a "
+          "request-value source (Request[...]/QueryString/Form). Bare "
+          "Process.Start is a legitimate .NET API, so a request source is "
+          "required, the same co-occurrence shape the JSP rule uses.",
+          all_of=(_ci(r"System\.Diagnostics\.Process\.Start|\beval\s*\("),
+                  _ci(r"\bRequest\s*(?:\.\s*(?:QueryString|Form|Params|Item|"
+                      r"Cookies|Headers|ServerVariables)|\[)")),),
     _Rule("EICAR_Test_File", "medium",
           "EICAR antivirus test string present. Not malware, but its presence in "
           "served content is a strong signal something is wrong.",

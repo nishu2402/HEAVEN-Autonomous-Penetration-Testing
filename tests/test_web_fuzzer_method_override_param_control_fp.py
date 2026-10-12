@@ -25,6 +25,8 @@ Nothing here touches the network: the HTTP surface is a tiny in-process fake.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from heaven.vulnscan.web_fuzzer import _fuzz_method_override, _fuzz_parameters
@@ -195,3 +197,95 @@ async def test_hidden_param_unique_status_beyond_control_still_fires():
     params = {f["evidence"]["param"] for f in findings
               if f["vuln_type"] == "hidden_parameter_discovered"}
     assert "admin" in params, "a status the control does not produce is a discovery"
+
+
+# ── 3. hidden parameter: a load-shed under the concurrent burst is not discovery ─
+#
+# The sequentially-measured negative control cannot cancel a reaction the server
+# only has UNDER load. The discovery phase fans probes out ~10 at a time; a
+# throttling host answers part of that wave with a load-shed variant (observed live
+# on cPanel login ports: random junk names flipped to a 401 page exactly 121 bytes
+# longer than the 200 baseline, purely for riding in the burst) while every request
+# made on its own returns a clean 200. Baseline and control are fetched alone, so
+# they never see the shed and cannot subtract it, and every probed name is
+# "discovered". A sequential re-confirmation re-fetches each candidate alone, where
+# the artifact does not reproduce, so the storm collapses to nothing.
+class _LoadShedResp:
+    """A response whose status/length depends on whether it was issued inside a
+    concurrent burst. Any probe (URL carrying HEAVEN_PROBE) issued while another
+    request overlaps sheds to a longer 401; issued alone it returns a clean 200.
+    Baseline fetches (no HEAVEN_PROBE) always return the clean 200 body."""
+
+    def __init__(self, state: dict, url: str):
+        self._state = state
+        self._url = url
+        self.status = 200
+        self._body = state["base"]
+        self.headers: dict = {}
+        self.url = url
+
+    async def __aenter__(self):
+        st = self._state
+        st["inflight"] += 1
+        # Hold the slot briefly so genuinely concurrent peers register before the
+        # shed decision is made; a lone request sees only itself.
+        await asyncio.sleep(0.01)
+        st["peak"] = max(st["peak"], st["inflight"])
+        probe = "HEAVEN_PROBE" in self._url
+        genuine = st.get("genuine") and f'{st["genuine"]}=HEAVEN_PROBE' in self._url
+        if genuine:
+            # a real hidden parameter: distinct response regardless of load
+            self.status, self._body = 200, st["base"] + ("v" * 5000)
+        elif probe and st["inflight"] > 1:
+            # load-shed artifact: only under the concurrent burst
+            self.status, self._body = 401, st["base"] + ("x" * 121)
+        else:
+            self.status, self._body = 200, st["base"]
+        return self
+
+    async def __aexit__(self, *a):
+        self._state["inflight"] -= 1
+        return False
+
+    async def text(self, *a, **k):
+        return self._body
+
+    async def read(self, *a, **k):
+        return self._body.encode()
+
+
+def _load_shed_session(genuine: str | None = None):
+    state = {"base": _base_body(1000), "inflight": 0, "peak": 0, "genuine": genuine}
+    sess = _Session(get_handler=lambda url: _LoadShedResp(state, url))
+    return sess, state
+
+
+@pytest.mark.asyncio
+async def test_hidden_param_concurrent_load_shed_is_not_discovery():
+    # Every probe in the concurrent burst sheds to 401/+121; alone, every request
+    # is a clean 200. Without the sequential re-confirmation this reported dozens of
+    # bogus parameters (one per probed name). It must now report none.
+    sess, state = _load_shed_session()
+    findings = await _fuzz_parameters(sess, "http://t/panel")
+    kinds = [f for f in findings if f["vuln_type"] == "hidden_parameter_discovered"]
+    assert state["peak"] > 1, "fixture must actually exercise concurrent probing"
+    assert kinds == [], (
+        "a load-shed that only happens inside the concurrent burst, and vanishes "
+        "when each candidate is re-fetched alone, names no hidden parameter"
+    )
+
+
+@pytest.mark.asyncio
+async def test_hidden_param_genuine_survives_concurrent_load_shed():
+    # Same load-shed storm, but 'debug' is a REAL parameter: its distinct +5000-byte
+    # response reproduces whether it rode the burst or is re-fetched alone, so it
+    # survives the confirmation while the load-shed junk names are dropped.
+    sess, state = _load_shed_session(genuine="debug")
+    findings = await _fuzz_parameters(sess, "http://t/panel")
+    params = {f["evidence"]["param"] for f in findings
+              if f["vuln_type"] == "hidden_parameter_discovered"}
+    assert state["peak"] > 1, "fixture must actually exercise concurrent probing"
+    assert params == {"debug"}, (
+        "only the parameter whose signal reproduces in a lone request is reported; "
+        "the load-shed names must not survive"
+    )

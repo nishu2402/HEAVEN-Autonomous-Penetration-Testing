@@ -856,7 +856,59 @@ async def _fuzz_parameters(session: "aiohttp.ClientSession",
 
     await asyncio.gather(*[_try_param(p) for p in _HIDDEN_PARAMS])
 
-    for item in interesting:
+    # Sequential re-confirmation (reproduce-first). The discovery phase above fans
+    # out up to 10 probes at once; a rate-limited or connection-throttled server
+    # answers part of that burst with a load-shed variant that has nothing to do
+    # with the probed name (observed live on cPanel login ports: random junk names
+    # flipped to a 401 page exactly 121 bytes longer than the 200 baseline, purely
+    # because they rode in the concurrent wave). The negative control is measured
+    # once, on its own, so it never sees that load and cannot cancel the artifact.
+    # Re-fetch each surviving candidate ALONE, next to a fresh junk control fetched
+    # the same way, and keep only the signals that persist without the burst: a
+    # genuine hidden parameter changes the response whether or not it was in a wave;
+    # a load artifact does not reproduce in a lone request.
+    # The confirmation is sequential and only runs on candidates, so on a healthy
+    # host it is a handful of sub-second requests. When the host is load-shedding —
+    # the exact condition that spawns these candidates in the first place — the same
+    # requests turn slow, so the loop is capped by an overall wall-clock budget;
+    # candidates not reached before the budget is spent are dropped unconfirmed. On a
+    # stressed host a length/status delta is noise rather than a real parameter, so
+    # erring toward suppression here keeps both the scan bounded and the report clean.
+    confirmed: list[dict] = []
+    if interesting:
+        confirm_deadline = asyncio.get_event_loop().time() + 20.0
+
+        async def _get_once(u: str) -> tuple[int, int, bool]:
+            async with session.get(u, timeout=aiohttp.ClientTimeout(total=6)) as rr:
+                bb = await rr.text()
+                return rr.status, len(bb), "HEAVEN_PROBE" in bb
+
+        for item in interesting:
+            if asyncio.get_event_loop().time() > confirm_deadline:
+                break
+            param = item["param"]
+            try:
+                c_name = "hvn_" + secrets.token_hex(4)
+                c_url = url + ("&" if "?" in url else "?") + f"{c_name}=HEAVEN_PROBE"
+                cc_status, cc_len, cc_refl = await _get_once(c_url)
+                p_url = url + ("&" if "?" in url else "?") + f"{param}=HEAVEN_PROBE"
+                p_status, p_len, p_refl = await _get_once(p_url)
+            except Exception:
+                logger.debug("suppressed non-fatal exception", exc_info=True)
+                continue
+            status_ok = (p_status != base_status and p_status != cc_status)
+            len_ok = (abs(p_len - base_len)
+                      > max(len_threshold, abs(cc_len - base_len) + jitter))
+            refl_ok = p_refl and not cc_refl
+            if status_ok or len_ok or refl_ok:
+                confirmed.append({
+                    "param": param,
+                    "status": p_status,
+                    "len_diff": abs(p_len - base_len),
+                    "reflected": refl_ok,
+                })
+
+    for item in confirmed:
         param = item["param"]
         # High-severity params
         high_risk = any(kw in param.lower() for kw in

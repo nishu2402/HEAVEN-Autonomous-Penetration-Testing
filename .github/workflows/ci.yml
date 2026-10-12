@@ -110,7 +110,7 @@ jobs:
         continue-on-error: true
       - name: Upload SARIF to GitHub code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: bandit.sarif
         continue-on-error: true
@@ -155,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # react-router 8 requires Node >=22.22.0 (also satisfies Vite 8's
           # >=22.12); pinning the minor keeps CI from drifting below the floor.
@@ -227,7 +227,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # react-router 8 requires Node >=22.22.0 — pin the minor to match.
           node-version: "22.22"
@@ -268,6 +268,9 @@ jobs:
     name: Docker image build
     runs-on: ubuntu-latest
     needs: [lint, test, ui-build]
+    # amd64-only `load` build is normally a few minutes; this is a safety net so
+    # a wedged buildkit layer can never run to GitHub's 6h job ceiling.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v4
@@ -278,8 +281,13 @@ jobs:
           push: false
           load: true            # make the image available to `docker run` below
           tags: heaven:ci-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Dedicated cache scope. This CI build and the multi-arch publish in
+          # docker.yml used to share the default gha scope, so when a push to
+          # main fired both workflows at once they wrote the same cache keys
+          # concurrently and buildkit's cache export could deadlock. Separate
+          # scopes (ci here, release-<ref> there) make the builds independent.
+          cache-from: type=gha,scope=ci
+          cache-to: type=gha,mode=max,scope=ci
       - name: Smoke-test the built image
         # Building isn't enough — a broken install path produces an image that
         # builds fine but crashes on startup. Actually run it to prove the

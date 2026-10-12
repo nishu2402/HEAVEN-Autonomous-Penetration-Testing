@@ -19,6 +19,14 @@ permissions:
   contents: read
   packages: write    # required to push to GHCR
 
+# Don't let two runs for the same ref build the same image in parallel; a newer
+# push supersedes an older in-flight build for that ref. main and a tag are
+# different refs, so a tagged release still builds alongside the main build —
+# the per-ref cache scopes below keep those two from colliding.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/heaven
@@ -26,6 +34,11 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # Hard ceiling for the whole job. The arm64 half runs under QEMU emulation,
+    # so a warm build is ~20-30 min but a cold one is longer; 150 min leaves
+    # generous head-room for a cold build plus one retry, while guaranteeing a
+    # wedged build fails in 2.5h instead of burning to GitHub's 6h limit.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v5
 
@@ -65,11 +78,15 @@ jobs:
       # First attempt. The arm64 half runs under QEMU emulation, so a transient
       # network / buildkit / registry hiccup can abort an otherwise-fine build.
       # continue-on-error lets the retry below take over instead of failing the
-      # job on a one-off blip.
+      # job on a one-off blip. timeout-minutes converts a *hang* into the same
+      # recoverable failure: without it a stalled buildkit/cache export just runs
+      # until the job ceiling, and continue-on-error never gets to trigger the
+      # retry (this is exactly what wedged the v4.3.0 tag build for ~5h).
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v7
+        timeout-minutes: 60
         continue-on-error: true
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -77,8 +94,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Per-ref cache scope so a concurrent main build and tag build never
+          # write the same gha cache keys (the contention that deadlocked the
+          # export). cache-from also reads the shared main scope so a fresh tag
+          # build still starts warm from the last main build.
+          cache-from: |
+            type=gha,scope=release-${{ github.ref_name }}
+            type=gha,scope=release-main
+          cache-to: type=gha,mode=max,scope=release-${{ github.ref_name }}
 
       - name: Pause before retry
         if: steps.build.outcome == 'failure'
@@ -87,9 +110,12 @@ jobs:
       # Retry once. buildx reuses the GHA layer cache, so the second attempt
       # only redoes the layer that failed and finishes fast. This step has no
       # continue-on-error, so a genuine, repeatable failure still surfaces as a
-      # red build. Keep its inputs identical to the first attempt.
+      # red build. Its own timeout-minutes keeps a retry that also hangs from
+      # eating the rest of the job ceiling. Keep its inputs identical to the
+      # first attempt.
       - name: Build and push (retry)
         if: steps.build.outcome == 'failure'
+        timeout-minutes: 60
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -98,5 +124,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=release-${{ github.ref_name }}
+            type=gha,scope=release-main
+          cache-to: type=gha,mode=max,scope=release-${{ github.ref_name }}

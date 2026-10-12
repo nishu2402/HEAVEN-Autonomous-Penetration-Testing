@@ -18,8 +18,8 @@
 #
 # Usage:
 #   scripts/build_release_notes.sh <version> [tag] [owner/repo] > notes.md
-#   # e.g. scripts/build_release_notes.sh 4.2.0
-#   #      scripts/build_release_notes.sh 4.2.0 v4.2.0 nishu2402/HEAVEN-Autonomous-Penetration-Testing
+#   # e.g. scripts/build_release_notes.sh 4.3.0
+#   #      scripts/build_release_notes.sh 4.3.0 v4.3.0 nishu2402/HEAVEN-Autonomous-Penetration-Testing
 set -euo pipefail
 
 VERSION="${1:?usage: build_release_notes.sh <version> [tag] [owner/repo]}"

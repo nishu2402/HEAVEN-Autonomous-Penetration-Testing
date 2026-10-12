@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0]: 2026-10-12
+
 ### Added
 
 - **Automatic local-model fallback keeps the AI roles active when a cloud key hits
@@ -162,6 +164,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   freshness against the embedded CWE→ATT&CK maps) and `heaven mitre technique <ID>`
   (look up a single technique, with the groups and malware that use it). Results are
   disk-cached under `data/mitre_cache/`. New coverage in `tests/test_mitre_taxii.py`.
+- **`heaven serve` can terminate TLS directly, so the web UI and API run over
+  HTTPS without a reverse proxy.** New `--tls-cert` and `--tls-key` flags (or the
+  `HEAVEN_TLS_CERTFILE` / `HEAVEN_TLS_KEYFILE` environment variables) hand a PEM
+  certificate and key to uvicorn, which then serves HTTPS on the bound port. Both
+  must be supplied together and must exist on disk, or the command stops with a
+  clear message before it binds, and the startup banner names the scheme it is
+  serving. A reverse proxy stays fully supported; this only removes the need for
+  one on a simple single-host deployment.
 
 ### Changed
 
@@ -191,6 +201,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     updated to the retrained artifacts (re-attach them to the release when
     publishing). Docs, model card, posters, and UI help text updated to the new
     figures.
+- **Agent Fleet metrics now count real model calls, and an unscoped scan still
+  grades its coverage.** A counting gateway wraps the brain so the fleet's
+  LLM-call metric reflects the calls brain-backed agents actually made rather than
+  an estimate. Separately, when a scan runs with no explicit scope the fleet seeds
+  the engagement scope from the scan's own seed targets, so coverage grading has a
+  target set to score against instead of reporting an empty scope.
 
 ### Fixed
 
@@ -210,6 +226,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (default 6s, clamped 1-30s), and the probed host is reported in
   `/api/update/status`. Deterministic detection is unaffected; this only changes
   how the self-update reports an unreachable remote.
+- **`heaven update` no longer blocks on files it regenerates itself, and names
+  exactly what is in the way when a real edit does block it.** A fast-forward
+  refuses to run over a dirty working tree, but a built checkout always carries a
+  few tracked files it rewrote itself (for example `heaven-ui/package-lock.json`
+  after an earlier `npm install`), so the updater used to stop on its own build
+  output. It now tells genuine operator edits apart from these regenerable
+  artifacts: the regenerable files are reset before the fast-forward and only real
+  edits block it, with the blocking paths listed so the fix is obvious (commit,
+  stash, or discard them). The installer and the update both prefer `npm ci`,
+  which installs strictly from the lockfile and never rewrites it, so a fresh
+  build leaves the tree clean, and the browser Update panel carries the same
+  distinction in its messaging. New coverage in `tests/test_self_update.py`.
 - **Six false-positive / silent-miss classes found by a live-target verification
   pass** (scanme.nmap.org · VAmPI · DVWA · OWASP Juice Shop). Each fix is
   recall-safe: the finding still surfaces, only a wrong severity, label, or CVE was
@@ -240,6 +268,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     reported available but the render fails or returns empty and static recovery is
     also empty, HEAVEN emits a distinct render-failed coverage note instead of
     returning a near-empty result with no warning.
+- **A false-positive precision sweep across the web, mail, TLS, Active Directory
+  and secret-scanning detectors, driven by live-target verification.** Every fix
+  is recall-safe: a genuine issue still surfaces, only a wrong label, a wrong
+  severity or a spurious hit was removed, and each one carries a regression test.
+  - **Each signal is confirmed under the conditions it was discovered in.** The
+    web parameter fuzzer discovers candidates with a concurrent request burst but
+    had measured its negative control with single sequential requests, so a host
+    that shed load under the burst (answering part of it with a slightly longer
+    error page) made every probed name look like a hidden parameter. Each
+    candidate is now re-confirmed on its own, next to a fresh control, before it
+    is reported, so a load artifact that does not reproduce in a lone request is
+    dropped. The method-override check now also requires both the plain and the
+    overridden request to succeed and to differ, so a server that rejects the
+    override is no longer read as accepting it.
+  - **Matching is gated on positive evidence.** Exploitation proof, CRLF and XXE
+    confirmation classify on whole-word tokens and real evidence rather than
+    incidental substrings; the Java SAST client-audit pass no longer reads an
+    equality comparison as an assignment sink; and stored XSS fires only once a
+    payload is confirmed to persist, not when the response escapes it.
+  - **Off-site and placeholder noise is removed.** Misconfiguration and
+    web-technology checks no longer attribute an off-site redirect's headers to
+    the target origin; the JavaScript and git secret scanners no longer flag
+    template placeholders or credential-less URLs; DKIM no longer calls an
+    Ed25519 key weak; the SSL/TLS scanner no longer reports a strong cipher as
+    weak and names the negotiated protocol correctly; a dangling MX record is
+    flagged only when its host is provably non-existent; and a finding with no
+    backing CVE keeps its honest calibrated-confidence band instead of being
+    promoted. The borderline review that looks at low-confidence findings can no
+    longer demote one a deterministic oracle already confirmed.
+
+### Security
+
+- **The interactive API documentation can be switched off to shrink the
+  unauthenticated surface.** Swagger (`/api/docs`), ReDoc (`/api/redoc`) and the
+  `/openapi.json` schema are useful in development but describe every route, so
+  `HEAVEN_DISABLE_DOCS=1` now disables all three for a hardened or hosted
+  deployment. The routes they describe stay authenticated either way, so the
+  schema alone never granted access; this removes the published description of the
+  surface as well.
+- **The legacy `X-XSS-Protection` response header is now configurable.** Modern
+  browsers dropped their built-in XSS auditor and rely on the strict
+  Content-Security-Policy HEAVEN already sends, and the legacy auditor has known
+  bypasses of its own, so `HEAVEN_XSS_PROTECTION` lets an operator set the header
+  to `0` (the modern recommendation) or to any explicit value. It defaults to the
+  previous `1; mode=block`, so nothing changes unless you opt in.
 
 ## [4.2.0]: 2026-09-24
 

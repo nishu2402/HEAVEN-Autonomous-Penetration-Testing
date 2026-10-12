@@ -32,7 +32,7 @@ _MODEL_ASSET = "NVD_model.pkl"
 # below matches ONLY the retrained artifact — older releases carry the previous
 # model and will fail this checksum. Attach the new NVD_model.pkl to the release
 # before/when publishing, and prepend that tag here.
-_MODEL_KNOWN_TAGS = ("v3.1.0",)
+_MODEL_KNOWN_TAGS = ("v4.3.0",)
 _MODEL_SHA256 = "715fe8dab8c80c1303bf8d1fddf4374ca9b4f0e33287f1bc192c9c1ae26d58d9"
 _MODEL_SIZE_BYTES = 10352387
 

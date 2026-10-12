@@ -94,7 +94,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API**: 106 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.2.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.3.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -468,7 +468,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 68 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.2.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.3.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">
@@ -476,7 +476,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 | Command | Purpose |
 |---|---|
 | `scan` | Launch a vulnerability scan (`-m web\|network\|full`, `--stealth 1-5`, `--auto-prove`, `--autonomous`) |
-| `serve` | Start the API server + web UI |
+| `serve` | Start the API server + web UI (optional native TLS: `--tls-cert`/`--tls-key` serves HTTPS without a reverse proxy) |
 | `engage` · `scope` · `use` | Manage engagements · in-scope targets · select the active engagement (stops repeating `--engagement`) |
 | `findings` · `show` · `mark` · `remediate` | List findings · full detail · set triage status · AI-assisted remediation |
 | `leads` | **Honest leads**: substantiated signals that did not reach the finding bar, kept for a human to review · never counted as findings, never given a severity · `--promote` / `--dismiss` to triage |
@@ -490,6 +490,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 | `sca` | Software Composition Analysis: dependency manifests vs. OSV.dev advisories |
 | `cve <product> [version]` | **Dynamic live CVE lookup**: query NVD + CIRCL for any product/version *not* in the local DB (merged, de-duped, version-confirmed, EPSS-scored, Exploit-DB-correlated; `--engagement` persists them) |
 | `dns <domain>` | **DNS enumeration**: A/AAAA/MX/NS/TXT/SOA/CNAME records, resolvable subdomains, mail servers, DNSSEC & wildcard, plus DNS security posture; surfaces in the **Assets** view and reports (`--engagement` persists them) |
+| `ssh <host>` · `vpn <host>` | **Direct crypto probes, at parity with `dns`**: `ssh` audits the SSH transport (weak host-key / KEX / cipher / MAC algorithms) · `vpn` checks an OpenVPN control channel for missing tls-auth/tls-crypt (`--engagement` persists them) |
 | `postex enum/loot/full` | Post-exploitation: privesc enumeration (Linux + Windows via `--os`) · loot harvest · full playbook (kill-chain + AI) |
 | `cloud storage` | Credential-free public S3/GCS/Azure bucket-exposure scan derived from a target domain |
 | `cloud iam` | Read-only IAM privilege audit of the authenticated AWS identity (over-privileged principals · missing MFA · stale/root keys · weak password policy) |

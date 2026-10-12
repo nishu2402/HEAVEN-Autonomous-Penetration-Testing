@@ -128,8 +128,8 @@ For a multi-user or internet-exposed deployment, also:
 
 | Version | Supported |
 |---|---|
-| 4.2.x  | ✅ |
-| < 4.2  | ❌ please upgrade |
+| 4.3.x  | ✅ |
+| < 4.3  | ❌ please upgrade |
 
 ## Security release process
 

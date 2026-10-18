@@ -602,6 +602,7 @@ class IDORScanner:
         self,
         targets: list[str],
         forms_by_url: Optional[dict[str, list]] = None,
+        time_budget: Optional[float] = None,
     ) -> dict:
         """
         Run IDOR tests against all targets.
@@ -632,14 +633,27 @@ class IDORScanner:
                 tasks.append(self._test_unauth_access(session, url))
                 if forms:
                     tasks.append(self._test_mass_assignment(session, url, forms))
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Budget-aware: each probe appends to self._findings as it finishes,
+            # so probes completed before the soft deadline are kept; the rest are
+            # cancelled instead of the orchestrator's hard timeout dropping all of
+            # them (same salvage as the injection sweep).
+            from heaven.utils.fanout import gather_budgeted
+            _done, truncated = await gather_budgeted(
+                tasks, time_budget=time_budget)
 
         logger.info(f"IDORScanner: {len(self._findings)} findings")
-        return {
+        out: dict = {
             "findings": self._findings,
             "urls_tested": len(unique),
+            "urls_requested": len(unique),
             "error": None,
         }
+        if truncated:
+            out["budget_exhausted"] = True
+            logger.warning(
+                "IDORScanner: soft budget reached; %d of %d probe(s) completed, "
+                "returning partial findings", len(_done), len(tasks))
+        return out
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -653,6 +667,7 @@ async def scan_for_idor(
     alt_auth_headers: Optional[dict] = None,
     concurrency: int = 20,
     stealth_level: str = "normal",
+    time_budget: Optional[float] = None,
 ) -> dict:
     """Top-level function called from the orchestrator."""
     # (concurrency, inter-request delay seconds) per stealth level — higher
@@ -677,7 +692,8 @@ async def scan_for_idor(
         alt_auth_headers=alt_auth_headers,
         request_delay=request_delay,
     )
-    return await scanner.scan(targets, forms_by_url=forms_by_url)
+    return await scanner.scan(targets, forms_by_url=forms_by_url,
+                              time_budget=time_budget)
 
 
 def _active_auth_headers() -> Optional[dict]:

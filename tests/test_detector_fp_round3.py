@@ -30,10 +30,11 @@ from heaven.vulnscan import injection_scanner as ij
 # ── minimal fake aiohttp session ──────────────────────────────────────────────
 
 class _FakeResp:
-    def __init__(self, status=200, text="", json_data=None):
+    def __init__(self, status=200, text="", json_data=None, headers=None):
         self.status = status
         self._text = text
         self._json = json_data
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -44,6 +45,9 @@ class _FakeResp:
     async def text(self, *a, **k):
         return self._text
 
+    async def read(self, *a, **k):
+        return self._text.encode()
+
     async def json(self, *a, **k):
         if self._json is None:
             raise ValueError("response is not JSON")
@@ -52,13 +56,23 @@ class _FakeResp:
 
 class _FakeSession:
     """`session.get/post/put(...)` return an async-context-manager response,
-    exactly like aiohttp — so the scanner code path is exercised unchanged."""
+    exactly like aiohttp — so the scanner code path is exercised unchanged.
+
+    ``post`` is URL-aware so the rate-limit catch-all guard can be exercised: the
+    guard first probes a random ``/api/login-<hex>`` sibling that must NOT exist,
+    then the real ``/api/login``. ``catch_all=True`` makes every path (sibling
+    included) answer identically — the shared-hosting / SPA shell behaviour that
+    previously produced a bogus ``no_rate_limit`` on every guessed API path."""
 
     def __init__(self, *, get_text="", get_status=200,
-                 put_status=200, put_json=None, post_status=200):
+                 put_status=200, put_json=None, post_status=200,
+                 post_ctype="application/json", post_text="", catch_all=False):
         self._get_text, self._get_status = get_text, get_status
         self._put_status, self._put_json = put_status, put_json
         self._post_status = post_status
+        self._post_ctype = post_ctype
+        self._post_text = post_text
+        self._catch_all = catch_all
 
     def get(self, url, **kw):
         return _FakeResp(self._get_status, text=self._get_text)
@@ -67,7 +81,12 @@ class _FakeSession:
         return _FakeResp(self._put_status, json_data=self._put_json)
 
     def post(self, url, **kw):
-        return _FakeResp(self._post_status)
+        # Random non-existent sibling probed by the catch-all guard.
+        if "/api/login-" in url and not self._catch_all:
+            return _FakeResp(404, text="not found",
+                             headers={"Content-Type": "application/json"})
+        return _FakeResp(self._post_status, text=self._post_text,
+                         headers={"Content-Type": self._post_ctype})
 
 
 # ── pure-helper unit checks ───────────────────────────────────────────────────
@@ -135,9 +154,36 @@ async def test_missing_endpoint_is_not_no_rate_limit():
 
 @pytest.mark.asyncio
 async def test_live_unlimited_endpoint_flags_no_rate_limit():
+    # A real JSON login API (distinguishable from a non-existent sibling) that
+    # processes 50 POSTs with no 429 still fires.
     findings = await api.RESTAPIScanner.test_rate_limiting(
-        _FakeSession(post_status=200), "http://t")
+        _FakeSession(post_status=200, post_ctype="application/json"), "http://t")
     assert findings and findings[0].vuln_type == "no_rate_limit"
+
+
+@pytest.mark.asyncio
+async def test_html_catch_all_is_not_no_rate_limit():
+    # Shared hosting / SPA / parked domain: every path (incl. /api/login) returns
+    # the same 200 HTML shell. That is not a live login API, so the 50 "processed"
+    # 200s must NOT be read as "no rate limiting" (observed live on a cPanel host
+    # that returned its homepage for every guessed /api, /graphql, /v1 ... path).
+    findings = await api.RESTAPIScanner.test_rate_limiting(
+        _FakeSession(post_status=200, post_ctype="text/html",
+                     post_text="<!doctype html><html>home</html>",
+                     catch_all=True),
+        "http://t")
+    assert findings == [], "an HTML catch-all is not evidence of a missing rate limiter"
+
+
+@pytest.mark.asyncio
+async def test_json_catch_all_sibling_match_is_not_no_rate_limit():
+    # Even a JSON catch-all that answers a non-existent /api/login-<rand> sibling
+    # identically to /api/login is not a confirmed endpoint — suppress.
+    findings = await api.RESTAPIScanner.test_rate_limiting(
+        _FakeSession(post_status=200, post_ctype="application/json",
+                     post_text='{"ok":true}', catch_all=True),
+        "http://t")
+    assert findings == [], "an indistinguishable sibling means no confirmed login endpoint"
 
 
 # ── mass-assignment FP fix ────────────────────────────────────────────────────

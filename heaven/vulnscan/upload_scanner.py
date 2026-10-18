@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 import secrets
+from typing import Optional
 from urllib.parse import urljoin
 
 try:
@@ -211,7 +212,8 @@ async def _probe_form(session: "aiohttp.ClientSession", form: dict,
 
 
 async def scan_upload_forms(endpoints: list[dict], *, authorized: bool = False,
-                            timeout: float = 12.0) -> dict:
+                            timeout: float = 12.0,
+                            time_budget: Optional[float] = None) -> dict:
     """Probe every file-upload form discovered by the crawl.
 
     Gated on ``authorized`` because it writes a (benign, inert) file to the
@@ -226,18 +228,34 @@ async def scan_upload_forms(endpoints: list[dict], *, authorized: bool = False,
     if not forms:
         return {"skipped": True, "reason": "no file-upload forms discovered"}
 
+    import time as _time
+    deadline = (_time.monotonic() + time_budget) \
+        if (time_budget and time_budget > 0) else None
+    truncated = False
+
     connector = aiohttp.TCPConnector(ssl=False, limit=10)
     findings: list[dict] = []
+    tested = 0
     async with aiohttp.ClientSession(connector=connector, **aiohttp_session_kwargs()) as session:
         for form in forms:
+            if deadline is not None and _time.monotonic() >= deadline:
+                truncated = True
+                break
             try:
                 f = await _probe_form(session, form, timeout)
             except Exception:  # noqa: BLE001
                 logger.debug("upload form probe error for %s", form.get("action"),
                              exc_info=True)
                 f = None
+            tested += 1
             if f is not None:
                 findings.append(f)
 
-    return {"findings": findings, "forms_tested": len(forms),
-            "vulnerabilities": findings, "total": len(findings)}
+    out = {"findings": findings, "forms_tested": tested,
+           "vulnerabilities": findings, "total": len(findings),
+           "urls_requested": len(forms), "urls_audited": tested}
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning("upload probe: soft budget reached; tested %d of %d form(s), "
+                       "returning partial results", tested, len(forms))
+    return out

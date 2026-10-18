@@ -186,7 +186,8 @@ class PDFReportGenerator:
             html = ComplianceReportGenerator().generate_html_report(
                 findings, engagement_name=self._engagement(data),
                 assets=data.get("assets"), meta=meta or None,
-                leads=data.get("leads"))
+                leads=data.get("leads"),
+                coverage_notes=data.get("coverage_notes"))
             Path(html_path).write_text(html, encoding="utf-8")
             logger.info(f"HTML report written to {html_path} (install reportlab for PDF)")
             return True

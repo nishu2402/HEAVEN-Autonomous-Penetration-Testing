@@ -18,6 +18,7 @@ Key features
 from __future__ import annotations
 
 import asyncio
+import time
 import shutil
 import tempfile
 from pathlib import Path
@@ -312,6 +313,7 @@ class DirectoryFuzzer:
         recursive: bool = True,
         max_depth: int = 2,
         extensions: Optional[list[str]] = None,
+        time_budget: Optional[float] = None,
     ) -> None:
         self._concurrency = concurrency
         self._delay = request_delay
@@ -323,6 +325,15 @@ class DirectoryFuzzer:
         self._sem = asyncio.Semaphore(concurrency)
         self._findings: list[dict] = []
         self._seen_paths: set[str] = set()
+        # Soft wall-clock deadline. The per-path fan-out below scales with the
+        # wordlist (hundreds-thousands of probes per target), so on a slow host
+        # it can outrun the orchestrator's hard task timeout and lose EVERY path
+        # it found. With a budget, each _scan_target keeps the probes completed
+        # before the deadline and stops launching more, and the ffuf per-target
+        # loop breaks out, so the task returns partial results instead of zero.
+        self._time_budget = time_budget
+        self._deadline: Optional[float] = None
+        self._truncated = False
         # Set True when the fuzz session carries an auth cookie jar. While
         # authenticated, the fuzzer must never GET a session-destroying path
         # (/logout, /signout, …): the app tears the shared session down
@@ -550,7 +561,23 @@ class DirectoryFuzzer:
         ]
         self._seen_paths.update(candidate_urls)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Budget-aware per-path fan-out: this is the sweep that scales with the
+        # wordlist, so on a slow host it is what outruns the task timeout. Keep
+        # the probes that finished before the deadline; stop awaiting the rest.
+        remaining: Optional[float] = None
+        if self._deadline is not None:
+            remaining = self._deadline - time.monotonic()
+            if remaining <= 0:
+                self._truncated = True
+                # Close the coroutines we built but will not await, so no
+                # "coroutine was never awaited" warning escapes.
+                for _c in tasks:
+                    _c.close()
+                return []
+        from heaven.utils.fanout import gather_budgeted
+        results, _trunc = await gather_budgeted(tasks, time_budget=remaining)
+        if _trunc:
+            self._truncated = True
         findings: list[dict] = []
         dirs_found: list[str] = []
 
@@ -687,6 +714,12 @@ class DirectoryFuzzer:
         if not targets:
             return {"findings": [], "urls_tested": 0, "error": "no targets"}
 
+        # Arm the soft deadline for this sweep (see __init__). _scan_target and
+        # the ffuf loop below both honour it so a slow host returns partial paths.
+        self._deadline = (time.monotonic() + self._time_budget) \
+            if (self._time_budget and self._time_budget > 0) else None
+        self._truncated = False
+
         # Try ffuf first (per target); fall back to the native async engine for
         # any target where ffuf could not run — a missing binary, an unsupported
         # flag, a non-zero exit or an unparseable output file (``_run_ffuf``
@@ -696,7 +729,13 @@ class DirectoryFuzzer:
         native_targets: list[str] = list(targets)
         if shutil.which("ffuf"):
             native_targets = []
-            for url in targets:
+            for _i, url in enumerate(targets):
+                if self._deadline is not None and time.monotonic() >= self._deadline:
+                    self._truncated = True
+                    logger.warning(
+                        "DirFuzzer (ffuf): soft budget reached; %d of %d target(s) "
+                        "fuzzed, returning partial results", _i, len(targets))
+                    break
                 results = await self._run_ffuf(url)
                 if results is None:
                     native_targets.append(url)   # ffuf failed → native fallback
@@ -708,8 +747,11 @@ class DirectoryFuzzer:
                 deduped_ffuf = self._dedup(all_findings)
                 await self._capture_responses(deduped_ffuf)
                 deduped_ffuf = self._collapse_soft200_catchall(deduped_ffuf)
-                return {"findings": deduped_ffuf,
+                _out = {"findings": deduped_ffuf,
                         "urls_tested": len(targets), "error": None}
+                if self._truncated:
+                    _out["budget_exhausted"] = True
+                return _out
             logger.info("DirFuzzer: ffuf unavailable/failed for %d/%d target(s): "
                         "native engine covers them", len(native_targets), len(targets))
 
@@ -739,7 +781,11 @@ class DirectoryFuzzer:
         await self._capture_responses(deduped)
         deduped = self._collapse_soft200_catchall(deduped)
         logger.info(f"DirFuzzer: {len(deduped)} unique paths found")
-        return {"findings": deduped, "urls_tested": len(targets), "error": None}
+        _out = {"findings": deduped, "urls_tested": len(targets), "error": None}
+        if self._truncated:
+            _out["budget_exhausted"] = True
+            logger.warning("DirFuzzer: soft budget reached; returning partial paths")
+        return _out
 
     async def _capture_responses(self, findings: list[dict]) -> None:
         """Attach the real HTTP response to each discovered path (Proof of issue).
@@ -1001,6 +1047,7 @@ async def fuzz_directories(
     targets: list[str],
     stealth_level: str = "normal",
     tech_hints: Optional[list[str]] = None,
+    time_budget: Optional[float] = None,
 ) -> dict:
     """
     Entry point called from the orchestrator.
@@ -1031,5 +1078,6 @@ async def fuzz_directories(
         concurrency=concurrency,
         request_delay=delay,
         extensions=extra_exts,
+        time_budget=time_budget,
     )
     return await fuzzer.fuzz(targets)

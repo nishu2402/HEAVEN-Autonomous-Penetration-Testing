@@ -82,16 +82,22 @@ def _ci(pattern: str) -> re.Pattern:
     return re.compile(pattern, re.I | re.S)
 
 
-# A server-side-script context marker (PHP/JSP/ASP tags, an HTTP superglobal, or
-# a code-execution sink). The named-webshell tokens below are only meaningful
-# inside real PHP/JSP/ASPX source, so a match requires one of these to be present
-# too. Without it, a brand token like "FilesMan" or "WSO 2" matches ASCII bytes
-# that occur by chance inside binary media (an MP4 atom, a codec tag) or benign
-# text that merely names a product (for example the "WSO2" software vendor),
-# which is a false positive. A genuine webshell (including a media/PHP polyglot)
+# A PHP script context marker (an open tag, an HTTP superglobal, or a
+# code-execution sink). The named-webshell tokens below are only meaningful
+# inside real PHP source, so a match requires one of these to be present too.
+# Without it, a brand token like "FilesMan" or "WSO 2" matches ASCII bytes that
+# occur by chance inside binary media (an MP4 atom, a codec tag) or benign text
+# that merely names a product (for example the "WSO2" software vendor), which is
+# a false positive. A genuine PHP webshell (including a media/PHP polyglot)
 # always carries this context, so requiring it costs no real detection.
+#
+# The markers here are deliberately PHP-only. The bare ASP/ERB tag ``<%`` is NOT
+# included: these are *PHP* shells (c99/r57/b374k/WSO/FilesMan/IndoXploit/alfa),
+# so ``<%`` is the wrong language, and at two bytes it is common enough in random
+# binary to pair with a stray brand token ~0.4% of the time, a measured false
+# positive on media. ASP/JSP/.NET shells are covered by their own rules below.
 _SCRIPT_CTX = _ci(
-    r"<\?php|<\?=|<%|\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b"
+    r"<\?php|<\?=|\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b"
     r"|\b(?:eval|assert|system|shell_exec|passthru|proc_open|popen|exec|"
     r"base64_decode|gzinflate|str_rot13)\s*\(|Runtime\.getRuntime\s*\(")
 
@@ -174,9 +180,11 @@ rule PHP_Webshell_Named {
         $fm = "FilesMan" nocase
         $indo = "IndoXploit" nocase
         $alfa = /alfa\s*team|AlfaShell/ nocase
-        // A named shell is server-side source, so require a script context too;
+        // A named PHP shell is PHP source, so require a PHP script context too;
         // this stops a brand token matching stray bytes in binary media / text.
-        $ctx_tag = /<\?php|<\?=|<%/ nocase
+        // The ASP/ERB tag <% is intentionally excluded: wrong language for these
+        // PHP shells, and two bytes is short enough to hit random media noise.
+        $ctx_tag = /<\?php|<\?=/ nocase
         $ctx_sg = /\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)/ nocase
         $ctx_sink = /(eval|assert|system|shell_exec|passthru|proc_open|popen)\s*\(/ nocase
     condition:

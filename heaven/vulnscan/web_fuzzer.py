@@ -1303,7 +1303,8 @@ _FUZZ_STEALTH: dict[str, tuple[int, float]] = {
 
 
 async def fuzz_targets(urls: list[str], aggressive: Optional[bool] = None,
-                       max_urls: int = 40, stealth_level: str = "normal") -> dict:
+                       max_urls: int = 40, stealth_level: str = "normal",
+                       time_budget: Optional[float] = None) -> dict:
     """Fuzz multiple URLs concurrently.
 
     The verb-tampering / host-header / 403-bypass / cache-poisoning / smuggling /
@@ -1363,9 +1364,22 @@ async def fuzz_targets(urls: list[str], aggressive: Optional[bool] = None,
             if delay:
                 await asyncio.sleep(delay)
 
-    await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
-    return {
+    # Budget-aware fan-out: URLs whose checks finished before the soft deadline
+    # keep their findings (appended to the shared list); the rest are cancelled
+    # rather than losing the whole task at the orchestrator's hard timeout.
+    from heaven.utils.fanout import gather_budgeted
+    _done, truncated = await gather_budgeted(
+        [_one(u) for u in unique], time_budget=time_budget)
+    out = {
         "total": len(all_findings),
         "findings": all_findings,
         "vulnerabilities": all_findings,
+        "urls_requested": len(unique),
+        "urls_audited": len(_done),
     }
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "Web fuzz: soft budget reached; audited %d of %d URL(s), "
+            "returning partial results", len(_done), len(unique))
+    return out

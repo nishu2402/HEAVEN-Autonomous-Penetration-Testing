@@ -619,6 +619,12 @@ async def dns_recon(domain: str, enumerate_subdomains: bool = False,
             f"Domain {domain} has no DNSSEC signature records. "
             f"DNS responses can be forged (cache poisoning, Kaminsky attack).",
             confidence=0.95,
+            evidence={
+                "observed": (
+                    f"A DNSSEC validation query for {domain} returned no DNSKEY / "
+                    "RRSIG records, so its DNS responses are unsigned."),
+                "dnssec_enabled": False,
+            },
         ))
 
     # ── SOA analysis ─────────────────────────────────────────────────────────

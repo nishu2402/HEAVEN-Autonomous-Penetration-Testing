@@ -2743,6 +2743,18 @@ def create_app() -> FastAPI:
         raw_assets = _collect_raw_assets(engagement)
         # DNS enumeration (records + subdomains) for the report's DNS section.
         raw_dns = _collect_raw_dns(engagement)
+        # Coverage caveats (a scanner that timed out or hit its soft budget) from
+        # the MOST RECENT scan only — coverage is per-run, so aggregating stale
+        # scans would mislead. Surfaced in the report's "Scan Coverage" section so
+        # partial coverage on a slow host is disclosed, not silently hidden.
+        raw_coverage: list = []
+        with contextlib.suppress(Exception):
+            _store_cov = _read_store(engagement)
+            _recent = _store_cov.list_scans(limit=1)
+            if _recent and _recent[0] and _recent[0].get("summary_json"):
+                _summ = json.loads(_recent[0]["summary_json"])
+                raw_coverage = [c for c in (_summ.get("coverage_notes") or [])
+                                if isinstance(c, dict)]
         # Honest leads (substantiated sub-confirmation observations) for the
         # report's "Leads for manual review" appendix. Never findings, never
         # counted as such — the same channel the CLI export renders, so the
@@ -2813,7 +2825,8 @@ def create_app() -> FastAPI:
                 body = ComplianceReportGenerator().generate_html_report(
                     findings, engagement_name=eng_name, assets=raw_assets,
                     dns_records=raw_dns, compliance_framework=compliance_fw,
-                    meta=report_meta or None, leads=raw_leads)
+                    meta=report_meta or None, leads=raw_leads,
+                    coverage_notes=raw_coverage)
             elif fmt == "markdown":
                 from heaven.devsecops.evidence import export_findings_markdown
                 body = export_findings_markdown(findings, engagement_name=eng_name,
@@ -6359,6 +6372,11 @@ async def _run_scan_background(scan_id: str, req: ScanRequest, *, resume: bool =
                     # DNS enumeration (records + subdomains) for the Assets view's
                     # DNS section and the report's DNS Enumeration section.
                     "dns_records": result.get("dns_records", []),
+                    # Honest coverage caveats — a scanner that timed out or hit its
+                    # soft budget contributed partial/no findings; persist so the
+                    # report and dashboard can disclose that coverage is incomplete
+                    # rather than letting a throttled host look fully scanned.
+                    "coverage_notes": result.get("coverage_notes", []),
                     "severity": {
                         s: sum(1 for f in findings if (f.get("severity") or "info").lower() == s)
                         for s in ("critical", "high", "medium", "low", "info")
@@ -6381,10 +6399,12 @@ async def _run_scan_background(scan_id: str, req: ScanRequest, *, resume: bool =
                 "findings": findings,
                 "assets": result.get("assets", []),
                 "dns_records": result.get("dns_records", []),
+                "coverage_notes": result.get("coverage_notes", []),
                 "summary": {
                     "total_vulnerabilities": len(findings),
                     "total_assets": len(result.get("assets", [])),
                     "elapsed_seconds": result.get("elapsed_seconds", 0),
+                    "coverage_notes": result.get("coverage_notes", []),
                     **{s: sum(1 for f in findings if (f.get("severity") or "info").lower() == s)
                        for s in ("critical", "high", "medium", "low", "info")},
                 },

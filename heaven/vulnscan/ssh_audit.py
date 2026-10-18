@@ -156,8 +156,9 @@ class SSHAudit:
 
 
 def _finding(host: str, port: int, vuln_type: str, severity: str, title: str,
-             description: str, confidence: float = 0.95, cve: str = "") -> dict:
-    return {
+             description: str, confidence: float = 0.95, cve: str = "",
+             evidence: Optional[dict] = None) -> dict:
+    out = {
         "target": f"{host}:{port}",
         "vuln_type": vuln_type,
         "title": title,
@@ -167,6 +168,9 @@ def _finding(host: str, port: int, vuln_type: str, severity: str, title: str,
         "cve_id": cve,
         "source": "ssh_audit",
     }
+    if evidence:
+        out["evidence"] = dict(evidence)
+    return out
 
 
 # ── Wire parsing ──────────────────────────────────────────────────────────────
@@ -307,7 +311,13 @@ def audit_algorithms(host: str, port: int, algos: dict[str, list[str]]) -> list[
             f"SSH Server Offers Weak {label} ({', '.join(h[0] for h in hits)})",
             f"The SSH server at {host}:{port} advertises {label.lower()} that are "
             f"cryptographically weak or deprecated: {listed}. {tail}",
-            confidence=0.97))
+            confidence=0.97,
+            evidence={
+                "observed": (
+                    f"The server's SSH_MSG_KEXINIT advertised these weak "
+                    f"{label.lower()}: {listed}."),
+                "weak_algorithms": [h[0] for h in hits],
+            }))
 
     # Host keys — the headline case (ssh-dss / ssh-rsa SHA-1). A server offering
     # these for host authentication typically also accepts them for client

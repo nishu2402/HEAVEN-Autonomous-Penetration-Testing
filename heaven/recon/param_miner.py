@@ -277,6 +277,7 @@ async def _confirm(
 async def mine_parameters(
     urls: list[str], stealth_level: str = "normal", max_urls: int = 25,
     wordlist: Optional[tuple[str, ...]] = None, timeout: float = 8.0,
+    time_budget: Optional[float] = None,
 ) -> dict[str, Any]:
     """Mine hidden GET parameters across ``urls``.
 
@@ -335,9 +336,15 @@ async def mine_parameters(
                     logger.debug("param-miner error on %s: %s", u, e)
                     return []
 
-        results = await asyncio.gather(*[_run(u) for u in picked])
+        # Budget-aware: keep the URLs mined before the soft deadline; the rest
+        # are cancelled rather than losing the whole task at the hard timeout.
+        from heaven.utils.fanout import gather_budgeted
+        results, truncated = await gather_budgeted(
+            [_run(u) for u in picked], time_budget=time_budget)
 
     for mined in results:
+        if isinstance(mined, Exception):
+            continue
         if not mined:
             continue
         by_url: dict[str, dict[str, Any]] = {}
@@ -351,5 +358,12 @@ async def mine_parameters(
             total += 1
         endpoints.extend(by_url.values())
 
-    logger.info("param-miner: %d hidden parameter(s) across %d URL(s)", total, len(picked))
-    return {"endpoints": endpoints, "mined_params": total}
+    logger.info("param-miner: %d hidden parameter(s) across %d URL(s)", total, len(results))
+    out: dict[str, Any] = {"endpoints": endpoints, "mined_params": total,
+                           "urls_requested": len(picked), "urls_audited": len(results)}
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "param-miner: soft budget reached; mined %d of %d URL(s), "
+            "returning partial results", len(results), len(picked))
+    return out

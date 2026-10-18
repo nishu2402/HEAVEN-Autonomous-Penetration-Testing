@@ -252,7 +252,8 @@ def match_edge_kev_headers(headers: Mapping[str, str], *, target: str = "",
 
 
 async def scan_edge_appliances(urls: list[str], *, session: Any = None,
-                               max_hosts: int = 32, timeout: float = 8.0) -> dict:
+                               max_hosts: int = 32, timeout: float = 8.0,
+                               time_budget: Optional[float] = None) -> dict:
     """Active (read-only) edge-appliance fingerprint. Fetches each host's root and
     a few well-known appliance login paths, fingerprints the family, and surfaces
     its KEV CVEs. Bounded and safe — plain GETs, no exploit payloads."""
@@ -287,10 +288,19 @@ async def scan_edge_appliances(urls: list[str], *, session: Any = None,
             timeout=aiohttp.ClientTimeout(total=timeout),
             headers={"User-Agent": "Mozilla/5.0 (compatible; HEAVEN-EdgeKEV/1.0)"})
 
+    import time as _time
+    _deadline = (_time.monotonic() + time_budget) \
+        if (time_budget and time_budget > 0) else None
+    _truncated = False
     findings: list[dict] = []
     seen_family: set[tuple[str, str]] = set()  # (netloc, family) dedup
     try:
         for netloc, base in origins.items():
+            if _deadline is not None and _time.monotonic() >= _deadline:
+                _truncated = True
+                logger.warning("Edge-KEV scan: soft budget reached; returning "
+                               "partial results")
+                break
             # Collect candidate paths across all families plus the root.
             paths = ["/"]
             for sig in _SIGNATURES:
@@ -327,4 +337,7 @@ async def scan_edge_appliances(urls: list[str], *, session: Any = None,
     if findings:
         logger.info("Edge-KEV scan → %d appliance exposure(s) across %d host(s)",
                     len(findings), len(origins))
-    return {"findings": findings, "vulnerabilities": [], "total": len(findings)}
+    out: dict = {"findings": findings, "vulnerabilities": [], "total": len(findings)}
+    if _truncated:
+        out["budget_exhausted"] = True
+    return out

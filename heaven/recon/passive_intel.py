@@ -208,6 +208,36 @@ def _parse_cpe(cpe: str) -> tuple[str, str]:
     return product, version
 
 
+# nmap service names ↔ CPE product tokens that denote the same software, so a
+# version from one may be attached to a product named by the other. Kept tiny and
+# high-signal (the HTTP-server case is the one that bites): ``httpd``/``http`` are
+# the same server, ``http server`` is the CPE spelling of nmap's ``httpd``.
+_PRODUCT_TOKEN_ALIASES = {"httpd": "http"}
+
+
+def _product_tokens(name: str) -> set[str]:
+    toks = re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).split()
+    return {_PRODUCT_TOKEN_ALIASES.get(t, t) for t in toks}
+
+
+def _same_product(existing: str, cpe_product: str) -> bool:
+    """True when ``cpe_product`` plausibly names the SAME software as ``existing``,
+    so the CPE's version may be grafted onto a port already carrying ``existing``.
+
+    A CPE's ``(product, version)`` is a unit: InternetDB publishes a FLAT, port-less
+    CPE list (``_cpe_port_map`` guesses the port), so a port that nmap labelled
+    e.g. ``Apache httpd`` can be handed the CPE of a DIFFERENT product that shares
+    the port (``cpe:/a:f5:nginx:1.29.8``). Backfilling that CPE's version onto the
+    nmap product invents a nonexistent release (``Apache httpd 1.29.8``) that then
+    reads as end-of-life. Require a shared product token before lending a version;
+    when in doubt, don't (a missed version backfill is harmless, a wrong one is a
+    false EOL/CVE finding). An empty side never matches — the caller handles the
+    "port had no product, take the whole CPE pair" case explicitly.
+    """
+    a, b = _product_tokens(existing), _product_tokens(cpe_product)
+    return bool(a and b and (a & b))
+
+
 def _cpe_port_map(cpes: list[str]) -> dict[int, tuple[str, str]]:
     """Associate each host-level CPE with the conventional port(s) it runs on."""
     out: dict[int, tuple[str, str]] = {}
@@ -342,9 +372,16 @@ async def _enrich_one(host_dict: dict, query_ip: str, info: dict, *,
             continue
         p["corroborated_by"] = "internetdb"
         prod, ver = cpe_by_port.get(pnum, ("", ""))
-        if prod and not (p.get("product") or "").strip():
+        existing_prod = (p.get("product") or "").strip()
+        took_product = False
+        if prod and not existing_prod:
             p["product"] = prod
-        if ver and not (p.get("version") or "").strip():
+            took_product = True
+        # The CPE's version is that CPE product's; attach it only when it is also
+        # the port's product (we just took it, or it matches) — never graft a
+        # different product's version onto an nmap guess (see _same_product).
+        if (ver and not (p.get("version") or "").strip()
+                and (took_product or _same_product(existing_prod, prod))):
             p["version"] = ver
         cpe_str = cpe_str_by_port.get(pnum, "")
         if cpe_str and not (p.get("cpe") or "").strip():
@@ -381,10 +418,16 @@ async def _enrich_one(host_dict: dict, query_ip: str, info: dict, *,
             pd["source"] = "passive+active"
             pd["state"] = active.get("state") or "open"
             pd["corroborated_by"] = "internetdb"
-            # Backfill product/version from the CPE only where active came back bare.
-            if prod and not (pd.get("product") or "").strip():
+            # Backfill product/version from the CPE only where active came back
+            # bare — and keep the CPE's version tied to the CPE's product, so a
+            # port whose active product disagrees never borrows its version.
+            existing_prod = (pd.get("product") or "").strip()
+            took_product = False
+            if prod and not existing_prod:
                 pd["product"] = prod
-            if ver and not (pd.get("version") or "").strip():
+                took_product = True
+            if (ver and not (pd.get("version") or "").strip()
+                    and (took_product or _same_product(existing_prod, prod))):
                 pd["version"] = ver
             if not (pd.get("service_version") or "").strip():
                 pd["service_version"] = " ".join(

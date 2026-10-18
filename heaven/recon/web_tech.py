@@ -211,6 +211,7 @@ async def scan_web_tech(
     max_urls: int = 25,
     timeout: float = 8.0,
     live_feed: Any = None,
+    time_budget: Optional[float] = None,
 ) -> dict:
     """Fingerprint web components across *urls* and raise EOL + CVE findings.
 
@@ -275,8 +276,15 @@ async def scan_web_tech(
     edge_findings: list[dict] = []
     seen_edge: set[tuple[str, str]] = set()
 
+    import time as _time
+    _deadline = (_time.monotonic() + time_budget) \
+        if (time_budget and time_budget > 0) else None
     try:
         for (host, port, _scheme), url in origins.items():
+            if _deadline is not None and _time.monotonic() >= _deadline:
+                logger.warning("web-tech scan: soft budget reached; fingerprinting "
+                               "partial origin set, running EOL/CVE on what was found")
+                break
             headers = await fetch(url)
             if not headers:
                 continue

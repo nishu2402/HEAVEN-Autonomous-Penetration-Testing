@@ -169,6 +169,63 @@ def test_enrich_merges_passive_ports_labeled_honestly(monkeypatch):
     assert hosts[0]["passive_cves"] == ["CVE-2020-9999"]
 
 
+def test_same_product_gates_version_backfill():
+    # A CPE's version may only be lent to a product that matches it.
+    assert pi._same_product("Apache httpd", "nginx") is False       # the FP case
+    assert pi._same_product("Apache httpd", "http server") is True  # httpd≈http alias
+    assert pi._same_product("OpenSSH", "openssh") is True
+    assert pi._same_product("", "nginx") is False                   # caller handles blank
+
+
+def test_enrich_never_grafts_a_different_products_version(monkeypatch):
+    """REGRESSION: InternetDB publishes a FLAT, port-less CPE list, so a port that
+    nmap labelled 'Apache httpd' (no version) can be handed a DIFFERENT product's
+    CPE that shares the port (an nginx CPE on :80). The CPE's version must NOT be
+    grafted onto the nmap product — that invented 'Apache httpd 1.29.8' on
+    certifiedhacker.com and read as end-of-life. The product that genuinely has no
+    name still takes the whole CPE pair, and a port with its own version keeps it.
+    """
+    _mock_lookup(monkeypatch, {
+        "ports": [22, 80, 3306],
+        "cpes": [
+            "cpe:/a:f5:nginx:1.29.8",      # conventional :80/:443 → wrong product for :80 here
+            "cpe:/a:openbsd:openssh:9.9",  # conventional :22
+            "cpe:/a:oracle:mysql:5.7.44",  # conventional :3306
+        ],
+        "vulns": [],
+    })
+
+    async def no_confirm(host, ports, stealth):
+        return {}
+    monkeypatch.setattr(pi, "_reprobe_ports", no_confirm)
+
+    hosts = [{
+        "host": "162.241.216.11", "ip": "162.241.216.11", "is_alive": True,
+        "open_ports": [
+            # nmap guessed Apache on :80 with NO version (the real server is nginx)
+            {"port": 80, "service": "http", "state": "open",
+             "product": "Apache httpd", "version": "", "banner": "Apache httpd"},
+            # versionless SSH — should take the openssh CPE pair wholesale
+            {"port": 22, "service": "ssh", "state": "open",
+             "product": "", "version": ""},
+            # already-versioned MySQL — untouched
+            {"port": 3306, "service": "mysql", "state": "open",
+             "product": "MySQL", "version": "5.7.44"},
+        ],
+    }]
+    _run(pi.enrich_hosts(hosts, stealth_level="normal"))
+    ports = {p["port"]: p for p in hosts[0]["open_ports"]}
+
+    # :80 — product unchanged, and nginx's 1.29.8 is NOT grafted onto Apache.
+    assert ports[80]["product"] == "Apache httpd"
+    assert not (ports[80].get("version") or "").strip()
+    assert "1.29.8" not in (ports[80].get("service_version") or "")
+    # :22 — had no product, so it takes the matching CPE pair (product + version).
+    assert ports[22].get("version") == "9.9"
+    # :3306 — keeps its own real version.
+    assert ports[3306].get("version") == "5.7.44"
+
+
 def test_enrich_reprobe_promotes_confirmed_port(monkeypatch):
     _mock_lookup(monkeypatch, {"ports": [3306], "cpes": [], "vulns": []})
 

@@ -482,7 +482,10 @@ def _ui_rebuild(root: Path) -> tuple[bool, str]:
         # of sync with package.json (npm ci refuses that) so an install still
         # succeeds — Layer-2 dirty handling then covers the resulting phantom dirt.
         used_ci = (ui / "package-lock.json").is_file()
-        inst = subprocess.run(  # nosec B603 B607 # fixed npm argv, no shell
+        # B607 is not raised here (the argv is a ternary, not a literal list
+        # bandit can inspect), so only B603 needs suppressing on this line;
+        # lines below use literal ["npm", ...] lists and keep B607.
+        inst = subprocess.run(  # nosec B603 # fixed npm argv, no shell
             ["npm", "ci", "--legacy-peer-deps"] if used_ci
             else ["npm", "install", "--legacy-peer-deps"],
             cwd=str(ui), capture_output=True, text=True, timeout=900,

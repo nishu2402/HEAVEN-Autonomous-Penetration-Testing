@@ -157,6 +157,7 @@ async def scan_access_control(
     urls: list[str], *,
     privileged: Any = None, low_priv: Any = None,
     stealth_level: str = "normal", timeout: float = 8.0, max_urls: int = 60,
+    time_budget: Optional[float] = None,
 ) -> dict[str, Any]:
     """Run the multi-role access-control differential over ``urls``.
 
@@ -272,15 +273,31 @@ async def scan_access_control(
                     )
             return None
 
-    results = await asyncio.gather(*[_audit_url(u) for u in picked])
+    # Budget-aware fan-out: on a slow/throttling host, return the audits that
+    # completed before the soft deadline rather than letting the orchestrator's
+    # hard timeout cancel this coroutine and drop every finding (see
+    # heaven.utils.fanout.gather_budgeted).
+    from heaven.utils.fanout import gather_budgeted
+    results, truncated = await gather_budgeted(
+        [_audit_url(u) for u in picked], time_budget=time_budget)
+    audited = len(results)
     for r in results:
         if r:
             findings.append(r)
 
     if findings:
         logger.info("access-control audit: %d finding(s) across %d URL(s)",
-                    len(findings), len(picked))
-    return {"findings": findings, "tested": len(picked)}
+                    len(findings), audited)
+    out: dict[str, Any] = {
+        "findings": findings, "tested": audited,
+        "urls_requested": len(picked), "urls_audited": audited,
+    }
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "access-control audit: soft budget reached; audited %d of %d URL(s), "
+            "returning partial results", audited, len(picked))
+    return out
 
 
 def _finding(url: str, *, severity: str, confidence: float, proven: bool,

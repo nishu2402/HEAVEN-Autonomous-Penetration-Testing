@@ -125,14 +125,22 @@ class TestCidrDiscoveryAndConcurrency:
         assert set(scanned) == {"10.0.0.1", "10.0.0.2", "10.0.0.3"}
 
     def test_hosts_are_scanned_concurrently(self, monkeypatch):
-        """Two hosts that each take ~0.2s must finish together (concurrent), not
-        serialized to ~0.4s — the old sequential loop was the CIDR bottleneck."""
+        """Two hosts that each take ~0.5s must finish together (concurrent ~0.5s),
+        not serialized to ~1.0s — the old sequential loop was the CIDR bottleneck.
+
+        The per-host delay is deliberately large relative to ``scan_network``'s
+        fixed setup/discovery overhead (~0.05-0.15s): with a tiny 0.2s delay the
+        concurrent time and a tight threshold sat inside that overhead noise and
+        the test flaked. A 0.5s delay puts concurrent (~0.55s) and serial (~1.0s)
+        far apart, so the < 0.8s bound proves concurrency with margin on both
+        sides and stays green under load.
+        """
         import asyncio
         import time
         from heaven.recon import network_scanner as ns
 
         async def slow_scan_host(host, ports, **kw):
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.5)
             r = ns.HostResult(host=host)
             r.is_alive = True
             return r
@@ -144,7 +152,7 @@ class TestCidrDiscoveryAndConcurrency:
         elapsed = time.monotonic() - t0
 
         assert out["total_hosts"] == 2
-        assert elapsed < 0.35, f"hosts were not scanned concurrently ({elapsed:.2f}s)"
+        assert elapsed < 0.8, f"hosts were not scanned concurrently ({elapsed:.2f}s)"
 
     def test_time_budget_returns_partial_results(self, monkeypatch):
         """When the deep-scan time budget elapses, hosts still running are

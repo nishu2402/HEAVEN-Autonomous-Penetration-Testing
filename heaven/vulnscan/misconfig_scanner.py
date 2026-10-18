@@ -30,6 +30,7 @@ import hashlib
 import hmac
 import json
 import re
+from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 try:
@@ -785,7 +786,8 @@ async def scan_url_misconfig(session: "aiohttp.ClientSession", url: str) -> list
 
 
 async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
-                         max_urls: int = 40) -> dict:
+                         max_urls: int = 40,
+                         time_budget: Optional[float] = None) -> dict:
     """Run all misconfiguration checks over a set of URLs.
 
     Host/response-level checks (CORS, cookies, headers, JWT) are collapsed to one
@@ -841,7 +843,14 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
             async with sem:
                 findings.extend(await scan_url_misconfig(session, u))
 
-        await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
+        # Budget-aware per-URL fan-out — the one that scales with the crawl, so
+        # the one that can outrun the task timeout and lose everything. Findings
+        # are appended to the shared list as each URL completes, so the ones done
+        # before the soft deadline survive.
+        from heaven.utils.fanout import gather_budgeted
+        _ures, _truncated = await gather_budgeted(
+            [_one(u) for u in unique], time_budget=time_budget)
+        _audited = len(_ures)
 
         # GraphQL introspection is a host-level check — probe each unique origin
         # once (not per URL) so a big crawl doesn't hammer /graphql repeatedly.
@@ -855,7 +864,11 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
             async with sem:
                 findings.extend(await _check_graphql(session, origin))
 
-        await asyncio.gather(*[_gql(o) for o in origins], return_exceptions=True)
+        # Skip the host-level follow-ons once the per-URL budget is spent, so the
+        # task RETURNS its gathered findings instead of risking the hard-timeout
+        # cancel (which would drop the per-URL findings too) while probing more.
+        if not _truncated:
+            await asyncio.gather(*[_gql(o) for o in origins], return_exceptions=True)
 
         # RIA cross-domain policy (crossdomain.xml / clientaccesspolicy.xml) is a
         # host-level file — probe each origin once.
@@ -863,12 +876,24 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
             async with sem:
                 findings.extend(await _check_crossdomain(session, origin))
 
-        await asyncio.gather(*[_xd(o) for o in origins], return_exceptions=True)
+        if not _truncated:
+            await asyncio.gather(*[_xd(o) for o in origins], return_exceptions=True)
 
         # Soft-404 / catch-all guard: only the origins that actually produced
         # multiple page-hygiene findings are worth a catch-all probe, and only a
         # confirmed catch-all collapses them (a site with genuinely distinct login
         # pages keeps one finding per page).
+        #
+        # Unlike the GraphQL / crossdomain follow-ons above (fresh per-origin
+        # DISCOVERY, legitimately skipped under a spent budget and disclosed by the
+        # coverage notes), this is a dedup QUALITY step over findings ALREADY
+        # gathered: on a catch-all host the same page-hygiene issue fires once per
+        # audited URL, so skipping the collapse makes a salvaged partial result
+        # NOISIER, not just less complete. It is one bounded GET per hygiene origin
+        # (usually a single origin), so it runs even when truncated — but then
+        # under its own small budget so a slow host can never push it past the
+        # task's drain margin (~10% of the effective timeout). If it cannot finish
+        # in time the findings are simply left uncollapsed, no worse than before.
         hygiene_origins = {
             o for o in origins
             if sum(1 for f in findings
@@ -882,9 +907,20 @@ async def scan_misconfig(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
                 if await _origin_is_catch_all(session, origin):
                     catch_all_origins.add(origin)
 
-        await asyncio.gather(*[_ca(o) for o in hygiene_origins], return_exceptions=True)
+        if hygiene_origins:
+            await gather_budgeted(
+                [_ca(o) for o in hygiene_origins],
+                time_budget=(_DEFAULT_TIMEOUT if _truncated else None))
         findings = _collapse_catch_all_hygiene(findings, catch_all_origins)
 
     findings = _dedup(findings)
     logger.info("Misconfig scan → %d finding(s) across %d URL(s)", len(findings), len(unique))
-    return {"findings": findings, "vulnerabilities": findings, "total": len(findings)}
+    out: dict = {"findings": findings, "vulnerabilities": findings,
+                 "total": len(findings),
+                 "urls_requested": len(unique), "urls_audited": _audited}
+    if _truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "Misconfig scan: soft budget reached; audited %d of %d URL(s), "
+            "returning partial results", _audited, len(unique))
+    return out

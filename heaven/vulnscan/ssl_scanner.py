@@ -780,8 +780,9 @@ def _check_hsts(host: str, port: int = 443, timeout: float = 8.0) -> tuple[bool,
 
 def _make_finding(host: str, port: int, issue: str, severity: str,
                   title: str, description: str, cve: str = "",
-                  confidence: float = 0.95) -> dict:
-    return {
+                  confidence: float = 0.95,
+                  evidence: Optional[dict] = None) -> dict:
+    out = {
         "target": f"{host}:{port}",
         "vuln_type": issue,
         "title": title,
@@ -791,6 +792,12 @@ def _make_finding(host: str, port: int, issue: str, severity: str,
         "cve_id": cve,
         "source": "ssl_scanner",
     }
+    # Target-specific observed proof so the report's evidence block shows the
+    # real security fact (the absent header, the negotiated SHA-1 sigalg …),
+    # not a generic "identified by the check" fallback.
+    if evidence:
+        out["evidence"] = dict(evidence)
+    return out
 
 
 # ── Public scan function ────────────────────────────────────────────────────────
@@ -967,7 +974,15 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             "Intermediate, NIST SP 800-52r2). Configure the server to offer only "
             "SHA-256+ signature schemes (e.g. rsa_pss_rsae_sha256, "
             "ecdsa_secp256r1_sha256) and drop rsa_pkcs1_sha1 / ecdsa_sha1.",
-            confidence=0.95))
+            confidence=0.95,
+            evidence={
+                "observed": (
+                    "A TLS 1.2 handshake completed when the client offered ONLY "
+                    f"SHA-1 signature schemes, so the server authenticated its key "
+                    f"exchange with {_pretty}."),
+                "signature_algorithm": result.legacy_sigalg,
+                "tls_version": "1.2",
+            }))
     # Only assert the *absence* of forward secrecy when we actually enumerated at
     # least one TLS ≤1.2 cipher. An empty list means enumeration failed (transient
     # handshake drops), so "no FS" then would be a false positive, not a finding.
@@ -988,7 +1003,15 @@ def _run_ssl_scan(host: str, port: int) -> SSLResult:
             F.append(_make_finding(host, port, "no_hsts", "medium",
                 "HSTS Not Configured",
                 "Missing Strict-Transport-Security header. Browsers will accept HTTP downgrade.",
-                confidence=0.97))
+                confidence=0.97,
+                evidence={
+                    "observed": (
+                        f"The HTTPS response from {host}:{port} carried no "
+                        "Strict-Transport-Security header, so a browser will honour "
+                        "a plaintext-HTTP downgrade of this origin."),
+                    "strict_transport_security": "absent",
+                    "checked_url": f"https://{host}:{port}/",
+                }))
         else:
             # HSTS is present — audit each directive independently. A deep TLS
             # auditor (sslyze / testssl / Qualys SSL Labs) reports every omission,
@@ -1130,7 +1153,8 @@ async def scan_ssl(host: str, port: int = 443) -> dict:
 
 
 async def scan_ssl_targets(targets: list[str],
-                           ports: Optional[list[int]] = None) -> dict:
+                           ports: Optional[list[int]] = None,
+                           time_budget: Optional[float] = None) -> dict:
     """
     Scan multiple hosts/URLs for TLS/SSL issues concurrently.
     targets: list of hostnames or 'host:port' strings.
@@ -1171,14 +1195,26 @@ async def scan_ssl_targets(targets: list[str],
             for p in ports:
                 tasks.append(_scan_one(t, p))
 
-    await asyncio.gather(*tasks, return_exceptions=True)
+    # Budget-aware: each handshake appends to the shared list as it finishes, so
+    # hosts completed before the soft deadline are kept; the rest are cancelled
+    # rather than the orchestrator's hard timeout dropping all of them.
+    from heaven.utils.fanout import gather_budgeted
+    _done, truncated = await gather_budgeted(tasks, time_budget=time_budget)
 
     crit  = sum(1 for f in all_findings if f.get("severity") == "critical")
     high  = sum(1 for f in all_findings if f.get("severity") == "high")
-    return {
+    out = {
         "total": len(all_findings),
         "critical": crit,
         "high": high,
         "findings": all_findings,
         "vulnerabilities": all_findings,
+        "urls_requested": len(tasks),
+        "urls_audited": len(_done),
     }
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "SSL scan: soft budget reached; scanned %d of %d target(s), "
+            "returning partial results", len(_done), len(tasks))
+    return out

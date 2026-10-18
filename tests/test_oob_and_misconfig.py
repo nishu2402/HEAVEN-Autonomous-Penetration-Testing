@@ -210,6 +210,73 @@ def test_catch_all_hygiene_collapse():
                if f["vuln_type"] == "password_autocomplete_enabled") == 6
 
 
+async def test_catch_all_collapse_runs_even_when_budget_truncates(monkeypatch):
+    """REGRESSION: a budget-truncated misconfig run must STILL collapse catch-all
+    page-hygiene duplicates.
+
+    The collapse is a dedup QUALITY step over findings already gathered (one
+    bounded probe per origin), not fresh discovery, so — unlike the GraphQL /
+    crossdomain follow-ons — it runs even when the per-URL budget was spent.
+    Skipping it (the old behaviour) made a salvaged partial result report the same
+    login-form nag once per audited URL on a catch-all / soft-404 host. Verified
+    live against a real catch-all host (certifiedhacker.com): a 5s-budget run went
+    from 23 noisy findings to the same 5 the full run produces.
+
+    Truncation is forced deterministically (no wall-clock race): the fan-out still
+    runs every coroutine, but reports ``truncated=True``.
+    """
+    from aiohttp import web
+
+    import heaven.utils.fanout as fanout_mod
+
+    # Catch-all origin: the same cacheable password-form page for EVERY path, so
+    # both page-hygiene checks fire on each URL and the random catch-all probe
+    # (/heaven-ca-*) also sees a 200 HTML page → origin confirmed catch-all.
+    page = ('<html><body><form method="post">'
+            '<input type="password" name="pw"></form></body></html>')
+
+    async def _any(_request: "web.Request") -> "web.Response":
+        return web.Response(text=page, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_route("GET", "/{tail:.*}", _any)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        base = f"http://127.0.0.1:{port}"
+
+        real_gb = fanout_mod.gather_budgeted
+
+        async def _force_truncated(coros, *, time_budget=None, return_exceptions=True):
+            # Run every coroutine to completion (so URLs are actually audited and
+            # their findings gathered), but report truncation — exactly the
+            # "deadline hit with work already done" state, without a timing race.
+            results, _ = await real_gb(list(coros), time_budget=None,
+                                       return_exceptions=return_exceptions)
+            return results, True
+
+        monkeypatch.setattr(fanout_mod, "gather_budgeted", _force_truncated)
+
+        urls = [f"{base}/", f"{base}/graphql", f"{base}/swagger",
+                f"{base}/api/v1", f"{base}/admin"]
+        res = await scan_misconfig(urls)
+    finally:
+        await runner.cleanup()
+
+    assert res.get("budget_exhausted") is True
+    pw = [f for f in res["findings"] if f["vuln_type"] == "password_autocomplete_enabled"]
+    cc = [f for f in res["findings"] if f["vuln_type"] == "sensitive_cache_control"]
+    # Collapsed to ONE per type despite 5 catch-all URLs and a truncated run; the
+    # old gate (skip the collapse when truncated) would leave 5 of each.
+    assert len(pw) == 1, [f["target"] for f in pw]
+    assert len(cc) == 1, [f["target"] for f in cc]
+    assert pw[0]["evidence"].get("catch_all_host") is True
+    assert pw[0]["evidence"].get("duplicate_probe_urls") == 4
+
+
 # ── cookie-flag parsing: attribute-scoped, deletion-aware ──────────────────────
 # The flag checks must read the Set-Cookie ATTRIBUTE section only. The old
 # ``"secure" in raw.lower()`` substring test over the whole header let a cookie

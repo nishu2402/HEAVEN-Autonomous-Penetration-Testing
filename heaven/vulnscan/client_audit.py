@@ -28,6 +28,7 @@ from __future__ import annotations
 from heaven.net.egress import client_session as _egress_cs  # egress-routed aiohttp
 
 import re
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 try:
@@ -368,12 +369,15 @@ def _dedup(findings: list[dict]) -> list[dict]:
 
 
 async def scan_client_audit(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
-                            max_urls: int = 40, **_kw) -> dict:
+                            max_urls: int = 40,
+                            time_budget: Optional[float] = None, **_kw) -> dict:
     """Static client-side audit over a set of URLs."""
     if not HAS_AIOHTTP:
         return {"findings": [], "vulnerabilities": [], "total": 0,
                 "error": "aiohttp not installed"}
     import asyncio
+
+    from heaven.utils.fanout import gather_budgeted
 
     seen: set[str] = set()
     unique: list[str] = []
@@ -397,8 +401,23 @@ async def scan_client_audit(urls: list[str], timeout: float = _DEFAULT_TIMEOUT,
             async with sem:
                 findings.extend(await audit_url(session, u))
 
-        await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
+        # Budget-aware: each _one appends to the shared `findings` as it finishes,
+        # so URLs completed before the soft deadline are kept; the ones still
+        # pending at the deadline are cancelled (they never appended). This stops
+        # the orchestrator's hard timeout from cancelling the whole task and
+        # dropping every finding.
+        _results, truncated = await gather_budgeted(
+            [_one(u) for u in unique], time_budget=time_budget)
 
     findings = _dedup(findings)
+    audited = len(_results)
     logger.info("Client-side audit → %d finding(s) across %d URL(s)", len(findings), len(unique))
-    return {"findings": findings, "vulnerabilities": findings, "total": len(findings)}
+    out: dict = {"findings": findings, "vulnerabilities": findings,
+                 "total": len(findings),
+                 "urls_requested": len(unique), "urls_audited": audited}
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "Client-side audit: soft budget reached; audited %d of %d URL(s), "
+            "returning partial results", audited, len(unique))
+    return out

@@ -363,7 +363,8 @@ class ComplianceReportGenerator:
                              assets: Optional[list[dict]] = None,
                              dns_records: Optional[list[dict]] = None,
                              compliance_framework: Optional[str] = None,
-                             leads: Optional[list[dict]] = None) -> str:
+                             leads: Optional[list[dict]] = None,
+                             coverage_notes: Optional[list[dict]] = None) -> str:
         """Render the full professional report as one HTML string.
 
         `meta` (all optional) may carry: client, assessor, period, version,
@@ -463,6 +464,7 @@ class ComplianceReportGenerator:
             self._exec_summary(eng, counts, len(findings), overall, ordered,
                                len(scope), confirmed_counts, confirmed_total,
                                potential_total),
+            self._coverage_section(coverage_notes),
             self._scope_methodology(scope),
             self._inventory(inventory),
             self._content_discovery(findings),
@@ -806,6 +808,45 @@ class ComplianceReportGenerator:
             <tr><td>NIST SP 800-115</td><td>Technical assessment methodology</td></tr>
             <tr><td>MITRE ATT&amp;CK</td><td>Adversary technique mapping (where applicable)</td></tr>
             <tr><td>CVSS v4.0 and v3.1 / EPSS / CISA KEV</td><td>Severity, exploit-likelihood &amp; known-exploited enrichment</td></tr>
+          </table>
+        </div>"""
+
+    @staticmethod
+    def _coverage_section(coverage_notes: Optional[list[dict]]) -> str:
+        """Scan coverage & completeness — disclose where coverage was PARTIAL.
+
+        A scanner that hit its soft time budget (and salvaged partial findings)
+        or that timed out / failed (contributing none) means part of the attack
+        surface was not fully assessed. Stating that plainly is the honest
+        complement to the finding list: a clean result in an area a scanner could
+        not finish is absence of coverage, NOT evidence the target is secure.
+        Omitted entirely (no section, no TOC change) when coverage was complete,
+        so a normal report is unchanged.
+        """
+        notes = [n for n in (coverage_notes or []) if isinstance(n, dict)
+                 and str(n.get("impact") or "").strip()]
+        if not notes:
+            return ""
+        rows = ""
+        for n in notes:
+            scanner = str(n.get("scanner") or n.get("url") or "Scan phase")
+            impact = str(n.get("impact") or "").strip()
+            remediation = str(n.get("remediation") or "").strip()
+            rows += (
+                f'<tr><td>{_esc(scanner)}</td><td>{_esc(impact)}'
+                + (f'<div class="muted small">For full coverage: {_esc(remediation)}</div>'
+                   if remediation else "")
+                + "</td></tr>")
+        return f"""<div class="page section" id="coverage"><h2>Scan Coverage &amp; Completeness</h2>
+          <p>The items below were <strong>not fully assessed</strong> in this run: a
+          scanner reached its time budget on a slow or rate-limiting host, or did not
+          run to completion. Any findings already reported for these areas are accurate;
+          however their coverage is <strong>partial</strong>, so the absence of a
+          finding there is not evidence the target is secure. Re-running with a longer
+          timeout, a narrower scope, or a lower stealth level closes the gap.</p>
+          <table>
+            <tr><th style="width:230px">Scanner / phase</th><th>Coverage note</th></tr>
+            {rows}
           </table>
         </div>"""
 
@@ -1391,6 +1432,15 @@ class ComplianceReportGenerator:
             "candidate_details", "how_to_confirm", "signals", "reasons",
             "fp_check_reasons", "candidate_cves", "candidate_cve_count",
             "highest_candidate_cvss", "verification",
+            # Scoring / calibration internals injected by enrich_finding and the
+            # ML risk model. These are already rendered in the finding's metadata
+            # table (CVSS base/vector, risk score, confidence); surfacing them in
+            # the "Observed" proof block shows scoring noise where the reader
+            # expects the actual security observation, so keep them out of proof.
+            "predicted_cvss_score", "priority_score", "risk_band",
+            "calibrated_confidence", "calibration", "cvss4_base",
+            "cvss4_vector", "cvss31_vector", "cvss_vector", "cvss_version",
+            "typical_cvss", "objective_base_score",
         }
         observed = [
             f"{k.replace('_', ' ')}: {_evidence_value(v)}"

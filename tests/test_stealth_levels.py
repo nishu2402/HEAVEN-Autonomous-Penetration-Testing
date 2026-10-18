@@ -283,7 +283,7 @@ async def test_scan_for_idor_threads_concurrency_and_delay(monkeypatch):
             captured["concurrency"] = concurrency
             captured["delay"] = request_delay
 
-        async def scan(self, targets, forms_by_url=None):
+        async def scan(self, targets, forms_by_url=None, time_budget=None):
             return {"findings": []}
 
     monkeypatch.setattr(idor_scanner, "IDORScanner", FakeScanner)
@@ -302,7 +302,8 @@ async def test_fuzz_directories_threads_concurrency_and_delay(monkeypatch):
     captured: dict[str, float] = {}
 
     class FakeFuzzer:
-        def __init__(self, concurrency=30, request_delay=0.0, extensions=None):
+        def __init__(self, concurrency=30, request_delay=0.0, extensions=None,
+                     time_budget=None):
             captured["concurrency"] = concurrency
             captured["delay"] = request_delay
 

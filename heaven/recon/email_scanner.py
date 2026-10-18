@@ -511,6 +511,13 @@ class EmailSecurityScanner:
             description="No MTA-STS policy, sending servers cannot enforce TLS and may "
                         "be downgraded to cleartext by an on-path attacker.",
             confidence=0.8,
+            evidence={
+                "observed": (
+                    f"A TXT query for _mta-sts.{domain} returned no MTA-STS policy "
+                    "record, so sending servers have no published TLS-enforcement "
+                    "policy for this domain."),
+                "mta_sts_policy": "absent",
+            },
             remediation="Publish an MTA-STS policy (_mta-sts TXT + https policy file).",
         ))
 
@@ -585,6 +592,13 @@ class EmailSecurityScanner:
                     description="Mail server does not advertise STARTTLS, inbound "
                                 "mail can be delivered in cleartext.",
                     confidence=0.85,
+                    evidence={
+                        "observed": (
+                            f"The EHLO response from {server} did not advertise the "
+                            "STARTTLS capability, so a sending server cannot upgrade "
+                            "the connection to TLS."),
+                        "starttls_advertised": False,
+                    },
                     remediation="Enable STARTTLS on the mail server.",
                 ))
 

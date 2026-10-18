@@ -9,6 +9,7 @@ from heaven.net.egress import client_session as _egress_cs  # egress-routed aioh
 import asyncio
 import hashlib
 import re
+import time
 import urllib.parse
 from typing import Optional
 
@@ -1127,14 +1128,28 @@ async def scan_auth(url: str, forms: Optional[list[dict]] = None,
     }
 
 
-async def scan_auth_targets(urls: list[str], crawl_data: Optional[dict] = None) -> dict:
+async def scan_auth_targets(urls: list[str], crawl_data: Optional[dict] = None,
+                            *, time_budget: Optional[float] = None) -> dict:
     """
     Scan multiple URLs concurrently.
     crawl_data: optional dict keyed by URL containing 'forms' lists from crawler.
+    time_budget: optional wall-clock soft budget, in seconds. When set, the
+      fan-out stops launching (and awaiting) further per-URL audits once the
+      budget elapses and RETURNS the findings gathered so far. Without it, a
+      slow or throttling host with hundreds of crawled URLs runs until the
+      orchestrator's hard task timeout cancels this coroutine mid-``gather`` —
+      the function never reaches its ``return``, so every finding already
+      collected is discarded and the task is recorded with ZERO findings.
+      The caller passes ~90% of the task's effective timeout so the sweep drains
+      and returns inside the hard deadline, converting "timeout → nothing" into
+      "budget reached → everything found before the deadline, task COMPLETED".
     """
     crawl_data = crawl_data or {}
     all_findings: list[dict] = []
     sem = asyncio.Semaphore(5)
+    deadline = (time.monotonic() + time_budget) if (time_budget and time_budget > 0) else None
+    audited = 0
+    truncated = False
 
     # When an authenticated session is shared across the scan, NEVER audit a
     # logout / session-destroy URL. The header/cookie audits fetch each URL with
@@ -1159,15 +1174,55 @@ async def scan_auth_targets(urls: list[str], crawl_data: Optional[dict] = None) 
         logger.debug("session-destroying URL filter unavailable", exc_info=True)
 
     async def _one(url: str) -> None:
+        nonlocal audited, truncated
+        # Already over budget before this URL even starts: skip without taking a
+        # slot, so the gather drains quickly once the deadline passes.
+        if deadline is not None and time.monotonic() >= deadline:
+            truncated = True
+            return
         async with sem:
+            remaining: Optional[float] = None
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    truncated = True
+                    return
             forms = crawl_data.get(url, {}).get("forms", [])
-            res = await scan_auth(url, forms=forms)
+            try:
+                # Bound each per-URL audit by the time left to the deadline so one
+                # slow/throttling host cannot swallow the whole remaining budget
+                # and starve the URLs queued behind it.
+                if remaining is not None:
+                    res = await asyncio.wait_for(
+                        scan_auth(url, forms=forms), timeout=remaining)
+                else:
+                    res = await scan_auth(url, forms=forms)
+            except asyncio.TimeoutError:
+                truncated = True
+                logger.info(
+                    "auth scan: time budget reached mid-audit on %s; the findings "
+                    "gathered so far are preserved", url)
+                return
             all_findings.extend(res.get("findings", []))
+            audited += 1
 
     await asyncio.gather(*[_one(u) for u in urls], return_exceptions=True)
 
-    return {
+    if truncated:
+        logger.warning(
+            "auth scan: time budget (%.0fs) truncated the sweep after auditing "
+            "%d/%d URL(s); %d finding(s) gathered before the deadline are kept "
+            "(the task completes with these instead of being cancelled and losing "
+            "all of them)",
+            (time_budget or 0.0), audited, len(urls), len(all_findings))
+
+    result: dict = {
         "total": len(all_findings),
         "findings": all_findings,
         "vulnerabilities": all_findings,
+        "urls_requested": len(urls),
+        "urls_audited": audited,
     }
+    if truncated:
+        result["budget_exhausted"] = True
+    return result

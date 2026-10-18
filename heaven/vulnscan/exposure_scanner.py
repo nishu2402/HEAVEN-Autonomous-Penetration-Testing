@@ -270,6 +270,7 @@ async def scan_exposures(
     base_urls: list[str], *, js_files: Optional[list[str]] = None,
     page_urls: Optional[list[str]] = None, stealth_level: str = "normal",
     timeout: float = 8.0, max_bases: int = 10,
+    time_budget: Optional[float] = None,
 ) -> dict[str, Any]:
     """Probe for exposed sensitive files, secrets and source maps.
 
@@ -299,17 +300,38 @@ async def scan_exposures(
     engine = EvasionEngine(profile)
     headers = engine.get_http_headers()
 
+    # Soft wall-clock deadline: stop probing further roots/files once it elapses
+    # and return what we have, so a slow host does not push this task to the
+    # orchestrator's hard timeout where every finding would be dropped.
+    import time as _time
+    deadline = (_time.monotonic() + time_budget) \
+        if (time_budget and time_budget > 0) else None
+    truncated = False
+
     findings: list[dict[str, Any]] = []
+    audited = 0
     connector = aiohttp.TCPConnector(ssl=False, limit=max(1, min(10, profile.max_concurrent)))
     async with _egress_cs(headers=headers, connector=connector) as session:
         for root in roots:
+            if deadline is not None and _time.monotonic() >= deadline:
+                truncated = True
+                break
             await engine.apply_evasion_delay()
             findings.extend(await _scan_base(session, root, timeout))
-        if js_files:
+            audited += 1
+        if not truncated and js_files:
             findings.extend(await _scan_sourcemaps(session, js_files, timeout))
-        if page_urls:
+        if not truncated and page_urls:
             findings.extend(await _scan_backups(session, page_urls, timeout))
 
     if findings:
-        logger.info("exposure scan: %d finding(s) across %d root(s)", len(findings), len(roots))
-    return {"findings": findings, "vulnerabilities": findings, "total": len(findings)}
+        logger.info("exposure scan: %d finding(s) across %d root(s)", len(findings), audited)
+    out: dict[str, Any] = {"findings": findings, "vulnerabilities": findings,
+                           "total": len(findings),
+                           "urls_requested": len(roots), "urls_audited": audited}
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "exposure scan: soft budget reached; scanned %d of %d root(s), "
+            "returning partial results", audited, len(roots))
+    return out

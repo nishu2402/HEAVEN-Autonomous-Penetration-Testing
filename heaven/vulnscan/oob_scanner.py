@@ -208,7 +208,8 @@ async def _probe_cmdi(session: "aiohttp.ClientSession", url: str,
 
 async def scan_oob(urls: list[str], oast: OASTListener | None = None,
                    timeout: float = _DEFAULT_TIMEOUT, max_urls: int = 25,
-                   xxe: bool = True, cmdi: bool = True) -> dict:
+                   xxe: bool = True, cmdi: bool = True,
+                   time_budget: float | None = None) -> dict:
     """Probe URLs for SSRF and XXE using an out-of-band collaborator.
 
     Pass an already-running :class:`OASTListener` (the orchestrator shares one);
@@ -235,6 +236,8 @@ async def scan_oob(urls: list[str], oast: OASTListener | None = None,
             break
 
     findings: list[dict] = []
+    audited = 0
+    truncated = False
     try:
         conn = aiohttp.TCPConnector(ssl=False, limit=15)
         ct = aiohttp.ClientTimeout(total=timeout)
@@ -251,10 +254,24 @@ async def scan_oob(urls: list[str], oast: OASTListener | None = None,
                     if cmdi:
                         findings.extend(await _probe_cmdi(session, u, oast))
 
-            await asyncio.gather(*[_one(u) for u in unique], return_exceptions=True)
+            # Budget-aware: URLs whose probes finished before the soft deadline
+            # keep their findings; the rest are cancelled rather than losing the
+            # whole task at the orchestrator's hard timeout.
+            from heaven.utils.fanout import gather_budgeted
+            _done, truncated = await gather_budgeted(
+                [_one(u) for u in unique], time_budget=time_budget)
+            audited = len(_done)
     finally:
         if owns_listener:
             oast.stop()
 
     logger.info("OOB scan → %d finding(s) across %d URL(s)", len(findings), len(unique))
-    return {"findings": findings, "vulnerabilities": findings, "total": len(findings)}
+    out: dict = {"findings": findings, "vulnerabilities": findings,
+                 "total": len(findings),
+                 "urls_requested": len(unique), "urls_audited": audited}
+    if truncated:
+        out["budget_exhausted"] = True
+        logger.warning(
+            "OOB scan: soft budget reached; audited %d of %d URL(s), "
+            "returning partial results", audited, len(unique))
+    return out

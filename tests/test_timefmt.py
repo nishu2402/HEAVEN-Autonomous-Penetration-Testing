@@ -53,8 +53,13 @@ def test_default_follows_local_machine(monkeypatch):
     """Empty config means: use the machine's own zone, and never raise."""
     _pin(monkeypatch, "")
     expected = datetime.now().astimezone().tzinfo
-    assert tf.resolve_tz().utcoffset(_NOON_UTC) == expected.utcoffset(
-        datetime.now())
+    # Compare the offset at the SAME fixed instant on both sides. Using
+    # datetime.now() on the right straddles a DST switch twice a year, so on a
+    # dev host in a DST zone the two instants would carry different offsets
+    # during the shoulder weeks and the assertion would fail for a tz reason,
+    # not a logic one. CI runs in UTC where it never mattered; this keeps it
+    # green on any local clock too.
+    assert tf.resolve_tz().utcoffset(_NOON_UTC) == expected.utcoffset(_NOON_UTC)
     # The rendered strings are non-empty and carry a zone token.
     assert tf.report_timestamp(_NOON_UTC)
     assert tf.stamp(_NOON_UTC)
@@ -73,8 +78,12 @@ def test_pinned_india_reads_ist(monkeypatch):
 @_needs_tzdata
 def test_pinned_uk_reads_bst_in_summer(monkeypatch):
     _pin(monkeypatch, "Europe/London")
-    # Late September is still British Summer Time (UTC+01:00).
-    assert tf.tz_label() == "BST"
+    # Late September is still British Summer Time (UTC+01:00). Pass the fixed
+    # summer instant so the label is deterministic: a bare tz_label() reads
+    # "now", which is GMT from late October to late March and would fail this
+    # assertion every winter (the production default reading "now" is correct;
+    # only the test must pin the instant it is asserting a season for).
+    assert tf.tz_label(_NOON_UTC) == "BST"
     assert tf.stamp(_NOON_UTC) == "2026-09-23 13:00 BST"
 
 

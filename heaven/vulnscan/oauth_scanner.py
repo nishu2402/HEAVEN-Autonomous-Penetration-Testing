@@ -282,7 +282,7 @@ async def _audit_password_reset_hostheader(session, origin: str,
                     pbody = await resp.content.read(256 * 1024)
                     reflected = _reflected_marker(pbody.decode("utf-8", "ignore"), marker)
             except Exception:  # noqa: BLE001
-                reflected = False
+                reflected = ""
         if reflected:
             out.append(_finding(
                 reset_url, "password_reset_host_poisoning", "high",
@@ -434,11 +434,11 @@ async def scan_oauth_flows(urls: list[str], *, time_budget: Optional[float] = No
                 _audit_saml_signing(session, origin),
                 return_exceptions=True,
             )
-            for r in results:
-                if isinstance(r, list):
-                    findings.extend(r)
-                elif isinstance(r, Exception):
-                    logger.debug("oauth subtask error: %s", r)
+            for res in results:
+                if isinstance(res, list):
+                    findings.extend(res)
+                elif isinstance(res, Exception):
+                    logger.debug("oauth subtask error: %s", res)
 
     # De-dup by (target, vuln_type).
     seen: set[tuple[str, str]] = set()

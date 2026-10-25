@@ -116,7 +116,7 @@ def _evidence_for(oast: OASTListener, token: str) -> dict:
         "callback_channel": getattr(first, "channel", ""),
         "channels": channels,
     }
-    if "dns" in channels and getattr(oast, "dns_zone", ""):
+    if "dns" in channels and oast.dns_zone:
         ev["dns_hostname"] = oast.hostname_for(token)
     return ev
 

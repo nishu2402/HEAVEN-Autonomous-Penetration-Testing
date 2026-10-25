@@ -1236,7 +1236,7 @@ class ADScanner:
                 attributes=["sAMAccountName", "msDS-AllowedToDelegateTo",
                             "userAccountControl"],
             )
-            constrained = []
+            constrained: list[dict[str, Any]] = []
             for e in getattr(self._conn, "entries", []):
                 targets = _attr_list(e, "msDS-AllowedToDelegateTo")
                 if not targets:

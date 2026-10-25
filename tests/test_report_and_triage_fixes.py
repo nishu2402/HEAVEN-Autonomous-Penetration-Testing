@@ -85,6 +85,46 @@ def test_report_all_false_positive_returns_404(client):
     assert rep.status_code == 404
 
 
+# ── bug-bounty submission pack is served by the same export route ──
+
+def test_report_export_bugbounty_format(client):
+    """The webapp/REST export route produces the identical submission pack as
+    `heaven export --format bugbounty`, so the capability is not CLI-only."""
+    client.post("/api/engagements/active", json={"name": "bb-eng"})
+    _store, _ids = _seed("bb-eng", [
+        {"target": "https://shop.example/item?id=1", "vuln_type": "bola",
+         "title": "Cross-identity object read", "severity": "critical",
+         "confidence": 0.96, "risk_score": 9.1},
+    ])
+    rep = client.get("/api/report/export?format=bugbounty")
+    assert rep.status_code == 200, rep.text
+    assert "text/markdown" in rep.headers.get("content-type", "")
+    assert ".md" in rep.headers.get("content-disposition", "")
+    body = rep.text
+    # Submission shape: pack header, per-finding block, honest status label,
+    # and the Impact/Remediation sections a triage queue expects.
+    assert "Bug Bounty Submission Pack" in body
+    assert "Cross-identity object read" in body
+    assert ("Confirmed" in body or "Potential" in body)
+    assert "## Impact" in body and "## Remediation" in body
+
+
+def test_report_export_bugbounty_platform_wording(client):
+    """`platform` reshapes only the section wording: Intigriti uses a Proof of
+    Concept heading where the generic/HackerOne packs use Steps to Reproduce."""
+    client.post("/api/engagements/active", json={"name": "bb-plat"})
+    _store, _ids = _seed("bb-plat", [
+        {"target": "https://api.example/users/7", "vuln_type": "idor",
+         "title": "IDOR on user record", "severity": "high",
+         "confidence": 0.8, "risk_score": 7.4},
+    ])
+    generic = client.get("/api/report/export?format=bugbounty&platform=generic")
+    intigriti = client.get("/api/report/export?format=bugbounty&platform=intigriti")
+    assert generic.status_code == 200 and intigriti.status_code == 200
+    assert "## Steps to Reproduce" in generic.text
+    assert "## Proof of Concept" in intigriti.text
+
+
 # ── operator notes persist without a status change ──
 
 def test_save_notes_without_status_change(client):

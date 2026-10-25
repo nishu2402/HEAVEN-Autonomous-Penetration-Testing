@@ -89,6 +89,34 @@ def test_non_jwt_is_ignored():
     assert _jwt_findings("http://h/", "just-a-plain-cookie-value", source="c") == []
 
 
+def test_jwt_finding_records_its_own_proof():
+    # A JWT finding must embed the response that handed back the token (status +
+    # excerpt). Otherwise the scan-scoped proof_capture pass backfills from the
+    # per-URL store, which a later POST method-probe (405) can win, rendering an
+    # "Observed response: HTTP 405" that never carried the token.
+    import hashlib
+    import hmac
+
+    header = _b64url({"alg": "HS256", "typ": "JWT"})
+    payload = _b64url({"sub": "admin", "role": "user"})
+    signing_input = f"{header}.{payload}"
+    sig = base64.urlsafe_b64encode(
+        hmac.new(b"secret", signing_input.encode(), hashlib.sha256).digest()
+    ).rstrip(b"=").decode()
+    token = f"{signing_input}.{sig}"
+    out = _jwt_findings("http://h/login", token, source="cookie:session",
+                        status=200, proof_excerpt=f"Set-Cookie: session={token}")
+    assert len(out) == 1 and out[0]["vuln_type"] == "jwt_weak_secret"
+    ev = out[0]["evidence"]
+    assert ev["status"] == 200
+    assert ev["response_excerpt"].startswith("Set-Cookie: session=")
+    # Omitting the proof (a unit test calling the detector directly) must stay a
+    # clean no-op: no bogus status/excerpt keys.
+    bare = _jwt_findings("http://h/login", token, source="cookie:session")
+    assert "status" not in bare[0]["evidence"]
+    assert "response_excerpt" not in bare[0]["evidence"]
+
+
 # ── misconfiguration scanner against the native app ───────────────────────────
 
 async def test_misconfig_detects_all_classes_on_native_app():
@@ -109,6 +137,12 @@ async def test_misconfig_detects_all_classes_on_native_app():
     assert cors["severity"] == "high"
     jwt = next(f for f in res["findings"] if f["vuln_type"] == "jwt_weak_secret")
     assert jwt["evidence"]["recovered_secret"] == "secret"
+    # The finding must carry the transaction that actually proved it (the 200
+    # that handed back the Set-Cookie), not leave a gap for proof_capture to
+    # backfill from a later POST method-probe that got a 405. See
+    # test_jwt_finding_records_its_own_proof for the unit-level contract.
+    assert jwt["evidence"]["status"] == 200
+    assert "Set-Cookie" in jwt["evidence"]["response_excerpt"]
 
 
 async def test_misconfig_no_false_positive_on_clean_endpoint():
@@ -294,10 +328,11 @@ class _CookieHdrs:
 
 
 class _CookieResp:
-    def __init__(self, set_cookies, content_type="text/html", body=""):
+    def __init__(self, set_cookies, content_type="text/html", body="", status=200):
         self.headers = _CookieHdrs(set_cookies)
         self.content_type = content_type
         self._body = body
+        self.status = status
 
     async def text(self, *a, **k):
         return self._body

@@ -54,6 +54,27 @@ class ScanMode(str, Enum):
     # ScanMode entry.
 
 
+class Profile(str, Enum):
+    """Operating profile: a cross-cutting overlay on top of ``ScanMode``.
+
+    A ``ScanMode`` chooses *which* scanners run; a ``Profile`` tunes *how* the
+    whole run behaves regardless of mode. The two are orthogonal, so the same
+    deep scanner core serves both a classic authorised engagement and a
+    scope-constrained, internet-facing bug-bounty program.
+
+    * ``PENTEST`` (default) keeps the historical behaviour: operator-defined
+      targets, the standard request budget, OOB bound to loopback for lab use.
+    * ``BUGBOUNTY`` tunes for a public program: strict program-scope enforcement
+      (in-scope wildcards plus an out-of-scope exclusion list), breadth-first
+      recon within that scope, a routable OOB collaborator for blind bugs, a
+      politer request budget to respect program rules, and a submission-ready
+      default report. The actual knob values live in heaven.profiles.
+    """
+
+    PENTEST = "pentest"
+    BUGBOUNTY = "bugbounty"
+
+
 class Platform(str, Enum):
     LINUX = "linux"
     MACOS = "macos"
@@ -267,6 +288,10 @@ class HeavenConfig:
     log_level: str = "INFO"
     data_dir: Path = field(default_factory=lambda: Path("data"))
     scan_mode: ScanMode = ScanMode.FULL
+    # Operating profile (orthogonal to scan_mode). PENTEST is the historical
+    # default; BUGBOUNTY tunes scope/recon/OOB/throttle/reporting for a public
+    # program. See heaven.profiles.apply_profile for the concrete knobs.
+    profile: Profile = Profile.PENTEST
     honeypot_threshold: float = 0.7
     # Timezone for the server-rendered human-facing timestamps: report footers
     # and the "Generated" line in the PDF/HTML/Markdown and forensics reports.
@@ -303,6 +328,12 @@ class HeavenConfig:
         if sm:
             try:
                 self.scan_mode = ScanMode(sm)
+            except ValueError:
+                pass
+        pf = _env("HEAVEN_PROFILE", None)
+        if pf:
+            try:
+                self.profile = Profile(pf.lower())
             except ValueError:
                 pass
         self.honeypot_threshold = _env("HEAVEN_HONEYPOT_THRESHOLD", self.honeypot_threshold, float)

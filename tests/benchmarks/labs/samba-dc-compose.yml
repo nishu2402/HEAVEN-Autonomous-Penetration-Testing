@@ -12,6 +12,17 @@
 #     spoolss pipe over an authenticated SMB session proves the coercion
 #     interface is reachable; the coercion call itself is never issued.
 #
+# The entrypoint also seeds three authenticated-tier misconfigurations so the
+# advanced, credentialed AD checks have a real DC to confirm against (see
+# test_samba_dc_lab_detects_authenticated_ad_depth):
+#   * svc_sql is given an SPN -> Kerberoasting reports it HIGH (not critical: it
+#     is not adminCount=1), the live guard for the severity false positive.
+#   * Authenticated Users are granted DS-Replication-Get-Changes[-All] on the
+#     domain head -> a CONFIRMED critical DCSync finding parsed from the domain
+#     security descriptor (not inferred from adminCount).
+#   * Authenticated Users are granted GenericAll over "Domain Admins" -> a
+#     CONFIRMED critical ACL-takeover edge parsed from the group descriptor.
+#
 # SECURITY: every port binds to loopback ONLY (127.0.0.1). This is a disposable,
 # self-contained DC with seeded test accounts and no real data.
 services:
@@ -29,5 +40,6 @@ services:
       - "127.0.0.1:135:135"     # RPC endpoint mapper
       - "127.0.0.1:139:139"     # NetBIOS session
       - "127.0.0.1:389:389"     # LDAP
+      - "127.0.0.1:636:636"     # LDAPS (TLS: satisfies the DC's strong-auth requirement)
       - "127.0.0.1:445:445"     # SMB (named-pipe RPC)
     restart: "no"

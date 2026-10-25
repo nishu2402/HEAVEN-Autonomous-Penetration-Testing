@@ -236,7 +236,15 @@ def _parse_enroll_and_write(sd_bytes: bytes) -> tuple[Optional[bool], Optional[b
 
     can_enroll = False
     can_write = False
-    dacl = getattr(sd, "Dacl", None)
+    # impacket's SR_SECURITY_DESCRIPTOR is a Structure accessed as a dict; it has
+    # no __getattr__, so getattr(sd, "Dacl") is ALWAYS None and would make this
+    # parser silently never confirm a right (every template stuck at "potential").
+    # Read the field properly, falling back to getattr for any older impacket that
+    # did expose it as an attribute.
+    try:
+        dacl = sd["Dacl"]
+    except Exception:
+        dacl = getattr(sd, "Dacl", None)
     if dacl is None:
         return None, None
     for ace in dacl.aces:

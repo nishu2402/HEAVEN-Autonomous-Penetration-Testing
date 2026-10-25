@@ -470,6 +470,111 @@ def test_samba_dc_lab_detects_kerberos_enum_and_coercion():
         assert "SpoolSample" in methods, methods  # MS-RPRN (PrinterBug) reachable
 
 
+def test_samba_dc_lab_detects_authenticated_ad_depth():
+    """Prove HEAVEN's CREDENTIALED AD checks against the real Samba DC, with the
+    three seeded misconfigurations (see samba-dc-compose.yml). This is the live
+    counterpart to tests/test_ad_acl_and_depth.py (the same detectors, but
+    parsing the security descriptors a genuine DC returns over LDAP):
+
+    * Kerberoasting finds svc_sql's SPN and rates it HIGH, never critical (svc_sql
+      is not adminCount=1), the live guard for the severity false positive.
+    * DCSync is CONFIRMED from the domain head DACL (Authenticated Users hold the
+      replication rights), reported critical, not the adminCount pointer.
+    * ACL abuse CONFIRMS the GenericAll edge over Domain Admins (critical, Tier-0).
+    * The attack-path builder emits only these evidence-backed paths, so a path to
+      Domain Admin is present AND is justified by a real finding.
+    """
+    _skip_if_unavailable()
+    import ssl
+
+    from ldap3 import ALL, Connection, Server, Tls
+
+    from heaven.recon.ad_scanner import ADAttackType, ADScanner
+
+    admin_pass = "Passw0rd!2026#Aegis"
+
+    def _ldaps_bindable() -> bool:
+        # Gate on the LDAPS bind actually succeeding, NOT merely on the KDC
+        # answering: Samba brings TLS/636 up a little after Kerberos, and binding
+        # too early fails the TLS handshake (UNEXPECTED_EOF). This is the readiness
+        # the authenticated checks actually depend on.
+        try:
+            srv = Server("127.0.0.1", port=636, use_ssl=True,
+                         tls=Tls(validate=ssl.CERT_NONE), connect_timeout=5)
+            c = Connection(srv, user="administrator@heaven.local",
+                           password=admin_pass, auto_bind=True, receive_timeout=6)
+            c.unbind()
+            return True
+        except Exception:
+            return False
+
+    with LabStack("samba-dc-compose.yml", build=True):
+        ready = wait_until(_ldaps_bindable, timeout_s=300.0, interval_s=4.0)
+        assert ready, "samba-dc LDAPS never became bindable"
+
+        async def _run():
+            scanner = ADScanner(domain="heaven.local", dc_host="127.0.0.1",
+                                username="administrator", password=admin_pass)
+            # RootDSE fills the naming context; then bind authenticated over LDAPS
+            # and drive the credentialed checks directly.
+            await scanner.discover_via_rootdse()
+            # Bind over LDAPS: the DC requires confidentiality (a cleartext SIMPLE
+            # bind is refused strongerAuthRequired and an unsigned NTLM bind is
+            # terminated), so authenticate over TLS on 636, as a real engagement
+            # would. The lab's cert is self-signed, so skip verification.
+            tls = Tls(validate=ssl.CERT_NONE)
+            srv = Server("127.0.0.1", port=636, use_ssl=True, tls=tls,
+                         get_info=ALL, connect_timeout=8)
+            conn = Connection(srv, user="administrator@heaven.local",
+                              password=admin_pass, auto_bind=True,
+                              receive_timeout=10)
+            scanner._conn = conn
+            if not scanner.domain_dn:
+                scanner.domain_dn = conn.server.info.other.get(
+                    "defaultNamingContext", [""])[0]
+            await scanner.check_kerberoasting()
+            await scanner.check_dcsync_rights()
+            await scanner.check_delegation_abuse()
+            await scanner.check_acl_abuse()
+            await scanner.build_attack_paths()
+            try:
+                conn.unbind()
+            except Exception:
+                pass
+            return scanner._findings
+
+        findings = asyncio.run(_run())
+        by_type: dict = {}
+        for f in findings:
+            by_type.setdefault(f.attack_type, []).append(f)
+
+        # Kerberoasting: svc_sql's SPN is found and rated HIGH (not critical).
+        kerb = by_type.get(ADAttackType.KERBEROASTING, [])
+        assert kerb, f"Kerberoasting missed svc_sql's SPN; got {list(by_type)}"
+        assert kerb[0].severity == "high", (
+            f"a non-privileged SPN account must be high, not {kerb[0].severity}")
+        assert "svc_sql" in kerb[0].affected_objects, kerb[0].affected_objects
+
+        # DCSync: confirmed critical from the real domain head descriptor.
+        dcsync = by_type.get(ADAttackType.DCSYNC_RISK, [])
+        assert dcsync, "DCSync check produced nothing against the seeded DC"
+        confirmed = [f for f in dcsync if f.evidence.get("confirmed")]
+        assert confirmed, f"DCSync not CONFIRMED from the SD; got {[f.title for f in dcsync]}"
+        assert confirmed[0].severity == "critical", confirmed[0].severity
+
+        # ACL abuse: confirmed critical GenericAll edge over Domain Admins.
+        acl = [f for f in by_type.get(ADAttackType.ACL_ABUSE, [])
+               if f.evidence.get("confirmed")]
+        assert acl, "ACL takeover edge over Domain Admins not confirmed"
+        assert acl[0].severity == "critical", acl[0].severity
+        assert any("Domain Admins" in o for o in acl[0].affected_objects), acl[0].affected_objects
+
+        # Attack path: present and justified by the confirmed findings above.
+        paths = [f for f in by_type.get(ADAttackType.ACL_ABUSE, [])
+                 if "confirmed path" in f.title]
+        assert paths, "no attack-path finding assembled from the confirmed primitives"
+
+
 # ── web: DOM-XSS proven live in a headless browser against OWASP Juice Shop ───
 def test_juiceshop_lab_proves_dom_xss():
     """OWASP Juice Shop's search DOM XSS: the ``q`` parameter is rendered into an

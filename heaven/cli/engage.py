@@ -235,27 +235,46 @@ def scope() -> None:
                    "Multiplied into every finding's risk_score, so a critical SQLi "
                    "on a crown_jewel host outranks the same finding on a low-crit dev box.")
 @click.option("--notes", default="")
+@click.option("--out-of-scope", "out_of_scope", is_flag=True,
+              help="Record this target as explicitly OUT of scope (a bug-bounty "
+                   "exclusion). It will be subtracted from in-scope wildcards.")
 def scope_add(target: str, engagement: Optional[str], kind: str,
-              criticality: str, notes: str) -> None:
+              criticality: str, notes: str, out_of_scope: bool) -> None:
     """Add a target to the engagement scope (this is the authorization gate)."""
     from heaven.engagement import EngagementStore
     store = EngagementStore(_engagement_db_path(engagement))
-    store.add_scope(target, kind=kind, in_scope=True,
+    store.add_scope(target, kind=kind, in_scope=not out_of_scope,
                     criticality=criticality, notes=notes)
-    mul = {"low": 0.7, "medium": 1.0, "high": 1.3, "crown_jewel": 1.5}[criticality]
-    _print(f"[green]Added to scope:[/green] {target} ({kind}, "
-           f"criticality={criticality}, ×{mul})")
+    if out_of_scope:
+        _print(f"[yellow]Marked OUT of scope:[/yellow] {target} ({kind})")
+    else:
+        mul = {"low": 0.7, "medium": 1.0, "high": 1.3, "crown_jewel": 1.5}[criticality]
+        _print(f"[green]Added to scope:[/green] {target} ({kind}, "
+               f"criticality={criticality}, ×{mul})")
 
 
 @scope.command("import")
 @click.argument("path", type=click.Path(exists=True, dir_okay=False))
 @click.option("--engagement", help="Engagement name")
-def scope_import(path: str, engagement: Optional[str]) -> None:
-    """Import scope from a file (one target per line, # for comments)."""
+@click.option("--program", is_flag=True,
+              help="Parse a bug-bounty program scope: HackerOne/Bugcrowd JSON, or "
+                   "a text file with out-of-scope sections and *.wildcard entries.")
+def scope_import(path: str, engagement: Optional[str], program: bool) -> None:
+    """Import scope from a file.
+
+    Default: one target per line (# for comments), every line in-scope.
+    With --program: understands in-scope AND out-of-scope, wildcards, and
+    HackerOne/Bugcrowd JSON exports.
+    """
     from heaven.engagement import EngagementStore
     store = EngagementStore(_engagement_db_path(engagement))
-    n = store.import_scope_file(Path(path))
-    _print(f"[green]Imported {n} targets from {path}[/green]")
+    if program:
+        res = store.import_program_scope(Path(path))
+        _print(f"[green]Imported program scope from {path}:[/green] "
+               f"{res['in_scope']} in-scope, {res['out_of_scope']} out-of-scope")
+    else:
+        n = store.import_scope_file(Path(path))
+        _print(f"[green]Imported {n} targets from {path}[/green]")
 
 
 @scope.command("list")

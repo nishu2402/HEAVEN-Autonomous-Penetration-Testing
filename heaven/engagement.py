@@ -1070,6 +1070,72 @@ CRITICALITY_MULTIPLIER = {
 }
 
 
+def _scope_kind_of(target: str) -> str:
+    """Classify a scope entry into a scope-table ``kind``.
+
+    A ``*.example.com`` / ``.example.com`` entry is a subdomain-wide ``domain``;
+    a scheme'd entry is a ``url``; a dotted/slashed all-numeric entry is a
+    ``cidr``; an all-numeric dotted entry is an ``ip``; anything else is a bare
+    ``host``.
+    """
+    t = (target or "").strip().lower()
+    if t.startswith("*.") or t.startswith("."):
+        return "domain"
+    if t.startswith("http://") or t.startswith("https://"):
+        return "url"
+    body = t.replace(".", "").replace("/", "")
+    if "/" in t and body.isdigit():
+        return "cidr"
+    if t and all(c.isdigit() or c == "." for c in t):
+        return "ip"
+    return "host"
+
+
+def _iter_program_json(parsed: object):
+    """Yield ``(target, in_scope)`` pairs from a parsed program-scope JSON.
+
+    Accepts the common HackerOne / Bugcrowd shapes and simple
+    ``{"in_scope": [...], "out_of_scope": [...]}`` objects. Unknown shapes
+    yield nothing rather than raising, so a malformed export degrades to "no
+    entries imported" instead of a traceback.
+    """
+    def _asset_id(d: dict) -> str:
+        for key in ("asset_identifier", "target", "name", "host", "url",
+                    "identifier", "value"):
+            v = d.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return ""
+
+    def _is_in(d: dict) -> bool:
+        for key in ("eligible_for_submission", "in_scope", "inScope",
+                    "eligible"):
+            if key in d:
+                return bool(d[key])
+        return True  # default: present means in-scope unless marked otherwise
+
+    if isinstance(parsed, dict):
+        # Wrapper keys that hold the actual list(s).
+        for wrap in ("scopes", "targets", "assets", "data"):
+            if isinstance(parsed.get(wrap), (list, dict)):
+                yield from _iter_program_json(parsed[wrap])
+        for key, in_scope in (("in_scope", True), ("inScope", True),
+                              ("out_of_scope", False), ("outOfScope", False),
+                              ("excluded", False)):
+            for item in parsed.get(key, []) or []:
+                if isinstance(item, str):
+                    yield item, in_scope
+                elif isinstance(item, dict):
+                    yield _asset_id(item), _is_in(item)
+        return
+    if isinstance(parsed, list):
+        for item in parsed:
+            if isinstance(item, str):
+                yield item, True
+            elif isinstance(item, dict):
+                yield _asset_id(item), _is_in(item)
+
+
 @dataclass
 class Finding:
     id: str
@@ -1567,18 +1633,76 @@ class EngagementStore:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            # Crude kind detection
-            if line.startswith("http://") or line.startswith("https://"):
-                kind = "url"
-            elif "/" in line and line.replace(".", "").replace("/", "").isdigit():
-                kind = "cidr"
-            elif all(c.isdigit() or c == "." for c in line):
-                kind = "ip"
-            else:
-                kind = "host"
-            self.add_scope(line, kind=kind)
+            self.add_scope(line, kind=_scope_kind_of(line))
             count += 1
         return count
+
+    def import_program_scope(self, path: Path | str) -> dict[str, int]:
+        """Import a bug-bounty program's scope, in-scope AND out-of-scope.
+
+        Unlike :meth:`import_scope_file` (every line is in-scope), this
+        understands the shapes programs actually publish, so a HackerOne /
+        Bugcrowd scope can be loaded directly:
+
+        * **JSON** — a list of asset dicts (``asset_identifier`` /
+          ``eligible_for_submission`` as HackerOne emits, or ``target`` /
+          ``in_scope`` as Bugcrowd does), or an object with ``in_scope`` /
+          ``out_of_scope`` string lists, or one wrapping either under
+          ``scopes`` / ``targets``.
+        * **Text** — one target per line. A line beginning with ``!`` is
+          out-of-scope; a comment line naming "out of scope" / "excluded"
+          switches the following lines to out-of-scope (and "in scope" back).
+          A ``*.example.com`` / ``.example.com`` entry is stored as a ``domain``
+          (subdomain-wide) so recon and ScopeGuard treat it as a wildcard.
+
+        Returns ``{"in_scope": n, "out_of_scope": m}``. Nothing here authorises
+        a host; it only records what the program published.
+        """
+        import json
+
+        path = Path(path)
+        raw = path.read_text()
+        added = {"in_scope": 0, "out_of_scope": 0}
+
+        def _record(target: str, in_scope: bool) -> None:
+            target = (target or "").strip()
+            if not target:
+                return
+            self.add_scope(target, kind=_scope_kind_of(target), in_scope=in_scope)
+            added["in_scope" if in_scope else "out_of_scope"] += 1
+
+        stripped = raw.lstrip()
+        is_json = path.suffix.lower() == ".json" or stripped[:1] in ("{", "[")
+        parsed = None
+        if is_json:
+            try:
+                parsed = json.loads(raw)
+            except ValueError:
+                parsed = None  # fall through to text parsing
+
+        if parsed is not None:
+            for target, in_scope in _iter_program_json(parsed):
+                _record(target, in_scope)
+            return added
+
+        # Text form, with section markers and the ``!`` out-of-scope prefix.
+        current_in = True
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                low = line.lower()
+                if "out of scope" in low or "out-of-scope" in low or "excluded" in low:
+                    current_in = False
+                elif "in scope" in low or "in-scope" in low:
+                    current_in = True
+                continue
+            if line.startswith("!"):
+                _record(line[1:].strip(), in_scope=False)
+            else:
+                _record(line, in_scope=current_in)
+        return added
 
     # ── Scans ──────────────────────────────────────────────────────────
     def record_scan_start(self, scan_id: str, name: str = "", mode: str = "",

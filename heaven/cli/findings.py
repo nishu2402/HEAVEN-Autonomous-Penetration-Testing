@@ -175,11 +175,15 @@ def _infer_export_format(output: str) -> Optional[str]:
 @click.option("--engagement", help="Engagement name")
 @click.option("--output", "-o", required=True, type=click.Path(), help="Output file")
 @click.option("--format", "fmt",
-              type=click.Choice(["markdown", "csv", "json", "sarif", "junit",
-                                 "burp", "proxy-jsonl"]),
+              type=click.Choice(["markdown", "bugbounty", "csv", "json", "sarif",
+                                 "junit", "burp", "proxy-jsonl"]),
               default=None,
               help="Export format. Inferred from the --output extension "
                    "(.json/.csv/.sarif/.md/.jsonl) when omitted; markdown otherwise.")
+@click.option("--platform",
+              type=click.Choice(["generic", "hackerone", "bugcrowd", "intigriti"]),
+              default="generic",
+              help="bugbounty format only: tailor section wording to a platform.")
 @click.option("--fail-on",
               type=click.Choice(["critical", "high", "medium", "low", "none"]),
               default="medium",
@@ -191,13 +195,14 @@ def _infer_export_format(output: str) -> Optional[str]:
     "open", "verified", "false_positive", "accepted_risk", "fixed",
 ]), help="Only export findings in this status")
 @click.option("--min-confidence", type=float, default=0.0)
-def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
-           severity: Optional[str], status: Optional[str],
+def export(engagement: Optional[str], output: str, fmt: str, platform: str,
+           fail_on: str, severity: Optional[str], status: Optional[str],
            min_confidence: float) -> None:
     """Export engagement findings.
 
     Formats:
       markdown    Human-readable report with curl repros (default)
+      bugbounty   Submission-ready per-finding reports (H1/Bugcrowd/Intigriti)
       csv         For Jira / spreadsheet import
       json        Raw findings, full evidence
       sarif       SARIF 2.1.0 for GitHub/GitLab code-scanning dashboards
@@ -207,7 +212,7 @@ def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
     """
     from heaven.engagement import EngagementStore
     from heaven.devsecops.evidence import (
-        export_findings_markdown, export_findings_csv,
+        export_findings_markdown, export_findings_csv, export_findings_bugbounty,
     )
 
     # When --format is omitted, infer it from the output extension so
@@ -270,6 +275,10 @@ def export(engagement: Optional[str], output: str, fmt: str, fail_on: str,
                                          dns_records=_collect_engagement_dns(engagement),
                                          leads=open_leads)
         out_path.write_text(text)
+    elif fmt == "bugbounty":
+        out_path.write_text(export_findings_bugbounty(
+            finding_dicts, engagement_name=eng.name if eng else "",
+            platform=platform))
     elif fmt == "csv":
         out_path.write_text(export_findings_csv(finding_dicts))
     elif fmt == "json":

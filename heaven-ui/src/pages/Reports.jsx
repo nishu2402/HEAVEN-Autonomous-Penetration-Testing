@@ -49,6 +49,10 @@ export default function Reports() {
   // OWASP Top 10 coverage either way.
   const [frameworks, setFrameworks] = useState([]);
   const [fw, setFw] = useState("");
+  // Bug-bounty submission export: which program's section wording to use. The
+  // deliverable itself (CVSS, CWE, curl + raw request, OAST callback proof,
+  // Confirmed/Potential) is identical across platforms.
+  const [platform, setPlatform] = useState("generic");
   const toast = useToast();
 
   useEffect(() => {
@@ -113,6 +117,20 @@ export default function Reports() {
       toast.success(`Downloaded ${name}`);
     } catch (e) {
       toast.error(e.message || "SBOM export failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  // Download the selected engagement as a bug-bounty submission pack (per-finding
+  // H1/Bugcrowd/Intigriti markdown). Only the section wording follows `platform`.
+  async function pickBugBounty() {
+    setBusy("bugbounty");
+    try {
+      const name = await downloadReport("bugbounty", { ...engOpts(), platform });
+      toast.success(`Downloaded ${name}`);
+    } catch (e) {
+      toast.error(e.message || "Export failed");
     } finally {
       setBusy("");
     }
@@ -365,6 +383,45 @@ export default function Reports() {
           </div>
         </div>
       )}
+
+      {/* Bug-bounty submission pack: per-finding reports shaped for a triage
+          queue (CVSS 3.1 + 4.0, CWE/OWASP, curl + raw request, OAST callback
+          proof, and an honest Confirmed/Potential label). The platform picker
+          changes only the section wording, never what is reported. */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
+          🎯 Bug-bounty submission pack
+        </div>
+        <p className="dim" style={{ fontSize: 12, margin: "6px 0 10px", lineHeight: 1.6 }}>
+          One report block per finding, ready to paste into a program's triage form:
+          CVSS 3.1 &amp; 4.0, CWE/OWASP, a copy-paste curl and raw request, any
+          out-of-band callback as proof, and an honest{" "}
+          <strong style={{ color: "var(--text-0)" }}>Confirmed / Potential</strong> label.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                      marginBottom: 12 }}>
+          <label htmlFor="bb-platform" className="form-label" style={{ margin: 0 }}>
+            Program platform
+          </label>
+          <select id="bb-platform" className="form-select" value={platform}
+                  onChange={(e) => setPlatform(e.target.value)}
+                  style={{ minWidth: 0, maxWidth: 360 }}>
+            <option value="generic">Generic</option>
+            <option value="hackerone">HackerOne</option>
+            <option value="bugcrowd">Bugcrowd</option>
+            <option value="intigriti">Intigriti</option>
+          </select>
+        </div>
+        <button onClick={pickBugBounty} disabled={!!busy}
+          style={{
+            padding: "11px 18px", fontSize: 13.5, fontWeight: 600,
+            background: "var(--brand)", color: "#fff", border: "none",
+            borderRadius: "var(--radius-md)", cursor: busy ? "wait" : "pointer",
+            fontFamily: "var(--font-ui)",
+          }}>
+          {busy === "bugbounty" ? "Preparing…" : "⬇  Download submission pack (Markdown)"}
+        </button>
+      </div>
 
       <div className="card" style={{ marginTop: 12 }}>
         <div style={{ fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase",

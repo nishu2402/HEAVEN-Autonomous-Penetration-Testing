@@ -211,7 +211,7 @@ VULN_MODULE: dict[str, tuple[str, ...]] = {
     "security_headers": ("web_crawler",),
     # ── Broken access control (authorization) ────────────────────────────────
     "broken_access_control": ("access_control", "idor_scanner"),
-    "bola": ("access_control", "api_scanner"),
+    "bola": ("access_control", "api_scanner", "idor_scanner"),
     "mass_assignment": ("access_control", "api_scanner"),
     "race_condition": ("access_control",),
     # ── Injection aliases the scanners actually emit ─────────────────────────
@@ -327,6 +327,18 @@ _ADDITIONAL_EMITTERS: dict[str, tuple[str, ...]] = {
     "csrf_missing_token": ("auth_scanner", "advanced_attacks"),
     "oauth_open_redirect": ("auth_scanner",),
     "oauth_state_reflected": ("auth_scanner",),
+    # heaven.vulnscan.oauth_scanner — OAuth/OIDC/SAML flow-abuse (account takeover)
+    "oauth_implicit_flow_enabled": ("oauth_scanner",),
+    "oauth_pkce_not_advertised": ("oauth_scanner",),
+    "oauth_ropc_enabled": ("oauth_scanner",),
+    "oauth_redirect_uri_bypass": ("oauth_scanner", "auth_scanner"),
+    "password_reset_host_poisoning": ("oauth_scanner",),
+    "saml_assertion_signing_not_enforced": ("oauth_scanner",),
+    # heaven.vulnscan.advanced_attacks — true single-packet race
+    "race_condition_limit_overrun": ("advanced_attacks",),
+    # heaven.vulnscan.logic_scanner — business-logic abuse
+    "numeric_tampering": ("logic_scanner",),
+    "workflow_step_skip": ("logic_scanner",),
     "session_fixation": ("auth_scanner",),
     "technology_disclosure": ("auth_scanner", "adaptive_intel"),
     "weak_http_auth_credentials": ("auth_scanner",),

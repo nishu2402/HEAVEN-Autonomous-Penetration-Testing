@@ -3558,6 +3558,16 @@ _ALIASES: dict[str, str] = {
     # Web-app / API posture
     "oauth_pkce_not_enforced": "oauth_pkce_missing",
     "pkce_not_enforced": "oauth_pkce_missing",
+    "oauth_pkce_not_advertised": "oauth_pkce_missing",
+    # OAuth/OIDC/SAML flow abuse (oauth_scanner) → closest canonical KB entries.
+    "oauth_implicit_flow_enabled": "oauth_pkce_missing",
+    "oauth_ropc_enabled": "oauth_pkce_missing",
+    "saml_assertion_signing_not_enforced": "saml_unsigned_assertions",
+    # NB: oauth_redirect_uri_bypass and password_reset_host_poisoning are
+    # deliberately NOT aliased to open_redirect / host_header_injection — those
+    # classes' medium "typical_cvss" would under-rate what are really account-
+    # takeover bugs. They carry their own impact-accurate CVSS vectors (see
+    # _CVSS_VECTOR_BY_KEY) and get CWE/OWASP via the dynamic-taxonomy prefixes.
     "sensitive_file": "sensitive_file_exposure",
     "exposed_sensitive_file": "sensitive_file_exposure",
     "dir_listing": "directory_listing",
@@ -3567,6 +3577,7 @@ _ALIASES: dict[str, str] = {
     "exposed_service": "exposed_database",
     "auto_binding": "mass_assignment",
     "toctou": "race_condition",
+    "race_condition_limit_overrun": "race_condition",
     "known_vulnerable_version": "vulnerable_component",
     "outdated_component": "vulnerable_component",
     "vulnerable_dependency": "vulnerable_component",
@@ -3751,6 +3762,12 @@ _CVSS_VECTOR_BY_KEY: dict[str, str] = {
     "directory_listing": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "mass_assignment": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N",
     "race_condition": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    # Account-takeover flow bugs: the generic open-redirect / host-header classes
+    # under-rate these (C:L/I:L), so give them their own impact-accurate vectors.
+    # A redirect_uri bypass leaks the authorization code; reset-link poisoning
+    # leaks the reset token — both lead to victim account takeover.
+    "oauth_redirect_uri_bypass": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:L/A:N",
+    "password_reset_host_poisoning": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",  # nosec B105 - CVSS vector, not a secret
     "vulnerable_component": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     "outdated_patch_level": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
     "graphql_introspection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
@@ -3925,6 +3942,8 @@ _CVSS4_VECTOR_BY_KEY: dict[str, str] = {
     "directory_listing": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
     "mass_assignment": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:N/SC:N/SI:N/SA:N",
     "race_condition": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",
+    "oauth_redirect_uri_bypass": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:H/VI:L/VA:N/SC:N/SI:N/SA:N",
+    "password_reset_host_poisoning": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",  # nosec B105 - CVSS vector, not a secret
     "vulnerable_component": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
     "outdated_patch_level": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
     "graphql_introspection": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
@@ -4114,6 +4133,15 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
       "saml_"),
      ("CWE-347", "A07:2025 Authentication Failures",
       "T1606.002, Forge Web Credentials: SAML Tokens")),
+    # OAuth 2.0 / OIDC flow abuse (redirect_uri bypass, implicit flow, missing
+    # PKCE, ROPC) — account-takeover surface. redirect_uri bypass is handled by
+    # the open_redirect alias/group (CWE-601); the rest are authentication-flow
+    # weaknesses. Kept ahead of the generic auth/credential bucket so an OAuth
+    # finding scores against the right class.
+    (("oauth_implicit", "implicit_flow", "oauth_pkce", "pkce_not", "oauth_ropc",
+      "ropc", "oauth_", "oidc_"),
+     ("CWE-287", "A07:2025 Authentication Failures",
+      "T1528, Steal Application Access Token")),
     # Internet-facing edge/VPN appliance with actively-exploited (CISA KEV) CVEs.
     (("edge_citrix", "edge_ivanti", "edge_fortinet", "edge_paloalto",
       "edge_microsoft_exchange", "edge_f5", "edge_appliance", "kev_appliance"),
@@ -4211,6 +4239,14 @@ _KEYWORD_TAXONOMY: list[tuple[tuple[str, ...], tuple[str, str, str]]] = [
      ("CWE-770", "A06:2025 Insecure Design", "T1499, Endpoint Denial of Service")),
     (("mass_assign", "auto_bind"),
      ("CWE-915", "A08:2025 Software or Data Integrity Failures", "T1190, Exploit Public-Facing Application")),
+    # Business-logic abuse (logic_scanner): numeric/quantity tampering and
+    # workflow step-skip are design flaws, not bad characters — A06 Insecure Design.
+    (("numeric_tamper", "quantity_tamper", "price_tamper", "value_tamper"),
+     ("CWE-20", "A06:2025 Insecure Design", "T1565, Data Manipulation")),
+    (("workflow_step_skip", "step_skip", "workflow_bypass", "business_logic"),
+     ("CWE-840", "A06:2025 Insecure Design", "T1190, Exploit Public-Facing Application")),
+    (("race_condition", "toctou", "limit_overrun"),
+     ("CWE-362", "A06:2025 Insecure Design", "T1190, Exploit Public-Facing Application")),
     (("deserial",),
      ("CWE-502", "A08:2025 Software or Data Integrity Failures", "T1190, Exploit Public-Facing Application")),
     (("outdated", "vulnerable_comp", "known_vuln", "eol", "end_of_life", "cve"),

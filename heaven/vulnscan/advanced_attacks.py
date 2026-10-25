@@ -20,7 +20,9 @@ import hashlib
 import hmac
 import json
 import secrets
+import ssl as _ssl
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -217,6 +219,201 @@ class JWTAttacker:
 
 class RaceConditionDetector:
     """Detect TOCTOU and race condition vulnerabilities."""
+
+    _READONLY_MARKERS = ("phpinfo", "server-status", "server-info",
+                         "nginx_status", "status?full", "opcache", "apc.php",
+                         "info.php", "/status", "/metrics", "/health")
+
+    # ── true single-packet race (HTTP/1.1 last-byte synchronisation) ──────────
+    @staticmethod
+    def _build_raw_request(method: str, parsed, body: bytes,
+                           cookie: str = "") -> bytes:
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+        lines = [
+            f"{method} {path} HTTP/1.1",
+            f"Host: {parsed.netloc}",
+            "User-Agent: Mozilla/5.0 (compatible; HEAVEN-Race/1.0)",
+            "Accept: */*",
+        ]
+        if cookie:
+            lines.append(f"Cookie: {cookie}")
+        if body:
+            lines.append("Content-Type: application/x-www-form-urlencoded")
+            lines.append(f"Content-Length: {len(body)}")
+        lines.append("Connection: close")
+        head = ("\r\n".join(lines) + "\r\n\r\n").encode()
+        return head + body
+
+    @staticmethod
+    async def _single_packet_burst(parsed, raw: bytes, n: int,
+                                   timeout: float = 10.0) -> list[tuple[int, str]]:
+        """Fire ``n`` copies of ``raw`` with last-byte synchronisation.
+
+        Each connection sends the whole request except its final byte, waits on a
+        shared barrier, then all connections release the last byte together — the
+        standard single-packet technique that lands the complete requests inside
+        the same server tick. Returns (status, body_hash) per response that came
+        back. Pure stdlib asyncio; no extra dependency."""
+        use_tls = parsed.scheme == "https"
+        port = parsed.port or (443 if use_tls else 80)
+        host = parsed.hostname or ""
+        ctx = None
+        if use_tls:
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+        head, tail = raw[:-1], raw[-1:]
+        try:
+            barrier = asyncio.Barrier(n)  # Python 3.11+
+        except AttributeError:  # pragma: no cover - interpreter < 3.11
+            return []
+
+        async def _one() -> Optional[tuple[int, str]]:
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=ctx,
+                                            server_hostname=host if use_tls else None),
+                    timeout=timeout)
+            except Exception:  # noqa: BLE001
+                return None
+            try:
+                writer.write(head)
+                await writer.drain()
+                try:
+                    await asyncio.wait_for(barrier.wait(), timeout=timeout)
+                except Exception:  # noqa: BLE001 - a lost connection must not wedge the rest
+                    logger.debug("race barrier wait interrupted", exc_info=True)
+                writer.write(tail)
+                await writer.drain()
+                data = await asyncio.wait_for(reader.read(65536), timeout=timeout)
+            except Exception:  # noqa: BLE001
+                return None
+            finally:
+                try:
+                    writer.close()
+                except Exception:  # noqa: BLE001
+                    logger.debug("race connection close failed", exc_info=True)
+            if not data:
+                return None
+            status = 0
+            try:
+                first = data.split(b"\r\n", 1)[0].split(b" ")
+                if len(first) >= 2 and first[1].isdigit():
+                    status = int(first[1])
+            except Exception:  # noqa: BLE001
+                status = 0
+            body = data.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in data else data
+            return status, hashlib.md5(body, usedforsecurity=False).hexdigest()[:12]
+
+        results = await asyncio.gather(*[_one() for _ in range(n)],
+                                       return_exceptions=True)
+        return [r for r in results if isinstance(r, tuple)]
+
+    @staticmethod
+    async def _sequential_control(parsed, raw: bytes, n: int,
+                                  timeout: float = 10.0) -> list[tuple[int, str]]:
+        """Send the same request ``n`` times strictly sequentially (the control
+        run that tells a real limit from an endpoint with no limit at all)."""
+        out: list[tuple[int, str]] = []
+        for _ in range(n):
+            r = await RaceConditionDetector._single_packet_burst(parsed, raw, 1, timeout)
+            out.extend(r)
+        return out
+
+    @classmethod
+    async def test_single_packet_race(cls, url: str, method: str = "POST",
+                                      data: Optional[dict] = None,
+                                      n: int = 15) -> Optional[AdvancedFinding]:
+        """Prove a limit-overrun race with a single-packet attack + a sequential
+        control.
+
+        Signal: under synchronised single-packet delivery, two or more requests
+        commit the SAME fresh-success response (identical 2xx status + body),
+        while a strictly-sequential control of the same size reproduces that
+        exact fresh success at most once (the rest get a different limit/duplicate
+        response). That is precisely "the server enforces the limit when requests
+        are serialised, but a single-packet race bypasses it" — the coupon /
+        balance / vote-reuse class. An endpoint with no limit (sequential also
+        succeeds repeatedly) or whose success body merely carries a per-request
+        nonce (no two identical successes) never fires."""
+        if aiohttp is None:
+            return None
+        u = url.lower()
+        if any(m in u for m in cls._READONLY_MARKERS):
+            return None
+        if method.upper() == "GET":
+            return None  # a GET commits no state, so it cannot overrun a limit
+        parsed = urllib.parse.urlparse(url)
+        if not parsed.hostname:
+            return None
+
+        body = urllib.parse.urlencode(data or {}).encode()
+        cookie = ""
+        try:
+            from heaven.recon.auth_session import get_active_session
+            _s = get_active_session()
+            if _s and _s.cookies:
+                cookie = "; ".join(f"{k}={v}" for k, v in _s.cookies.items())
+        except Exception:  # noqa: BLE001
+            cookie = ""
+        raw = cls._build_raw_request(method, parsed, body, cookie)
+
+        # 1. Synchronised single-packet burst.
+        burst = await cls._single_packet_burst(parsed, raw, n)
+        succ = [(s, h) for s, h in burst if 200 <= s < 300]
+        if len(succ) < 2:
+            return None  # nothing (or only one request) succeeded → no overrun
+        # Largest identical fresh-success group.
+        groups: dict[tuple[int, str], int] = {}
+        for key in succ:
+            groups[key] = groups.get(key, 0) + 1
+        fresh, fresh_count = max(groups.items(), key=lambda kv: kv[1])
+        if fresh_count < 2:
+            return None  # successes were all distinct (nonce/timestamp pages)
+
+        # 2. Sequential control — does the SAME fresh success recur when serialised?
+        control = await cls._sequential_control(parsed, raw, n)
+        if not control:
+            return None  # could not establish a control → do not guess
+        control_fresh = sum(1 for kv in control if kv == fresh)
+        # A genuine single-use limit lets the fresh success through at most once
+        # when serialised; the control also has to show the limit response exists
+        # (a non-fresh, non-5xx answer), not just connection errors.
+        control_limit_responses = [kv for kv in control
+                                   if kv != fresh and kv[0] and kv[0] < 500]
+        if control_fresh > 1 or not control_limit_responses:
+            return None  # no enforced limit (repeatable) → not a race bug
+
+        return AdvancedFinding(
+            target=url, vuln_type="race_condition_limit_overrun", severity="high",
+            title="Race condition: limit overrun via single-packet attack",
+            description=(
+                f"A single-packet race sent {n} identical {method} requests with "
+                f"last-byte synchronisation and {fresh_count} of them committed the "
+                f"same fresh-success response (HTTP {fresh[0]}), while a sequential "
+                f"control reproduced that success only {control_fresh} time(s) — the "
+                f"remaining serialised requests hit a limit/duplicate response. The "
+                f"endpoint enforces its limit only when requests are serialised, so a "
+                f"single-packet race bypasses it (coupon/balance/vote reuse class)."
+            ),
+            confidence=0.85,
+            evidence={
+                "method": method, "requests": n,
+                "single_packet_fresh_successes": fresh_count,
+                "sequential_fresh_successes": control_fresh,
+                "fresh_success_status": fresh[0],
+                "technique": "single_packet_last_byte_sync",
+                "proof": (f"{fresh_count} concurrent fresh successes vs "
+                          f"{control_fresh} sequential — limit bypassed under race"),
+            },
+            remediation=("Enforce the limit atomically at the datastore (unique "
+                         "constraint, SELECT ... FOR UPDATE, atomic decrement, or an "
+                         "idempotency key), not with a check-then-act in application "
+                         "code."),
+            cwe="CWE-362",
+        )
 
     @staticmethod
     async def test_race(session: aiohttp.ClientSession, url: str,
@@ -757,6 +954,15 @@ async def run_advanced_tests(session: aiohttp.ClientSession, url: str,
             race = await RaceConditionDetector.test_race(session, endpoint)
             if race:
                 all_findings.append(race)
+            # True single-packet (last-byte-sync) race: proves a limit overrun
+            # the concurrent-burst heuristic above can only hint at. Reproduce-
+            # first via its own sequential control, so it adds no false positive.
+            try:
+                spr = await RaceConditionDetector.test_single_packet_race(endpoint)
+                if spr:
+                    all_findings.append(spr)
+            except Exception as e:  # noqa: BLE001 - a probe error never fails the phase
+                logger.debug("single-packet race probe failed on %s: %s", endpoint, e)
 
     # Default credential spray
     cred_findings = await CredentialSprayer.spray_web_login(session, url)

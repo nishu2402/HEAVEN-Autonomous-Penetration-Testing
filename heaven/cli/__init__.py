@@ -172,7 +172,8 @@ if HAS_CLICK:
         info, init as init_module,
         install_tools as install_tools_module, knowledge,
         labs as labs_module,
-        lateral, methodology, mitre, pivot as pivot_module, postex as postex_module,
+        lateral, methodology, mitre, oast as oast_module,
+        pivot as pivot_module, postex as postex_module,
         quickstart as quickstart_module, replay,
         sast, sbom as sbom_module, sca as sca_module, scan, server,
         ssh as ssh_module,
@@ -210,6 +211,7 @@ if HAS_CLICK:
     labs_module.register(cli)
     lateral.register(cli)
     methodology.register(cli)
+    oast_module.register(cli)
     pivot_module.register(cli)
     mitre.register(cli)
     postex_module.register(cli)

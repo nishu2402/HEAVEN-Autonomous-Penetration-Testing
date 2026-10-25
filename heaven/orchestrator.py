@@ -377,6 +377,18 @@ class ScanOrchestrator:
         # Initialised lazily from build_full_scan (needs the targets dict).
         self.feedback: Optional[FeedbackEngine] = None
         self._followup_hosts: set[str] = set()  # hosts already given a follow-on task
+        # Shared out-of-band (OAST) collaborator for the whole run. The OOB
+        # SSRF/XXE/cmdi task and the injection task's DNS-exfil blind-SQLi probe
+        # use the SAME listener, so there is a single DNS bind (two separate
+        # listeners would collide on the DNS port and one would silently degrade
+        # to HTTP-only). Started lazily on first use — building an orchestrator
+        # must bind no socket, since the test suite builds many — and stopped in
+        # run()'s teardown. The bug-bounty routable profile is what makes the
+        # operator export HEAVEN_OAST_DNS_ZONE / HEAVEN_OAST_PUBLIC_IP, which
+        # from_env() reads to activate the DNS channel.
+        self._oast = None
+        self._oast_lock = asyncio.Lock()
+        self._oast_started = False
         # Web/vuln task timeouts scale up for slower / quieter / wider scans, so a
         # rate-limiting real-world host does not trip the old fixed caps mid-scan
         # and lose the task's partial work. Set from stealth + scope in
@@ -423,6 +435,40 @@ class ScanOrchestrator:
             "default": asyncio.Semaphore(200),
             "ml": asyncio.Semaphore(10),
         }
+
+    async def get_oast(self):
+        """Lazily start and return the run's shared OAST collaborator.
+
+        Returns ``None`` when a collaborator cannot be started (no socket). The
+        DNS channel activates only when ``HEAVEN_OAST_DNS_ZONE`` is set; the
+        listener binds loopback by default, which already covers localhost/lab
+        targets. Safe to call from several tasks concurrently — the first caller
+        starts the listener under the lock, the rest get the same instance.
+        """
+        async with self._oast_lock:
+            if self._oast_started:
+                return self._oast
+            self._oast_started = True
+            try:
+                from heaven.vulnscan.oast import OASTListener
+                self._oast = OASTListener.from_env().start()
+                if getattr(self._oast, "dns_enabled", False):
+                    logger.info(
+                        "OAST DNS channel active (zone %s) — blind DNS-exfil "
+                        "SSRF/RCE/SQLi provable", self._oast.dns_zone)
+            except OSError as e:
+                logger.debug("shared OAST collaborator unavailable (%s)", e)
+                self._oast = None
+            return self._oast
+
+    def _stop_oast(self) -> None:
+        """Stop the shared collaborator if it was started (run() teardown)."""
+        if self._oast is not None:
+            try:
+                self._oast.stop()
+            except Exception:  # noqa: BLE001 — teardown must never fail a scan
+                logger.debug("suppressed OAST stop error", exc_info=True)
+            self._oast = None
 
     def add_task(
         self,
@@ -1560,6 +1606,9 @@ class ScanOrchestrator:
             record_findings_to_knowledge(all_vulns, all_assets, engagement_name=eng_name)
         except Exception:  # noqa: BLE001
             logger.debug("knowledge-graph capture skipped", exc_info=True)
+
+        # Release the shared OAST collaborator (HTTP + any DNS listener/thread).
+        self._stop_oast()
 
         return summary
 
@@ -2775,6 +2824,45 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         concurrency_group="web", timeout=600,
     )
 
+    # ═══ Phase: OAUTH / OIDC / SAML FLOW ABUSE (account takeover) ═══
+    # Deeper than the auth scanner's endpoint discovery: reads the provider's
+    # discovery metadata for flow weaknesses (implicit flow, missing PKCE, ROPC)
+    # and proves redirect_uri bypass / password-reset host-poisoning / SAML
+    # signature-stripping on OBSERVED redirects and reflections only.
+    async def _oauth_flow_scan(**kw):
+        try:
+            from heaven.vulnscan.oauth_scanner import scan_oauth_flows
+        except ImportError:
+            return {}
+        urls = list(targets.get("urls", []))
+        reset_urls: list[str] = []
+        for _tid, res in orch.results.items():
+            if res.state != TaskState.COMPLETED or not res.data:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                ep_url = ep if isinstance(ep, str) else ep.get("url", "")
+                if not ep_url:
+                    continue
+                if ep_url not in urls:
+                    urls.append(ep_url)
+                low = ep_url.lower()
+                if any(h in low for h in ("reset", "forgot", "recover",
+                                          "lostpassword", "password")):
+                    reset_urls.append(ep_url)
+        if not urls:
+            return {"skipped": True, "reason": "no URLs for OAuth/SAML flow audit"}
+        return await scan_oauth_flows(
+            urls, reset_urls=reset_urls, oast=await orch.get_oast(),
+            time_budget=current_task_budget())
+
+    orch.add_task(
+        "OAuth / OIDC / SAML Flow Audit", _oauth_flow_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=300,
+    )
+
     # ═══ Phase: WEB FUZZER ═══
     async def _web_fuzz(**kw):
         try:
@@ -2880,7 +2968,6 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
     async def _misconfig_oob(**kw):
         try:
             from heaven.vulnscan.misconfig_scanner import scan_misconfig
-            from heaven.vulnscan.oast import OASTListener
             from heaven.vulnscan.oob_scanner import scan_oob
         except ImportError:
             return {}
@@ -2912,14 +2999,17 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         # target can reach. Loopback by default (covers localhost/lab targets);
         # for a remote engagement you're authorized to receive callbacks from,
         # set HEAVEN_OAST_HOST=<routable-ip> (and optionally HEAVEN_OAST_BIND=
-        # 0.0.0.0 / HEAVEN_OAST_PORT). A finding fires only on a real callback.
-        try:
-            with OASTListener.from_env() as oast:
-                oob = await scan_oob(urls, oast=oast,
-                                     time_budget=current_task_budget())
-                findings.extend(oob.get("findings", []))
-        except OSError as e:
-            logger.debug(f"OAST collaborator unavailable ({e}); skipping OOB probes")
+        # 0.0.0.0 / HEAVEN_OAST_PORT, plus HEAVEN_OAST_DNS_ZONE / PUBLIC_IP for a
+        # DNS channel). A finding fires only on a real callback. The run shares
+        # ONE collaborator (see ScanOrchestrator.get_oast) so the OOB and
+        # injection tasks never collide on the DNS bind.
+        oast = await orch.get_oast()
+        if oast is not None:
+            oob = await scan_oob(urls, oast=oast,
+                                 time_budget=current_task_budget())
+            findings.extend(oob.get("findings", []))
+        else:
+            logger.debug("OAST collaborator unavailable; skipping OOB probes")
 
         return {"findings": findings, "vulnerabilities": findings, "total": len(findings)}
 
@@ -3021,9 +3111,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         # Soft-cap the sweep at 90% of the hard task timeout so a slow target
         # yields the findings gathered so far instead of being cancelled with
         # total loss (which would also skip the dependent IDOR scan).
+        # The shared collaborator lets the SQLi path prove out-of-band DNS exfil
+        # (zero-FP) when the DNS channel is active; harmless no-op otherwise.
+        oast = await orch.get_oast()
         return await scan_for_injections(
             urls, forms_by_url=forms_by_url, stealth_level=stealth,
-            time_budget=_INJECTION_TIMEOUT_S * 0.9,
+            time_budget=_INJECTION_TIMEOUT_S * 0.9, oast=oast,
         )
 
     inject_id = orch.add_task(
@@ -3031,6 +3124,35 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
         modes=WEBAPI_MODES,
         concurrency_group="web", timeout=_INJECTION_TIMEOUT_S,
+    )
+
+    # ═══ Phase: BUSINESS-LOGIC ABUSE (numeric tampering + workflow step-skip) ═══
+    async def _logic_scan(**kw):
+        try:
+            from heaven.vulnscan.injection_scanner import build_injection_targets
+            from heaven.vulnscan.logic_scanner import scan_business_logic
+        except ImportError:
+            return {}
+        endpoints: list[dict] = []
+        for _tid, res in orch.results.items():
+            if getattr(res, "state", None) != TaskState.COMPLETED:
+                continue
+            data = res.data if isinstance(res.data, dict) else {}
+            for ep in data.get("endpoints", []):
+                if isinstance(ep, dict):
+                    endpoints.append(ep)
+        urls, forms_by_url = build_injection_targets(
+            endpoints, seed_urls=list(targets.get("urls", [])))
+        if not urls and not forms_by_url:
+            return {"skipped": True, "reason": "no URLs for business-logic scan"}
+        return await scan_business_logic(
+            urls, forms_by_url=forms_by_url, time_budget=current_task_budget())
+
+    orch.add_task(
+        "Business-Logic Abuse Scan", _logic_scan,
+        phase=ScanPhase.VULN_SCAN, depends_on=[web_id, adapt_id],
+        modes=WEBAPI_MODES,
+        concurrency_group="web", timeout=300,
     )
 
     # ═══ Phase: FILE-UPLOAD PROBE ═══

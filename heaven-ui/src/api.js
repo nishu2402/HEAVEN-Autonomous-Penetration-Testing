@@ -138,6 +138,7 @@ export async function downloadReport(format, opts = {}) {
   const q = new URLSearchParams({ format });
   if (opts.engagement) q.append("engagement", opts.engagement);
   if (opts.framework) q.append("framework", opts.framework);
+  if (opts.platform) q.append("platform", opts.platform);
   const r = await fetch(`${API_BASE}/report/export?${q.toString()}`, {
     headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
   });

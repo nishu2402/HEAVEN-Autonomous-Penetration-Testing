@@ -71,6 +71,56 @@ def test_attach_matches_evidence_url_fallback() -> None:
         pc.end(token)
 
 
+def test_attach_skips_method_mismatch_when_no_own_status() -> None:
+    """A finding proved by a successful request but carrying no status of its own
+    must NOT inherit a 405/501 left in the per-URL store by a later method-probe.
+
+    This is the jwt_weak_secret case: the GET that returned the Set-Cookie proved
+    it, but a later POST /login (405) won the store. An absent response is more
+    honest than a "405 Method Not Allowed" shown under a finding it never proved.
+    """
+    for bad in (405, 501):
+        token = pc.begin()
+        try:
+            pc.record("http://t/login", bad, "Method Not Allowed")
+            finding = {"target": "http://t/login",
+                       "vuln_type": "jwt_weak_secret", "evidence": {}}
+            assert pc.attach(finding) is False
+            assert "status" not in finding["evidence"]
+            assert "response_body" not in finding["evidence"]
+        finally:
+            pc.end(token)
+
+
+def test_attach_still_fills_success_when_no_own_status() -> None:
+    """The 405/501 guard must not over-reach: a successful transaction with no
+    own status on the finding still fills the gap."""
+    token = pc.begin()
+    try:
+        pc.record("http://t/login", 200, "welcome")
+        finding = {"target": "http://t/login",
+                   "vuln_type": "jwt_weak_secret", "evidence": {}}
+        assert pc.attach(finding) is True
+        assert finding["evidence"]["status"] == 200
+        assert finding["evidence"]["response_body"] == "welcome"
+    finally:
+        pc.end(token)
+
+
+def test_attach_skips_status_mismatch_with_own_status() -> None:
+    """A finding that recorded its OWN status rejects a same-URL transaction whose
+    status differs (a different, later request), leaving its evidence intact."""
+    token = pc.begin()
+    try:
+        pc.record("http://t/x", 405, "method not allowed")
+        finding = {"target": "http://t/x", "evidence": {"status": 200}}
+        assert pc.attach(finding) is False
+        assert finding["evidence"]["status"] == 200
+        assert "response_body" not in finding["evidence"]
+    finally:
+        pc.end(token)
+
+
 def test_scan_scopes_are_isolated_across_tasks() -> None:
     """Two concurrent scan contexts must not see each other's captures."""
     async def scan(mark: str) -> tuple[int, object]:

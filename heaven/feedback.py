@@ -74,6 +74,12 @@ class ScopeGuard:
         self._domains: set[str] = set()   # subdomain-wildcard scope (deliberate)
         self._nets: list[ipaddress._BaseNetwork] = []
         self._exact: set[str] = set()     # exact host / IP scope
+        # Out-of-scope exclusions (bug-bounty programs publish these alongside
+        # the in-scope wildcards). An excluded host is denied even when an
+        # in-scope wildcard would otherwise authorise it, so a program that puts
+        # *.example.com in scope but blog.example.com out of scope is honoured.
+        self._excluded_exact: set[str] = set()
+        self._excluded_domains: set[str] = set()
 
         def _add_host(raw: str, *, wildcard: bool) -> None:
             raw = (raw or "").strip().lower()
@@ -108,6 +114,36 @@ class ScopeGuard:
         for dom in targets.get("domains", []) or []:
             _add_host(str(dom), wildcard=True)
 
+        # Out-of-scope entries. A bare / wildcard host both exclude that host;
+        # a wildcard (``*.x`` / ``.x`` / a ``domain`` entry) also excludes its
+        # whole subtree.
+        for raw in targets.get("exclude", []) or []:
+            ex = (str(raw) or "").strip().lower()
+            if not ex:
+                continue
+            if "://" in ex:
+                ex = urlparse(ex).hostname or ""
+            sub_wide = False
+            if ex.startswith("*."):
+                ex, sub_wide = ex[2:], True
+            elif ex.startswith("."):
+                ex, sub_wide = ex[1:], True
+            ex = ex.split(":", 1)[0].strip("[]")
+            if not ex:
+                continue
+            self._excluded_exact.add(ex)
+            if sub_wide:
+                self._excluded_domains.add(ex)
+
+    def _is_excluded(self, host: str) -> bool:
+        """True when ``host`` is on the out-of-scope list (exact or subtree)."""
+        if host in self._excluded_exact:
+            return True
+        for dom in self._excluded_domains:
+            if host == dom or host.endswith("." + dom):
+                return True
+        return False
+
     def allows_subdomains(self, domain: str) -> bool:
         """True when *arbitrary* subdomains of ``domain`` are in authorised scope.
 
@@ -125,6 +161,8 @@ class ScopeGuard:
         domain = domain.split(":", 1)[0].strip("[]")
         if not domain:
             return False
+        if self._is_excluded(domain):
+            return False
         for dom in self._domains:
             if domain == dom or domain.endswith("." + dom):
                 return True
@@ -138,6 +176,8 @@ class ScopeGuard:
             host = urlparse(host).hostname or ""
         host = host.split(":", 1)[0].strip("[]")
         if not host:
+            return False
+        if self._is_excluded(host):
             return False
         if host in self._exact:
             return True

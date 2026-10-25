@@ -20,6 +20,7 @@ logger = get_logger("recon.ad")
 try:
     import ldap3  # noqa: F401
     from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, BASE
+    from ldap3.protocol.microsoft import security_descriptor_control
     HAS_LDAP = True
 except ImportError:
     HAS_LDAP = False
@@ -73,6 +74,74 @@ def derive_domain_from_dn(dn: str) -> str:
     parts = [p.split("=", 1)[1] for p in (dn or "").split(",")
              if p.strip().lower().startswith("dc=") and "=" in p]
     return ".".join(parts)
+
+
+def _attr_int(entry: Any, name: str) -> int:
+    """Read an ldap3 attribute as an int, robust to the attribute being absent or
+    an empty Attribute object. ``getattr(entry, name, 0)`` returns the ldap3
+    Attribute wrapper (which is truthy even when the value is absent), so a naive
+    bool() on it would treat every account as if the flag were set, the source of
+    a severity false positive. This reads the underlying ``.value`` and coerces."""
+    try:
+        v = getattr(entry, name, None)
+        v = v.value if hasattr(v, "value") else v
+        if isinstance(v, (list, tuple)):
+            v = v[0] if v else None
+        return int(v) if v is not None else 0
+    except Exception:
+        return 0
+
+
+def _attr_list(entry: Any, name: str) -> list[str]:
+    """Read a (possibly multi-valued) ldap3 attribute as a list of strings.
+    Empty list when absent, so a filter-ignoring test double or a missing
+    attribute never fabricates a value."""
+    try:
+        v = getattr(entry, name, None)
+        vals = v.values if hasattr(v, "values") else v
+        if vals is None:
+            return []
+        if isinstance(vals, (list, tuple)):
+            return [str(x) for x in vals if x is not None]
+        return [str(vals)]
+    except Exception:
+        return []
+
+
+def _attr_bytes(entry: Any, name: str) -> Optional[bytes]:
+    """Read an ldap3 attribute that carries raw bytes (e.g. nTSecurityDescriptor).
+    Returns ``None`` when absent or not byte-shaped so the caller stays honest."""
+    try:
+        v = getattr(entry, name, None)
+        raw = v.raw_values if hasattr(v, "raw_values") else None
+        if raw:
+            return bytes(raw[0])
+        v = v.value if hasattr(v, "value") else v
+        if isinstance(v, (bytes, bytearray)):
+            return bytes(v)
+    except Exception:
+        logger.debug("could not read bytes attribute %s", name, exc_info=True)
+    return None
+
+
+def _sid_str_to_bytes(sid: str) -> Optional[bytes]:
+    """Encode a canonical ``S-1-5-21-...`` SID string into its binary form so it
+    can be used in an ``(objectSid=...)`` LDAP filter. ``None`` if not a SID."""
+    import struct
+    try:
+        parts = sid.split("-")
+        if parts[0] != "S":
+            return None
+        revision = int(parts[1])
+        authority = int(parts[2])
+        subs = [int(p) for p in parts[3:]]
+        data = struct.pack("B", revision) + struct.pack("B", len(subs))
+        data += authority.to_bytes(6, "big")
+        for sub in subs:
+            data += struct.pack("<I", sub)
+        return data
+    except Exception:
+        return None
 
 
 @dataclass
@@ -700,10 +769,19 @@ class ADScanner:
 
         findings = []
         try:
-            # Find user accounts with SPNs (exclude computer accounts)
+            # User accounts with SPNs, excluding the ones that are not practical
+            # Kerberoast targets and would otherwise skew the result:
+            #   * computer accounts (their SPNs are machine SPNs, not roastable),
+            #   * krbtgt and other critical system objects (krbtgt carries SPNs and
+            #     adminCount=1, so including it both inflates the count AND wrongly
+            #     escalates the finding to critical; GetUserSPNs/Rubeus exclude it),
+            #   * disabled accounts (UAC ACCOUNTDISABLE 0x2 — the KDC will not issue
+            #     a TGS for them, so they cannot actually be roasted).
             self._conn.search(
                 self.domain_dn,
-                "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer)))",
+                "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))"
+                "(!(sAMAccountName=krbtgt))(!(isCriticalSystemObject=TRUE))"
+                "(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
                 search_scope=SUBTREE,
                 attributes=["sAMAccountName", "servicePrincipalName", "memberOf",
                              "pwdLastSet", "adminCount", "description"],
@@ -713,7 +791,10 @@ class ADScanner:
                 account = {
                     "username": str(entry.sAMAccountName),
                     "spns": [str(s) for s in entry.servicePrincipalName.values] if hasattr(entry, 'servicePrincipalName') else [],
-                    "admin_count": getattr(entry, 'adminCount', 0),
+                    # adminCount is only "privileged" when it is literally 1; the
+                    # raw ldap3 Attribute is truthy even when unset, so coerce.
+                    "admin_count": _attr_int(entry, "adminCount"),
+                    "privileged": _attr_int(entry, "adminCount") == 1,
                     "description": str(getattr(entry, 'description', '')),
                 }
                 spn_accounts.append(account)
@@ -723,8 +804,11 @@ class ADScanner:
             self._domain_info.spn_accounts = spn_accounts
 
             if spn_accounts:
-                # High-value targets: admin accounts with SPNs
-                admin_spns = [a for a in spn_accounts if a.get("admin_count")]
+                # High-value targets: service accounts that are themselves
+                # privileged (adminCount=1). Cracking one of these is a direct path
+                # to Tier-0, so it raises the finding to critical; otherwise the
+                # exposure is real but not inherently domain-takeover (high).
+                admin_spns = [a for a in spn_accounts if a.get("privileged")]
                 severity = "critical" if admin_spns else "high"
 
                 findings.append(ADFinding(
@@ -773,7 +857,8 @@ class ADScanner:
             asrep_accounts = []
             for entry in self._conn.entries:
                 account = {"username": str(entry.sAMAccountName),
-                           "admin_count": getattr(entry, 'adminCount', 0)}
+                           "admin_count": _attr_int(entry, "adminCount"),
+                           "privileged": _attr_int(entry, "adminCount") == 1}
                 asrep_accounts.append(account)
                 self._graph[str(account.get("username", ""))].add("AS-REP Roastable")
 
@@ -926,60 +1011,171 @@ class ADScanner:
         return hashes
 
     async def check_dcsync_rights(self) -> list[ADFinding]:
-        """Check for non-DC accounts with DCSync replication rights (T1003.006)."""
+        """Detect DCSync exposure from the domain head security descriptor
+        (T1003.006).
+
+        The authoritative signal is the domain object's DACL, not the adminCount
+        attribute. adminCount=1 is stamped by AdminSDHolder on every built-in
+        privileged account and is NOT a delegated replication right, so reporting
+        it as DCSync is a universal false positive. Here we parse the domain head
+        DACL and confirm a grant only for a principal that does not hold
+        replication by default (a DC / Domain-or-Enterprise-Admin / SYSTEM). When
+        the descriptor cannot be read, we fall back to the honest adminCount
+        ACL-review pointer rather than claiming a right we did not see."""
         logger.info("Checking for DCSync rights...")
         if not self._conn:
             return []
 
-        findings = []
-        try:
-            # Search for objects with replication rights at domain level
-            self._conn.search(
-                self.domain_dn, "(objectClass=domain)",
-                search_scope=SUBTREE,
-                attributes=["nTSecurityDescriptor"],
-            )
-            # Simplified check: look for accounts in replication groups
-            self._conn.search(
-                self.domain_dn,
-                "(&(objectClass=user)(adminCount=1))",
-                search_scope=SUBTREE,
-                attributes=["sAMAccountName", "memberOf"],
-            )
-            admin_accounts = [str(e.sAMAccountName) for e in self._conn.entries]
+        from heaven.recon.ad_acl import (
+            ace_grants_replication, parse_dacl, sid_is_default_privileged)
 
-            if admin_accounts:
+        findings: list[ADFinding] = []
+        confirmed: list[str] = []
+        try:
+            # Request only the DACL portion (sdflags = DACL_SECURITY_INFORMATION):
+            # the SACL needs SeSecurityPrivilege, the DACL does not, so an ordinary
+            # authenticated bind can read it.
+            try:
+                self._conn.search(
+                    self.domain_dn, "(objectClass=domain)",
+                    search_scope=BASE, attributes=["nTSecurityDescriptor"],
+                    controls=security_descriptor_control(sdflags=0x04),
+                )
+            except Exception:
+                # ldap3 control unsupported in this build, or the server rejected
+                # it; retry without the control so a permissive DC still answers.
+                self._conn.search(
+                    self.domain_dn, "(objectClass=domain)",
+                    search_scope=BASE, attributes=["nTSecurityDescriptor"])
+            sd_bytes: Optional[bytes] = None
+            for e in getattr(self._conn, "entries", []):
+                sd_bytes = _attr_bytes(e, "nTSecurityDescriptor")
+                if sd_bytes:
+                    break
+            aces = parse_dacl(sd_bytes)
+            if aces:
+                seen: set[str] = set()
+                for ace in aces:
+                    if (ace_grants_replication(ace)
+                            and not sid_is_default_privileged(ace.sid)
+                            and ace.sid not in seen):
+                        seen.add(ace.sid)
+                        confirmed.append(ace.sid)
+
+            if confirmed:
+                names = self._resolve_sids(confirmed)
+                objects = [f"{names[s]} ({s})" if s in names else s
+                           for s in confirmed]
                 findings.append(ADFinding(
-                    target=self.domain,
+                    target=self.domain or self.dc_host,
                     attack_type=ADAttackType.DCSYNC_RISK,
-                    severity="medium",
-                    title=(f"Replication ACL review: {len(admin_accounts)} privileged "
-                           "accounts (DCSync rights not confirmed)"),
+                    severity="critical",
+                    title=(f"DCSync: {len(confirmed)} non-default principal(s) hold "
+                           "domain replication rights"),
                     description=(
-                        f"Identified {len(admin_accounts)} accounts with adminCount=1. "
-                        "That attribute only marks an account as protected by "
-                        "AdminSDHolder because it belongs to a privileged group; it is "
-                        "not evidence that a DS-Replication-Get-Changes right has been "
-                        "delegated. A genuine DCSync exposure is a non-default principal "
-                        "granted the replication extended rights on the domain head, "
-                        "which has to be confirmed from the domain object security "
-                        "descriptor. Treat this as a pointer for that ACL review, not a "
-                        "confirmed delegated right."
+                        f"{len(confirmed)} principal(s) that are not Domain "
+                        "Controllers or built-in admins are granted the "
+                        "DS-Replication-Get-Changes / -All extended rights on the "
+                        "domain head. Any one of them can run DCSync to pull the "
+                        "password hashes of every domain account, including krbtgt "
+                        "(enabling Golden Tickets). This was read from the domain "
+                        "object's security descriptor, not inferred from adminCount."
                     ),
-                    affected_objects=admin_accounts[:20],
-                    confidence=0.5,
+                    affected_objects=objects[:20],
+                    confidence=0.9,
                     remediation=(
-                        "Audit replication rights with: Get-ACL 'AD:\\DC=domain,DC=local'. "
-                        "Remove unnecessary replication permissions. "
-                        "Monitor Event ID 4662 for replication access."
+                        "Remove DS-Replication-Get-Changes[-All] from the listed "
+                        "principals on the domain head (keep them only on Domain "
+                        "Controllers and the built-in admin groups). Monitor Event "
+                        "ID 4662 for replication access."
                     ),
                     mitre_technique="T1003.006",
+                    evidence={"principals_with_replication": objects[:20],
+                              "rights": ["DS-Replication-Get-Changes",
+                                         "DS-Replication-Get-Changes-All"],
+                              "confirmed": True},
                 ))
+            else:
+                # No confirmed grant (or SD unreadable): surface the adminCount set
+                # as an ACL-review pointer, honestly labelled as not a confirmed
+                # replication right.
+                self._conn.search(
+                    self.domain_dn,
+                    "(&(objectClass=user)(adminCount=1))",
+                    search_scope=SUBTREE,
+                    attributes=["sAMAccountName", "memberOf"],
+                )
+                admin_accounts = [str(e.sAMAccountName) for e in self._conn.entries]
+                if admin_accounts:
+                    findings.append(ADFinding(
+                        target=self.domain,
+                        attack_type=ADAttackType.DCSYNC_RISK,
+                        severity="medium",
+                        title=(f"Replication ACL review: {len(admin_accounts)} privileged "
+                               "accounts (DCSync rights not confirmed)"),
+                        description=(
+                            f"Identified {len(admin_accounts)} accounts with adminCount=1. "
+                            "That attribute only marks an account as protected by "
+                            "AdminSDHolder because it belongs to a privileged group; it is "
+                            "not evidence that a DS-Replication-Get-Changes right has been "
+                            "delegated. A genuine DCSync exposure is a non-default principal "
+                            "granted the replication extended rights on the domain head, "
+                            "which was not found in the domain object security descriptor "
+                            "on this run. Treat this as a pointer for that ACL review, not a "
+                            "confirmed delegated right."
+                        ),
+                        affected_objects=admin_accounts[:20],
+                        confidence=0.5,
+                        remediation=(
+                            "Audit replication rights with: Get-ACL 'AD:\\DC=domain,DC=local'. "
+                            "Remove unnecessary replication permissions. "
+                            "Monitor Event ID 4662 for replication access."
+                        ),
+                        mitre_technique="T1003.006",
+                    ))
         except Exception as e:
             logger.error(f"DCSync check failed: {e}")
 
         self._findings.extend(findings)
         return findings
+
+    def _resolve_sids(self, sids: list[str]) -> dict[str, str]:
+        """Best-effort SID → sAMAccountName resolution for readable findings.
+        Silent and bounded: a SID that cannot be resolved is simply omitted, so
+        the caller falls back to showing the raw SID."""
+        from heaven.recon.ad_acl import well_known_name
+        names: dict[str, str] = {}
+        if not sids:
+            return names
+        try:
+            from ldap3.utils.conv import escape_filter_chars
+        except Exception:
+            escape_filter_chars = None  # type: ignore[assignment]
+        for sid in sids[:20]:
+            # Well-known SIDs (Authenticated Users, Everyone, ...) have no
+            # directory object to resolve, so name them from the table.
+            wk = well_known_name(sid)
+            if wk:
+                names[sid] = wk
+                continue
+            if not self._conn or escape_filter_chars is None:
+                continue
+            raw = _sid_str_to_bytes(sid)
+            if not raw:
+                continue
+            try:
+                self._conn.search(
+                    self.domain_dn,
+                    f"(objectSid={escape_filter_chars(raw)})",
+                    search_scope=SUBTREE, attributes=["sAMAccountName"])
+                for e in getattr(self._conn, "entries", []):
+                    nm = _attr_list(e, "sAMAccountName")
+                    if nm and nm[0]:
+                        names[sid] = nm[0]
+                    break
+            except Exception:
+                logger.debug("SID resolve failed for %s", sid, exc_info=True)
+        return names
 
     async def check_delegation_abuse(self) -> list[ADFinding]:
         """Check for unconstrained and constrained delegation abuse."""
@@ -1026,6 +1222,112 @@ class ADScanner:
                         "Enable 'Account is sensitive and cannot be delegated' flag."
                     ),
                     mitre_technique="T1550",
+                ))
+
+            # Constrained delegation (classic + protocol transition). The presence
+            # of msDS-AllowedToDelegateTo IS the configuration, not a heuristic. An
+            # account with TRUSTED_TO_AUTH_FOR_DELEGATION (UAC 0x1000000) can do
+            # protocol transition (S4U2Self), so a compromise of it impersonates
+            # ANY user to the listed services, which is the dangerous variant.
+            self._conn.search(
+                self.domain_dn,
+                "(msDS-AllowedToDelegateTo=*)",
+                search_scope=SUBTREE,
+                attributes=["sAMAccountName", "msDS-AllowedToDelegateTo",
+                            "userAccountControl"],
+            )
+            constrained = []
+            for e in getattr(self._conn, "entries", []):
+                targets = _attr_list(e, "msDS-AllowedToDelegateTo")
+                if not targets:
+                    continue
+                uac = _attr_int(e, "userAccountControl")
+                constrained.append({
+                    "account": str(getattr(e, "sAMAccountName", "")),
+                    "targets": targets,
+                    "protocol_transition": bool(uac & 0x1000000),
+                })
+            for c in constrained:
+                pt = c["protocol_transition"]
+                findings.append(ADFinding(
+                    target=self.domain,
+                    attack_type=ADAttackType.CONSTRAINED_DELEG,
+                    severity="high" if pt else "medium",
+                    title=(f"Constrained Delegation{' + protocol transition' if pt else ''}: "
+                           f"{c['account']}"),
+                    description=(
+                        f"Account '{c['account']}' is trusted for constrained "
+                        f"delegation to {len(c['targets'])} service(s)"
+                        + (" with protocol transition (S4U2Self), so a compromise of "
+                           "it can impersonate ANY user (including Domain Admins) to "
+                           "those services without their credentials."
+                           if pt else
+                           ". A compromise of it can impersonate users that "
+                           "authenticate through it to the listed services.")
+                    ),
+                    affected_objects=c["targets"][:20],
+                    confidence=0.9,
+                    remediation=(
+                        "Review the delegation target list; prefer resource-based "
+                        "constrained delegation, remove protocol transition "
+                        "(TRUSTED_TO_AUTH_FOR_DELEGATION) where not required, and add "
+                        "sensitive accounts to Protected Users."
+                    ),
+                    mitre_technique="T1558.003",
+                    evidence={"account": c["account"], "targets": c["targets"][:20],
+                              "protocol_transition": pt},
+                ))
+
+            # Resource-based constrained delegation (RBCD): an object whose
+            # msDS-AllowedToActOnBehalfOfOtherIdentity names principals that may
+            # act on its behalf. The attribute is a security descriptor; a grant to
+            # a non-default principal is an inbound takeover primitive for that host.
+            from heaven.recon.ad_acl import parse_dacl, sid_is_default_privileged
+            self._conn.search(
+                self.domain_dn,
+                "(msDS-AllowedToActOnBehalfOfOtherIdentity=*)",
+                search_scope=SUBTREE,
+                attributes=["sAMAccountName",
+                            "msDS-AllowedToActOnBehalfOfOtherIdentity"],
+            )
+            # Materialise (host, sd) first; _resolve_sids below issues further
+            # searches that would otherwise clobber self._conn.entries mid-loop.
+            rbcd_hosts: list[tuple[str, Optional[bytes]]] = [
+                (str(getattr(e, "sAMAccountName", "")),
+                 _attr_bytes(e, "msDS-AllowedToActOnBehalfOfOtherIdentity"))
+                for e in getattr(self._conn, "entries", [])]
+            for host, sd_bytes in rbcd_hosts:
+                aces = parse_dacl(sd_bytes)
+                if not aces:
+                    continue
+                grantees = sorted({a.sid for a in aces
+                                   if not sid_is_default_privileged(a.sid)})
+                if not grantees:
+                    continue
+                names = self._resolve_sids(grantees)
+                shown = [f"{names[s]} ({s})" if s in names else s for s in grantees]
+                findings.append(ADFinding(
+                    target=self.domain,
+                    attack_type=ADAttackType.RBCD,
+                    severity="high",
+                    title=f"Resource-Based Constrained Delegation configured on {host}",
+                    description=(
+                        f"'{host}' allows {len(grantees)} non-default principal(s) to "
+                        "act on its behalf via resource-based constrained delegation. "
+                        "A principal that controls one of them (or can create a "
+                        "computer account, see the machine-account-quota finding) can "
+                        "obtain service tickets to this host as any user, including a "
+                        "local administrator."
+                    ),
+                    affected_objects=shown[:20],
+                    confidence=0.9,
+                    remediation=(
+                        "Clear msDS-AllowedToActOnBehalfOfOtherIdentity on this object "
+                        "unless the delegation is required, and restrict who can write "
+                        "it (and set ms-DS-MachineAccountQuota to 0)."
+                    ),
+                    mitre_technique="T1558.003",
+                    evidence={"host": host, "allowed_principals": shown[:20]},
                 ))
         except Exception as e:
             logger.error(f"Delegation check failed: {e}")
@@ -1133,34 +1435,110 @@ class ADScanner:
         self._findings.extend(findings)
         return findings
 
+    # Tier-0 groups: a takeover edge onto one of these is a direct path to domain
+    # compromise, so it is reported critical rather than high.
+    _TIER0_GROUPS = frozenset({
+        "domain admins", "enterprise admins", "administrators", "schema admins"})
+
     async def check_acl_abuse(self) -> list[ADFinding]:
-        """Check for misconfigured ACLs that allow privilege escalation."""
+        """Find BloodHound-style ACL takeover edges onto privileged groups:
+        a non-default principal holding GenericAll / GenericWrite / WriteDacl /
+        WriteOwner, or write to the group's ``member`` attribute (so it can add
+        itself). Parsed from each group's security descriptor: a confirmed edge,
+        not an "audit these" pointer. When no descriptor can be read we fall back
+        to the honest adminCount pointer so the behaviour degrades gracefully."""
         logger.info("Checking for ACL abuse paths...")
         if not self._conn:
             return []
 
-        findings = []
+        from heaven.recon.ad_acl import (
+            ace_dangerous_group_rights, parse_dacl, sid_is_default_privileged)
 
-        # Check for users with write access to privileged groups
+        findings: list[ADFinding] = []
         try:
-            self._conn.search(
-                self.domain_dn,
-                "(&(objectClass=group)(adminCount=1))",
-                search_scope=SUBTREE,
-                attributes=["cn", "member", "nTSecurityDescriptor"],
-            )
-            priv_groups = [str(e.cn) for e in self._conn.entries]
+            try:
+                self._conn.search(
+                    self.domain_dn,
+                    "(&(objectClass=group)(adminCount=1))",
+                    search_scope=SUBTREE,
+                    attributes=["cn", "member", "nTSecurityDescriptor"],
+                    controls=security_descriptor_control(sdflags=0x04),
+                )
+            except Exception:
+                self._conn.search(
+                    self.domain_dn,
+                    "(&(objectClass=group)(adminCount=1))",
+                    search_scope=SUBTREE,
+                    attributes=["cn", "member", "nTSecurityDescriptor"],
+                )
 
-            if priv_groups:
+            # Materialise (cn, sd) per group first; resolving SIDs below issues
+            # further searches that would otherwise clobber self._conn.entries.
+            groups: list[tuple[str, Optional[bytes]]] = []
+            for e in getattr(self._conn, "entries", []):
+                groups.append((str(getattr(e, "cn", "")),
+                               _attr_bytes(e, "nTSecurityDescriptor")))
+            priv_groups = [cn for cn, _ in groups if cn]
+
+            # edges: {(principal_sid) -> {group -> rights}}
+            edges: list[dict] = []
+            for cn, sd_bytes in groups:
+                aces = parse_dacl(sd_bytes)
+                if not aces:
+                    continue
+                for ace in aces:
+                    if sid_is_default_privileged(ace.sid):
+                        continue
+                    rights = ace_dangerous_group_rights(ace)
+                    if rights:
+                        edges.append({"sid": ace.sid, "group": cn, "rights": rights})
+
+            if edges:
+                sids = sorted({e["sid"] for e in edges})
+                names = self._resolve_sids(sids)
+                tier0 = any(e["group"].lower() in self._TIER0_GROUPS for e in edges)
+                objects = []
+                for e in edges[:20]:
+                    who = names.get(e["sid"], e["sid"])
+                    objects.append(f"{who} has {'/'.join(e['rights'])} over {e['group']}")
+                findings.append(ADFinding(
+                    target=self.domain,
+                    attack_type=ADAttackType.ACL_ABUSE,
+                    severity="critical" if tier0 else "high",
+                    title=(f"ACL takeover edge: {len(edges)} non-default principal(s) "
+                           "can control a privileged group"),
+                    description=(
+                        f"{len(edges)} access-control entr(y/ies) let a principal that "
+                        "is not a default administrator take control of a privileged "
+                        "group (GenericAll / WriteDacl / WriteOwner / GenericWrite, or "
+                        "write to the group's membership). Such a principal can add "
+                        "itself to the group and inherit its privileges"
+                        + (", which for a Tier-0 group is a direct path to domain "
+                           "compromise." if tier0 else ".")
+                        + " Read from each group's security descriptor."
+                    ),
+                    affected_objects=objects,
+                    confidence=0.9,
+                    remediation=(
+                        "Remove the write/control grant from the listed principals; "
+                        "privileged-group ACLs should be held only by Tier-0 admins. "
+                        "Validate with BloodHound and restore AdminSDHolder defaults."
+                    ),
+                    mitre_technique="T1222.001",
+                    evidence={"edges": objects, "confirmed": True},
+                ))
+            elif priv_groups:
                 findings.append(ADFinding(
                     target=self.domain,
                     attack_type=ADAttackType.ACL_ABUSE,
                     severity="medium",
                     title=f"ACL Audit: {len(priv_groups)} privileged groups identified",
                     description=(
-                        f"Identified {len(priv_groups)} groups with adminCount=1. "
-                        "Recommend auditing ACLs for GenericAll, WriteDacl, WriteOwner permissions "
-                        "that could allow unauthorized privilege escalation."
+                        f"Identified {len(priv_groups)} groups with adminCount=1. No "
+                        "dangerous non-default ACL grant was confirmed from their "
+                        "security descriptors on this run. Recommend auditing ACLs for "
+                        "GenericAll, WriteDacl, WriteOwner permissions that could allow "
+                        "unauthorized privilege escalation."
                     ),
                     affected_objects=priv_groups[:15],
                     confidence=0.70,
@@ -1174,63 +1552,98 @@ class ADScanner:
         return findings
 
     async def build_attack_paths(self) -> list[dict]:
-        """Build BloodHound-style attack paths from any user to Domain Admin."""
+        """Assemble attack paths to Domain Admin from CONFIRMED primitives only.
+
+        The previous version emitted a canned Kerberoast -> ... -> DCSync -> Domain
+        Admin path whenever any SPN account existed, which fabricated a critical
+        "path to Domain Admin" on every domain that merely had a non-privileged
+        service account (and asserted a DCSync step the DCSync check explicitly
+        could not confirm). Each path below is instead gated on a real finding from
+        this scan, so a domain with no genuine Tier-0 path yields no path finding.
+        """
         logger.info("Building attack path graph...")
-        paths = []
+        paths: list[dict] = []
 
-        # Build graph edges from findings
-        for finding in self._findings:
-            if finding.attack_type == ADAttackType.KERBEROASTING:
-                for obj in finding.affected_objects:
-                    self._graph["Kerberoast"].add(obj)
-                    self._graph[obj].add("Service Account Credentials")
-                    self._graph["Service Account Credentials"].add("Lateral Movement")
-            elif finding.attack_type == ADAttackType.UNCONSTRAINED_DELEG:
-                for obj in finding.affected_objects:
-                    self._graph["Compromise Any User"].add(f"TGT on {obj}")
-                    self._graph[f"TGT on {obj}"].add("Domain Admin Impersonation")
-            elif finding.attack_type == ADAttackType.DCSYNC_RISK:
-                self._graph["Privileged Account Compromise"].add("DCSync")
-                self._graph["DCSync"].add("All Domain Hashes")
-                self._graph["All Domain Hashes"].add("Domain Admin")
-
-        # Find shortest paths to Domain Admin
-        if self._graph:
-            path_example = {
-                "name": "Kerberoast → Lateral Movement → Domain Admin",
+        # 1. A kerberoastable account that is ITSELF privileged (adminCount=1):
+        # cracking its password yields a Tier-0 credential directly.
+        priv_spns = [a["username"] for a in self._domain_info.spn_accounts
+                     if a.get("privileged")]
+        if priv_spns:
+            paths.append({
+                "name": "Kerberoast privileged service account → Domain Admin",
+                "basis": f"privileged SPN account(s): {', '.join(priv_spns[:5])}",
                 "steps": [
-                    {"step": 1, "action": "Kerberoast service account", "technique": "T1558.003"},
-                    {"step": 2, "action": "Crack TGS ticket offline", "technique": "T1110.002"},
-                    {"step": 3, "action": "Authenticate as service account", "technique": "T1078"},
-                    {"step": 4, "action": "Lateral movement to DC", "technique": "T1021.002"},
-                    {"step": 5, "action": "DCSync all hashes", "technique": "T1003.006"},
+                    {"step": 1, "action": "Request TGS for the privileged SPN account",
+                     "technique": "T1558.003"},
+                    {"step": 2, "action": "Crack the TGS offline", "technique": "T1110.002"},
+                    {"step": 3, "action": "Authenticate as the Tier-0 service account",
+                     "technique": "T1078.002"},
                 ],
-                "complexity": "medium",
-                "detection_difficulty": "hard",
-                "total_steps": 5,
-            }
-            paths.append(path_example)
+                "complexity": "medium", "detection_difficulty": "hard",
+                "total_steps": 3,
+            })
 
-            if self._domain_info.unconstrained_deleg:
-                paths.append({
-                    "name": "Unconstrained Delegation → Domain Admin",
-                    "steps": [
-                        {"step": 1, "action": "Coerce authentication to delegation host", "technique": "T1187"},
-                        {"step": 2, "action": "Capture TGT from memory", "technique": "T1558"},
-                        {"step": 3, "action": "Impersonate Domain Admin", "technique": "T1550"},
-                    ],
-                    "complexity": "low",
-                    "detection_difficulty": "medium",
-                    "total_steps": 3,
-                })
+        # 2. Unconstrained delegation on a non-DC host (a confirmed finding).
+        if self._domain_info.unconstrained_deleg:
+            hosts = [c.get("hostname", "") for c in self._domain_info.unconstrained_deleg]
+            paths.append({
+                "name": "Unconstrained Delegation → Domain Admin",
+                "basis": f"unconstrained-delegation host(s): {', '.join(h for h in hosts[:5] if h)}",
+                "steps": [
+                    {"step": 1, "action": "Coerce a DC to authenticate to the delegation host",
+                     "technique": "T1187"},
+                    {"step": 2, "action": "Capture the DC TGT from memory", "technique": "T1558"},
+                    {"step": 3, "action": "Impersonate Domain Admin / DCSync", "technique": "T1550"},
+                ],
+                "complexity": "low", "detection_difficulty": "medium",
+                "total_steps": 3,
+            })
 
+        # 3. A CONFIRMED DCSync grant (evidence.confirmed from the SD parse).
+        dcsync_confirmed = [f for f in self._findings
+                            if f.attack_type == ADAttackType.DCSYNC_RISK
+                            and f.evidence.get("confirmed")]
+        if dcsync_confirmed:
+            paths.append({
+                "name": "Delegated replication rights → DCSync → Domain Admin",
+                "basis": "non-default principal holds DS-Replication-Get-Changes[-All]",
+                "steps": [
+                    {"step": 1, "action": "Authenticate as the over-privileged principal",
+                     "technique": "T1078"},
+                    {"step": 2, "action": "DCSync krbtgt + all domain hashes",
+                     "technique": "T1003.006"},
+                ],
+                "complexity": "low", "detection_difficulty": "hard", "total_steps": 2,
+            })
+
+        # 4. A CONFIRMED ACL takeover edge onto a Tier-0 group (critical ACL finding).
+        acl_tier0 = [f for f in self._findings
+                     if f.attack_type == ADAttackType.ACL_ABUSE
+                     and f.severity == "critical" and f.evidence.get("confirmed")]
+        if acl_tier0:
+            paths.append({
+                "name": "ACL takeover of a Tier-0 group → Domain Admin",
+                "basis": "non-default principal controls a Tier-0 group ACL",
+                "steps": [
+                    {"step": 1, "action": "Use the write/control right to add self to the group",
+                     "technique": "T1222.001"},
+                    {"step": 2, "action": "Inherit Tier-0 privileges", "technique": "T1078.002"},
+                ],
+                "complexity": "low", "detection_difficulty": "medium", "total_steps": 2,
+            })
+
+        # Only emit a path finding when a real path exists, never a fabricated one.
         if paths:
             self._findings.append(ADFinding(
                 target=self.domain,
                 attack_type=ADAttackType.ACL_ABUSE,
                 severity="critical",
-                title=f"Attack Path Analysis: {len(paths)} paths to Domain Admin",
-                description=f"Discovered {len(paths)} attack paths from unprivileged user to Domain Admin.",
+                title=f"Attack Path Analysis: {len(paths)} confirmed path(s) to Domain Admin",
+                description=(
+                    f"Assembled {len(paths)} attack path(s) to Domain Admin, each "
+                    "built from a confirmed finding in this scan (not a generic "
+                    "template): " + "; ".join(p["name"] for p in paths) + "."
+                ),
                 attack_path=[str(p.get("name", "")) for p in paths],
                 confidence=0.85,
                 remediation="Implement tiered administration. Protect Tier 0 assets.",

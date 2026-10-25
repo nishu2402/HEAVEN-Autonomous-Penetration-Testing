@@ -207,12 +207,24 @@ def _crack_jwt_secret(signing_input: str, sig_b64: str, alg: str) -> str | None:
     return None
 
 
-def _jwt_findings(target: str, token: str, source: str) -> list[dict]:
+def _jwt_findings(target: str, token: str, source: str,
+                  status: int = 0, proof_excerpt: str = "") -> list[dict]:
     parsed = _parse_jwt(token)
     if parsed is None:
         return []
     header, signing_input, sig = parsed
     alg = str(header.get("alg", "")).lower()
+    # The response that handed back this token IS the proof of a JWT finding, so
+    # record it on the finding itself (status + a short excerpt, e.g. the
+    # Set-Cookie line). Without it the scan-scoped proof_capture pass would later
+    # backfill status/body from the per-URL store, which can hold a DIFFERENT
+    # request to the same URL (a POST method-probe that got a 405), leaving the
+    # submission report's "Observed response" a 405 that never carried the token.
+    proof: dict = {}
+    if status > 0:
+        proof["status"] = status
+    if proof_excerpt:
+        proof["response_excerpt"] = proof_excerpt[:400]
     out: list[dict] = []
     if alg == "none":
         out.append(_finding(
@@ -220,7 +232,7 @@ def _jwt_findings(target: str, token: str, source: str) -> list[dict]:
             "JWT accepts alg:none, tokens are forgeable",
             "A JWT using the 'none' algorithm carries no signature, so any client "
             "can forge a token with arbitrary claims (e.g. escalate to admin).",
-            0.95, {"source": source, "jwt_header": header},
+            0.95, {"source": source, "jwt_header": header, **proof},
         ))
         return out
     secret = _crack_jwt_secret(signing_input, sig, header.get("alg", ""))
@@ -231,7 +243,7 @@ def _jwt_findings(target: str, token: str, source: str) -> list[dict]:
             "The HMAC signing key was recovered from a small wordlist, so an "
             "attacker can mint valid tokens with any claims they like.",
             0.98, {"source": source, "algorithm": header.get("alg"),
-                   "recovered_secret": secret, "jwt_header": header},
+                   "recovered_secret": secret, "jwt_header": header, **proof},
         ))
     return out
 
@@ -279,6 +291,7 @@ async def _check_cors(session: "aiohttp.ClientSession", url: str) -> list[dict]:
 async def _check_cookies_and_jwt(session: "aiohttp.ClientSession", url: str) -> list[dict]:
     try:
         async with session.get(url, allow_redirects=False) as resp:
+            status = resp.status
             set_cookies = resp.headers.getall("Set-Cookie", [])
             is_https = urlparse(url).scheme == "https"
             body = ""
@@ -338,11 +351,15 @@ async def _check_cookies_and_jwt(session: "aiohttp.ClientSession", url: str) -> 
         # a JWT delivered in a cookie is worth cracking
         if _parse_jwt(value) and value not in seen_jwts:
             seen_jwts.add(value)
-            out.extend(_jwt_findings(url, value, source=f"cookie:{name}"))
+            out.extend(_jwt_findings(url, value, source=f"cookie:{name}",
+                                     status=status, proof_excerpt=f"Set-Cookie: {raw}"))
     for tok in _extract_jwts(body):
         if tok not in seen_jwts:
             seen_jwts.add(tok)
-            out.extend(_jwt_findings(url, tok, source="response_body"))
+            i = body.find(tok)
+            window = body[max(0, i - 40):i + len(tok) + 40] if i >= 0 else tok
+            out.extend(_jwt_findings(url, tok, source="response_body",
+                                     status=status, proof_excerpt=window))
     return out
 
 

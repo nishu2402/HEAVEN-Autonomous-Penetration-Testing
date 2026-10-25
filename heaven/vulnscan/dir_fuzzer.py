@@ -249,6 +249,20 @@ HIT_CODES = {200, 201, 204, 301, 302, 307, 308, 401, 403, 405}
 # Codes that definitely mean not found
 MISS_CODES = {404, 410}
 
+# ── Blanket-deny (soft-401/403) collapse thresholds ───────────────────────────
+# A normal server returns 401/403 only for the few paths that genuinely exist but
+# are protected. A server, WAF or CDN in block mode returns the SAME
+# access-controlled response for EVERY path it is asked for, including the guessed
+# wordlist names that do not exist, so each probe masquerades as a protected
+# resource and floods the report with "sensitive file" findings for links that
+# cannot be opened. The tell is scale plus uniformity: many access-controlled hits
+# on one host whose responses collapse to a tiny set of sizes. _DENY_MIN keeps a
+# handful of genuinely protected paths out of the collapse; the size bucket
+# tolerates a deny page that varies by a few bytes (e.g. a per-request nonce).
+_DENY_MIN = 10
+_DENY_DISTINCT_MAX = 3
+_DENY_SIZE_BUCKET = 128
+
 WILDCARD_SAMPLE = "h3av3n_wildcard_probe_9z8x7"
 # A second, deliberately LONGER non-existent path. Probing two random paths of
 # different lengths reveals soft-404 pages that reflect the requested path
@@ -493,6 +507,15 @@ class DirectoryFuzzer:
                     ):
                         return None
         elif wildcard:
+            # A server that returned this SAME access-controlled status for the
+            # known-nonexistent random probes denies every path: an identical
+            # 401/403 here is the blanket policy, not a discovered protected
+            # resource. Size is ignored on purpose, because a deny edge serves
+            # varying stub/challenge pages and that variance must not resurrect a
+            # non-finding (a blanket-403 CDN leaked dozens of "sensitive file"
+            # hits this way, none of them openable).
+            if _blanket_denies(wildcard, status):
+                return None
             # Same status + size inside the observed catch-all band → noise.
             if wildcard["status"] == status and wildcard["lo"] <= size <= wildcard["hi"]:
                 return None
@@ -747,6 +770,7 @@ class DirectoryFuzzer:
                 deduped_ffuf = self._dedup(all_findings)
                 await self._capture_responses(deduped_ffuf)
                 deduped_ffuf = self._collapse_soft200_catchall(deduped_ffuf)
+                deduped_ffuf = self._collapse_blanket_deny(deduped_ffuf)
                 _out = {"findings": deduped_ffuf,
                         "urls_tested": len(targets), "error": None}
                 if self._truncated:
@@ -780,6 +804,7 @@ class DirectoryFuzzer:
         deduped = self._dedup(all_findings)
         await self._capture_responses(deduped)
         deduped = self._collapse_soft200_catchall(deduped)
+        deduped = self._collapse_blanket_deny(deduped)
         logger.info(f"DirFuzzer: {len(deduped)} unique paths found")
         _out = {"findings": deduped, "urls_tested": len(targets), "error": None}
         if self._truncated:
@@ -886,6 +911,63 @@ class DirectoryFuzzer:
             out.append(rep)
         return out
 
+    @staticmethod
+    def _collapse_blanket_deny(findings: list[dict]) -> list[dict]:
+        """Drop access-controlled (401/403) hits on a host that denies EVERY path.
+
+        The fuzzer reads a 401/403 as "this path exists but is protected", which
+        is true on a normal server. A server, WAF or CDN in block mode instead
+        returns the SAME access-controlled response for every path it is asked
+        for, including the guessed wordlist names that do not exist, so each probe
+        masquerades as a protected resource and the report fills with 'sensitive
+        file' findings for links that cannot be opened (observed live against
+        www.ashirwadsweets.com: 96 paths, all 403, two distinct deny pages).
+
+        The tell is scale plus uniformity, read off the scan's OWN captured
+        responses so it holds even for a WAF that only starts blocking mid-scan (a
+        state a later re-probe would miss): when a host produced at least
+        ``_DENY_MIN`` access-controlled hits whose response sizes collapse to at
+        most ``_DENY_DISTINCT_MAX`` buckets, none carries a per-resource signal
+        and all are dropped. A few protected paths (< ``_DENY_MIN``), or many that
+        each render distinctly, are left untouched, because that is honest
+        discovery. Served resources (2xx) are never considered here, so a real
+        exposed file keeps its finding.
+
+        This runs on both backends' merged findings, so it also covers the ffuf
+        path, whose own ``-ac`` calibration cannot model a deny edge that serves
+        more than one page size."""
+        by_host: dict[str, list[dict]] = {}
+        for f in findings:
+            if not isinstance(f, dict):
+                continue
+            ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+            status = ev.get("status_code") or ev.get("status")
+            if status in (401, 403):
+                host = urlparse(f.get("target", "")).netloc
+                by_host.setdefault(host, []).append(f)
+        drop: set[int] = set()
+        denied_hosts = 0
+        for group in by_host.values():
+            if len(group) < _DENY_MIN:
+                continue
+            buckets: set[int] = set()
+            for f in group:
+                size = (f.get("evidence") or {}).get("response_size")
+                buckets.add(int(size) // _DENY_SIZE_BUCKET
+                            if isinstance(size, int) else -1)
+            if len(buckets) <= _DENY_DISTINCT_MAX:
+                denied_hosts += 1
+                for f in group:
+                    drop.add(id(f))
+        if not drop:
+            return findings
+        kept = [f for f in findings if id(f) not in drop]
+        logger.info(
+            "DirFuzzer: dropped %d blanket-deny 401/403 hit(s) on %d host(s) that "
+            "answer every path with the same access-controlled response",
+            len(findings) - len(kept), denied_hosts)
+        return kept
+
 
 # ─────────────────────────────────────────────────────────────────
 # Helpers
@@ -895,6 +977,21 @@ def _served(status: int) -> bool:
     """True when a status means the resource was actually served (a body returned),
     as opposed to access-controlled (401/403) or redirected (3xx)."""
     return status in (200, 201, 204, 405, 500)
+
+
+def _blanket_denies(wildcard: Optional[dict], status: int) -> bool:
+    """True when the catch-all model shows the server returns THIS same
+    access-controlled status (401/403) for known-nonexistent random paths.
+
+    ``_detect_wildcard`` records ``status`` only when every random nonexistent
+    probe shared one status. When that status is a 401/403, the server denies
+    every path it is asked for, so a probed path's identical 401/403 is the
+    blanket policy and not a discovered protected resource. Returns False for a
+    server that honestly 404s random paths (no catch-all) or whose catch-all is a
+    served/redirect status handled elsewhere."""
+    if not wildcard:
+        return False
+    return status in (401, 403) and wildcard.get("status") == status
 
 
 def _is_git_vcs_path(p: str) -> bool:

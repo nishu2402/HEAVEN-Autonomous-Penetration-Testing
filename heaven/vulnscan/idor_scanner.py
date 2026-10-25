@@ -498,6 +498,121 @@ class IDORScanner:
             cwe="CWE-639",
         )
 
+    # ── Cross-identity BOLA with ground truth ─────────────────────
+
+    def _id_sites(self, url: str) -> list[tuple[str, str, int]]:
+        """Return (kind, original_id, int_value) for each enumerable integer ID
+        in ``url`` (path segment or object-ish query param). UUIDs are skipped
+        here because they cannot be walked to a neighbour deterministically."""
+        sites: list[tuple[str, str, int]] = []
+        parsed = urlparse(url)
+        for seg in parsed.path.split("/"):
+            if _RE_INT_SEGMENT.match(seg):
+                sites.append(("path", seg, int(seg)))
+        for param, values in parse_qs(parsed.query, keep_blank_values=True).items():
+            v = values[0] if values else ""
+            if _RE_OBJECT_PARAM.match(param) and _RE_INT_SEGMENT.match(v):
+                sites.append((f"param:{param}", v, int(v)))
+        return sites
+
+    def _with_id(self, url: str, kind: str, original: str, new: str) -> str:
+        if kind == "path":
+            return _replace_path_segment(url, original, new)
+        return _replace_qs_param(url, kind.split(":", 1)[1], new)
+
+    async def _test_cross_identity_bola(self, session, url: str) -> None:
+        """True BOLA with a ground-truth RECIPROCAL cross-read.
+
+        Beyond the same-URL swap heuristic: user A owns object X (the URL's own
+        id); we walk to a neighbouring id Y that user B can read. We then prove
+        the authorization boundary is broken in BOTH directions — A reads Y with
+        exactly B's authenticated view of it, and B reads X with exactly A's view
+        of it — while X and Y are genuinely distinct objects (their raw bodies are
+        not equal) and anonymous requests to both are denied. The reciprocal
+        cross-read cannot be explained by shared authenticated content (that would
+        make X and Y identical, excluded here) nor by one account simply owning
+        both, so it is a confirmed object-level authorization break, not a guess.
+
+        Exact (whitespace-normalised) inequality tells X from Y, so a per-user
+        record that differs only in its data fields is still recognised as a
+        distinct object; the ``_body_differs`` tolerance is used only for the
+        cross-view MATCHES, where small per-request noise (nonces, timestamps)
+        must not break the comparison."""
+        if not self._alt_headers:
+            return
+        sites = self._id_sites(url)
+        if not sites:
+            return
+
+        def _n(b: str) -> str:
+            return " ".join((b or "").split())
+
+        kind, original, value = sites[0]
+        async with self._slot():
+            status_ax, body_ax = await _get(session, url, self._base_headers)  # A's own X
+        if status_ax != 200 or not body_ax:
+            return
+
+        for cand in (value + 1, value - 1):
+            if cand <= 0 or cand == value:
+                continue
+            y_url = self._with_id(url, kind, original, str(cand))
+            async with self._slot():
+                status_by, body_by = await _get(session, y_url, self._alt_headers)  # B's own Y
+            if status_by != 200 or not body_by:
+                continue
+            # X and Y must be genuinely DIFFERENT objects (exact inequality, so a
+            # shared/cloned page — identical for both users — is excluded, while a
+            # templated per-user record that differs only in data still qualifies).
+            if _n(body_ax) == _n(body_by):
+                continue
+            async with self._slot():
+                status_ay, body_ay = await _get(session, y_url, self._base_headers)  # A reads Y
+                status_bx, body_bx = await _get(session, url, self._alt_headers)     # B reads X
+                status_anon_y, body_anon_y = await _get(
+                    session, y_url, {"User-Agent": "HEAVEN-Scanner/1.0"})
+                status_anon_x, body_anon_x = await _get(
+                    session, url, {"User-Agent": "HEAVEN-Scanner/1.0"})
+            # Both objects must be access-controlled (anon denied or different).
+            if status_anon_y == 200 and not _body_differs(body_by, body_anon_y):
+                continue
+            if status_anon_x == 200 and not _body_differs(body_ax, body_anon_x):
+                continue
+            # Reciprocal cross-read: A sees B's Y and B sees A's X, each matching
+            # the owner's authenticated view (tolerant of per-request noise).
+            a_reads_y = status_ay == 200 and not _body_differs(body_ay, body_by)
+            b_reads_x = status_bx == 200 and not _body_differs(body_bx, body_ax)
+            if a_reads_y and b_reads_x:
+                self._add(
+                    target=y_url,
+                    vuln_type="bola",
+                    title="BOLA: cross-identity object access (reciprocal, ground-truth)",
+                    severity="critical",
+                    confidence=0.96,
+                    evidence={
+                        "probe_type": "cross_identity_bola",
+                        "param": kind,
+                        "own_object_url": url,
+                        "other_object_url": y_url,
+                        "own_id": original,
+                        "other_id": str(cand),
+                        "anonymous_status_x": status_anon_x,
+                        "anonymous_status_y": status_anon_y,
+                        "proof": (
+                            f"user A read object {cand} with exactly user B's "
+                            f"authenticated view, and user B read object {original} "
+                            "with exactly user A's view (two distinct, access-"
+                            "controlled objects; anonymous access denied) — a "
+                            "confirmed object-level authorization break."),
+                    },
+                    remediation=(
+                        "Enforce object-level authorization on every request: verify "
+                        "the authenticated principal owns or is granted the specific "
+                        "object id before returning it. Do not rely on the id alone."),
+                    cwe="CWE-639",
+                )
+                return
+
     # ── Mass assignment probe ─────────────────────────────────────
 
     async def _test_mass_assignment(self, session, url: str, forms: list[dict]) -> None:
@@ -630,6 +745,7 @@ class IDORScanner:
                 tasks.append(self._test_path_ids(session, url))
                 tasks.append(self._test_param_ids(session, url))
                 tasks.append(self._test_horizontal_privesc(session, url))
+                tasks.append(self._test_cross_identity_bola(session, url))
                 tasks.append(self._test_unauth_access(session, url))
                 if forms:
                     tasks.append(self._test_mass_assignment(session, url, forms))

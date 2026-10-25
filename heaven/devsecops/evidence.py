@@ -725,6 +725,185 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
     return "\n".join(out)
 
 
+_BB_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _bb_cvss(finding: dict, vuln_type: str) -> tuple[str, str]:
+    """(cvss_3_1_vector, cvss_4_0_vector) for a finding, preferring values the
+    finding already carries, then the knowledge-base vector for its class."""
+    ev = finding.get("evidence", {}) or {}
+    v3 = (finding.get("cvss_vector") or finding.get("cvss_v3_vector")
+          or ev.get("cvss_vector") or "")
+    v4 = finding.get("cvss_v4_vector") or ev.get("cvss_v4_vector") or ""
+    if not v3 or not v4:
+        with contextlib.suppress(Exception):
+            from heaven.devsecops.vuln_kb import cvss4_vector_for, cvss_vector_for
+            v3 = v3 or cvss_vector_for(vuln_type)
+            v4 = v4 or cvss4_vector_for(vuln_type)
+    return v3, v4
+
+
+def _bb_oast_evidence(ev: dict) -> list[str]:
+    """Render the out-of-band callback proof, when present, as report lines."""
+    channels = ev.get("channels") or ([ev["callback_channel"]]
+                                       if ev.get("callback_channel") else [])
+    if not channels and not ev.get("token"):
+        return []
+    lines = ["**Out-of-band proof (HEAVEN collaborator):**", ""]
+    if channels:
+        lines.append(f"- Channel(s): {', '.join(channels)}")
+    if ev.get("token"):
+        lines.append(f"- Correlation token: `{ev['token']}`")
+    if ev.get("dns_hostname"):
+        lines.append(f"- DNS callback host: `{ev['dns_hostname']}`")
+    if ev.get("callback_from"):
+        lines.append(f"- Callback source: {ev['callback_from']}")
+    if ev.get("callback_count"):
+        lines.append(f"- Callbacks recorded: {ev['callback_count']}")
+    lines.append("")
+    return lines
+
+
+def export_findings_bugbounty(findings: list[dict], engagement_name: str = "",
+                              platform: str = "generic") -> str:
+    """Render findings as submission-ready, per-finding bug-bounty reports.
+
+    One self-contained block per finding in the shape triage teams expect on
+    HackerOne / Bugcrowd / Intigriti: Title, Severity + CVSS vector, CWE, the
+    affected endpoint, a Summary, copy-paste Steps to Reproduce (the faithful
+    ``curl`` and raw HTTP request already built per finding, or the class
+    reproduce command), Impact, Remediation, and an Evidence section that
+    includes the out-of-band collaborator callback when the bug was proved that
+    way. Each block states whether HEAVEN marks the finding Confirmed (a probe
+    reproduced it) or Potential (needs manual confirmation), so nothing is
+    over-claimed in a submission.
+
+    ``platform`` tweaks only the section wording (``hackerone``/``bugcrowd``/
+    ``intigriti``/``generic``); the evidence is identical.
+    """
+    from heaven.utils.cvss import is_confirmed_finding
+    from heaven.utils.timefmt import stamp
+
+    steps_heading = {
+        "hackerone": "## Steps To Reproduce",
+        "bugcrowd": "## Steps to Reproduce",
+        "intigriti": "## Proof of Concept",
+    }.get(platform.lower(), "## Steps to Reproduce")
+
+    ordered = sorted(
+        findings,
+        key=lambda f: (_BB_SEVERITY_ORDER.get(str(f.get("severity", "info")).lower(), 5),
+                       -float(f.get("confidence", 0.0) or 0.0)))
+
+    out: list[str] = ["# HEAVEN: Bug Bounty Submission Pack"]
+    if engagement_name:
+        out.append(f"\n**Program / engagement:** {engagement_name}")
+    out.append(f"\n**Generated:** {stamp()}")
+    out.append(f"\n**Reports:** {len(ordered)}  ·  one self-contained block per finding\n")
+    out.append("---\n")
+
+    for idx, finding in enumerate(ordered, 1):
+        pkg = package_finding(finding)
+        ev = finding.get("evidence", {}) or {}
+        vuln_type = pkg.vuln_type
+        title = (finding.get("title") or vuln_type.replace("_", " ").title())
+        severity = str(pkg.severity or "info").title()
+        v3, v4 = _bb_cvss(finding, vuln_type)
+        confirmed = is_confirmed_finding(finding)
+        status = "Confirmed (reproduced by HEAVEN)" if confirmed else \
+                 "Potential (manual confirmation recommended)"
+
+        out.append(f"## {idx}. [{severity}] {title}")
+        out.append("")
+        meta = [f"**Target:** {pkg.target}", f"**Severity:** {severity}",
+                f"**Status:** {status}"]
+        if v3:
+            meta.append(f"**CVSS 3.1:** `{v3}`")
+        if v4:
+            meta.append(f"**CVSS 4.0:** `{v4}`")
+        if pkg.cwe_id:
+            meta.append(f"**CWE:** {pkg.cwe_id}")
+        if pkg.owasp:
+            meta.append(f"**OWASP:** {pkg.owasp}")
+        if pkg.cve_id:
+            meta.append(f"**CVE:** {pkg.cve_id}")
+        out.append("  \n".join(meta))
+        out.append("")
+
+        out.append("## Summary")
+        out.append("")
+        out.append(pkg.description or title)
+        out.append("")
+
+        # Steps to reproduce — the copy-paste proof.
+        out.append(steps_heading)
+        out.append("")
+        if pkg.is_http:
+            if pkg.curl_command:
+                out.append("Reproduce with curl:")
+                out.append("```bash")
+                out.append(pkg.curl_command)
+                out.append("```")
+                out.append("")
+            if pkg.raw_http_request:
+                out.append("Raw HTTP request (Burp → Paste as request):")
+                out.append("```http")
+                out.append(pkg.raw_http_request)
+                out.append("```")
+                out.append("")
+            if pkg.response_status > 0:
+                out.append(f"Observed response: HTTP {pkg.response_status}")
+                if pkg.response_excerpt:
+                    out.append("```")
+                    out.append(pkg.response_excerpt[:800])
+                    out.append("```")
+                out.append("")
+        else:
+            if pkg.repro_command:
+                out.append("```bash")
+                out.append(pkg.repro_command)
+                out.append("```")
+                out.append("")
+            elif pkg.repro_note:
+                out.append(f"_{pkg.repro_note}_")
+                out.append("")
+            observed = {k: v for k, v in pkg.evidence_data.items()
+                        if v not in (None, "", [], {})}
+            if observed:
+                out.append("Observed:")
+                for k, v in observed.items():
+                    out.append(f"- **{k}:** {_evidence_value(v)}")
+                out.append("")
+        if pkg.repro_steps:
+            for i, step in enumerate(pkg.repro_steps, 1):
+                out.append(f"{i}. {step}")
+            out.append("")
+
+        # Out-of-band proof (SSRF/XXE/cmdi/OOB-SQLi).
+        out.extend(_bb_oast_evidence(ev))
+
+        out.append("## Impact")
+        out.append("")
+        out.append(pkg.impact or _bb_default_impact(vuln_type, severity))
+        out.append("")
+
+        out.append("## Remediation")
+        out.append("")
+        out.append(pkg.remediation or "Validate and constrain the affected behaviour; "
+                   "apply least privilege and server-side authorization checks.")
+        out.append("")
+        out.append("---\n")
+
+    return "\n".join(out)
+
+
+def _bb_default_impact(vuln_type: str, severity: str) -> str:
+    """A short, honest impact line when the KB carries none for this class."""
+    return (f"A {severity.lower()}-severity {vuln_type.replace('_', ' ')} that an "
+            "attacker can leverage against this endpoint. See the reproduction "
+            "steps above for the concrete behaviour observed.")
+
+
 def _render_leads_md(leads: list[dict]) -> str:
     """Markdown "Leads for manual review" appendix, or '' when there are none.
 

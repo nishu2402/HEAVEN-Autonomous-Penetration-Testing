@@ -146,6 +146,15 @@ def attach(finding: dict) -> bool:
         # mismatched one.
         if has_status and status > 0 and _as_int(recorded_status) not in (None, status):
             continue
+        # Same hazard when the finding kept NO status of its own to compare
+        # against: a 405/501 is the response to a request whose METHOD the
+        # endpoint rejects, so it can never be the transaction that extracted a
+        # cookie, header or redirect (the proofs this gap-fill serves). A later
+        # method-probe that won the per-URL store must not supply the "observed
+        # response" for a finding proved by a successful request. An absent
+        # response is more honest than a contradictory one.
+        if not has_status and status in (405, 501):
+            continue
         changed = False
         if not has_status and status > 0:
             ev.setdefault("status", status)

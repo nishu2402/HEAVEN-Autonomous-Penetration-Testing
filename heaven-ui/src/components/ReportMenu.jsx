@@ -12,6 +12,7 @@ const FORMATS = [
   { id: "sarif", label: "SARIF", hint: "GitHub code scanning" },
   { id: "burp", label: "Burp XML", hint: "Burp Suite import" },
   { id: "proxy-jsonl", label: "Proxy JSONL", hint: "Replay / pipelines" },
+  { id: "bugbounty", label: "Bug-bounty submission", hint: "H1 / Bugcrowd / Intigriti" },
 ];
 
 export default function ReportMenu({ engagement }) {

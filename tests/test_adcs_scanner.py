@@ -213,3 +213,56 @@ def test_enumerate_adcs_esc8_from_web_map():
 def test_enumerate_adcs_no_ca_returns_empty():
     conn = _FakeConn([], [])
     assert a.enumerate_adcs(conn, "CN=Configuration,DC=corp,DC=local") == []
+
+
+# ── _parse_enroll_and_write against REAL security-descriptor bytes ────────────
+# This path was effectively dead: impacket's SR_SECURITY_DESCRIPTOR is a Structure
+# with no __getattr__, so getattr(sd, "Dacl") was always None and the parser never
+# confirmed a right (every parseable template was stuck at "potential"). These
+# tests build genuine SD bytes so the DACL is actually read.
+
+def _plain_allow_sd(sid_str: str, mask: int) -> bytes:
+    import pytest
+    ldaptypes = pytest.importorskip("impacket.ldap.ldaptypes")
+    sd = ldaptypes.SR_SECURITY_DESCRIPTOR()
+    sd["Revision"] = b"\x01"
+    sd["Sbz1"] = b"\x00"
+    sd["Control"] = 0x8004  # SE_SELF_RELATIVE | SE_DACL_PRESENT
+    owner = ldaptypes.LDAP_SID()
+    owner.fromCanonical("S-1-5-32-544")
+    sd["OwnerSid"] = owner
+    sd["GroupSid"] = b""
+    sd["Sacl"] = b""
+    dacl = ldaptypes.ACL()
+    dacl["AclRevision"] = 4
+    dacl["Sbz1"] = 0
+    dacl["Sbz2"] = 0
+    ace = ldaptypes.ACE()
+    ace["AceType"] = ldaptypes.ACCESS_ALLOWED_ACE.ACE_TYPE
+    ace["AceFlags"] = 0
+    body = ldaptypes.ACCESS_ALLOWED_ACE()
+    body["Mask"] = ldaptypes.ACCESS_MASK()
+    body["Mask"]["Mask"] = mask
+    sid = ldaptypes.LDAP_SID()
+    sid.fromCanonical(sid_str)
+    body["Sid"] = sid
+    ace["Ace"] = body
+    dacl.aces = [ace]
+    sd["Dacl"] = dacl
+    return sd.getData()
+
+
+def test_parse_enroll_and_write_confirms_low_priv_from_real_sd():
+    # Authenticated Users (S-1-5-11) granted GenericAll → low-priv CAN enrol/write.
+    raw = _plain_allow_sd("S-1-5-11", a.ADS_RIGHT_GENERIC_ALL)
+    can_enroll, can_write = a._parse_enroll_and_write(raw)
+    assert can_enroll is True and can_write is True
+
+
+def test_parse_enroll_and_write_restricts_when_only_admin_can_enrol():
+    # Only Domain Admins (RID 512) granted GenericAll → NO low-priv enrolment, so
+    # the parser returns a definite False (not None), which lets classify_template
+    # drop an ESC1-shaped template to the low shape-only note instead of a high FP.
+    raw = _plain_allow_sd("S-1-5-21-1-2-3-512", a.ADS_RIGHT_GENERIC_ALL)
+    can_enroll, can_write = a._parse_enroll_and_write(raw)
+    assert can_enroll is False and can_write is False

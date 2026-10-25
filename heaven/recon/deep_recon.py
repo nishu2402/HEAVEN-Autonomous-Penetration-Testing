@@ -721,6 +721,13 @@ async def fuzz_endpoints(session: aiohttp.ClientSession, base_url: str,
     except Exception:
         logger.debug("catch-all baseline probe failed for %s", base_url, exc_info=True)
     catch_all = base_status == 200 and base_is_html
+    # A server, WAF or CDN in block mode answers the random nonexistent baseline
+    # with an access-controlled status (401/403): it denies EVERY path, so a
+    # probed path returning that same status is not a discovered protected
+    # endpoint, it is the blanket policy. Feeding those phantoms forward made the
+    # API/web scanners run their full battery against the whole COMMON_API_PATHS
+    # list on a host that simply denies everything.
+    base_denies_all = base_status in (401, 403)
 
     async def check_path(path):
         async with sem:
@@ -740,6 +747,11 @@ async def fuzz_endpoints(session: aiohttp.ClientSession, base_url: str,
                                 and "html" in content_type.lower()
                                 and abs(content_len - base_len)
                                 <= max(256, int(base_len * 0.10))):
+                            return None
+                        # Blanket-deny origin: an identical 401/403 to the one the
+                        # nonexistent baseline got is the deny policy, not a
+                        # discovered endpoint.
+                        if base_denies_all and status == base_status:
                             return None
                         return DiscoveredAsset(
                             asset_type="endpoint", value=url,

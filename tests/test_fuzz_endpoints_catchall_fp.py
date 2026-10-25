@@ -102,3 +102,29 @@ def test_normal_host_discovery_unchanged() -> None:
     assert len(found) == 2, f"expected exactly the two real 200s; got {vals}"
     assert any(v.endswith("/api") for v in vals)
     assert any(v.endswith("/graphql") for v in vals)
+
+
+def test_blanket_403_origin_discovers_no_phantom_endpoints() -> None:
+    # Live regression (www.ashirwadsweets.com): a WAF/CDN in block mode returns 403
+    # for EVERY path, so the random baseline is also 403. Every COMMON_API_PATHS
+    # entry would otherwise be "discovered" as a protected endpoint and fed to the
+    # API/web scanners. The baseline deny-match guard drops them all.
+    found = _run(lambda path: (403, "text/html", b"<html>403 Forbidden</html>"),
+                 _API_PATHS)
+    assert found == [], (
+        "a blanket-403 origin must not yield phantom endpoints; got "
+        f"{[a.value for a in found]}")
+
+
+def test_real_protected_endpoint_survives_blanket_404() -> None:
+    # Honest 404 for unknown paths (baseline is 404, not a deny-all), but /api is a
+    # real endpoint that 403s. It is genuine discovery and must survive.
+    def handler(path):
+        if path == "/api":
+            return 403, "application/json", b'{"error":"forbidden"}'
+        return 404, "text/html", b"not found"
+
+    found = _run(handler, _API_PATHS)
+    vals = [a.value for a in found]
+    assert len(found) == 1 and vals[0].endswith("/api"), (
+        f"a genuinely protected endpoint on a well-behaved origin must survive; got {vals}")

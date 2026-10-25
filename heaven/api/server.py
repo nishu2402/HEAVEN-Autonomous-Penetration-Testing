@@ -2665,12 +2665,14 @@ def create_app() -> FastAPI:
         format: str = "html",
         engagement: Optional[str] = None,
         framework: str = "OWASP_TOP10",
+        platform: str = "generic",
         user: User = Depends(require_permission("report.view")),
     ):
         """Generate + download an engagement report. Reuses the exact reporters
         behind `heaven export` / `heaven report`, so CLI and webapp produce the
-        same output. Formats: html, pdf, markdown, csv, json, sarif, burp,
-        proxy-jsonl."""
+        same output. Formats: html, pdf, markdown, csv, json, sarif, junit, burp,
+        proxy-jsonl, bugbounty. `platform` (generic/hackerone/bugcrowd/intigriti)
+        shapes the bugbounty submission wording only."""
         from fastapi import Response
         from fastapi.responses import FileResponse
         from heaven.devsecops.vuln_kb import enrich_finding
@@ -2769,8 +2771,10 @@ def create_app() -> FastAPI:
             "json": "application/json", "sarif": "application/json",
             "junit": "application/xml",
             "burp": "application/xml", "proxy-jsonl": "application/x-ndjson",
+            "bugbounty": "text/markdown",
         }
-        ext = {"markdown": "md", "proxy-jsonl": "jsonl", "junit": "xml"}
+        ext = {"markdown": "md", "proxy-jsonl": "jsonl", "junit": "xml",
+               "bugbounty": "md"}
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", eng_name)[:60] or "engagement"
         # A recognised compliance framework id (hipaa, uk_gdpr, …) adds a mapped
         # control-coverage section to the html/pdf/markdown deliverables; anything
@@ -2850,6 +2854,13 @@ def create_app() -> FastAPI:
             elif fmt == "proxy-jsonl":
                 from heaven.devsecops.burp_export import export_proxy_history_jsonl
                 body = export_proxy_history_jsonl(findings)
+            elif fmt == "bugbounty":
+                # Submission-ready per-finding markdown (H1/Bugcrowd/Intigriti),
+                # the exact reporter behind `heaven export --format bugbounty`, so
+                # the webapp and CLI hand back the identical deliverable.
+                from heaven.devsecops.evidence import export_findings_bugbounty
+                body = export_findings_bugbounty(
+                    findings, engagement_name=eng_name, platform=platform)
             else:
                 raise HTTPException(400, f"unsupported format: {fmt}")
         except HTTPException:

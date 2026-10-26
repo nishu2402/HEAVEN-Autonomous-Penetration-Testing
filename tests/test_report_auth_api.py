@@ -103,3 +103,25 @@ def test_malformed_bearer_header_is_401_not_500(auth_client, header):
     # clean 401 (authentication required), never a server error.
     r = auth_client.get("/api/engagement/top-findings", headers={"Authorization": header})
     assert r.status_code == 401, r.text
+
+
+# ── /api/auth/me contract the web console's boot-time auth probe relies on ──
+# The SPA's bootstrapAuth() probes /api/auth/me on load when it has no stored
+# session: a 200 means "treat us as signed in" (skip the login wall), a 401 means
+# "stay logged out" (redirect to /login). These two tests pin that contract so a
+# server change can't silently re-trap the operator at /login with auth disabled,
+# or auto-admit anyone with auth enabled.
+
+def test_auth_me_returns_admin_without_token_when_auth_disabled(client):
+    """HEAVEN_DISABLE_AUTH set: /api/auth/me answers with the synthesised admin
+    and no bearer token, so the dev/CI console opens straight to the dashboard."""
+    r = client.get("/api/auth/me")
+    assert r.status_code == 200, r.text
+    assert r.json().get("role") == "admin"
+
+
+def test_auth_me_requires_token_when_auth_enabled(auth_client):
+    """Auth enabled: /api/auth/me without a token is 401, so bootstrapAuth() does
+    NOT adopt a session and ProtectedRoute still redirects to /login."""
+    r = auth_client.get("/api/auth/me")
+    assert r.status_code == 401, r.text

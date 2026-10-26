@@ -1297,7 +1297,11 @@ class EngagementStore:
             ev: dict = {}
             if r["evidence_json"]:
                 try:
-                    ev = json.loads(r["evidence_json"])
+                    parsed = json.loads(r["evidence_json"])
+                    # evidence_json is normally an object, but a scanner could have
+                    # persisted a bare JSON string/number/list; keep it a dict so
+                    # every reader (reports, Burp export) can rely on the shape.
+                    ev = parsed if isinstance(parsed, dict) else {}
                 except json.JSONDecodeError:
                     ev = {}
             canon = ""

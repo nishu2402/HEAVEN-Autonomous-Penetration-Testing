@@ -35,9 +35,28 @@ from __future__ import annotations
 
 import base64
 import html
+import re
 import urllib.parse
 from datetime import datetime, timezone
 from typing import Iterable
+
+# XML 1.0 cannot represent most C0 control bytes even when escaped, and a finding
+# field can carry one (a scanned banner, a reflected response excerpt), so strip
+# the forbidden code points before the value reaches the Burp items XML. Without
+# this a single raw NUL/BEL corrupts the whole file and Burp refuses to import it.
+_XML_INVALID_RE = re.compile(
+    "[^\x09\x0a\x0d\x20-퟿-�\U00010000-\U0010ffff]"
+)
+
+
+def _strip_xml_invalid(s: str) -> str:
+    return _XML_INVALID_RE.sub("", str(s))
+
+
+def _cdata(s: str) -> str:
+    """Safe text for a ``<![CDATA[...]]>`` section: drop XML-invalid control
+    chars and split any literal ``]]>`` so it cannot close the section early."""
+    return _strip_xml_invalid(s).replace("]]>", "]]]]><![CDATA[>")
 
 
 def _build_http_request(method: str, url: str, headers: dict, body: str) -> str:
@@ -91,7 +110,9 @@ def _b64(s: str) -> str:
 
 
 def _xml_escape(s: str) -> str:
-    return html.escape(str(s), quote=True)
+    # Strip XML-invalid control chars first; escape() only entity-encodes
+    # & < > " ', it does not remove a raw control byte (which is still illegal).
+    return html.escape(_strip_xml_invalid(s), quote=True)
 
 
 def export_burp_xml(findings: Iterable[dict],
@@ -115,7 +136,8 @@ def export_burp_xml(findings: Iterable[dict],
     ]
 
     for f in findings:
-        evidence = f.get("evidence", {}) or {}
+        _ev = f.get("evidence")
+        evidence = _ev if isinstance(_ev, dict) else {}  # tolerate non-dict evidence_json
         target = (f.get("target") or f.get("target_url")
                   or evidence.get("url") or "")
         if not target.startswith(("http://", "https://")):
@@ -194,8 +216,8 @@ def export_burp_xml(findings: Iterable[dict],
             f'    <host ip="">{_xml_escape(host)}</host>',
             f"    <port>{port}</port>",
             f"    <protocol>{parsed.scheme or 'https'}</protocol>",
-            f"    <method><![CDATA[{method}]]></method>",
-            f"    <path><![CDATA[{path}]]></path>",
+            f"    <method><![CDATA[{_cdata(method)}]]></method>",
+            f"    <path><![CDATA[{_cdata(path)}]]></path>",
             "    <extension>null</extension>",
             f'    <request base64="true"><![CDATA[{_b64(raw_request)}]]></request>',
             f"    <status>{status}</status>",
@@ -218,7 +240,8 @@ def export_proxy_history_jsonl(findings: Iterable[dict]) -> str:
     import json as _json
     out_lines = []
     for f in findings:
-        evidence = f.get("evidence", {}) or {}
+        _ev = f.get("evidence")
+        evidence = _ev if isinstance(_ev, dict) else {}  # tolerate non-dict evidence_json
         target = f.get("target") or f.get("target_url") or ""
         method = (f.get("method") or evidence.get("method") or "GET").upper()
         param = f.get("param") or evidence.get("param") or ""

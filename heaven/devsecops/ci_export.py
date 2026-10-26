@@ -24,6 +24,7 @@ is read straight off the finding.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 # saxutils.escape/quoteattr only *escape* our own strings for XML OUTPUT; we never
 # parse untrusted XML here, so the B406 XML-attack blacklist does not apply.
@@ -39,6 +40,22 @@ from heaven.utils.cvss import (
 
 from heaven import __version__ as _TOOL_VERSION   # SARIF/JUnit driver version tracks the app
 _INFO_URI = "https://github.com/heaven-security/heaven"
+
+# XML 1.0 forbids most C0 control characters outright: escape()/quoteattr() only
+# turn & < > " ' into entities, they do NOT remove a raw NUL/BEL/etc., and such a
+# byte makes the whole document not well-formed. A finding field can legitimately
+# carry a control byte (a scanned service banner, a reflected response excerpt),
+# so strip the forbidden code points before escaping. Keeps the JUnit deliverable
+# parseable by the CI reporter that consumes it. (SARIF is JSON, which escapes
+# control chars safely, so it needs no equivalent.)
+_XML_INVALID_RE = re.compile(
+    "[^\x09\x0a\x0d\x20-퟿-�\U00010000-\U0010ffff]"
+)
+
+
+def _xml_text(value: Any) -> str:
+    """Stringify ``value`` and drop code points XML 1.0 cannot represent."""
+    return _XML_INVALID_RE.sub("", str(value))
 
 
 def _cvss4_base(f: dict[str, Any]) -> float:
@@ -238,20 +255,22 @@ def findings_to_junit(findings: list[dict[str, Any]], *,
                       f"Target: {target}\n"
                       f"CVE: {_cve(f) or '—'}")
             cases.append(
-                f'  <testcase classname={quoteattr(classname)} name={quoteattr(name)}>\n'
-                f'    <failure message={quoteattr(f"{severity.upper()}: {title}")} '
-                f'type={quoteattr(severity)}>{escape(detail)}</failure>\n'
+                f'  <testcase classname={quoteattr(_xml_text(classname))} '
+                f'name={quoteattr(_xml_text(name))}>\n'
+                f'    <failure message={quoteattr(_xml_text(f"{severity.upper()}: {title}"))} '
+                f'type={quoteattr(_xml_text(severity))}>{escape(_xml_text(detail))}</failure>\n'
                 f'  </testcase>'
             )
         else:
             cases.append(
-                f'  <testcase classname={quoteattr(classname)} name={quoteattr(name)}/>'
+                f'  <testcase classname={quoteattr(_xml_text(classname))} '
+                f'name={quoteattr(_xml_text(name))}/>'
             )
 
     suite_name = "HEAVEN" + (f": {engagement_name}" if engagement_name else "")
     header = ('<?xml version="1.0" encoding="UTF-8"?>\n'
               f'<testsuites tests="{len(findings)}" failures="{failures}">\n'
-              f'  <testsuite name={quoteattr(suite_name)} tests="{len(findings)}" '
+              f'  <testsuite name={quoteattr(_xml_text(suite_name))} tests="{len(findings)}" '
               f'failures="{failures}">')
     footer = '  </testsuite>\n</testsuites>\n'
     body = "\n".join(cases)

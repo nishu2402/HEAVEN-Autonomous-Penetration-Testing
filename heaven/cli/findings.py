@@ -9,7 +9,7 @@ from typing import Optional
 
 import click
 
-from heaven.cli._helpers import _engagement_db_path, _print, json_output
+from heaven.cli._helpers import _open_engagement_read, _print, json_output
 from heaven.utils.logger import HAS_RICH
 
 
@@ -34,8 +34,7 @@ def findings(engagement: Optional[str], severity: Optional[str],
     # Global --json forces machine-readable output regardless of --format.
     if json_output():
         fmt = "json"
-    from heaven.engagement import EngagementStore
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     results = store.list_findings(
         severity=severity, status=status, target=target,
         vuln_type=vuln_type, min_confidence=min_confidence, limit=limit,
@@ -77,9 +76,8 @@ def findings(engagement: Optional[str], severity: Optional[str],
 @click.option("--engagement", help="Engagement name")
 def show(finding_id: str, engagement: Optional[str]) -> None:
     """Show full details for a single finding (request, response, repro)."""
-    from heaven.engagement import EngagementStore
     from heaven.devsecops.evidence import package_finding
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     f = store.get_finding(finding_id)
     if not f:
         _print(f"[red]Finding not found:[/red] {finding_id}")
@@ -110,8 +108,7 @@ def show(finding_id: str, engagement: Optional[str]) -> None:
 @click.option("--notes", default="", help="Operator notes for the status change")
 def mark(finding_id: str, status: str, engagement: Optional[str], notes: str) -> None:
     """Mark a finding's status (verified, false-positive, accepted-risk, fixed)."""
-    from heaven.engagement import EngagementStore
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     if store.update_finding_status(finding_id, status, notes=notes):
         _print(f"[green]Updated[/green] {finding_id} → {status}")
     else:
@@ -124,9 +121,8 @@ def mark(finding_id: str, status: str, engagement: Optional[str], notes: str) ->
 @click.option("--engagement", help="Engagement name")
 def replay(finding_id: str, engagement: Optional[str]) -> None:
     """Print the curl command needed to manually re-verify a finding."""
-    from heaven.engagement import EngagementStore
     from heaven.devsecops.evidence import package_finding
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     f = store.get_finding(finding_id)
     if not f:
         _print(f"[red]Finding not found:[/red] {finding_id}")
@@ -210,7 +206,6 @@ def export(engagement: Optional[str], output: str, fmt: str, platform: str,
       burp        Burp Suite XML, load into Site Map, replay in Repeater
       proxy-jsonl JSONL with full request/response, for mitmproxy / Caido
     """
-    from heaven.engagement import EngagementStore
     from heaven.devsecops.evidence import (
         export_findings_markdown, export_findings_csv, export_findings_bugbounty,
     )
@@ -226,7 +221,7 @@ def export(engagement: Optional[str], output: str, fmt: str, platform: str,
             _print(f"[dim]Format '{inferred}' inferred from output extension "
                    f"(override with --format).[/dim]")
 
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     eng = store.get_engagement()
 
     sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -294,6 +289,17 @@ def export(engagement: Optional[str], output: str, fmt: str, platform: str,
         gate = summarize_gate(finding_dicts, fail_on=fail_on)
         _print(f"[dim]JUnit gate (fail-on {fail_on}): "
                f"{gate['breaching']} failing / {gate['total']} total[/dim]")
+        _print(f"[green]Exported {len(finding_dicts)} findings → {output} ({fmt})[/green]")
+        # When the operator explicitly asked to gate on a severity, make the
+        # gate real: exit non-zero so `heaven export --format junit --fail-on
+        # high` breaks a CI step directly, matching the documented behaviour and
+        # `heaven scan`'s own CI gate. Omitting --fail-on keeps the plain "emit
+        # the XML, let the CI test reporter decide" flow on exit 0.
+        src = click.get_current_context().get_parameter_source("fail_on")
+        explicit = src is not None and src.name == "COMMANDLINE"
+        if explicit and gate["breaching"] > 0:
+            raise SystemExit(1)
+        return
     elif fmt == "burp":
         from heaven.devsecops.burp_export import export_burp_xml
         out_path.write_text(export_burp_xml(
@@ -321,10 +327,9 @@ def remediate(finding_id: str, engagement: Optional[str], no_llm: bool) -> None:
     something actionable. The output is labelled honestly with whether the LLM
     actually produced it.
     """
-    from heaven.engagement import EngagementStore
     from heaven.devsecops.ai_remediation import AIRemediationEngine
     from heaven.devsecops.vuln_kb import enrich_finding
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     f = store.get_finding(finding_id)
     if not f:
         _print(f"[red]Finding not found:[/red] {finding_id}")
@@ -395,13 +400,12 @@ def verify(engagement: Optional[str], i_have_authorization: bool, limit: int) ->
     """
     import asyncio
 
-    from heaven.engagement import EngagementStore
     from heaven.utils.cvss import is_confirmed_finding
     from heaven.vulnscan.active_verifier import (
         supported_cves, verify_finding, _finding_cve, _PROBES,
     )
 
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     rows = store.list_findings(limit=limit)
     # Only Potential findings whose CVE has a registered safe probe.
     targets = [
@@ -472,9 +476,8 @@ def verify(engagement: Optional[str], i_have_authorization: bool, limit: int) ->
               default="OWASP_TOP10")
 def report(engagement: Optional[str], output: str, framework: str) -> None:
     """Generate compliance-mapped HTML report."""
-    from heaven.engagement import EngagementStore
     from heaven.devsecops.compliance_report import ComplianceReportGenerator
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
     # False-positives are triaged out of the client deliverable.
     findings_list = [f for f in store.list_findings(limit=10000)
                      if (f.status or "").lower() != "false_positive"]
@@ -527,8 +530,7 @@ def leads(engagement: Optional[str], status: str, show_all: bool, limit: int,
     """
     if json_output():
         fmt = "json"
-    from heaven.engagement import EngagementStore
-    store = EngagementStore(_engagement_db_path(engagement))
+    store = _open_engagement_read(engagement)
 
     # Human adjudication: promote (a human confirmed it) / dismiss (ruled out).
     if promote_id or dismiss_id:

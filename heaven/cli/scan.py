@@ -13,9 +13,12 @@ import click
 from heaven.cli._helpers import (
     _URL_REGEX,
     _engagement_db_path,
+    _open_engagement_read,
     _print,
     _validate_target_string,
     _verify_authorization,
+    emit_json,
+    json_output,
 )
 from heaven.config import Profile, ScanMode, get_config
 from heaven.utils.logger import HAS_RICH, get_logger, print_banner
@@ -1095,7 +1098,14 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
         _print("[red]Resume requires --i-have-authorization[/red]")
         sys.exit(3)
 
-    store = EngagementStore(_engagement_db_path(engagement))
+    # A typo'd --engagement has nothing to resume: error (exit 2) rather than
+    # materialising a stray <name>.db and then reporting "no interrupted scans".
+    db_path = _engagement_db_path(engagement)
+    if engagement and not db_path.exists():
+        _print(f"[red]No engagement named '{engagement}'.[/red] "
+               f"Run [cyan]heaven engage list[/cyan] to see engagements.")
+        sys.exit(2)
+    store = EngagementStore(db_path)
     unfinished = store.find_resumable_scans()
     if not unfinished:
         _print("[yellow]No interrupted scans to resume.[/yellow]")
@@ -1179,8 +1189,9 @@ def resume(engagement: Optional[str], scan_id: Optional[str],
 @click.option("--engagement")
 def pause(scan_id: str, engagement: Optional[str]) -> None:
     """Pause a running scan."""
-    from heaven.engagement import EngagementStore
-    store = EngagementStore(_engagement_db_path(engagement))
+    # Read/update an existing engagement: a typo'd --engagement errors (exit 2)
+    # rather than materialising a stray DB and then failing to find the scan.
+    store = _open_engagement_read(engagement)
     if store.pause_scan(scan_id):
         _print(f"[green]Scan {scan_id[:8]} paused.[/green]")
     else:
@@ -1191,9 +1202,14 @@ def pause(scan_id: str, engagement: Optional[str]) -> None:
 @click.option("--engagement")
 def status_cmd(engagement: Optional[str]) -> None:
     """Show all scans in the engagement."""
-    from heaven.engagement import EngagementStore
-    store = EngagementStore(_engagement_db_path(engagement))
+    # Read-only open: a typo'd --engagement errors (exit 2) instead of
+    # materialising a stray <name>.db and then silently reporting "No scans",
+    # matching `coverage`/`diff` and `heaven findings`.
+    store = _open_engagement_read(engagement)
     scans = store.list_all_scans()
+    if json_output():
+        emit_json({"engagement": store.db_path.stem, "scans": scans})
+        return
     if not scans:
         _print("[yellow]No scans found.[/yellow]")
         return

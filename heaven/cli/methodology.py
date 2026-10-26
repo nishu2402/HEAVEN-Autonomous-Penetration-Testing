@@ -119,10 +119,12 @@ def coverage(engagement: str | None, standard: str | None, as_json: bool) -> Non
     findings: list[dict] = []
     eng_name = engagement or ""
     try:
-        from heaven.cli._helpers import _engagement_db_path
-        from heaven.engagement import EngagementStore, get_active_engagement
+        from heaven.cli._helpers import _open_engagement_read
+        from heaven.engagement import get_active_engagement
         eng_name = engagement or get_active_engagement() or ""
-        store = EngagementStore(_engagement_db_path(engagement))
+        # Read-only open: a typo'd --engagement errors (exit 2) instead of
+        # materialising a stray <name>.db and silently overlaying zero findings.
+        store = _open_engagement_read(engagement)
         findings = [
             {"id": f.id, "vuln_type": f.vuln_type, "title": f.title,
              "severity": f.severity, "target": f.target,

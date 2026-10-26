@@ -124,6 +124,42 @@ class TestBurpExport:
         # Only one item (the URL one)
         assert len(root.findall("item")) == 1
 
+    def test_control_chars_and_cdata_breaker_stay_well_formed(self):
+        """A finding carrying raw control bytes and a literal ``]]>`` (from a
+        hostile URL/payload/response) must still produce a Burp-importable file:
+        XML 1.0 control bytes are stripped and ``]]>`` cannot close a CDATA
+        section early."""
+        from heaven.devsecops.burp_export import export_burp_xml
+        import xml.etree.ElementTree as ET
+        findings = [{
+            "id": "h1", "target": "https://x.test/a]]>b?q=]]>\x07",
+            "vuln_type": "xss", "severity": "high", "method": "GET", "param": "q",
+            "title": "t \x00\x07\x1b ]]> <s>",
+            "evidence": {"payload": "<svg onload=1>\x07]]>", "status": 200,
+                         "response_body": "bad \x00\x08 ]]> <x>"},
+        }]
+        xml = export_burp_xml(findings)
+        root = ET.fromstring(xml)  # must parse despite control bytes + ]]>
+        assert len(root.findall("item")) == 1
+        assert "\x00" not in xml and "\x07" not in xml
+
+    def test_non_dict_evidence_does_not_crash(self):
+        """``evidence_json`` is normally an object, but a bare JSON string can be
+        stored; the exporter must tolerate a non-dict ``evidence`` instead of
+        raising ``AttributeError``."""
+        from heaven.devsecops.burp_export import (
+            export_burp_xml, export_proxy_history_jsonl,
+        )
+        import xml.etree.ElementTree as ET
+        findings = [{
+            "id": "s1", "target": "https://x.test/", "vuln_type": "sqli",
+            "severity": "medium", "evidence": "a bare string, not a dict",
+        }]
+        root = ET.fromstring(export_burp_xml(findings))  # no crash
+        assert root.tag == "items"
+        # jsonl path shares the same pattern.
+        assert export_proxy_history_jsonl(findings).strip() != ""
+
     def test_proxy_jsonl_format(self):
         from heaven.devsecops.burp_export import export_proxy_history_jsonl
         import json as _json

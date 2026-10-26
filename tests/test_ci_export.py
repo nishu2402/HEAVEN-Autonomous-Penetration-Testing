@@ -101,6 +101,22 @@ def test_junit_escapes_special_characters():
     minidom.parseString(xml)  # must stay well-formed despite &, <, "
 
 
+def test_junit_strips_xml_invalid_control_chars():
+    """A finding field carrying a raw control byte (a scanned banner, a reflected
+    response excerpt) must not corrupt the JUnit deliverable. XML 1.0 forbids NUL
+    / BEL / ESC even when escaped, so they are stripped, keeping the file
+    parseable by the CI reporter."""
+    findings = [{"id": "x", "vuln_type": "xss\x00", "severity": "high",
+                 "title": "Reflected \x00\x07\x1b <script> & ]]> bytes",
+                 "target": "http://h/?a=]]>\x07", "cve_id": "CVE-2024-1"}]
+    xml = findings_to_junit(findings, fail_on="high")
+    doc = minidom.parseString(xml)  # must stay well-formed despite control bytes
+    # The real text survives (just the illegal bytes are gone).
+    assert "Reflected" in xml and "script" in xml
+    assert "\x00" not in xml and "\x07" not in xml and "\x1b" not in xml
+    assert doc is not None
+
+
 # ── Gate summary ─────────────────────────────────────────────────────────────
 
 def test_summarize_gate_counts_breaching():
@@ -150,3 +166,56 @@ def test_explicit_info_severity_is_respected_over_score():
     g = summarize_gate(f, fail_on="high")
     assert g["by_severity"].get("info") == 1
     assert g["breaching"] == 0
+
+
+# ── JUnit CLI gate: --fail-on actually breaks the build ──────────────────────
+
+def _seed_engagement(tmp_path, monkeypatch):
+    """A tmp engagement with one critical finding, wired as the active one."""
+    from heaven.engagement import EngagementStore
+    db = tmp_path / "gate.db"
+    store = EngagementStore(db, create=True)
+    store.upsert_finding("scan1", {
+        "vuln_type": "sqli", "title": "SQL injection", "severity": "critical",
+        "target": "http://t/item", "confidence": 0.9, "cvss_base": 9.8,
+    })
+    monkeypatch.setenv("HEAVEN_ENGAGEMENT", str(db))
+    return db
+
+
+def test_export_junit_explicit_fail_on_breaks_build(tmp_path, monkeypatch):
+    """`heaven export --format junit --fail-on <sev>` exits non-zero when a
+    finding breaches, so a CI step fails directly (matching the documented
+    behaviour), and the XML is still written for the test reporter."""
+    from click.testing import CliRunner
+    from heaven.cli.findings import export
+    _seed_engagement(tmp_path, monkeypatch)
+    out = tmp_path / "r.xml"
+
+    res = CliRunner().invoke(
+        export, ["--format", "junit", "--fail-on", "critical", "-o", str(out)])
+    assert res.exit_code == 1, res.output
+    assert out.exists() and out.read_text().strip()  # XML still emitted
+
+
+def test_export_junit_without_fail_on_stays_exit_zero(tmp_path, monkeypatch):
+    """Omitting --fail-on keeps the plain emit-XML flow on exit 0 (the CI test
+    reporter decides), so existing pipelines are unaffected."""
+    from click.testing import CliRunner
+    from heaven.cli.findings import export
+    _seed_engagement(tmp_path, monkeypatch)
+    out = tmp_path / "r.xml"
+
+    res = CliRunner().invoke(export, ["--format", "junit", "-o", str(out)])
+    assert res.exit_code == 0, res.output
+
+
+def test_export_junit_fail_on_none_never_gates(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from heaven.cli.findings import export
+    _seed_engagement(tmp_path, monkeypatch)
+    out = tmp_path / "r.xml"
+
+    res = CliRunner().invoke(
+        export, ["--format", "junit", "--fail-on", "none", "-o", str(out)])
+    assert res.exit_code == 0, res.output

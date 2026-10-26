@@ -43,7 +43,14 @@ def replay(scan_id: str, engagement: Optional[str],
         _print("[red]Replay requires --i-have-authorization[/red]")
         sys.exit(3)
 
-    store = EngagementStore(_engagement_db_path(engagement))
+    # A typo'd --engagement has no scan to replay: error (exit 2) rather than
+    # materialising a stray <name>.db and then reporting "scan not found".
+    src_path = _engagement_db_path(engagement)
+    if engagement and not src_path.exists():
+        _print(f"[red]No engagement named '{engagement}'.[/red] "
+               f"Run [cyan]heaven engage list[/cyan] to see engagements.")
+        sys.exit(2)
+    store = EngagementStore(src_path)
     # list_scans() (SELECT *) carries config_json + mode; list_all_scans() drops
     # them, which would leave every replay with an empty config → no targets.
     all_scans = store.list_scans(limit=1000)

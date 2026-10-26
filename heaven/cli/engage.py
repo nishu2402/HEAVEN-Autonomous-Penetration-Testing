@@ -12,6 +12,7 @@ from heaven.cli._helpers import (
     _engagement_db_path,
     _engagement_dirs,
     _print,
+    _validate_engagement_name,
     clear_current_engagement,
     get_current_engagement,
     resolve_engagement_name,
@@ -182,9 +183,13 @@ def engage_rename(old_name: str, new_name: str) -> None:
     if not new_name:
         _print("[red]New name must not be empty.[/red]")
         sys.exit(2)
-    if new_name == "default" or any(ch in new_name for ch in ("/", "\\")) or ".." in new_name:
-        _print(f"[red]Invalid engagement name: {new_name!r}[/red]")
+    if new_name == "default":
+        _print(f"[red]Invalid engagement name: {new_name!r}[/red] "
+               f"('default' is reserved).")
         sys.exit(2)
+    # Shared traversal/charset guard (also covers NUL + absolute paths, which the
+    # old inline check missed). The old name is validated when its path resolves.
+    _validate_engagement_name(new_name)
 
     old_path = _engagement_db_path(old_name)
     if not old_path.exists():

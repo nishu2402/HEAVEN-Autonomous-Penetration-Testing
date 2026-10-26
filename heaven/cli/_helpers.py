@@ -240,10 +240,36 @@ def _engagement_dirs() -> list[Path]:
     return dirs
 
 
+def _validate_engagement_name(name: str) -> None:
+    """Reject a bare engagement name that could escape the engagements dir.
+
+    An engagement name becomes a filename (``engagements/<name>.db``), so a name
+    with a path separator, ``..``, a NUL, or an absolute path would place the
+    SQLite DB outside the config-controlled data dir. ``engage rename`` already
+    guarded its target; this is the shared guard every bare name passes through,
+    so ``engage init`` and every ``--engagement <name>`` auto-create
+    (scan/dns/sca/ssh/vpn/fleet/autonomous/replay) are covered too. Mirrors the
+    web API's ``_validate_http_engagement``. Exits 2 on an unsafe name.
+    """
+    raw = str(name)
+    if ("/" in raw or "\\" in raw or "\x00" in raw or ".." in raw
+            or raw.strip() in ("", ".", "..") or Path(raw).is_absolute()):
+        _print(f"[red]Invalid engagement name: {name!r}[/red] "
+               f"(no path separators, '..', NUL, or absolute paths).")
+        sys.exit(2)
+
+
 def _resolve_engagement_name(name: str) -> Path:
     """Map a bare engagement name to its DB, preferring an existing file across
     the canonical + legacy dirs; a not-yet-created engagement lands in the
-    canonical (``<data_dir>/engagements/``) dir so it is web-visible too."""
+    canonical (``<data_dir>/engagements/``) dir so it is web-visible too.
+
+    The name is validated first so a traversal (``../../x``) or absolute path can
+    never materialise a DB outside ``<data_dir>/engagements/``; this is the one
+    choke point every bare name (explicit ``--engagement``, ``heaven use``
+    context, web/demo active pointer) flows through.
+    """
+    _validate_engagement_name(name)
     dirs = _engagement_dirs()
     for d in dirs:
         p = d / f"{name}.db"
@@ -278,3 +304,45 @@ def _engagement_db_path(name: Optional[str] = None) -> Path:
     except Exception:  # noqa: BLE001 — no pointer just means "use the default"
         logger.debug("suppressed non-fatal exception", exc_info=True)
     return Path("engagement.db")
+
+
+def _list_engagement_names() -> list[str]:
+    """Names of every engagement DB on disk, canonical dir first, deduped."""
+    names: list[str] = []
+    for d in _engagement_dirs():
+        try:
+            for p in sorted(d.glob("*.db")):
+                if p.stem not in names:
+                    names.append(p.stem)
+        except OSError:
+            continue
+    return names
+
+
+def _open_engagement_read(name: Optional[str] = None) -> Any:
+    """Open an engagement store for a READ-ONLY command.
+
+    Two guarantees a plain ``EngagementStore(_engagement_db_path(name))`` does
+    not give:
+
+    * ``create=False``: a command that only reads never leaves an empty store
+      behind. A bare ``EngagementStore(path)`` materialises ``<name>.db`` on
+      construction, so a typo'd ``--engagement`` used to create a stray DB in
+      ``data/engagements/`` and then silently return nothing.
+    * An explicitly named engagement with no DB fails loudly (exit 2, with the
+      known engagements) instead of silently serving an empty result, so a typo
+      surfaces as an error rather than a misleading "no findings".
+
+    The bare ``./engagement.db`` default (no name, no active pointer) is never
+    guarded; a fresh install reads empty, as before.
+    """
+    from heaven.engagement import EngagementStore
+    path = _engagement_db_path(name)
+    if name and not path.exists():
+        known = _list_engagement_names()
+        hint = ("  Known engagements: " + ", ".join(known)) if known else ""
+        _print(f"[red]No engagement named '{name}'.[/red] Run "
+               f"[cyan]heaven engage list[/cyan] to see engagements, or "
+               f"[cyan]heaven engage init {name}[/cyan] to create it.{hint}")
+        sys.exit(2)
+    return EngagementStore(path, create=False)

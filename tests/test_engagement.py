@@ -746,6 +746,33 @@ class TestEvidencePackage:
         # Second line is data
         assert "x1,a,sqli" in csv
 
+    def test_csv_export_neutralises_formula_injection(self):
+        """A hostile finding field (banner/URL/param) that starts with a formula
+        trigger must not become a live spreadsheet formula (CWE-1236). Every cell
+        is prefixed with a single quote so Excel / Calc / Sheets treat it as text,
+        while the visible text is preserved."""
+        import csv as _csv
+        import io
+        from heaven.devsecops.evidence import export_findings_csv
+        findings = [{
+            "id": "x1",
+            "target": '=HYPERLINK("http://evil.test","pwn")',
+            "vuln_type": "-2+3",
+            "title": "+cmd|'/c calc'!A1",
+            "severity": "high",
+            "operator_notes": "@SUM(1+1)",
+            "confidence": 0.9,
+        }]
+        out = export_findings_csv(findings)
+        rows = list(_csv.reader(io.StringIO(out)))
+        # No data cell may start with a formula-trigger character.
+        for cell in rows[1]:
+            assert cell[:1] not in ("=", "+", "-", "@", "\t", "\r"), cell
+        # The visible text is kept (prefixed), not dropped.
+        assert "HYPERLINK" in out and "calc" in out
+        # A benign numeric field stays a plain number (no stray quote).
+        assert "'0.9" not in out
+
 
 # ── End-to-end engagement workflow ─────────────────────────────────────
 

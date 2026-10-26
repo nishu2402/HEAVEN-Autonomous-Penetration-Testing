@@ -15,7 +15,7 @@ from __future__ import annotations
 import contextlib
 import shlex
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -976,8 +976,27 @@ def _render_compliance_md(findings: list[dict], framework_id: str) -> str:
     return "\n".join(lines)
 
 
+def _csv_safe(value: Any) -> Any:
+    """Neutralise CSV formula injection (CWE-1236).
+
+    A spreadsheet app (Excel / LibreOffice Calc / Google Sheets) runs a cell as a
+    formula when its first character is ``= + - @`` or a TAB / CR. Finding fields
+    can hold attacker-influenced strings (service banners, URLs, parameter names,
+    reflected payloads), so a leading-trigger string is prefixed with a single
+    quote, which keeps the visible text intact but forces the app to treat the
+    cell as text. Numbers and other non-string types pass through unchanged.
+    """
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def export_findings_csv(findings: list[dict]) -> str:
-    """Render findings as CSV — for ticket-system import."""
+    """Render findings as CSV for ticket-system import.
+
+    Cell values are run through :func:`_csv_safe` so a hostile finding field
+    cannot smuggle a spreadsheet formula into the deliverable.
+    """
     import csv
     import io
     buf = io.StringIO()
@@ -1004,5 +1023,5 @@ def export_findings_csv(findings: list[dict]) -> str:
             "first_seen_at": f.get("first_seen_at", ""),
             "operator_notes": f.get("operator_notes", ""),
         }
-        w.writerow(row)
+        w.writerow({k: _csv_safe(v) for k, v in row.items()})
     return buf.getvalue()

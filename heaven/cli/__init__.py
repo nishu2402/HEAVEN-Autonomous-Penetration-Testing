@@ -97,8 +97,9 @@ if HAS_CLICK:
     @click.option("--quiet", "-q", is_flag=True,
                   help="Suppress informational log output (clean output for scripts/CI).")
     @click.option("--json", "json_out", is_flag=True,
-                  help="Emit machine-readable JSON where supported (findings, doctor, "
-                       "config, coverage, assets, correlate, demo). Implies --quiet.")
+                  help="Emit machine-readable JSON where supported (findings, status, "
+                       "leads, doctor, config, coverage, assets, correlate, demo). "
+                       "Implies --quiet.")
     @click.option("--config-file", type=click.Path(), help="Path to .env config file")
     @click.pass_context
     def cli(ctx: click.Context, debug: bool, quiet: bool, json_out: bool,

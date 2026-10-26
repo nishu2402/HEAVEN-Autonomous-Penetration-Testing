@@ -14,6 +14,10 @@ const SS_KEY = "heaven.auth";
 let authToken = null;
 let currentUser = null;
 let mustChangePassword = false;
+// Set when the server recognised us without a token: only possible with
+// HEAVEN_DISABLE_AUTH (dev/CI), where /api/auth/me returns a synthesised admin.
+// Lets the console treat us as signed in with no bearer token to store.
+let authBypass = false;
 const listeners = new Set();
 const sessionExpiredListeners = new Set();
 
@@ -55,7 +59,27 @@ export function getUser() {
 }
 
 export function isAuthenticated() {
-  return Boolean(authToken && currentUser);
+  return Boolean((authToken || authBypass) && currentUser);
+}
+
+// Boot-time probe for the no-stored-session case. With HEAVEN_DISABLE_AUTH set
+// (dev/CI) the backend answers /api/auth/me with a synthesised admin and no
+// token is needed, so the console opens straight to the dashboard instead of
+// trapping the operator at a login wall the server isn't even enforcing. In
+// normal mode the endpoint returns 401 and we stay logged out, so
+// ProtectedRoute still redirects to /login. Returns true when adopted.
+export async function bootstrapAuth() {
+  if (authToken && currentUser) return true; // real session already hydrated
+  try {
+    const r = await fetch(`${API_BASE}/auth/me`);
+    if (!r.ok) return false;
+    currentUser = await r.json();
+    authBypass = true;
+    notify();
+    return true;
+  } catch {
+    return false; // network/offline, stay on the login screen
+  }
 }
 
 export function onAuthChange(fn) {
@@ -221,6 +245,7 @@ export async function logout() {
   }
   authToken = null;
   currentUser = null;
+  authBypass = false;
   persistAuth();
   notify();
 }

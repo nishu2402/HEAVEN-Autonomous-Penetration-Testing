@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router";
 
-import { isAuthenticated, onAuthChange, needsPasswordChange, onSessionExpired } from "./api";
+import { isAuthenticated, onAuthChange, needsPasswordChange, onSessionExpired, bootstrapAuth } from "./api";
 
 // Eager: the app shell + the login screen. These paint first, so they stay in
 // the main bundle. Everything below is code-split (React.lazy) so the heavy
@@ -64,13 +64,28 @@ function RouteFallback() {
 
 function ProtectedRoute({ children }) {
   const [authed, setAuthed] = useState(isAuthenticated());
+  // When there's no stored session, probe the server once before deciding to
+  // redirect. With HEAVEN_DISABLE_AUTH set the probe adopts the admin and we
+  // skip the login wall; otherwise it 401s and we fall through to /login.
+  const [checking, setChecking] = useState(() => !isAuthenticated());
   const loc = useLocation();
 
   useEffect(() => {
     return onAuthChange(() => setAuthed(isAuthenticated()));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (isAuthenticated()) {
+      setChecking(false);
+      return undefined;
+    }
+    bootstrapAuth().finally(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   if (!authed) {
+    if (checking) return <RouteFallback />;
     return <Navigate to="/login" state={{ from: loc }} replace />;
   }
   return children;

@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Engagement as Eng } from "../api";
+import { useNavigate, useSearchParams } from "react-router";
+import { Engagement as Eng, Engagements } from "../api";
 import { EmptyState } from "../components/Skeleton.jsx";
 import { useToast } from "../components/Toast.jsx";
+
+const EMPTY_NEW = { name: "", client: "", sow: "", tester: "" };
 
 // The stored created_at is a raw ISO string with microseconds
 // (2026-08-19T09:36:46.689771+00:00) — machine output, not something to show an
@@ -19,6 +22,8 @@ function fmtWhen(iso) {
 
 export default function EngagementPage() {
   const toast = useToast();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
@@ -28,11 +33,60 @@ export default function EngagementPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
+  // Create-a-new-engagement form. Opened by the "New engagement" action
+  // (command palette / dashboard button route here with ?new=1) or the inline
+  // "＋ New engagement" button on this page.
+  const [creating, setCreating] = useState(false);
+  const [newForm, setNewForm] = useState(EMPTY_NEW);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState(null);
+
   const reload = useCallback(() => {
     Eng.summary().then(setData).catch((e) => setError(e.message));
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Open the create form when routed here with ?new=1 (command palette, the
+  // dashboard "New engagement" button, the header "Manage engagements" link).
+  useEffect(() => {
+    if (searchParams.get("new") === "1") setCreating(true);
+  }, [searchParams]);
+
+  function openCreate() {
+    setCreateError(null);
+    setNewForm(EMPTY_NEW);
+    setCreating(true);
+  }
+  function cancelCreate() {
+    setCreating(false);
+    setCreateError(null);
+    setNewForm(EMPTY_NEW);
+    if (searchParams.get("new")) setSearchParams({}, { replace: true });
+  }
+  async function submitCreate() {
+    const name = newForm.name.trim();
+    if (!name) { setCreateError("Name is required."); return; }
+    setCreateBusy(true);
+    setCreateError(null);
+    try {
+      await Engagements.create({
+        name,
+        client: newForm.client.trim(),
+        sow: newForm.sow.trim(),
+        tester: newForm.tester.trim(),
+      });
+      toast.success?.(`Engagement "${name}" created`);
+      setCreating(false);
+      setNewForm(EMPTY_NEW);
+      if (searchParams.get("new")) setSearchParams({}, { replace: true });
+      reload();   // the new engagement is now the active one
+    } catch (e) {
+      setCreateError(e.message || "Could not create engagement");
+    } finally {
+      setCreateBusy(false);
+    }
+  }
 
   function startEdit(field, current) {
     setEditField(field);
@@ -115,9 +169,87 @@ export default function EngagementPage() {
     );
   }
 
+  // The create form. Rendered at the top of every view state (loading, error,
+  // empty, populated) whenever `creating` is on, so "New engagement" always
+  // reaches a working form no matter which engagement (if any) is active.
+  const createCard = creating ? (
+    <div className="card">
+      <div className="card-title">New engagement</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 520 }}>
+        <label className="form-group">
+          <span className="form-label">Name <span className="dim">(required)</span></span>
+          <input
+            className="form-input"
+            autoFocus
+            value={newForm.name}
+            disabled={createBusy}
+            maxLength={120}
+            placeholder="e.g. acme-webapp-pentest"
+            onChange={(e) => setNewForm((f) => ({ ...f, name: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); submitCreate(); }
+              if (e.key === "Escape") { e.preventDefault(); cancelCreate(); }
+            }}
+          />
+        </label>
+        <label className="form-group">
+          <span className="form-label">Client <span className="dim">(optional)</span></span>
+          <input
+            className="form-input"
+            value={newForm.client}
+            disabled={createBusy}
+            maxLength={200}
+            placeholder="e.g. ACME Corp"
+            onChange={(e) => setNewForm((f) => ({ ...f, client: e.target.value }))}
+          />
+        </label>
+        <label className="form-group">
+          <span className="form-label">Statement of work <span className="dim">(optional)</span></span>
+          <input
+            className="form-input"
+            value={newForm.sow}
+            disabled={createBusy}
+            maxLength={200}
+            placeholder="e.g. SOW-2026-001"
+            onChange={(e) => setNewForm((f) => ({ ...f, sow: e.target.value }))}
+          />
+        </label>
+        <label className="form-group">
+          <span className="form-label">Tester <span className="dim">(optional)</span></span>
+          <input
+            className="form-input"
+            value={newForm.tester}
+            disabled={createBusy}
+            maxLength={200}
+            placeholder="Who ran the assessment (shown on reports)"
+            onChange={(e) => setNewForm((f) => ({ ...f, tester: e.target.value }))}
+          />
+        </label>
+        {createError && (
+          <div className="error" style={{ fontSize: 12 }}>{createError}</div>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-primary"
+            disabled={createBusy || !newForm.name.trim()}
+            onClick={submitCreate}
+          >
+            {createBusy ? "Creating…" : "Create engagement"}
+          </button>
+          <button className="btn" disabled={createBusy} onClick={cancelCreate}>Cancel</button>
+        </div>
+        <span className="dim" style={{ fontSize: 11 }}>
+          Creates an isolated SQLite store and switches the app to it. Add scope
+          from the CLI, then launch a scan.
+        </span>
+      </div>
+    </div>
+  ) : null;
+
   if (error) {
     return (
       <div className="page">
+        {createCard}
         <div className="card error">{error}</div>
       </div>
     );
@@ -126,7 +258,8 @@ export default function EngagementPage() {
   if (!data) {
     return (
       <div className="page">
-        <div className="card"><span className="dim">Loading...</span></div>
+        {createCard}
+        {!creating && <div className="card"><span className="dim">Loading...</span></div>}
       </div>
     );
   }
@@ -137,10 +270,16 @@ export default function EngagementPage() {
   if (noEng) {
     return (
       <div className="page">
+        {createCard}
+        {!creating && (
+          <div className="card" style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn btn-primary" onClick={openCreate}>＋ New engagement</button>
+          </div>
+        )}
         <EmptyState
           icon="◈"
           headline="No active engagement yet"
-          body="HEAVEN organizes findings per engagement. The quickest way to start one is to launch a scan with an engagement name: or use the CLI steps below."
+          body="HEAVEN organizes findings per engagement. Click ＋ New engagement above to start one, launch a scan with an engagement name, or use the CLI steps below."
           cta="Launch a scan →"
           ctaTo="/scans"
         />
@@ -175,6 +314,12 @@ heaven scope add https://app.acme.example --kind url`}</pre>
 
   return (
     <div className="page">
+      {createCard}
+      {!creating && (
+        <div className="card" style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button className="btn btn-primary" onClick={openCreate}>＋ New engagement</button>
+        </div>
+      )}
       <div className="card">
         <div className="card-title">Engagement Details</div>
         <table className="kv-table">

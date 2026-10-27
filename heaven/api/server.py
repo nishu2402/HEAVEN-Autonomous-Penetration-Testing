@@ -2378,7 +2378,17 @@ def create_app() -> FastAPI:
         try:
             eng = store.get_engagement()
             stats = store.stats()
-            no_engagement = stats.get("total_findings", 0) == 0 and stats.get("scans_run", 0) == 0
+            # "No engagement" means there is genuinely nothing to show: no
+            # engagement-metadata row AND no activity. A freshly-created
+            # engagement (via `heaven engage init` or the web "New engagement"
+            # action) has a real metadata row but zero scans/findings — it must
+            # NOT be reported as "no engagement", or the UI would hide it behind
+            # the empty state until its first scan.
+            no_engagement = (
+                eng is None
+                and stats.get("total_findings", 0) == 0
+                and stats.get("scans_run", 0) == 0
+            )
             # Confirmation split — Overall Risk from confirmed findings only, in
             # parity with the reports and /api/dashboard. Computed on read.
             try:
@@ -2534,6 +2544,71 @@ def create_app() -> FastAPI:
                            "updated": 0.0})
         out.sort(key=lambda e: (not e["active"], -e["findings"], e["name"]))
         return {"engagements": out, "active": active}
+
+    @app.post("/api/engagements")
+    async def create_engagement_endpoint(
+        body: dict,
+        user: User = Depends(require_permission("scan.create")),
+    ):
+        """Create a brand-new, empty engagement store and (by default) switch the
+        app to it.
+
+        Backs the web UI "New engagement" action so an operator can start a fresh
+        engagement without first launching a scan or dropping to the CLI. Optional
+        ``client`` / ``statement_of_work`` (alias ``sow``) / ``tester`` seed the
+        cover-page metadata, exactly like ``heaven engage init``. Pass
+        ``activate: false`` to create without switching the active view.
+        """
+        from heaven.config import get_config
+        from heaven.engagement import EngagementStore
+
+        if not isinstance(body, dict):
+            raise HTTPException(422, "expected a JSON object")
+
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "name is required")
+        # The name becomes a DB filename — reject traversal before any file op.
+        _validate_http_engagement(name)
+        if name == "default":
+            raise HTTPException(400, "'default' is reserved and cannot be used as a name")
+
+        eng_dir = get_config().data_dir / "engagements"
+        db = eng_dir / f"{name}.db"
+        if db.exists():
+            raise HTTPException(409, f"An engagement named '{name}' already exists")
+
+        def _clean(v: Any) -> str:
+            # Collapse to a tidy single-line string, length-capped to keep the DB
+            # and report cover page sane (mirrors the PATCH details endpoint).
+            return " ".join(str(v or "").split())[:200]
+
+        client = _clean(body.get("client"))
+        sow = _clean(body.get("statement_of_work") or body.get("sow"))
+        tester = _clean(body.get("tester"))
+
+        try:
+            # create=True materialises the DB (and hardens its permissions).
+            store = EngagementStore(db)
+            eng = store.create_engagement(
+                name, client=client, statement_of_work=sow, tester=tester
+            )
+        except Exception as e:  # noqa: BLE001 — surface the failure to the UI
+            logger.warning("Engagement create failed for '%s': %s", name, e)
+            raise HTTPException(500, "Could not create engagement")
+
+        # Default to switching the whole app to the new engagement: the explicit
+        # "New engagement" action means "start working in it now".
+        activate = body.get("activate", True)
+        active = _resolve_engagement_name()
+        if activate:
+            _set_active_engagement(name)
+            active = name
+
+        logger.info("Engagement '%s' created by %s (activate=%s)",
+                    name, user.username, bool(activate))
+        return {"ok": True, "name": name, "active": active,
+                "engagement": eng.__dict__ if eng else None}
 
     @app.post("/api/engagements/active")
     async def set_active_engagement_endpoint(
@@ -5591,20 +5666,28 @@ def create_app() -> FastAPI:
             )
         except Exception as e:
             raise _server_error("sast_runner unavailable", e)
-        if not has_semgrep():
-            raise HTTPException(412, "semgrep not installed on the server "
-                                     "(pip install semgrep)")
 
+        # Validate the request body (400/422) before the semgrep precondition
+        # (412). A malformed request is the client's error no matter what the
+        # server has installed, so answering it first keeps the HTTP contract
+        # environment-independent: semgrep is an optional dep, so a host without
+        # it would otherwise mask a bad-body 400 behind a 412 (and CI, which does
+        # not install semgrep, saw exactly that).
         body = await _json_object(request)
         path = body.get("path")
         if not path:
             raise HTTPException(422, "body.path is required")
+        timeout_s = _int_field(body.get("timeout"), 300, name="timeout")
+
+        if not has_semgrep():
+            raise HTTPException(412, "semgrep not installed on the server "
+                                     "(pip install semgrep)")
 
         result = await run_sast(
             path,
             extra_configs=list(body.get("extra_configs") or []),
             use_builtin_rules=not bool(body.get("no_builtin", False)),
-            timeout_s=_int_field(body.get("timeout"), 300, name="timeout"),
+            timeout_s=timeout_s,
         )
 
         # Persist into an engagement so the findings surface in triage/dashboard.

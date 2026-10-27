@@ -440,6 +440,15 @@ export default function Dashboard() {
                   Remove {engList.filter((e) => !e.findings && !e.scans).length} empty engagements
                 </button>
               )}
+              <button
+                type="button"
+                className="eng-switch-new"
+                disabled={!!busyEng}
+                onClick={() => navigate('/engagement?new=1')}
+                title="Create a new, empty engagement"
+              >
+                ＋ New engagement
+              </button>
             </div>
           )}
           {noEng ? (
@@ -452,6 +461,9 @@ export default function Dashboard() {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" onClick={() => navigate('/scans')}>
                   Launch a scan →
+                </button>
+                <button className="btn" onClick={() => navigate('/engagement?new=1')}>
+                  ＋ New engagement
                 </button>
                 <button className="btn" onClick={loadSampleData} disabled={seeding}>
                   {seeding ? 'Loading…' : 'Load sample data'}

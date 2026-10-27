@@ -381,6 +381,15 @@ function notifyEngagementChanged() {
 
 export const Engagements = {
   list: () => api("/engagements"),
+  // Create a brand-new, empty engagement and (unless activate:false) switch the
+  // whole app to it. Backs the "New engagement" action. Optional client / sow /
+  // tester seed the cover-page metadata, same as `heaven engage init`.
+  // → { ok, name, active, engagement }.
+  create: ({ name, client, sow, tester, activate = true } = {}) =>
+    api("/engagements", {
+      method: "POST",
+      body: JSON.stringify({ name, client, statement_of_work: sow, tester, activate }),
+    }).then((r) => { notifyEngagementChanged(); return r; }),
   setActive: (name) =>
     api("/engagements/active", { method: "POST", body: JSON.stringify({ name }) })
       .then((r) => { notifyEngagementChanged(); return r; }),

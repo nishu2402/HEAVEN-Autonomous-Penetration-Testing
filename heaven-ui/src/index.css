@@ -548,6 +548,15 @@ a:hover { color: var(--accent-2); }
 }
 .eng-switch-clear:hover:not(:disabled) { color: var(--crit); }
 .eng-switch-clear:disabled { cursor: default; opacity: 0.5; }
+.eng-switch-new {
+  display: block; width: 100%; margin-top: 8px; padding: 7px 10px;
+  background: none; cursor: pointer;
+  border: 1px dashed var(--border); border-radius: var(--radius-sm, 6px);
+  color: var(--text-1); font-size: 12px; font-family: var(--font-ui);
+  font-weight: 600;
+}
+.eng-switch-new:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.eng-switch-new:disabled { cursor: default; opacity: 0.5; }
 
 .user-badge {
   color: var(--text-1); font-size: 11.5px; font-weight: 500;

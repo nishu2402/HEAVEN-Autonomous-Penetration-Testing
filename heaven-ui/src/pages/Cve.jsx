@@ -164,9 +164,9 @@ export default function CvePage() {
                         <td style={{ color: sevColor(c.severity), fontWeight: 600 }}>
                           {c.severity}
                         </td>
-                        <td className="num">{c.cvss || "—"}</td>
+                        <td className="num">{c.cvss || "n/a"}</td>
                         <td className="num" style={{ fontSize: 11 }}>
-                          {c.epss ? `${Math.round(c.epss * 100)}%` : "—"}
+                          {c.epss ? `${Math.round(c.epss * 100)}%` : "n/a"}
                         </td>
                         <td className="mono" style={{ fontSize: 11.5 }}>
                           {ref ? (
@@ -202,7 +202,7 @@ export default function CvePage() {
                             <span className="dim">version-unverified</span>
                           )}
                         </td>
-                        <td className="mono" style={{ fontSize: 11 }}>{c.cwe || "—"}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>{c.cwe || "n/a"}</td>
                         <td style={{ fontSize: 11.5, maxWidth: 380 }}>
                           {(c.title || "").slice(0, 130)}
                         </td>

@@ -149,7 +149,7 @@ export default function Findings() {
         }}>
           {Number.isFinite(Number(f.confidence))
             ? `${Math.round(Number(f.confidence) * 100)}%`
-            : "—"}
+            : "n/a"}
         </span>
       </td>
       <td><span className={`status-pill status-${f.status}`}>{f.status}</span></td>

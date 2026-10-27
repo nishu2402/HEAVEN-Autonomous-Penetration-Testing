@@ -377,9 +377,9 @@ export default function AssetsPage() {
                     <tr key={i}>
                       <td className="num mono">{p.port}</td>
                       <td className="mono" style={{ fontSize: 11 }}>{p.protocol || "tcp"}</td>
-                      <td>{p.service || "—"}</td>
-                      <td className="mono" style={{ fontSize: 11.5 }}>{p.service_version || "—"}</td>
-                      <td className="mono" style={{ fontSize: 10.5 }}>{p.cpe || "—"}</td>
+                      <td>{p.service || "n/a"}</td>
+                      <td className="mono" style={{ fontSize: 11.5 }}>{p.service_version || "n/a"}</td>
+                      <td className="mono" style={{ fontSize: 10.5 }}>{p.cpe || "n/a"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -474,7 +474,7 @@ export default function AssetsPage() {
                       <tr key={i}>
                         <td className="mono" style={{ fontSize: 11.5 }}>{s.name}</td>
                         <td className="mono" style={{ fontSize: 11 }}>
-                          {(s.addresses || []).join(", ") || "—"}
+                          {(s.addresses || []).join(", ") || "n/a"}
                         </td>
                       </tr>
                     ))}

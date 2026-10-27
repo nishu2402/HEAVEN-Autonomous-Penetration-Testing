@@ -12,7 +12,7 @@ const STATUSES = ["open", "promoted", "dismissed", "all"];
 
 function pct(v) {
   const n = Number(v);
-  return Number.isFinite(n) ? `${Math.round(n * 100)}%` : "—";
+  return Number.isFinite(n) ? `${Math.round(n * 100)}%` : "n/a";
 }
 
 export default function Leads() {

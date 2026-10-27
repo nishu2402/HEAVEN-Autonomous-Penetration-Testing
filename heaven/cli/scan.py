@@ -88,7 +88,7 @@ def _print_inventory(assets: Optional[list]) -> None:
         for p in h.get("ports", []):
             ver = p.get("service_version") or ""
             _print(f"    [dim]{p['port']:>5}/{p.get('protocol','tcp')}[/dim]  "
-                   f"{(p.get('service') or '—')[:14]:14}  {ver}")
+                   f"{(p.get('service') or 'n/a')[:14]:14}  {ver}")
     _print("  [dim]View later:[/dim] [cyan]heaven assets[/cyan]  "
            "[dim](an OS marked 'heuristic, unconfirmed' is a TTL guess)[/dim]")
 
@@ -597,7 +597,7 @@ def scan(
             try:
                 conf_str = f"{float(conf):.2f}"
             except (TypeError, ValueError):
-                conf_str = "—"
+                conf_str = "n/a"
             print(f"{ts}  FINDING  [{sev:<8}] {vt:24} {tgt:60} conf={conf_str}",
                   flush=True)
 
@@ -722,7 +722,7 @@ def scan(
                     try:
                         conf_str = f"{float(conf_val):.2f}"
                     except (TypeError, ValueError):
-                        conf_str = "—"
+                        conf_str = "n/a"
                     ftable.add_row(
                         f"[{color}]{sev[:4].upper()}[/{color}]",
                         str(f.get("vuln_type") or f.get("type") or "")[:24],
@@ -826,7 +826,7 @@ def scan(
                     v = float(fnd.get("predicted_cvss_score") or 0)
                 except (TypeError, ValueError):
                     v = 0.0
-                return f"{v:.1f}" if 0.0 < v <= 10.0 else "—"
+                return f"{v:.1f}" if 0.0 < v <= 10.0 else "n/a"
 
             for f in sorted(all_findings,
                             key=lambda x: x.get("priority_score", 0), reverse=True):

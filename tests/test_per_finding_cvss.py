@@ -167,7 +167,7 @@ def test_report_renders_both_base_and_contextual_columns():
     base = gen._finding_cvss(f)
     ctx = gen._finding_contextual_cvss(f)
     assert base == "8.1"
-    assert ctx not in ("—", base)  # genuinely adjusted, still a real number
+    assert ctx not in ("n/a", base)  # genuinely adjusted, still a real number
     html = gen.generate_html_report([f], engagement_name="t")
     assert ">Contextual</th>" in html  # the second column header is present
 

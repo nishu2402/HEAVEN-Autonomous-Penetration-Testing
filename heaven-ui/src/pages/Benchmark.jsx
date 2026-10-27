@@ -31,7 +31,7 @@ function fmtWhen(iso) {
   }
 }
 
-const pct = (x) => (x == null ? "—" : `${(x * 100).toFixed(1)}%`);
+const pct = (x) => (x == null ? "n/a" : `${(x * 100).toFixed(1)}%`);
 
 // Per-source explanatory caption — keeps the claim honest.
 const SOURCE_NOTE = {

@@ -159,6 +159,52 @@ class TestScope:
         assert not store.list_scope()
         assert len(store.list_scope(in_scope_only=False)) == 1
 
+    def test_out_of_scope_cidr_wins_over_in_scope_supernet(self, store):
+        """Exclusions are subtracted from inclusions: an IP inside an in-scope
+        super-range but also inside a narrower OUT-of-scope CIDR must be rejected
+        by the pre-scan gate, not scanned. Regression for the scope bypass where
+        the containment loop only consulted in_scope=1 rows."""
+        store.add_scope("10.0.0.0/8", kind="cidr", in_scope=True)
+        store.add_scope("10.5.5.0/24", kind="cidr", in_scope=False)
+        # In the in-scope /8 and NOT excluded → authorized.
+        assert store.is_in_scope("10.1.2.3")
+        # Inside the excluded /24 → rejected, in every form.
+        assert not store.is_in_scope("10.5.5.5")
+        assert not store.is_in_scope("http://10.5.5.5/admin")
+        assert not store.is_in_scope("10.5.5.0/24")
+        # A narrower exclusion does not drag the rest of the /8 out of scope.
+        assert store.is_in_scope("10.9.9.9")
+
+    def test_exact_in_scope_ip_overrides_broader_exclusion(self, store):
+        """An exact in-scope entry is the most specific statement and stands even
+        when a broader out-of-scope CIDR would otherwise exclude it."""
+        store.add_scope("10.5.5.0/24", kind="cidr", in_scope=False)
+        store.add_scope("10.5.5.9", kind="ip", in_scope=True)
+        assert store.is_in_scope("10.5.5.9")
+        assert not store.is_in_scope("10.5.5.8")
+
+    def test_out_of_scope_host_rejects_url_form(self, store):
+        """An excluded host blocks its URL/port forms too (exclusion by host)."""
+        store.add_scope("example.com", kind="host", in_scope=True)
+        store.add_scope("admin.example.com", kind="host", in_scope=False)
+        assert store.is_in_scope("https://example.com/login")
+        assert not store.is_in_scope("admin.example.com")
+        assert not store.is_in_scope("https://admin.example.com/panel")
+
+    def test_ipv6_cidr_scope_with_exclusion(self, store):
+        """IPv6 containment must work (urlparse mangles a bare IPv6 host key to
+        its first label, so every v6 host used to collapse together). An address
+        in an in-scope /32 is authorized unless it is also in an out-of-scope
+        /48, in bare and bracketed-URL forms alike."""
+        store.add_scope("2001:db8::/32", kind="cidr", in_scope=True)
+        store.add_scope("2001:db8:dead::/48", kind="cidr", in_scope=False)
+        assert store.is_in_scope("2001:db8::1")
+        assert store.is_in_scope("2001:db8:beef::9")
+        assert store.is_in_scope("http://[2001:db8::7]/x")
+        assert not store.is_in_scope("2001:db8:dead::5")
+        assert not store.is_in_scope("http://[2001:db8:dead::7]/x")
+        assert not store.is_in_scope("2001:dead::1")  # outside the /32
+
     def test_remove_scope(self, store):
         store.add_scope("temp.example")
         assert store.remove_scope("temp.example")
@@ -574,6 +620,31 @@ class TestFindingStatus:
     def test_update_nonexistent_returns_false(self, store):
         assert not store.update_finding_status("does-not-exist", "verified")
 
+    def test_non_dict_evidence_json_coerced_to_dict(self, store):
+        """A finding whose stored evidence_json is valid JSON but not an object
+        (a scanner persisted a bare list/string/number) must still read back with
+        a DICT evidence, so `heaven show` / `repro` / exports can call `.get` on
+        it instead of crashing with AttributeError. Regression for the gap in
+        `_row_to_finding` (get_finding + list_findings)."""
+        import sqlite3
+        from heaven.devsecops.evidence import package_finding
+        fid = store.upsert_finding("s1", {
+            "target": "http://t", "vuln_type": "x", "severity": "low",
+            "confidence": 0.5, "evidence": {"a": 1}})
+        with sqlite3.connect(store.db_path) as c:
+            c.execute("UPDATE findings SET evidence_json=? WHERE id=?",
+                      ('["ESC", 1, 2]', fid))
+            c.commit()
+        assert store.get_finding(fid).evidence == {}
+        assert store.list_findings()[0].evidence == {}
+        # The render path no longer raises.
+        f = store.get_finding(fid)
+        pkg = package_finding({"id": f.id, "target": f.target,
+                               "vuln_type": f.vuln_type, "title": f.title,
+                               "severity": f.severity, "confidence": f.confidence,
+                               "evidence": f.evidence})
+        assert pkg.to_markdown()
+
 
 # ── Filtering / search ─────────────────────────────────────────────────
 
@@ -980,3 +1051,59 @@ def test_legacy_world_readable_db_is_narrowed_on_open(tmp_path):
     EngagementStore(db, create=False)  # read-only open still hardens
     assert (db.stat().st_mode & 0o077) == 0, oct(db.stat().st_mode)
     assert (db.parent.stat().st_mode & 0o077) == 0, oct(db.parent.stat().st_mode)
+
+
+def test_filter_methods_are_parameterized_against_sql_injection(tmp_path):
+    """P4 lock-in: every user-facing store filter binds its value as a parameter,
+    so a SQL-injection payload is treated as a literal, not executed.
+
+    The strong discriminator is ``' OR '1'='1``: with parameters it matches zero
+    rows (the literal string is nowhere in the data); string concatenation would
+    instead return every row (or raise). A ``DROP TABLE`` payload must also leave
+    the schema intact. Covers list_findings (all string filters), get_leads /
+    count_leads (status + scan_id), count_findings and get_scan.
+    """
+    from heaven.engagement import EngagementStore
+
+    store = EngagementStore(tmp_path / "inj.db")
+    store.create_engagement("inj-eng")
+    store.record_scan_start("s1", name="s1", mode="web")
+    store.upsert_finding("s1", {"target": "https://a.example", "vuln_type": "xss",
+                                "severity": "high", "confidence": 0.9, "status": "open"})
+    store.upsert_finding("s1", {"target": "https://b.example", "vuln_type": "sqli",
+                                "severity": "critical", "confidence": 0.95, "status": "open"})
+    store.record_lead("s1", {"target": "https://c.example", "vuln_type": "idor",
+                             "severity": "medium", "confidence": 0.3})
+
+    baseline_findings = store.count_findings()
+    assert baseline_findings == 2
+    baseline_leads = store.count_leads()
+    assert baseline_leads >= 1
+
+    tautology = "' OR '1'='1"
+    drop = "x'; DROP TABLE findings; --"
+    union = "' UNION SELECT name FROM sqlite_master --"
+
+    for evil in (tautology, drop, union):
+        # A tautology bound as a parameter matches nothing, never "all rows".
+        assert store.list_findings(status=evil) == []
+        assert store.list_findings(severity=evil) == []
+        assert store.list_findings(vuln_type=evil) == []
+        assert store.list_findings(scan_id=evil) == []
+        # target uses LIKE %value%, still a bound parameter, still no match.
+        assert store.list_findings(target=evil) == []
+        # Leads filters.
+        assert store.get_leads(status=evil) == []
+        assert store.get_leads(scan_id=evil) == []
+        assert store.count_leads(status=evil) == 0
+        assert store.count_leads(scan_id=evil) == 0
+        assert store.count_findings(scan_id=evil) == 0
+        assert store.get_scan(evil) is None
+
+    # Schema + data survived every payload (no DROP, no corruption).
+    assert store.count_findings() == baseline_findings
+    assert store.count_leads() == baseline_leads
+    # And a legitimate filter still returns the right row (parameterization did
+    # not break normal querying).
+    assert len(store.list_findings(vuln_type="sqli")) == 1
+    assert store.stats()["total_findings"] == baseline_findings

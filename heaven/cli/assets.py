@@ -180,7 +180,7 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
             for p in h["ports"]:
                 ver = p.get("service_version") or ""
                 _print(f"  {p['port']:>7}  {p.get('protocol','tcp'):5}  "
-                       f"{(p.get('service') or '—')[:14]:14}  {ver}")
+                       f"{(p.get('service') or 'n/a')[:14]:14}  {ver}")
         _print("\n[dim]An OS marked '(heuristic · unconfirmed)' is a TTL guess, not a "
                "stack fingerprint.[/dim]")
 
@@ -200,7 +200,7 @@ def assets(engagement: Optional[str], scan_id: Optional[str],
             if subs:
                 _print(f"  [bold]Subdomains ({len(subs)}):[/bold]")
                 for s in subs:
-                    addrs = ", ".join(s.get("addresses") or []) or "—"
+                    addrs = ", ".join(s.get("addresses") or []) or "n/a"
                     _print(f"    [green]{s['name']}[/green]  [dim]{addrs}[/dim]")
 
 

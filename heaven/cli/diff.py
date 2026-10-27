@@ -179,7 +179,7 @@ def retest(baseline_scan_id: str, current_scan_id: str,
         _print(f"[green]Retest report written:[/green] {output}")
 
     rate = posture["remediation_rate"]
-    rate_str = f"{rate:.0f}%" if rate is not None else "—"
+    rate_str = f"{rate:.0f}%" if rate is not None else "n/a"
     _print(f"\n[bold]Remediation retest · {current_scan_id[:8]} vs. {baseline_scan_id[:8]}[/bold]")
     _print(f"  Remediated:       [green]{posture['remediated']:4}[/green]  "
            f"([bold green]{rate_str}[/bold green] of {posture['prior_total']} baseline findings)")

@@ -377,11 +377,11 @@ export default function WatchPage() {
                     <td className="num">
                       {r.n}{r.baseline ? <span className="dim" title="baseline, nothing to diff against yet"> (base)</span> : ""}
                     </td>
-                    <td><code>{(r.scan_id || "").slice(0, 8) || "—"}</code></td>
+                    <td><code>{(r.scan_id || "").slice(0, 8) || "n/a"}</code></td>
                     <td className="num" style={r.new ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{r.new ?? 0}</td>
                     <td className="num" style={r.regressed ? { color: "var(--warn, var(--danger))", fontWeight: 600 } : undefined}>{r.regressed ?? 0}</td>
                     <td className="num">{r.resolved ?? 0}</td>
-                    <td>{r.alert_dispatched ? "✓ sent" : (r.baseline ? "—" : "·")}</td>
+                    <td>{r.alert_dispatched ? "✓ sent" : (r.baseline ? "n/a" : "·")}</td>
                     <td className="dim" style={{ fontSize: 11 }}>
                       {r.error
                         ? <span className="error" style={{ fontSize: 11 }}>{r.error}</span>

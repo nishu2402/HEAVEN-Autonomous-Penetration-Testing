@@ -232,6 +232,38 @@ _background_scan_tasks: set = set()
 # (previously it only relabelled the in-memory dict while the scan ran on).
 _scan_tasks_by_id: dict[str, "asyncio.Task"] = {}
 
+# active_scans keeps a per-process cache of scans; the engagement store is the
+# durable record. Completed scans used to stay in this dict forever, so a
+# long-running `serve` leaked memory in proportion to every scan it ever ran
+# (each entry retains the full request config and the orchestrator result), and
+# GET /api/scans re-copied the whole dict on every poll. Cap it like the
+# fleet/autonomous/watch job dicts do, but ONLY evict scans in a terminal state:
+# a pending/running entry is load-bearing (duplicate-suppression, Cancel, live
+# progress, the WS stream, and orphan self-heal all key off its presence, and it
+# has no terminal store row to fall back to yet). Evicting an old terminal entry
+# is transparent: GET /api/scans and GET /api/scans/{id} already fall back to
+# the store for any id not in memory (the post-restart path).
+_ACTIVE_SCANS_SOFT_CAP = 200
+_LIVE_SCAN_STATES = frozenset({"pending", "running"})
+
+
+def _evict_terminal_scans() -> None:
+    """Bound active_scans by dropping the oldest terminal-state entries, never a
+    live (pending/running) one. Called right after a new scan is inserted."""
+    if len(active_scans) <= _ACTIVE_SCANS_SOFT_CAP:
+        return
+    terminal = [
+        (sid, sc) for sid, sc in active_scans.items()
+        if (sc.get("status") or "") not in _LIVE_SCAN_STATES
+    ]
+    # Oldest first. `created` is an ISO8601 string (lexicographically ordered by
+    # time); fall back to started_at, then the id, so the sort is always total.
+    terminal.sort(key=lambda kv: (kv[1].get("created")
+                                  or kv[1].get("started_at") or "", kv[0]))
+    drop = len(active_scans) - _ACTIVE_SCANS_SOFT_CAP
+    for sid, _sc in terminal[:drop]:
+        active_scans.pop(sid, None)
+
 # ── Autonomous-loop jobs ──
 # The autonomous loop can run for minutes. Running it inline in the request
 # handler blocked the HTTP response for the whole run and made the UI lose all
@@ -492,6 +524,130 @@ def _ws_error(message: str, exc: Optional[BaseException] = None) -> str:
     return f"{message} (ref {ref})"
 
 
+def _safe_error(message: str, exc: Optional[BaseException] = None) -> str:
+    """Client-safe error string for a background scan or job whose status the UI
+    polls; the stored analogue of ``_server_error`` / ``_ws_error``.
+
+    A broad ``except Exception`` must not drop the raw exception text into a dict
+    the status endpoints return verbatim (``GET /api/scans``, ``/api/scans/{id}``,
+    the job status routes): ``str(exc)`` can carry an absolute filesystem path
+    (``FileNotFoundError``), a database schema detail (``sqlite3.OperationalError``)
+    or an internal identifier (CWE-209, information exposure through an error
+    message). The full detail and traceback are logged server-side under a short
+    reference id that the client-facing string echoes, so an operator can
+    correlate a reported failure with the server log."""
+    ref = uuid.uuid4().hex[:8]
+    logger.error("background error [%s] %s", ref, message, exc_info=exc)
+    return f"{message} (ref {ref})"
+
+
+async def _pump_stream_until_done(websocket: WebSocket, queue: "asyncio.Queue") -> None:
+    """Forward queued messages to ``websocket`` until a ``done`` frame, watching
+    the socket's receive side concurrently so an abnormal client disconnect is
+    noticed at once instead of only when the next send happens to fail.
+
+    The job-progress streams are push-only: the browser subscribes and only
+    listens. A handler that awaited ``queue.get()`` alone would park there after
+    the client vanished, because the ASGI server reports a drop as a
+    ``websocket.disconnect`` event delivered through ``receive`` (which such a
+    handler never calls) and uvicorn does not cancel the endpoint task. The
+    orphaned subscriber queue would then linger in its ``subscribers`` set and
+    the broadcast loop would keep pushing into a queue nobody drains until the
+    job's next send failed. Racing a ``receive`` task against the queue closes
+    that window; a stray inbound frame on a push-only stream is ignored and the
+    receive re-armed.
+    """
+    recv_task = asyncio.ensure_future(websocket.receive())
+    get_task = asyncio.ensure_future(queue.get())
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {recv_task, get_task}, return_when=asyncio.FIRST_COMPLETED)
+            if recv_task in done:
+                # Starlette raises WebSocketDisconnect here on a dropped peer; a
+                # websocket.disconnect message likewise ends the stream.
+                msg = recv_task.result()
+                if isinstance(msg, dict) and msg.get("type") == "websocket.disconnect":
+                    raise WebSocketDisconnect(msg.get("code", 1005))
+                recv_task = asyncio.ensure_future(websocket.receive())
+                continue
+            message = get_task.result()
+            await websocket.send_json(message)
+            if isinstance(message, dict) and message.get("type") == "done":
+                return
+            get_task = asyncio.ensure_future(queue.get())
+    finally:
+        # Tear down whichever task is still outstanding so no receive()/get()
+        # coroutine is left pending (and no queued item is silently retained).
+        for _t in (recv_task, get_task):
+            if not _t.done():
+                _t.cancel()
+            try:
+                await _t
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+
+async def _stream_job_updates(
+    websocket: WebSocket,
+    job_id: str,
+    *,
+    jobs: "dict[str, dict]",
+    subscribers: "dict[str, set]",
+    token: Optional[str],
+    label: str,
+) -> None:
+    """Shared push-only progress stream for the fleet / autonomous / watch jobs.
+
+    On connect it sends a ``snapshot`` (status + progress so far), then forwards
+    each broadcast ``iteration`` frame and the final ``done``. Auth is via the
+    ``token`` query param (a browser cannot set headers on a WS handshake) and
+    polling ``GET /api/<label>/jobs/{id}`` is a complete fallback.
+
+    The per-subscriber queue is registered the instant before the ``try`` so the
+    ``finally`` always unregisters it, on a clean close, a send error,
+    cancellation, or an abnormal client disconnect. The pump
+    (:func:`_pump_stream_until_done`) races the receive side so a vanished client
+    is reaped promptly rather than leaking its queue until the next broadcast.
+    """
+    if not await _ws_authenticate(websocket, token):
+        return
+
+    job = jobs.get(job_id)
+    if not job:
+        await websocket.close(code=4404, reason="No such job")
+        return
+
+    await websocket.accept()
+    await websocket.send_json({
+        "type": "snapshot", "status": job["status"],
+        "progress": list(job.get("progress", [])),
+    })
+    if job["status"] != "running":
+        await websocket.send_json({"type": "done", "job": job})
+        await websocket.close()
+        return
+
+    queue: asyncio.Queue = asyncio.Queue()
+    subscribers.setdefault(job_id, set()).add(queue)
+    try:
+        await _pump_stream_until_done(websocket, queue)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:  # noqa: BLE001: never let a socket error crash the worker
+        logger.debug("%s stream error for %s: %s", label, job_id, e)
+    finally:
+        subs = subscribers.get(job_id)
+        if subs is not None:
+            subs.discard(queue)
+            if not subs:
+                subscribers.pop(job_id, None)
+        try:
+            await websocket.close()
+        except Exception:  # noqa: BLE001
+            logger.debug("suppressed non-fatal exception", exc_info=True)
+
+
 # The active-engagement pointer helpers live in heaven.engagement so the CLI,
 # the web API and the demo seeder all read/write one file the same way. Re-exported
 # under the historical `_`-prefixed names the rest of this module (and tests) use.
@@ -549,6 +705,69 @@ def _validate_http_engagement(name: Optional[str]) -> Optional[str]:
 def _is_safe_scan_id(scan_id: Optional[str]) -> bool:
     """True when a scan id is safe to interpolate into a report filename."""
     return bool(scan_id) and bool(_SAFE_SCAN_ID_RE.match(scan_id or ""))
+
+
+def _int_field(value: Any, default: int, *, lo: Optional[int] = None,
+               hi: Optional[int] = None, name: str = "value") -> int:
+    """Coerce a request-body field to int (mirrors ``int(value or default)``) but
+    answer a malformed value with a clean 400 instead of an uncaught 500, with
+    optional [lo, hi] clamping. A raw ``int(body.get(x) or d)`` on a hostile body
+    (``{"x": "abc"}`` / ``{"x": []}``) raised a ValueError/TypeError that no
+    handler caught, so uvicorn returned an unsanitized 500."""
+    try:
+        n = int(value or default)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{name} must be an integer")
+    if lo is not None:
+        n = max(lo, n)
+    if hi is not None:
+        n = min(hi, n)
+    return n
+
+
+def _host_port_pairs(raw: Any, *, name: str = "targets") -> list[tuple[str, int]]:
+    """Parse a request-body list of ``[host, port]`` pairs, answering a bad shape
+    with a clean 400. A raw ``[(t[0], int(t[1])) for t in raw]`` crashed with an
+    uncaught IndexError/TypeError/ValueError (→ 500) on malformed input."""
+    if not raw:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise HTTPException(status_code=400,
+                            detail=f"{name} must be a list of [host, port] pairs")
+    out: list[tuple[str, int]] = []
+    for t in raw:
+        if not isinstance(t, (list, tuple)) or len(t) < 2:
+            raise HTTPException(status_code=400,
+                                detail=f"each {name} entry must be [host, port]")
+        try:
+            port = int(t[1])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400,
+                                detail=f"each {name} entry needs an integer port")
+        out.append((str(t[0]), port))
+    return out
+
+
+async def _json_object(request: Request) -> dict:
+    """Read a JSON request body as a dict, with a clean answer for every bad shape.
+
+    An absent, empty or malformed body (and a literal ``null``) yields ``{}`` so a
+    handler with all-optional fields still runs on defaults, exactly like the old
+    ``try: body = await request.json() except Exception: body = {}`` idiom. The
+    addition is the type guard: a well-formed body that is *not* a JSON object
+    (``[...]``, ``"x"``, ``5``, ``true``) now raises a clean 422 instead of letting
+    the handler's ``body.get(...)`` raise ``AttributeError`` into an uncaught 500
+    (request-body type confusion, CWE-20). Every POST handler that reads a body
+    goes through here so the guarantee is uniform."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {}
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="expected a JSON object")
+    return data
 
 
 def _parse_benchmark_metrics(md: str) -> Optional[dict]:
@@ -1605,6 +1824,7 @@ def create_app() -> FastAPI:
             "created_by": user.username,
             "engagement": req.engagement,
         }
+        _evict_terminal_scans()
 
         from heaven.security.audit import get_audit_logger, AuditAction, AuditSeverity
         get_audit_logger().log(
@@ -1630,10 +1850,10 @@ def create_app() -> FastAPI:
             except asyncio.CancelledError:
                 exc = None
             if exc is not None:
-                logger.error(f"Background scan {scan_id} crashed: {exc}")
+                detail = _safe_error(f"background scan {scan_id} crashed", exc)
                 if scan_id in active_scans:
                     active_scans[scan_id]["status"] = "failed"
-                    active_scans[scan_id]["error"] = str(exc)
+                    active_scans[scan_id]["error"] = detail
 
         task.add_done_callback(_scan_done)
         return ScanResponse(scan_id=scan_id, status="pending", message="Scan queued")
@@ -1873,6 +2093,7 @@ def create_app() -> FastAPI:
             "created_by": user.username, "engagement": req.engagement,
             "scan_id": scan_id, "resumed": True,
         }
+        _evict_terminal_scans()
         task = asyncio.create_task(_run_scan_background(scan_id, req, resume=True))
         _background_scan_tasks.add(task)
         _scan_tasks_by_id[scan_id] = task
@@ -1885,10 +2106,10 @@ def create_app() -> FastAPI:
             except asyncio.CancelledError:
                 exc = None
             if exc is not None:
-                logger.error(f"Resumed scan {scan_id} crashed: {exc}")
+                detail = _safe_error(f"resumed scan {scan_id} crashed", exc)
                 if scan_id in active_scans:
                     active_scans[scan_id]["status"] = "failed"
-                    active_scans[scan_id]["error"] = str(exc)
+                    active_scans[scan_id]["error"] = detail
 
         task.add_done_callback(_resume_done)
         logger.info("Resuming scan %s by %s", scan_id, user.username)
@@ -2138,12 +2359,7 @@ def create_app() -> FastAPI:
         Returns the same summary shape as ``GET /api/correlations``.
         """
         from heaven.vulnscan.correlation import CorrelationEngine
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        if not isinstance(body, dict):
-            raise HTTPException(422, "expected a JSON object")
+        body = await _json_object(request)
         findings = body.get("findings", [])
         if not isinstance(findings, list):
             raise HTTPException(422, "'findings' must be a list")
@@ -3266,10 +3482,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise _server_error("agent fleet unavailable", e)
 
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
 
         engagement = str(body.get("engagement") or "").strip()
         if not engagement:
@@ -3286,8 +3499,10 @@ def create_app() -> FastAPI:
         if mode not in valid_modes:
             raise HTTPException(422, f"invalid mode: {mode}")
 
-        max_iterations = max(1, min(50, int(body.get("max_iterations") or 6)))
-        time_budget_s = max(30, min(7200, int(body.get("time_budget_s") or 1800)))
+        max_iterations = _int_field(body.get("max_iterations"), 6, lo=1, hi=50,
+                                    name="max_iterations")
+        time_budget_s = _int_field(body.get("time_budget_s"), 1800, lo=30, hi=7200,
+                                   name="time_budget_s")
         objective = str(body.get("objective") or "")
 
         if not _engagement_db_path(engagement).exists():
@@ -3342,9 +3557,8 @@ def create_app() -> FastAPI:
                 job["result"] = summary.to_dict()
                 job["status"] = "done"
             except Exception as e:  # noqa: BLE001 — surface any failure to the UI
-                job["error"] = str(e)
+                job["error"] = _safe_error(f"fleet job {job_id} failed", e)
                 job["status"] = "error"
-                logger.exception("Fleet job %s failed", job_id)
             finally:
                 job["ended_at"] = time.time()
                 _fleet_broadcast(job_id, {"type": "done", "job": job})
@@ -3384,46 +3598,9 @@ def create_app() -> FastAPI:
         `iteration` messages and a final `done` message with the full job. Auth is
         via the `token` query param. Polling GET /api/fleet/jobs/{id} is a complete
         fallback."""
-        if not await _ws_authenticate(websocket, token):
-            return
-
-        job = fleet_jobs.get(job_id)
-        if not job:
-            await websocket.close(code=4404, reason="No such job")
-            return
-
-        await websocket.accept()
-        await websocket.send_json({
-            "type": "snapshot", "status": job["status"],
-            "progress": list(job.get("progress", [])),
-        })
-        if job["status"] != "running":
-            await websocket.send_json({"type": "done", "job": job})
-            await websocket.close()
-            return
-
-        queue: asyncio.Queue = asyncio.Queue()
-        _fleet_subscribers.setdefault(job_id, set()).add(queue)
-        try:
-            while True:
-                msg = await queue.get()
-                await websocket.send_json(msg)
-                if msg.get("type") == "done":
-                    break
-        except WebSocketDisconnect:
-            pass
-        except Exception as e:  # noqa: BLE001 — never let a socket error crash the worker
-            logger.debug("fleet stream error for %s: %s", job_id, e)
-        finally:
-            subs = _fleet_subscribers.get(job_id)
-            if subs is not None:
-                subs.discard(queue)
-                if not subs:
-                    _fleet_subscribers.pop(job_id, None)
-            try:
-                await websocket.close()
-            except Exception:  # noqa: BLE001
-                logger.debug("suppressed non-fatal exception", exc_info=True)
+        await _stream_job_updates(
+            websocket, job_id, jobs=fleet_jobs,
+            subscribers=_fleet_subscribers, token=token, label="fleet")
 
     @app.get("/api/ai/models")
     async def ai_models(
@@ -3488,10 +3665,7 @@ def create_app() -> FastAPI:
         """
         from heaven.ai import local_llm
         from heaven.settings_catalog import apply_settings
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         provider = str((body or {}).get("provider") or "ollama").lower()
         if provider not in ("ollama", "local"):
             raise HTTPException(422, "provider must be 'ollama' or 'local'")
@@ -3622,10 +3796,7 @@ def create_app() -> FastAPI:
         cloud). Returns {skipped: reason} when no LLM is configured so the UI can
         show a friendly 'set up local AI' hint instead of erroring.
         """
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         messages = body.get("messages") or []
         if not isinstance(messages, list) or not messages:
             raise HTTPException(422, "expected non-empty 'messages': [{role, content}]")
@@ -3835,6 +4006,7 @@ def create_app() -> FastAPI:
             "name": "Demo scan (sample)", "mode": "full", "created": now,
             "phase": "Starting", "findings_count": 0, "demo": True,
         }
+        _evict_terminal_scans()
 
         # Per-phase delay (seconds). Overridable so tests can run it instantly.
         try:
@@ -3869,9 +4041,9 @@ def create_app() -> FastAPI:
                     eta_s=0, findings_count=res["findings"],
                 )
             except Exception as e:  # noqa: BLE001
-                logger.warning("Demo scan failed: %s", e)
+                detail = _safe_error("demo scan failed", e)
                 if scan_id in active_scans:
-                    active_scans[scan_id].update(status="failed", phase=str(e))
+                    active_scans[scan_id].update(status="failed", phase=detail)
 
         task = asyncio.create_task(_run())
         _background_scan_tasks.add(task)
@@ -3903,11 +4075,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise _server_error("replay subsystem unavailable", e)
 
-        body: dict = {}
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         engagement = body.get("engagement")
         new_engagement = body.get("new_engagement", "")
         # Both become DB filenames — reject traversal. (`engagement` also flows
@@ -4127,10 +4295,7 @@ def create_app() -> FastAPI:
 
         Returns the structured AI output (or {"skipped": "..."} when LLM unavailable).
         """
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
 
         try:
             if kind == "recon-parse":
@@ -4244,10 +4409,7 @@ def create_app() -> FastAPI:
         Output is returned synchronously for now (long-running modules log progress).
         Secrets harvested by loot/full are redacted in the response.
         """
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
 
         try:
             if module == "enum":
@@ -4366,10 +4528,7 @@ def create_app() -> FastAPI:
         benign proof command (no persistence). Admin permission AND an explicit
         i_have_authorization in the body are both required.
         """
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         target = str(body.get("target") or "").strip()
         if not target:
             raise HTTPException(400, "target is required")
@@ -4406,10 +4565,7 @@ def create_app() -> FastAPI:
         user: User = Depends(require_permission("vuln.view")),
     ):
         """Decode a base64/hex/base32/rot13 string. Body: {"text": "..."}."""
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         text = str(body.get("text") or "")
         if not text:
             raise HTTPException(400, "text is required")
@@ -4470,10 +4626,7 @@ def create_app() -> FastAPI:
             filename = str(upload.filename or "artifact")
         else:
             import base64
-            try:
-                body = await request.json()
-            except Exception:
-                body = {}
+            body = await _json_object(request)
             b64 = body.get("content_b64") or ""
             if not b64:
                 raise HTTPException(400, "content_b64 (or a multipart file) is required")
@@ -4544,10 +4697,7 @@ def create_app() -> FastAPI:
         "utf-8" for the text formats and "base64" for PDF (a binary document), so
         the client knows how to turn ``content`` back into a file.
         """
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         result = body.get("result")
         if not isinstance(result, dict):
             raise HTTPException(400, "result object is required")
@@ -4592,10 +4742,7 @@ def create_app() -> FastAPI:
 
         Repeat `jumps` for a double pivot (each tunnels through the previous).
         """
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         if not bool(body.get("i_have_authorization")):
             raise HTTPException(
                 403, "i_have_authorization must be true, pivoting tunnels into "
@@ -4998,10 +5145,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise _server_error("autonomous loop unavailable", e)
 
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
 
         engagement = body.get("engagement")
         seed_targets = {
@@ -5011,8 +5155,8 @@ def create_app() -> FastAPI:
         if not (seed_targets["ips"] or seed_targets["urls"]):
             raise HTTPException(422, "need at least one ip or url")
 
-        max_iterations = int(body.get("max_iterations") or 5)
-        time_budget_s = int(body.get("time_budget_s") or 600)
+        max_iterations = _int_field(body.get("max_iterations"), 5, name="max_iterations")
+        time_budget_s = _int_field(body.get("time_budget_s"), 600, name="time_budget_s")
         objective = str(body.get("objective") or "")
         use_llm = bool(body.get("use_llm", True))
 
@@ -5063,9 +5207,8 @@ def create_app() -> FastAPI:
                 job["result"] = summary.to_dict()
                 job["status"] = "done"
             except Exception as e:  # noqa: BLE001 — surface any failure to the UI
-                job["error"] = str(e)
+                job["error"] = _safe_error(f"autonomous job {job_id} failed", e)
                 job["status"] = "error"
-                logger.exception("Autonomous job %s failed", job_id)
             finally:
                 job["ended_at"] = time.time()
                 # Signal end-of-stream to any live WebSocket subscribers.
@@ -5112,47 +5255,9 @@ def create_app() -> FastAPI:
         on a WebSocket handshake). Polling GET /api/autonomous/jobs/{id} remains a
         complete fallback.
         """
-        if not await _ws_authenticate(websocket, token):
-            return
-
-        job = autonomous_jobs.get(job_id)
-        if not job:
-            await websocket.close(code=4404, reason="No such job")
-            return
-
-        await websocket.accept()
-        # Catch-up snapshot so a late subscriber (or reconnect) sees prior work.
-        await websocket.send_json({
-            "type": "snapshot", "status": job["status"],
-            "progress": list(job.get("progress", [])),
-        })
-        if job["status"] != "running":
-            await websocket.send_json({"type": "done", "job": job})
-            await websocket.close()
-            return
-
-        queue: asyncio.Queue = asyncio.Queue()
-        _autonomous_subscribers.setdefault(job_id, set()).add(queue)
-        try:
-            while True:
-                msg = await queue.get()
-                await websocket.send_json(msg)
-                if msg.get("type") == "done":
-                    break
-        except WebSocketDisconnect:
-            pass
-        except Exception as e:  # noqa: BLE001 — never let a socket error crash the worker
-            logger.debug("autonomous stream error for %s: %s", job_id, e)
-        finally:
-            subs = _autonomous_subscribers.get(job_id)
-            if subs is not None:
-                subs.discard(queue)
-                if not subs:
-                    _autonomous_subscribers.pop(job_id, None)
-            try:
-                await websocket.close()
-            except Exception:  # noqa: BLE001
-                logger.debug("suppressed non-fatal exception", exc_info=True)
+        await _stream_job_updates(
+            websocket, job_id, jobs=autonomous_jobs,
+            subscribers=_autonomous_subscribers, token=token, label="autonomous")
 
     # ── Watch mode (heaven watch equivalent) ──
     @app.get("/api/watch/channels")
@@ -5200,10 +5305,7 @@ def create_app() -> FastAPI:
         from heaven.config import get_config as _get_config
         from heaven.utils.watcher import WatchConfig, run_watch
 
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
 
         engagement = str(body.get("engagement") or "").strip()
         if not engagement:
@@ -5311,9 +5413,8 @@ def create_app() -> FastAPI:
                 _watch_broadcast(job_id, {"type": "done", "job": job})
                 raise
             except Exception as e:  # noqa: BLE001 — surface any failure to the UI
-                job["error"] = str(e)
+                job["error"] = _safe_error(f"watch job {job_id} failed", e)
                 job["status"] = "error"
-                logger.exception("Watch job %s failed", job_id)
             finally:
                 if job["ended_at"] is None:
                     job["ended_at"] = time.time()
@@ -5371,46 +5472,9 @@ def create_app() -> FastAPI:
         (status + progress so far), then `iteration` frames, then a final
         `done`. Auth via the `token` query param (WS handshakes can't set
         headers). Polling GET /api/watch/jobs/{id} is a complete fallback."""
-        if not await _ws_authenticate(websocket, token):
-            return
-
-        job = watch_jobs.get(job_id)
-        if not job:
-            await websocket.close(code=4404, reason="No such job")
-            return
-
-        await websocket.accept()
-        await websocket.send_json({
-            "type": "snapshot", "status": job["status"],
-            "progress": list(job.get("progress", [])),
-        })
-        if job["status"] != "running":
-            await websocket.send_json({"type": "done", "job": job})
-            await websocket.close()
-            return
-
-        queue: asyncio.Queue = asyncio.Queue()
-        _watch_subscribers.setdefault(job_id, set()).add(queue)
-        try:
-            while True:
-                msg = await queue.get()
-                await websocket.send_json(msg)
-                if msg.get("type") == "done":
-                    break
-        except WebSocketDisconnect:
-            pass
-        except Exception as e:  # noqa: BLE001 — never let a socket error crash the worker
-            logger.debug("watch stream error for %s: %s", job_id, e)
-        finally:
-            subs = _watch_subscribers.get(job_id)
-            if subs is not None:
-                subs.discard(queue)
-                if not subs:
-                    _watch_subscribers.pop(job_id, None)
-            try:
-                await websocket.close()
-            except Exception:  # noqa: BLE001
-                logger.debug("suppressed non-fatal exception", exc_info=True)
+        await _stream_job_updates(
+            websocket, job_id, jobs=watch_jobs,
+            subscribers=_watch_subscribers, token=token, label="watch")
 
     # ── Coverage self-grading (heaven coverage equivalent) ──
     @app.get("/api/coverage")
@@ -5447,11 +5511,8 @@ def create_app() -> FastAPI:
             from heaven.postex.lateral import run_lateral
         except Exception as e:
             raise _server_error("lateral module unavailable", e)
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        targets = [(t[0], int(t[1])) for t in body.get("targets") or []]
+        body = await _json_object(request)
+        targets = _host_port_pairs(body.get("targets"), name="targets")
         try:
             return await run_lateral(
                 authorized=True,
@@ -5483,7 +5544,7 @@ def create_app() -> FastAPI:
         os: str = Query(""), web_tech: str = Query(""),
         ad_domain: str = Query(""), cloud: str = Query(""),
         ports: str = Query("", description="comma-separated open ports, e.g. 22,80,443"),
-        top: int = Query(10),
+        top: int = Query(10, ge=1, le=100),
         user: User = Depends(require_permission("scan.view")),
     ):
         """Beta-smoothed posterior success-rate per technique for the supplied profile."""
@@ -5534,10 +5595,7 @@ def create_app() -> FastAPI:
             raise HTTPException(412, "semgrep not installed on the server "
                                      "(pip install semgrep)")
 
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         path = body.get("path")
         if not path:
             raise HTTPException(422, "body.path is required")
@@ -5546,7 +5604,7 @@ def create_app() -> FastAPI:
             path,
             extra_configs=list(body.get("extra_configs") or []),
             use_builtin_rules=not bool(body.get("no_builtin", False)),
-            timeout_s=int(body.get("timeout") or 300),
+            timeout_s=_int_field(body.get("timeout"), 300, name="timeout"),
         )
 
         # Persist into an engagement so the findings surface in triage/dashboard.
@@ -5601,15 +5659,13 @@ def create_app() -> FastAPI:
             raise HTTPException(412, "httpx not installed on the server "
                                      "(needed for OSV lookups)")
 
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         path = body.get("path")
         if not path:
             raise HTTPException(422, "body.path is required")
 
-        result = await scan_path(path, max_files=int(body.get("max_files") or 200))
+        result = await scan_path(path, max_files=_int_field(body.get("max_files"), 200,
+                                                            name="max_files"))
         result["findings"] = [enrich_finding(f) for f in result.get("findings", [])]
 
         # Same contract as SAST above: persist into the typed engagement (or the
@@ -5654,10 +5710,7 @@ def create_app() -> FastAPI:
         except Exception as e:  # pragma: no cover
             raise _server_error("cloud_scanner unavailable", e)
 
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         target = body.get("target")
         if not target:
             raise HTTPException(422, "body.target is required")
@@ -5704,10 +5757,7 @@ def create_app() -> FastAPI:
         except Exception as e:  # pragma: no cover
             raise _server_error("live_cve_feed unavailable", e)
 
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+        body = await _json_object(request)
         product = body.get("product", "")
         cpe = body.get("cpe", "")
         if not product and not cpe:
@@ -6449,13 +6499,16 @@ async def _run_scan_background(scan_id: str, req: ScanRequest, *, resume: bool =
         raise
 
     except Exception as e:
+        # Client-safe string (generic message + ref) for the fields the status
+        # endpoints relay to the UI; the raw exception stays in the server log
+        # (via _safe_error's exc_info) and the audit record below (forensic).
+        detail = _safe_error(f"background scan {scan_id} failed", e)
         active_scans[scan_id]["status"] = "failed"
-        active_scans[scan_id]["error"] = str(e)
-        logger.error(f"Background scan {scan_id} failed: {e}", exc_info=True)
+        active_scans[scan_id]["error"] = detail
 
         if store:
             try:
-                store.record_scan_complete(scan_id, summary={"error": str(e)}, status="failed")
+                store.record_scan_complete(scan_id, summary={"error": detail}, status="failed")
             except Exception:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
 

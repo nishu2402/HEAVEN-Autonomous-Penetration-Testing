@@ -24,7 +24,7 @@ function humanizeKey(k) {
 
 // Render one observed-evidence value compactly for the proof block.
 function formatEvidenceValue(v) {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "n/a";
   if (Array.isArray(v)) return v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ");
   if (typeof v === "object") {
     return Object.entries(v).map(([k, val]) => `${k}=${typeof val === "object" ? JSON.stringify(val) : val}`).join(", ");
@@ -208,7 +208,7 @@ export default function FindingDetail() {
     return "low";
   };
   // The v3.1 base to show: the calibrated per-finding score, else the class
-  // typical. `null` only when neither is present (then the row shows "—").
+  // typical. `null` only when neither is present (then the row shows "n/a").
   const v31Base = Number(f.predicted_cvss_score) > 0 ? Number(f.predicted_cvss_score)
                 : Number(f.typical_cvss) > 0 ? Number(f.typical_cvss)
                 : Number.isFinite(Number(f.predicted_cvss_score)) ? Number(f.predicted_cvss_score)
@@ -249,7 +249,7 @@ export default function FindingDetail() {
 
         <table className="kv-table" style={{ marginTop: 16 }}>
           <tbody>
-            <tr><td>Title</td><td style={{ color: "var(--text-0)" }}>{f.title || "—"}</td></tr>
+            <tr><td>Title</td><td style={{ color: "var(--text-0)" }}>{f.title || "n/a"}</td></tr>
             {f.confirmation && (
               <tr><td>Confirmation</td><td>
                 <span className={`conf-badge conf-${String(f.confirmation).toLowerCase()}`}>
@@ -266,7 +266,7 @@ export default function FindingDetail() {
               <span style={{ color: Number(f.confidence) >= 0.9 ? "var(--text-0)" : "var(--med)" }}>
                 {Number.isFinite(Number(f.confidence))
                   ? `${Math.round(Number(f.confidence) * 100)}%`
-                  : "—"}
+                  : "n/a"}
               </span>
               {f.confidence_bucket && <span className="dim" style={{ marginLeft: 6 }}>({f.confidence_bucket})</span>}
             </td></tr>
@@ -276,7 +276,7 @@ export default function FindingDetail() {
                 ? <>{Number(f.cvss4_base).toFixed(1)}
                     {v4Band && <span className={`sev-pill sev-${v4Band}`} style={{ marginLeft: 8, fontSize: 10 }}>{v4Band}</span>}
                     <span className="dim" style={{ marginLeft: 6 }}>(current standard)</span></>
-                : "—"}
+                : "n/a"}
             </td></tr>
             <tr><td>CVSS v3.1 base</td><td>
               {v31Base != null
@@ -285,7 +285,7 @@ export default function FindingDetail() {
                     <span className="dim" style={{ marginLeft: 6 }}>
                       {Number(f.predicted_cvss_score) > 0 ? "(calibrated, sets the badge)" : "(typical for class)"}
                     </span></>
-                : "—"}
+                : "n/a"}
             </td></tr>
             {v4BandDiffers && (
               <tr><td></td><td className="dim" style={{ fontSize: 11.5 }}>
@@ -295,21 +295,21 @@ export default function FindingDetail() {
               </td></tr>
             )}
             <tr><td>Contextual CVSS</td><td>
-              {f.contextual_cvss_score?.toFixed?.(1) ?? "—"}
+              {f.contextual_cvss_score?.toFixed?.(1) ?? "n/a"}
               <span className="dim" style={{ marginLeft: 6 }}>
                 (temporal + environmental, this finding&apos;s exploit maturity, confidence &amp; asset criticality)
               </span>
             </td></tr>
-            <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "—"}</td></tr>
-            <tr><td>CWE</td><td>{f.cwe || ev.cwe || "—"}</td></tr>
+            <tr><td>Priority score</td><td>{f.priority_score?.toFixed?.(2) ?? "n/a"}</td></tr>
+            <tr><td>CWE</td><td>{f.cwe || ev.cwe || "n/a"}</td></tr>
             {f.iec62443
               ? <tr><td>IEC 62443</td><td>{f.iec62443}</td></tr>
               : f.owasp_iot
                 ? <tr><td>OWASP IoT Top 10</td><td>{f.owasp_iot}</td></tr>
-                : <tr><td>OWASP</td><td>{f.owasp || ev.owasp || "—"}</td></tr>}
-            <tr><td>MITRE ATT&CK</td><td>{f.mitre_technique || ev.mitre || "—"}</td></tr>
-            <tr><td>CVSS v4.0 vector</td><td className="mono" style={{ fontSize: 12 }}>{cvss4Vector || "—"}</td></tr>
-            <tr><td>CVSS v3.1 vector</td><td className="mono" style={{ fontSize: 12 }}>{cvss31Vector || "—"}</td></tr>
+                : <tr><td>OWASP</td><td>{f.owasp || ev.owasp || "n/a"}</td></tr>}
+            <tr><td>MITRE ATT&CK</td><td>{f.mitre_technique || ev.mitre || "n/a"}</td></tr>
+            <tr><td>CVSS v4.0 vector</td><td className="mono" style={{ fontSize: 12 }}>{cvss4Vector || "n/a"}</td></tr>
+            <tr><td>CVSS v3.1 vector</td><td className="mono" style={{ fontSize: 12 }}>{cvss31Vector || "n/a"}</td></tr>
             <tr><td>Seen</td><td className="dim">
               {f.seen_count ?? 1}×{f.last_seen_at ? ` (last: ${f.last_seen_at.slice(0, 10)})` : ""}
             </td></tr>
@@ -574,8 +574,8 @@ export default function FindingDetail() {
                     </td>
                     <td style={{ padding: "6px 10px" }}>{d.cvss}</td>
                     <td style={{ padding: "6px 10px", textTransform: "capitalize" }}>{d.severity}</td>
-                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}>{d.affected_versions || "—"}</td>
-                    <td style={{ padding: "6px 10px" }}>{d.exploit_available ? "public" : "—"}</td>
+                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}>{d.affected_versions || "n/a"}</td>
+                    <td style={{ padding: "6px 10px" }}>{d.exploit_available ? "public" : "n/a"}</td>
                     <td style={{ padding: "6px 10px", color: "var(--text-0)" }}>{d.title}</td>
                   </tr>
                 ))}

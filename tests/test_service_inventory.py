@@ -409,6 +409,24 @@ def test_render_markdown_empty_is_blank():
     assert render_markdown([]) == ""
 
 
+def test_render_markdown_hostile_banner_cannot_inject_table_rows():
+    """A service banner is attacker-controlled external input. A pipe or newline
+    in service_version must not break the inventory table row and inject extra
+    rows or a live heading into the client report."""
+    md = render_markdown([
+        {"ip": "203.0.113.5", "os_guess": "", "open_ports": [
+            {"port": 8080, "service": "http",
+             "service_version": "Acme | 9999 | tcp | INJECTED | x | x\n## PWNED"}]},
+    ])
+    # No injected heading rendered as a live line, and exactly one data row.
+    assert not any(ln.strip().startswith("## PWNED") for ln in md.splitlines())
+    data_rows = [ln for ln in md.splitlines()
+                 if ln.startswith("| ") and "Acme" in ln]
+    assert len(data_rows) == 1
+    # The banner text is preserved (escaped), not dropped.
+    assert "Acme" in md and "INJECTED" in md
+
+
 def test_cli_inventory_prefers_scan_with_open_ports(tmp_path, monkeypatch):
     """Regression: a dead/mistyped-host scan records a host row with zero open
     ports. Defaulting the inventory to it (as the newest asset-bearing scan) made

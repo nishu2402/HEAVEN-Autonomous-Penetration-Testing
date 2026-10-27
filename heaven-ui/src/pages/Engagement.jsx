@@ -8,7 +8,7 @@ import { useToast } from "../components/Toast.jsx";
 // operator verbatim. Render it as a readable local date, and fall back to the
 // raw value only if it will not parse.
 function fmtWhen(iso) {
-  if (!iso) return "—";
+  if (!iso) return "n/a";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString([], {
@@ -100,7 +100,7 @@ export default function EngagementPage() {
         <td>{label}</td>
         <td>
           <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
-            <span className={value ? "" : "dim"}>{value || "—"}</span>
+            <span className={value ? "" : "dim"}>{value || "n/a"}</span>
             <button
               className="btn-small"
               onClick={() => startEdit(field, value)}

@@ -137,7 +137,7 @@ def _cvss_with_band(score_str: str) -> str:
     ``"6.9"`` becomes ``"6.9 (Medium)"`` so a reader never sees a bare number
     that looks like it contradicts the severity badge. The band uses the same
     FIRST cut-offs for CVSS v4.0 and v3.1, so each score is labelled with the
-    band that score genuinely falls in. ``"—"`` and blanks pass through.
+    band that score genuinely falls in. ``"n/a"`` and blanks pass through.
     """
     try:
         val = float(score_str)
@@ -755,7 +755,7 @@ class ComplianceReportGenerator:
             f'{SEVERITY_META[_sev_of(f)]["label"]}</span></td>'
             f'<td>{_conf_pill(f)}</td>'
             f'<td>{_esc(f.get("title") or f.get("vuln_type") or "Finding")}</td>'
-            f'<td class="small">{_esc(f.get("target") or "—")}</td></tr>'
+            f'<td class="small">{_esc(f.get("target") or "n/a")}</td></tr>'
             for f in top
         ) or '<tr><td colspan="4" class="muted">No findings.</td></tr>'
 
@@ -868,9 +868,9 @@ class ComplianceReportGenerator:
                 rows = "".join(
                     f'<tr><td class="small">{_esc(p.get("port"))}</td>'
                     f'<td class="small">{_esc(p.get("protocol") or "tcp")}</td>'
-                    f'<td>{_esc(p.get("service") or "—")}</td>'
-                    f'<td>{_esc(p.get("service_version") or "—")}</td>'
-                    f'<td class="small">{_esc(p.get("cpe") or "—")}</td></tr>'
+                    f'<td>{_esc(p.get("service") or "n/a")}</td>'
+                    f'<td>{_esc(p.get("service_version") or "n/a")}</td>'
+                    f'<td class="small">{_esc(p.get("cpe") or "n/a")}</td></tr>'
                     for p in ports
                 )
                 tbl = ('<table><tr><th style="width:64px">Port</th>'
@@ -931,8 +931,8 @@ class ComplianceReportGenerator:
         rows: list[str] = []
         for f in hits:
             ev = f.get("evidence") or {}
-            status = ev.get("status_code") or "—"
-            path = ev.get("path") or f.get("target") or "—"
+            status = ev.get("status_code") or "n/a"
+            path = ev.get("path") or f.get("target") or "n/a"
             m = SEVERITY_META[_sev_of(f)]
             url = f.get("target") or ""
             loc = ev.get("location")
@@ -983,7 +983,7 @@ class ComplianceReportGenerator:
             if subs:
                 srows = "".join(
                     f'<tr><td>{_esc(s.get("name"))}</td>'
-                    f'<td class="small">{_esc(", ".join(s.get("addresses") or []) or "—")}</td></tr>'
+                    f'<td class="small">{_esc(", ".join(s.get("addresses") or []) or "n/a")}</td></tr>'
                     for s in subs
                 )
                 sub_tbl = (f'<h4 class="small">Subdomains discovered ({len(subs)})</h4>'
@@ -1043,7 +1043,7 @@ class ComplianceReportGenerator:
                      f'<td>{_conf_pill(f)}</td>'
                      f'<td class="small">{_esc(cvss)}</td>'
                      f'<td class="small">{_esc(ctx)}</td>'
-                     f'<td class="small">{_esc(f.get("target") or "—")}</td></tr>')
+                     f'<td class="small">{_esc(f.get("target") or "n/a")}</td></tr>')
         return f"""<div class="page section" id="summary"><h2>Findings Summary</h2>
           <p class="muted small">The <b>Confirmation</b> column separates
           <span class="confpill conf-confirmed">Confirmed</span> findings (proven by direct
@@ -1287,21 +1287,21 @@ class ComplianceReportGenerator:
             # Upgrade a legacy 2021 tag stored on the finding to its 2025 label.
             owasp = _fw.normalize_owasp(f.get("owasp") or "") or self._owasp_for(f.get("vuln_type", ""))
         meta_rows = [
-            ("Target", f.get("target") or "—", False),
+            ("Target", f.get("target") or "n/a", False),
             ("Severity", m["label"], False),
             ("Confirmation", _conf_pill(f), True),
             ("CVSS v4.0 base", _cvss_with_band(cvss4), False),
             ("CVSS v3.1 base", _cvss_with_band(cvss), False),
             ("Contextual CVSS", contextual, False),
-            ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—", False),
-            ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—", False),
-            ("CWE", f.get("cwe") or "—", False),
-            (owasp_label, owasp or "—", False),
+            ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "n/a", False),
+            ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "n/a", False),
+            ("CWE", f.get("cwe") or "n/a", False),
+            (owasp_label, owasp or "n/a", False),
             # CVE links straight to the live NVD record — dynamic, not a bare string.
             ("CVE", self._cve_links(f), True),
-            ("MITRE ATT&CK", f.get("mitre_technique") or "—", False),
-            ("CVSS v4.0 vector", v4_vec or "—", False),
-            ("CVSS v3.1 vector", v31_vec or "—", False),
+            ("MITRE ATT&CK", f.get("mitre_technique") or "n/a", False),
+            ("CVSS v4.0 vector", v4_vec or "n/a", False),
+            ("CVSS v3.1 vector", v31_vec or "n/a", False),
             ("Status", (f.get("status") or "open").title(), False),
         ]
         meta_html = "".join(
@@ -1347,8 +1347,8 @@ class ComplianceReportGenerator:
                 f"{_esc(str(d.get('cve','')))}</a></td>"
                 f"<td>{_esc(_fmt_cvss(d.get('cvss')))}</td>"
                 f"<td>{_esc(str(d.get('severity','')).title())}</td>"
-                f"<td>{_esc(str(d.get('affected_versions','') or '—'))}</td>"
-                f"<td>{'public' if d.get('exploit_available') else '—'}</td>"
+                f"<td>{_esc(str(d.get('affected_versions','') or 'n/a'))}</td>"
+                f"<td>{'public' if d.get('exploit_available') else 'n/a'}</td>"
                 f"<td>{_esc(str(d.get('title','')))}</td>"
                 "</tr>"
                 for d in cand
@@ -1469,7 +1469,7 @@ class ComplianceReportGenerator:
         return blocks
 
     def _finding_cvss(self, f: dict) -> str:
-        """Best per-finding CVSS base score to display (1-dp string), or '—'.
+        """Best per-finding CVSS base score to display (1-dp string), or 'n/a'.
 
         Genuinely per-finding — not a flat severity default. Precedence, most
         authoritative first:
@@ -1478,7 +1478,7 @@ class ComplianceReportGenerator:
           3. the CVSS v3.1 base score computed from the class's curated vector;
           4. the base score computed from the finding's own vector;
           5. the ML-predicted score (severity-anchored — last numeric resort);
-          6. '—' when nothing scoreable exists.
+          6. 'n/a' when nothing scoreable exists.
         This means a CVE finding shows its true NVD score, and two different
         vulnerability classes no longer collapse to the same severity constant.
         """
@@ -1499,10 +1499,10 @@ class ComplianceReportGenerator:
                 continue
             if 0.0 < v <= 10.0:
                 return f"{v:.1f}"
-        return "—"
+        return "n/a"
 
     def _finding_cvss4(self, f: dict) -> str:
-        """CVSS v4.0 base score to display (1-dp string), or '—'. This is the
+        """CVSS v4.0 base score to display (1-dp string), or 'n/a'. This is the
         current-standard companion to :meth:`_finding_cvss` (which stays on the
         calibrated score that drives the severity band). Uses the v4.0 score
         stamped by ``enrich_finding``, else the class's v4.0 vector, else the
@@ -1531,7 +1531,7 @@ class ComplianceReportGenerator:
             vec = _generic_cvss_for_severity(
                 _resolve_severity_band(f, ev), version="4.0")
         s = _cvss.base_score_from_vector(vec) if vec else 0.0
-        return f"{s:.1f}" if s > 0 else "—"
+        return f"{s:.1f}" if s > 0 else "n/a"
 
     def _finding_contextual_cvss(self, f: dict) -> str:
         """Per-finding CVSS **contextual** score (Temporal + Environmental).
@@ -1541,11 +1541,11 @@ class ComplianceReportGenerator:
         from EPSS / public-exploit / KEV, the detector's confidence, and the
         asset's criticality + exposure), so two findings of the *same class*
         differ when their evidence differs. Degrades to the base score when a
-        finding carries no such signals. Returns a 1-dp string, or '—'.
+        finding carries no such signals. Returns a 1-dp string, or 'n/a'.
         """
         from heaven.utils import cvss as _cvss
         s = _cvss.contextual_score(f)
-        return f"{s:.1f}" if s > 0 else "—"
+        return f"{s:.1f}" if s > 0 else "n/a"
 
     @staticmethod
     def _steps_html(text: Any) -> str:
@@ -1591,7 +1591,7 @@ class ComplianceReportGenerator:
                 seen.add(cu)
                 cves.append(cu)
         if not cves:
-            return "—"
+            return "n/a"
         return ", ".join(
             f'<a href="https://nvd.nist.gov/vuln/detail/{c}" target="_blank" '
             f'rel="noopener noreferrer">{c}</a>'

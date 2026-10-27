@@ -63,3 +63,53 @@ def test_bugbounty_platform_wording_switches():
     intg = export_findings_bugbounty(_FINDINGS, platform="intigriti")
     assert "## Steps To Reproduce" in h1
     assert "## Proof of Concept" in intg
+
+
+def _markdown_live_text(md: str) -> str:
+    """The Markdown that renders OUTSIDE fenced code blocks, matched the way a
+    CommonMark renderer closes fences (a closing fence is a run of backticks at
+    least as long as the opener). Used to prove embedded code never escapes its
+    fence and renders as live Markdown/HTML in the deliverable."""
+    import re
+    live, in_block, opener = [], False, ""
+    for ln in md.splitlines():
+        st = ln.strip()
+        if not in_block:
+            m = re.match(r"^(`{3,})", st)
+            if m:
+                in_block, opener = True, m.group(1)
+                continue
+            live.append(ln)
+        else:
+            if re.match(r"^`{3,}\s*$", st) and len(st.rstrip()) >= len(opener):
+                in_block = False
+    return "\n".join(live)
+
+
+def test_bugbounty_response_body_backticks_cannot_break_out_of_fence():
+    """A scanned response body carrying a ``` run (any Markdown-serving target
+    returns these) must not break the submission's code fence and inject live
+    Markdown; the fence is sized longer than the longest backtick run."""
+    hostile = ("legit body\n```\n## INJECTED HEADING\n"
+               "[pwn](http://evil.example)\n```\ntail ```` quad run")
+    f = [{"id": "h1", "target": "https://shop.example/p", "vuln_type": "reflected_xss",
+          "severity": "high", "confidence": 0.9, "title": "XSS",
+          "evidence": {"request_url": "https://shop.example/p?q=1", "method": "GET",
+                       "status": 200, "response_excerpt": hostile}}]
+    md = export_findings_bugbounty(f)
+    live = _markdown_live_text(md)
+    assert "## INJECTED HEADING" not in live
+    assert "[pwn](http://evil.example)" not in live
+    # The real content is still present (inside the fence), not dropped.
+    assert "INJECTED HEADING" in md
+
+
+def test_bugbounty_backtick_payload_in_curl_cannot_break_out():
+    """A reflected payload with backticks reaches the curl block; `shlex.quote`
+    makes it shell-safe but the Markdown fence must still contain it."""
+    f = [{"id": "c1", "target": "https://shop.example/s", "vuln_type": "sqli_boolean",
+          "severity": "high", "confidence": 0.9, "title": "SQLi",
+          "evidence": {"request_url": "https://shop.example/s", "method": "GET",
+                       "param": "q", "payload": "1```\n## OOPS\n```", "status": 200}}]
+    md = export_findings_bugbounty(f)
+    assert "## OOPS" not in _markdown_live_text(md)

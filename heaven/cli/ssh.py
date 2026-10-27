@@ -33,7 +33,7 @@ def _render_table(res: dict, host: str, port: int) -> None:
                f"[dim]({res.get('error') or 'no response'})[/dim]")
         return
     _print(f"\n[bold]SSH Crypto Audit[/bold]  [dim]· {host}:{port}[/dim]")
-    _print(f"  [dim]banner  [/dim] {res.get('banner') or '—'}")
+    _print(f"  [dim]banner  [/dim] {res.get('banner') or 'n/a'}")
     if res.get("software"):
         _print(f"  [dim]software[/dim] {res['software']}")
     for label, key in (("kex", "kex"), ("host-keys", "host_keys"),

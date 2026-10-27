@@ -1,4 +1,4 @@
-"""HEAVEN — Findings-related CLI commands: `findings`, `show`, `mark`, `replay`, `export`, `report`."""
+"""HEAVEN Findings-related CLI commands: `findings`, `show`, `mark`, `repro`, `export`, `report`."""
 
 from __future__ import annotations
 
@@ -119,8 +119,13 @@ def mark(finding_id: str, status: str, engagement: Optional[str], notes: str) ->
 @click.command()
 @click.argument("finding_id")
 @click.option("--engagement", help="Engagement name")
-def replay(finding_id: str, engagement: Optional[str]) -> None:
-    """Print the curl command needed to manually re-verify a finding."""
+def repro(finding_id: str, engagement: Optional[str]) -> None:
+    """Print the one repro command for a finding (curl, or a class command).
+
+    Emits just the command on stdout so it can be piped or copied, unlike
+    `heaven show`, which renders the full finding. (Top-level `heaven replay`
+    is a different thing: it re-executes a whole scan.)
+    """
     from heaven.devsecops.evidence import package_finding
     store = _open_engagement_read(engagement)
     f = store.get_finding(finding_id)
@@ -582,7 +587,7 @@ def register(cli: click.Group) -> None:
     cli.add_command(findings)
     cli.add_command(show)
     cli.add_command(mark)
-    cli.add_command(replay)
+    cli.add_command(repro)
     cli.add_command(remediate)
     cli.add_command(verify)
     cli.add_command(export)

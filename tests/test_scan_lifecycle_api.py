@@ -522,3 +522,202 @@ def test_live_running_scan_is_not_reconciled(client):
         assert store.get_scan_state("live1")["status"] == "running"
     finally:
         server._scan_tasks_by_id.pop("live1", None)
+
+
+def test_evict_terminal_scans_bounds_memory_without_touching_live():
+    """active_scans must not grow without bound. _evict_terminal_scans drops the
+    OLDEST terminal entries down to the soft cap, and never evicts a live
+    (pending/running) entry even when it is the oldest thing in the dict, a
+    running scan's in-memory entry is load-bearing and has no terminal store row
+    to fall back to. Regression: completed scans used to accumulate forever, so a
+    long-running `serve` leaked memory and GET /api/scans re-copied the whole dict
+    on every poll."""
+    from heaven.api import server
+
+    cap = server._ACTIVE_SCANS_SOFT_CAP
+    snapshot = dict(server.active_scans)
+    server.active_scans.clear()
+    try:
+        # Two live scans with the EARLIEST timestamps: if the guard were missing
+        # these would be evicted first. They must survive.
+        server.active_scans["live-running"] = {
+            "status": "running", "created": "2000-01-01T00:00:00+00:00"}
+        server.active_scans["live-pending"] = {
+            "status": "pending", "created": "2000-01-01T00:00:01+00:00"}
+        # cap + 30 completed scans, strictly increasing (sortable) timestamps.
+        overflow = 30
+        for i in range(cap + overflow):
+            server.active_scans[f"done-{i:05d}"] = {
+                "status": "completed",
+                "created": f"2020-01-01T00:00:00.{i:05d}+00:00",
+                "result": {"x": "y" * 100},  # the payload that used to leak
+            }
+        assert len(server.active_scans) == cap + overflow + 2
+
+        server._evict_terminal_scans()
+
+        # Bounded to exactly the cap (2 live + cap-2 newest completed).
+        assert len(server.active_scans) == cap
+        # Both live entries survive despite being the oldest in the dict.
+        assert "live-running" in server.active_scans
+        assert "live-pending" in server.active_scans
+        # The oldest terminal entries were dropped (there were overflow+2 too
+        # many, but the 2 live ones are protected, so overflow+2 completed go).
+        dropped = overflow + 2
+        for i in range(dropped):
+            assert f"done-{i:05d}" not in server.active_scans, i
+        # The newest terminal entries were kept.
+        assert f"done-{cap + overflow - 1:05d}" in server.active_scans
+    finally:
+        server.active_scans.clear()
+        server.active_scans.update(snapshot)
+
+
+@pytest.fixture
+def strict_client(tmp_path, monkeypatch):
+    """Like `client`, but surfaces an unhandled route exception as a real 500
+    response (what uvicorn does) instead of re-raising, so a coercion regression
+    asserts cleanly as a 500 rather than erroring out of the test."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HEAVEN_DISABLE_AUTH", "1")
+    monkeypatch.setenv("HEAVEN_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("HEAVEN_ADMIN_PASSWORD", "Known-Old-Passw0rd")
+    monkeypatch.delenv("HEAVEN_ENGAGEMENT", raising=False)
+    import heaven.security.auth as auth_mod
+    auth_mod._auth_manager = None
+    try:
+        from fastapi.testclient import TestClient
+        from heaven.api.server import create_app
+        yield TestClient(create_app(), raise_server_exceptions=False)
+    finally:
+        auth_mod._auth_manager = None
+
+
+@pytest.mark.parametrize("path,body", [
+    # A malformed (truthy, wrong-type) numeric field used to raise an uncaught
+    # ValueError/TypeError -> unsanitized 500. Each body reaches the coercion and
+    # fails there, so no background job / scan / lateral action is launched.
+    ("/api/fleet/run", {"engagement": "e", "ips": ["127.0.0.1"], "mode": "full",
+                        "max_iterations": "abc"}),
+    ("/api/fleet/run", {"engagement": "e", "ips": ["127.0.0.1"], "mode": "full",
+                        "time_budget_s": "soon"}),
+    ("/api/autonomous/run", {"ips": ["127.0.0.1"], "max_iterations": "abc"}),
+    ("/api/autonomous/run", {"ips": ["127.0.0.1"], "time_budget_s": {"x": 1}}),
+    ("/api/lateral/run", {"targets": ["notapair"]}),      # int('o') ValueError
+    ("/api/lateral/run", {"targets": [["onlyhost"]]}),    # IndexError
+    ("/api/lateral/run", {"targets": [42]}),              # TypeError (not indexable)
+    ("/api/lateral/run", {"targets": "10.0.0.5:22"}),     # str, not a list of pairs
+    ("/api/sca", {"path": ".", "max_files": "abc"}),
+    ("/api/sast/scan", {"path": ".", "timeout": "abc"}),
+])
+def test_malformed_numeric_body_is_400_not_500(strict_client, path, body):
+    r = strict_client.post(path, json=body)
+    assert r.status_code == 400, f"{path} -> {r.status_code}: {r.text[:200]}"
+
+
+def test_evicted_completed_scan_still_resolves_via_store(client):
+    """Evicting an old completed scan from memory is transparent: GET
+    /api/scans/{id} falls back to the engagement store (the post-restart path),
+    so clicking it still works and its findings are intact."""
+    from heaven.api import server
+
+    client.post("/api/engagements/active", json={"name": "evict-eng"})
+    _seed("evict-eng", {
+        "old-done": [{"target": "https://a", "vuln_type": "xss",
+                      "title": "Reflected XSS", "severity": "high",
+                      "confidence": 0.9, "risk_score": 7.5}],
+    })
+    # Put it in memory as completed, then force eviction by flooding past the cap.
+    snapshot = dict(server.active_scans)
+    try:
+        server.active_scans["old-done"] = {
+            "scan_id": "old-done", "status": "completed",
+            "created": "2019-01-01T00:00:00+00:00", "engagement": "evict-eng",
+            "result": {"big": "z" * 100}}
+        for i in range(server._ACTIVE_SCANS_SOFT_CAP + 5):
+            server.active_scans[f"flood-{i:05d}"] = {
+                "status": "completed",
+                "created": f"2021-01-01T00:00:00.{i:05d}+00:00"}
+        server._evict_terminal_scans()
+        assert "old-done" not in server.active_scans  # evicted (oldest terminal)
+
+        # Still viewable via the store fallback, findings intact.
+        r = client.get("/api/scans/old-done?include_findings=true")
+        assert r.status_code == 200, r.text
+        assert r.json()["findings_count"] == 1
+        assert r.json()["findings"][0]["title"] == "Reflected XSS"
+    finally:
+        server.active_scans.clear()
+        server.active_scans.update(snapshot)
+
+
+# ── Internal-exposure: a crashed scan's error must not leak raw exception text ──
+def test_safe_error_hides_raw_exception_text():
+    """`_safe_error` is the chokepoint for background scan/job failures surfaced
+    to the UI: it must return a generic message + correlation ref, never the raw
+    ``str(exc)`` (which can carry an absolute path or DB schema detail, CWE-209).
+    The full detail is logged server-side under that same ref."""
+    import re
+
+    from heaven.api.server import _safe_error
+
+    secret_path = "/private/var/engagements/VerySecret_Client.db"
+    exc = FileNotFoundError(2, "No such file or directory", secret_path)
+    # Also prove a schema-shaped detail does not pass through.
+    exc2 = ValueError("no such column: internal_secret_col in table scans")
+
+    out = _safe_error("background scan sc-1 failed", exc)
+    assert secret_path not in out
+    assert "No such file or directory" not in out
+    assert re.fullmatch(r"background scan sc-1 failed \(ref [0-9a-f]{8}\)", out), out
+
+    out2 = _safe_error("fleet job fj-9 failed", exc2)
+    assert "internal_secret_col" not in out2
+    assert re.fullmatch(r"fleet job fj-9 failed \(ref [0-9a-f]{8}\)", out2), out2
+
+    # Each failure gets its own ref so an operator can correlate precisely.
+    assert out.rsplit("ref ", 1)[1] != out2.rsplit("ref ", 1)[1]
+
+
+def test_crashed_scan_error_is_sanitized_not_leaked(client, monkeypatch):
+    """End to end: when a background scan crashes with an exception whose text
+    carries an internal filesystem path, neither the in-memory record nor the
+    status endpoints (/api/scans, /api/scans/{id}) expose that raw path; only a
+    generic message plus a correlation ref, matching the _server_error contract."""
+    import asyncio
+    import re
+
+    import heaven.orchestrator as orch_mod
+    from heaven.api import server
+
+    secret_path = "/private/var/secret/engagements/VerySecret.db"
+
+    def _boom(*_a, **_k):
+        # str() of this carries the absolute path, exactly the leak we guard.
+        raise FileNotFoundError(2, "No such file or directory", secret_path)
+
+    monkeypatch.setattr(orch_mod, "build_full_scan", _boom)
+
+    scan_id = "scan-crash-e2e"
+    snapshot = dict(server.active_scans)
+    try:
+        server.active_scans[scan_id] = {
+            "scan_id": scan_id, "status": "pending", "mode": "web",
+            "created": "2026-01-01T00:00:00+00:00",
+        }
+        req = server.ScanRequest(targets=["10.0.0.1"], engagement="e2e-crash")
+        asyncio.run(server._run_scan_background(scan_id, req))
+
+        entry = server.active_scans[scan_id]
+        assert entry["status"] == "failed"
+        err = entry["error"]
+        # Sanitized: generic message + ref, NOT the raw internal path.
+        assert secret_path not in err
+        assert re.search(r"\(ref [0-9a-f]{8}\)$", err), err
+
+        # And neither status endpoint re-exposes the raw path to the client.
+        assert secret_path not in client.get(f"/api/scans/{scan_id}").text
+        assert secret_path not in client.get("/api/scans").text
+    finally:
+        server.active_scans.clear()
+        server.active_scans.update(snapshot)

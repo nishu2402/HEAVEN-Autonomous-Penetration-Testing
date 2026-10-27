@@ -39,7 +39,7 @@ def _render_table(inv: list[dict], totals: dict) -> None:
         if subs:
             _print(f"  [bold]Subdomains ({len(subs)}):[/bold]")
             for s in subs:
-                addrs = ", ".join(s.get("addresses") or []) or "—"
+                addrs = ", ".join(s.get("addresses") or []) or "n/a"
                 _print(f"    [green]{s['name']}[/green]  [dim]{addrs}[/dim]")
 
 

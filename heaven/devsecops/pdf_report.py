@@ -289,7 +289,7 @@ class PDFReportGenerator:
                 if r.get("paths_broken"):
                     breaks += f" · {int(_num(r['paths_broken']))} attack path(s)"
                 rows.append([Paragraph(_esc(str(r.get("title") or "")), styles["cell"]),
-                             Paragraph(_esc(str(r.get("target") or "—")), styles["small"]),
+                             Paragraph(_esc(str(r.get("target") or "n/a")), styles["small"]),
                              Paragraph(_esc(breaks), styles["small"])])
             out.append(table(rows, [cw - 116 * mm, 56 * mm, 60 * mm]))
             cut = rem.get("path_cut") or []
@@ -435,10 +435,10 @@ class PDFReportGenerator:
                 title_html += f'<br/><font size="7" color="#5b6472">{_esc(vtype)}</font>'
             rows.append([
                 Paragraph(title_html, styles["cell"]),
-                Paragraph(_esc(lead.get("target") or "—"), styles["small"]),
+                Paragraph(_esc(lead.get("target") or "n/a"), styles["small"]),
                 Paragraph(f"{_prob(lead):.0%}", styles["small"]),
-                Paragraph(_esc(lead.get("reason") or "—"), styles["small"]),
-                Paragraph(_esc(lead.get("next_step") or "—"), styles["small"]),
+                Paragraph(_esc(lead.get("reason") or "n/a"), styles["small"]),
+                Paragraph(_esc(lead.get("next_step") or "n/a"), styles["small"]),
             ])
         out.append(table(rows, [cw - 148 * mm, 34 * mm, 14 * mm,
                                 50 * mm, 50 * mm]))
@@ -699,9 +699,9 @@ class PDFReportGenerator:
             kf.append([pill(_sev_of(f)),
                        Paragraph(_esc(_conf_of(f)), styles["small"]),
                        Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
-                       Paragraph(_esc(f.get("target") or "—"), styles["small"])])
+                       Paragraph(_esc(f.get("target") or "n/a"), styles["small"])])
         if len(kf) == 1:
-            kf.append([Paragraph("—", styles["cell"]), Paragraph("—", styles["cell"]),
+            kf.append([Paragraph("n/a", styles["cell"]), Paragraph("n/a", styles["cell"]),
                        Paragraph("No findings.", styles["cell"]), Paragraph("", styles["cell"])])
         story.append(table(kf, [24 * mm, 24 * mm, cw - 108 * mm, 60 * mm]))
         story.append(PageBreak())
@@ -785,9 +785,9 @@ class PDFReportGenerator:
                     prows.append([
                         Paragraph(_esc(p.get("port")), styles["cell"]),
                         Paragraph(_esc(p.get("protocol") or "tcp"), styles["cell"]),
-                        Paragraph(_esc(p.get("service") or "—"), styles["cell"]),
-                        Paragraph(_esc(p.get("service_version") or "—"), styles["cell"]),
-                        Paragraph(_esc(p.get("cpe") or "—"), styles["cell"]),
+                        Paragraph(_esc(p.get("service") or "n/a"), styles["cell"]),
+                        Paragraph(_esc(p.get("service_version") or "n/a"), styles["cell"]),
+                        Paragraph(_esc(p.get("cpe") or "n/a"), styles["cell"]),
                     ])
                 story.append(table(prows,
                                    [16 * mm, 14 * mm, 26 * mm, cw - 116 * mm, 60 * mm]))
@@ -813,10 +813,10 @@ class PDFReportGenerator:
             for f in _dir_hits:
                 ev = f.get("evidence") or {}
                 crows.append([
-                    Paragraph(_esc(ev.get("path") or f.get("target") or "—"), styles["cell"]),
-                    Paragraph(_esc(ev.get("status_code") or "—"), styles["cell"]),
+                    Paragraph(_esc(ev.get("path") or f.get("target") or "n/a"), styles["cell"]),
+                    Paragraph(_esc(ev.get("status_code") or "n/a"), styles["cell"]),
                     Paragraph(_esc(SEVERITY_META[_sev_of(f)]["label"]), styles["cell"]),
-                    Paragraph(_esc(f.get("target") or "—"), styles["cell"]),
+                    Paragraph(_esc(f.get("target") or "n/a"), styles["cell"]),
                 ])
             story.append(table(crows,
                                [cw - 116 * mm, 18 * mm, 24 * mm, 74 * mm]))
@@ -852,7 +852,7 @@ class PDFReportGenerator:
                         f"Subdomains discovered ({len(subs)})", styles["h3"]))
                     srows = [[Paragraph(c, styles["th"]) for c in ("Subdomain", "Addresses")]]
                     for s in subs:
-                        addrs = ", ".join(s.get("addresses") or []) or "—"
+                        addrs = ", ".join(s.get("addresses") or []) or "n/a"
                         srows.append([Paragraph(_esc(s.get("name")), styles["cell"]),
                                       Paragraph(_esc(addrs), styles["cell"])])
                     story.append(table(srows, [cw * 0.5, cw * 0.5]))
@@ -893,7 +893,7 @@ class PDFReportGenerator:
                            Paragraph(_esc(_conf_of(f)), styles["small"]),
                            Paragraph(_esc(cvss), styles["small"]),
                            Paragraph(_esc(ctx), styles["small"]),
-                           Paragraph(_esc(f.get("target") or "—"), styles["small"])])
+                           Paragraph(_esc(f.get("target") or "n/a"), styles["small"])])
             story.append(table(fs, [8 * mm, cw - 141 * mm, 24 * mm, 22 * mm,
                                     16 * mm, 15 * mm, 56 * mm]))
         else:
@@ -1163,7 +1163,7 @@ class PDFReportGenerator:
                    or _CVSS_VECTORS.get((f.get("vuln_type") or "").lower(), "")
                    or _vkb._generic_cvss_for_severity(_band))
         # Upgrade any legacy 2021 tag stored on the finding to its 2025 label.
-        owasp = _fw.normalize_owasp(f.get("owasp") or "") or _OWASP._owasp_for(f.get("vuln_type", "")) or "—"
+        owasp = _fw.normalize_owasp(f.get("owasp") or "") or _OWASP._owasp_for(f.get("vuln_type", "")) or "n/a"
 
         hdr = Table([[Paragraph(f'<font color="white" size="10"><b>{m["label"]} &nbsp; '
                                 f'#{idx} &nbsp; {_esc(title)}</b></font>', styles["cell"])]],
@@ -1173,18 +1173,18 @@ class PDFReportGenerator:
                                  ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
 
         meta_pairs = [
-            ("Target", f.get("target") or "—"), ("Severity", m["label"]),
+            ("Target", f.get("target") or "n/a"), ("Severity", m["label"]),
             ("Confirmation", _conf_of(f)),
             ("CVSS v4.0 base", _cvss_with_band(cvss4)),
             ("CVSS v3.1 base", _cvss_with_band(cvss)),
             ("Contextual CVSS", contextual),
-            ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "—"),
-            ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "—"),
-            ("CWE", f.get("cwe") or "—"), ("OWASP", owasp),
-            ("CVE", f.get("cve_id") or f.get("cve") or "—"),
-            ("MITRE ATT&CK", f.get("mitre_technique") or "—"),
-            ("CVSS v4.0 vector", v4_vec or "—"),
-            ("CVSS v3.1 vector", v31_vec or "—"),
+            ("Risk score", f.get("risk_score") if f.get("risk_score") is not None else "n/a"),
+            ("Confidence", f"{float(f.get('confidence', 0)):.0%}" if f.get("confidence") is not None else "n/a"),
+            ("CWE", f.get("cwe") or "n/a"), ("OWASP", owasp),
+            ("CVE", f.get("cve_id") or f.get("cve") or "n/a"),
+            ("MITRE ATT&CK", f.get("mitre_technique") or "n/a"),
+            ("CVSS v4.0 vector", v4_vec or "n/a"),
+            ("CVSS v3.1 vector", v31_vec or "n/a"),
             ("Status", (f.get("status") or "open").title()),
         ]
         mt = Table([[Paragraph(_esc(k), styles["cellb"]), Paragraph(_esc(v), styles["cell"])]
@@ -1240,8 +1240,8 @@ class PDFReportGenerator:
                     Paragraph(_esc(str(d.get("cve", ""))), styles["small"]),
                     Paragraph(_esc(_fmt_cvss(d.get("cvss"))), styles["small"]),
                     Paragraph(_esc(str(d.get("severity", "")).title()), styles["small"]),
-                    Paragraph(_esc(str(d.get("affected_versions", "") or "—")), styles["small"]),
-                    Paragraph("public" if d.get("exploit_available") else "—", styles["small"]),
+                    Paragraph(_esc(str(d.get("affected_versions", "") or "n/a")), styles["small"]),
+                    Paragraph("public" if d.get("exploit_available") else "n/a", styles["small"]),
                     Paragraph(_esc(str(d.get("title", ""))), styles["small"]),
                 ])
             cwd = [0.15 * cw, 0.07 * cw, 0.10 * cw, 0.23 * cw, 0.09 * cw]
@@ -1300,7 +1300,7 @@ class PDFReportGenerator:
         desc = _esc(ev.get("description") or f.get("description") or "")
         return [
             hdr, Spacer(1, 3),
-            Paragraph(f"Target: {_esc(f.get('target') or '—')} · Severity: "
+            Paragraph(f"Target: {_esc(f.get('target') or 'n/a')} · Severity: "
                       f"{m['label']} · Status: {_esc((f.get('status') or 'open').title())}",
                       styles["small"]),
             Paragraph(desc, styles["body"]) if desc else Spacer(1, 1),

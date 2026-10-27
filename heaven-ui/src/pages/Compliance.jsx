@@ -111,7 +111,7 @@ function ControlRow({ control, expandAll }) {
           {control.count || 0}
         </td>
         <td style={{ padding: "8px 10px", verticalAlign: "top", color: "var(--text-2)", fontSize: 11 }}>
-          {hit ? (isOpen ? "▾ hide" : "▸ show") : "—"}
+          {hit ? (isOpen ? "▾ hide" : "▸ show") : "n/a"}
         </td>
       </tr>
       {hit && isOpen && (

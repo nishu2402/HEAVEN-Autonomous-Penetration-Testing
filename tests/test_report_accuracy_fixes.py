@@ -327,3 +327,49 @@ def test_cpanel_ports_are_fingerprinted():
     for p in (2082, 2083, 2086, 2087, 2095, 2096, 2222):
         assert p in SERVICE_FINGERPRINTS, f"port {p} not fingerprinted"
     assert 2083 in _LIVENESS_PROBE_PORTS and 2087 in _LIVENESS_PROBE_PORTS
+
+
+# ── 9. Markdown code-fence breakout (client deliverable integrity) ────────────
+# A target's HTTP response body is attacker-influenced and can contain a literal
+# ``` run (any Markdown/docs-serving app returns these). Rendered into a fixed
+# three-backtick fence it would close the block early and render the rest of the
+# report as live Markdown/HTML. Fences are now sized to outlast the content.
+
+def _md_live_text(md: str) -> str:
+    """Markdown that renders OUTSIDE fenced code blocks (CommonMark fence rule)."""
+    import re
+    live, in_block, opener = [], False, ""
+    for ln in md.splitlines():
+        st = ln.strip()
+        if not in_block:
+            m = re.match(r"^(`{3,})", st)
+            if m:
+                in_block, opener = True, m.group(1)
+                continue
+            live.append(ln)
+        elif re.match(r"^`{3,}\s*$", st) and len(st.rstrip()) >= len(opener):
+            in_block = False
+    return "\n".join(live)
+
+
+def test_response_body_backticks_cannot_break_report_fence():
+    hostile = ("legit\n```\n## INJECTED\n[x](http://evil.example)\n```\ntail")
+    f = {"vuln_type": "reflected_xss", "severity": "high", "confidence": 0.9,
+         "target": "http://shop.example/p",
+         "evidence": {"request_url": "http://shop.example/p?q=1", "method": "GET",
+                      "status": 200, "response_excerpt": hostile}}
+    md = package_finding(f).to_markdown()
+    live = _md_live_text(md)
+    assert "## INJECTED" not in live
+    assert "[x](http://evil.example)" not in live
+    assert "INJECTED" in md  # preserved inside the fence, not dropped
+
+
+def test_response_headers_backticks_cannot_break_report_fence():
+    f = {"vuln_type": "missing_security_header", "severity": "medium", "confidence": 0.9,
+         "target": "http://shop.example/", "payload": "x",
+         "evidence": {"request_url": "http://shop.example/", "method": "GET",
+                      "status": 200,
+                      "response_headers": {"X-Evil": "v\n```\n## HDRINJECT\n```"}}}
+    md = package_finding(f).to_markdown()
+    assert "## HDRINJECT" not in _md_live_text(md)

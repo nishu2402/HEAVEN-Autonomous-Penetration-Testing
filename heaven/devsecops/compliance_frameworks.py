@@ -618,7 +618,7 @@ def render_coverage_html(cov: dict[str, Any]) -> str:
  <div class="toolbar no-print"><button class="btn" onclick="window.print()">🖨 Print / Save as PDF</button></div>
  <div class="page">
   <h1>{_esc(title)} · Compliance coverage</h1>
-  <p class="muted">{_esc(cov.get('subtitle', ''))} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng or '—')}</strong>
+  <p class="muted">{_esc(cov.get('subtitle', ''))} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng or 'n/a')}</strong>
      &nbsp;·&nbsp; Generated {_esc(_generated_at())}</p>
   <div class="disclaimer"><strong>Coverage view, not an attestation.</strong>
    {_esc(_coverage_intro(cov))}</div>
@@ -640,7 +640,7 @@ def render_coverage_markdown(cov: dict[str, Any]) -> str:
     lines = [
         f"# {cov.get('title', '')}: Compliance coverage",
         "",
-        f"*{cov.get('subtitle', '')}* · Engagement: **{cov.get('engagement') or '—'}** "
+        f"*{cov.get('subtitle', '')}* · Engagement: **{cov.get('engagement') or 'n/a'}** "
         f"· Generated {_generated_at()}",
         "",
         f"> **Coverage view, not an attestation of compliance.** {_coverage_intro(cov)}",
@@ -657,7 +657,7 @@ def render_coverage_markdown(cov: dict[str, Any]) -> str:
         ref_txt = "; ".join(
             f"{(r.get('severity') or 'info').upper()} {r.get('title') or r.get('vuln_type')}"
             f"{' (' + r['target'] + ')' if r.get('target') else ''}"
-            for r in refs) or "—"
+            for r in refs) or "n/a"
         name = str(c.get("name", "")).replace("|", "\\|")
         ref_txt = ref_txt.replace("|", "\\|")
         lines.append(f"| {c.get('id', '')} | {name} | {c.get('status', '')} "
@@ -674,7 +674,7 @@ def render_coverage_pdf(cov: dict[str, Any]) -> bytes:
     def _refs_text(c: dict[str, Any]) -> str:
         refs = c.get("findings") or []
         if not refs:
-            return "—"
+            return "n/a"
         return "; ".join(
             f"{(r.get('severity') or 'info').upper()} "
             f"{r.get('title') or r.get('vuln_type') or 'Finding'}"
@@ -697,7 +697,7 @@ def render_coverage_pdf(cov: dict[str, Any]) -> bytes:
     return render_matrix_pdf(
         title=f"{cov.get('title', '')}: Compliance coverage",
         subtitle=cov.get("subtitle", ""),
-        meta_lines=[f"Engagement: {cov.get('engagement') or '—'}  ·  "
+        meta_lines=[f"Engagement: {cov.get('engagement') or 'n/a'}  ·  "
                     f"Generated {_generated_at()}"],
         intro="Coverage view, not an attestation of compliance. "
               + _coverage_intro(cov),

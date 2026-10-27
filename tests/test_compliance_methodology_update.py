@@ -155,6 +155,23 @@ def test_markdown_report_includes_compliance_section():
     assert "not an attestation of compliance" in md
 
 
+def test_compliance_table_resists_title_injection():
+    """A finding title feeds the 'Example findings' cell of the compliance
+    table. A newline in a title (titles are built from target-influenced field
+    names) must not break the table row and inject a live heading."""
+    from heaven.devsecops.evidence import export_findings_markdown
+    hostile = [{"id": "h1", "vuln_type": "sql_injection",
+                "title": "SQLi in 'id|x\n## PWNED COMPLIANCE\n| row | injected",
+                "severity": "high", "target": "http://x/login",
+                "owasp": "A05:2025 Injection"}]
+    md = export_findings_markdown(hostile, engagement_name="Acme",
+                                  compliance_framework="uk_gdpr")
+    # The compliance section exists and the injected heading is not a live line.
+    assert "UK GDPR Compliance Mapping" in md
+    assert not any(ln.strip().startswith("## PWNED COMPLIANCE")
+                   for ln in md.splitlines())
+
+
 def test_pdf_report_compliance_section_builds():
     import importlib.util
     if importlib.util.find_spec("reportlab") is None:

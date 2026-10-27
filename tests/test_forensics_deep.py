@@ -185,6 +185,39 @@ def test_report_render_markdown_and_html():
     assert json.loads(js)["kind"] == "pcap" and ext_js == "json"
 
 
+def test_report_markdown_evidence_backticks_cannot_break_fence():
+    """Forensic evidence is derived from an untrusted artifact (a string pulled
+    from a malicious sample). A ``` run in a value must stay inside the JSON
+    code fence, not break out and render the rest of the report as live
+    Markdown/HTML."""
+    import re
+
+    from heaven.forensics.report import render_markdown
+    result = {
+        "kind": "binary", "filename": "sample.bin",
+        "findings": [{"severity": "high", "title": "Embedded command",
+                      "evidence": {"extracted": "x\n```\n## INJECTED\n[p](http://evil.example)\n```"}}],
+        "report": {},
+    }
+    md = render_markdown(result)
+    # Walk fences the way CommonMark closes them and collect the live text.
+    live, in_block, opener = [], False, ""
+    for ln in md.splitlines():
+        st = ln.strip()
+        if not in_block:
+            m = re.match(r"^(`{3,})", st)
+            if m:
+                in_block, opener = True, m.group(1)
+                continue
+            live.append(ln)
+        elif re.match(r"^`{3,}\s*$", st) and len(st.rstrip()) >= len(opener):
+            in_block = False
+    live_text = "\n".join(live)
+    assert "## INJECTED" not in live_text
+    assert "[p](http://evil.example)" not in live_text
+    assert "INJECTED" in md  # preserved inside the fence
+
+
 def test_report_html_escapes_injection():
     from heaven.forensics.report import render_html
     result = {"kind": "binary", "findings": [

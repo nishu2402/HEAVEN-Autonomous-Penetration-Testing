@@ -15,10 +15,10 @@ tests/benchmarks/
 ├── owasp_benchmark.py            ← SAST tier: scores HEAVEN vs the OWASP Benchmark (Youden index)
 ├── fixtures/owasp_mini/          ← HEAVEN-authored Java fixtures (hermetic scorer test, MIT)
 ├── ground_truth/
-│   ├── dvwa.yaml                 ← labeled vulns in DVWA v1.10 (low + medium) — live web tier
-│   ├── native.yaml               ← the in-process web reproduction — always-on web tier
-│   ├── api.yaml                  ← the in-process API reproduction — always-on API tier
-│   └── msf2.yaml                 ← Metasploitable-2 — live network / service tier
+│   ├── dvwa.yaml                 ← labeled vulns in DVWA v1.10 (low + medium), live web tier
+│   ├── native.yaml               ← the in-process web reproduction, always-on web tier
+│   ├── api.yaml                  ← the in-process API reproduction, always-on API tier
+│   └── msf2.yaml                 ← Metasploitable-2, live network / service tier
 ├── native/
 │   ├── vuln_app.py + runner.py   ← in-process web target + scored runner (always-on)
 │   └── api_app.py + api_runner.py← in-process API target + scored runner (always-on)

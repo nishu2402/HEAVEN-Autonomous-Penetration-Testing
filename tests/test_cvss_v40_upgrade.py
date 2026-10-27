@@ -212,7 +212,7 @@ def test_cvss_with_band_labels_score_and_passes_through_blank():
     assert _cvss_with_band("3.7") == "3.7 (Low)"
     assert _cvss_with_band("9.8") == "9.8 (Critical)"
     # Non-numeric and zero pass through untouched (no "(None)" noise).
-    assert _cvss_with_band("—") == "—"
+    assert _cvss_with_band("n/a") == "n/a"
     assert _cvss_with_band("0.0") == "0.0"
 
 

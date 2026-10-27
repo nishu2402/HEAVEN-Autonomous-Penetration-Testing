@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3749 tests · 70 CLI commands · 106 API routes · 32 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.99 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3758 tests · 70 CLI commands · 107 API routes · 32 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.99 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -14,7 +14,7 @@
 
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-    <img src="https://img.shields.io/badge/API-FastAPI_106_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+    <img src="https://img.shields.io/badge/API-FastAPI_107_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
     <img src="https://img.shields.io/github/actions/workflow/status/nishu2402/HEAVEN-Autonomous-Penetration-Testing/ci.yml?style=for-the-badge&logo=pytest&logoColor=black&label=Tests" alt="Tests"/>
     <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
     <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
@@ -93,7 +93,7 @@ It runs three ways from the **same engagement dataset**:
 
 - **CLI**: 70 commands for scriptable, CI-friendly workflows.
 - **Web UI**: a 32-page React command centre (scan launcher, live findings, combined risk, kill-chain, reports).
-- **REST + WebSocket API**: 106 RBAC-protected routes for automation and integration.
+- **REST + WebSocket API**: 107 RBAC-protected routes for automation and integration.
 
 <div align="center">
 <img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.3.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
@@ -112,11 +112,11 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 3749 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 3758 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
 | 🧩 **Modules** | 245 |
 | ⌨️ **CLI Commands** | 70 |
-| 🌐 **API Routes** | 106 RBAC-protected routes |
+| 🌐 **API Routes** | 107 RBAC-protected routes |
 | 🖥️ **UI Pages** | 32 (React + Vite, dark glassmorphic) |
 | 🗄️ **Database** | PostgreSQL (async, 29-table schema) + zero-config SQLite fallback |
 | 🤖 **AI / LLM** | Observe→plan→act loop · recon agent · attack-chain planner · **vuln-hypothesis agent (LLM proposes, real detectors verify)** · FP review · knowledge graph |
@@ -642,7 +642,7 @@ share one engagement DB and persist the identical findings a single process woul
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7400B8,50:00D2FF,100:B8FF00"/>
 </p>
 
-106 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
+107 RBAC-protected routes on port 8443. Interactive docs at `/docs`.
 
 ```bash
 # Health (no auth)
@@ -808,11 +808,11 @@ heaven/                   ← Python package (245 modules)
 ├── devsecops/            PDF/compliance reports · vuln KB · SBOM · diff · alerting · ticketing
 ├── db/                   PostgreSQL (async ORM, 29-table schema) + SQLite fallback
 ├── security/             JWT RBAC · AES-256-GCM vault · HMAC audit log
-├── api/                  FastAPI server + WebSocket (106 routes)
+├── api/                  FastAPI server + WebSocket (107 routes)
 └── cli/                  Click CLI - one module per command group (70 commands)
 
 heaven-ui/                React + Vite web console (32 pages)
-tests/                    3749 pytest tests + native & DVWA benchmark suites
+tests/                    3758 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -831,7 +831,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (3749 tests)
+pytest tests/                  # full suite, ~3.5 min (3758 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -898,7 +898,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>3749 tests · 245 modules · 70 CLI commands · 106 API routes · 32 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>3758 tests · 245 modules · 70 CLI commands · 107 API routes · 32 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

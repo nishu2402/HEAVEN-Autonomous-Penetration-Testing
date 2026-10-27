@@ -204,7 +204,38 @@ jobs:
       - name: PSScriptAnalyzer (fail on errors, warnings informational)
         shell: pwsh
         run: |
-          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          # Prefer the copy already on the runner image; only reach out to the
+          # PowerShell Gallery when the module is genuinely missing, and make that
+          # reach robust. A cold runner whose PSGallery is unregistered or whose
+          # NuGet provider is not bootstrapped once failed this job outright with
+          # "No match was found ... module name 'PSScriptAnalyzer'", with no change
+          # on our side. Bootstrap the provider, trust the Gallery, and retry
+          # before giving up, so a transient Gallery hiccup is not a red build.
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+            if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+              Register-PSRepository -Default -ErrorAction SilentlyContinue
+            }
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+            $installed = $false
+            foreach ($attempt in 1..3) {
+              try {
+                Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser `
+                  -SkipPublisherCheck -Repository PSGallery -ErrorAction Stop
+                $installed = $true
+                break
+              } catch {
+                Write-Host "PSScriptAnalyzer install attempt $attempt failed: $($_.Exception.Message)"
+                Start-Sleep -Seconds (5 * $attempt)
+              }
+            }
+            if (-not $installed) {
+              Write-Host "Could not install PSScriptAnalyzer from the Gallery after 3 attempts." -ForegroundColor Red
+              exit 1
+            }
+          }
+          Import-Module PSScriptAnalyzer -ErrorAction Stop
           # Write-Host is intentional for a colored installer UX, so its style
           # warning is excluded; block only on genuine Error/ParseError findings.
           $errors = @()

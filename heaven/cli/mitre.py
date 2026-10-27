@@ -89,7 +89,7 @@ def kill_chain_cmd(engagement: Optional[str], output: Optional[str]) -> None:
         _print("\n[bold]Attacker workflow if these findings are chained:[/bold]")
         for step in path:
             phase_safe = step['phase'].replace("[", r"\[").replace("]", r"\]")
-            title_safe = (step['representative_finding'] or "—").replace("[", r"\[").replace("]", r"\]")
+            title_safe = (step['representative_finding'] or "n/a").replace("[", r"\[").replace("]", r"\]")
             _print(f"  → \\[{phase_safe}] {title_safe} ({step['severity']})")
 
     if output:

@@ -253,7 +253,7 @@ def findings_to_junit(findings: list[dict[str, Any]], *,
             confirmation = "Confirmed" if is_confirmed_finding(f) else "Potential"
             detail = (f"Severity: {severity} (CVSS {base:.1f}) | {confirmation}\n"
                       f"Target: {target}\n"
-                      f"CVE: {_cve(f) or '—'}")
+                      f"CVE: {_cve(f) or 'n/a'}")
             cases.append(
                 f'  <testcase classname={quoteattr(_xml_text(classname))} '
                 f'name={quoteattr(_xml_text(name))}>\n'

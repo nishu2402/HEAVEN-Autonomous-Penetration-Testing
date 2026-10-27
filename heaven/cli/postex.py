@@ -113,12 +113,12 @@ def enum_cmd(host: str, user: str, password: str, key: Optional[str], port: int,
     if os_kind == "windows":
         _print(f"\n[bold]Host:[/bold] {f.hostname}  [dim]{f.os} · {f.build}[/dim]")
         _print(f"[bold]User:[/bold] {f.username} (admin={f.is_admin}, "
-               f"integrity={f.integrity or '—'})  "
-               f"privileges: {', '.join(f.privileges) or '—'}")
+               f"integrity={f.integrity or 'n/a'})  "
+               f"privileges: {', '.join(f.privileges) or 'n/a'}")
     else:
         _print(f"\n[bold]Host:[/bold] {f.hostname}  [dim]{f.os} · kernel {f.kernel}[/dim]")
         _print(f"[bold]User:[/bold] {f.username} (uid={f.uid}, root={f.is_root})  "
-               f"groups: {', '.join(f.groups) or '—'}")
+               f"groups: {', '.join(f.groups) or 'n/a'}")
     if f.listening_ports:
         _print(f"[bold]Listening:[/bold] {', '.join(map(str, f.listening_ports))}")
     _print(f"\n[bold]Privilege-escalation vectors ({len(result.vectors)}):[/bold]")

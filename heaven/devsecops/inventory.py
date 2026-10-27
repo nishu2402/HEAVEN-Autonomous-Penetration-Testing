@@ -21,6 +21,8 @@ import threading
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from heaven.utils.markdown import table_cell
+
 
 def looks_like_ip(value: str) -> bool:
     """True when ``value`` is an IPv4/IPv6 literal (not a hostname)."""
@@ -570,9 +572,15 @@ def render_markdown(assets: Optional[list], *, already_normalized: bool = False)
         lines.append("| Port | Proto | Service | Version | CPE | Source |")
         lines.append("| ---- | ----- | ------- | ------- | --- | ------ |")
         for p in h["ports"]:
+            # Service / version / CPE are banner-derived (attacker-controlled),
+            # so each goes through table_cell: a raw newline or pipe in a banner
+            # would otherwise break the row and inject rows/headings into the
+            # report. See heaven.utils.markdown.table_cell.
             lines.append(
-                f"| {p['port']} | {p['protocol']} | {p.get('service') or '—'} "
-                f"| {p.get('service_version') or '—'} | {p.get('cpe') or '—'} "
+                f"| {p['port']} | {p['protocol']} "
+                f"| {table_cell(p.get('service') or 'n/a')} "
+                f"| {table_cell(p.get('service_version') or 'n/a')} "
+                f"| {table_cell(p.get('cpe') or 'n/a')} "
                 f"| {port_source_label(p)} |"
             )
         lines.append("")

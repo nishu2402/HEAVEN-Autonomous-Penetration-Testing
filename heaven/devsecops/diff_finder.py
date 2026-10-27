@@ -29,6 +29,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from heaven.utils.markdown import table_cell
+
 # Illustrative severity weights for the risk-drift index (higher = more risk).
 # The index is a severity-weighted count of the OPEN findings at each point, so
 # it moves when the mix shifts, not only when totals do (one critical closing
@@ -292,9 +294,13 @@ def render_diff_markdown(report: DiffReport,
         for r in rows[:50]:
             sev_em = {"critical": "🔴", "high": "🟠", "medium": "🟡",
                       "low": "🔵", "info": "⚪"}.get(r.severity, "·")
+            # target and title can carry target-influenced bytes (a title built
+            # from a leaked JSON field name / request path, a URL target); a raw
+            # pipe or newline would otherwise break this row and inject columns
+            # or a fake row into the diff (which is posted as a PR comment).
             lines.append(f"| {sev_em} {r.severity} | `{r.vuln_type}` | "
-                         f"{r.target[:60]} | {r.confidence:.0%} | "
-                         f"{(r.title or '')[:60]} |")
+                         f"{table_cell(r.target[:60])} | {r.confidence:.0%} | "
+                         f"{table_cell((r.title or '')[:60])} |")
         if len(rows) > 50:
             lines.append(f"\n*(+{len(rows) - 50} more, truncated)*\n")
         lines.append("")

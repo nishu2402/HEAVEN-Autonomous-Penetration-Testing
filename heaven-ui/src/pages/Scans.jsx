@@ -159,7 +159,7 @@ export default function Scans() {
       };
       const result = await ScansApi.create(payload);
       setLaunchSuccess(
-        `Scan launched · ID: ${result.scan_id || result.id || "—"}` +
+        `Scan launched · ID: ${result.scan_id || result.id || "n/a"}` +
         (destEngagement ? ` · saving to "${destEngagement}"` : "")
       );
       setTargets("");
@@ -556,7 +556,7 @@ function RetestCard({ refreshKey }) {
           </div>
           {posture && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 10, marginTop: 16 }}>
-              <RetestKpi n={posture.remediation_rate == null ? "—" : `${Math.round(posture.remediation_rate)}%`} l="Remediated" accent />
+              <RetestKpi n={posture.remediation_rate == null ? "n/a" : `${Math.round(posture.remediation_rate)}%`} l="Remediated" accent />
               <RetestKpi n={posture.remediated} l="Fixed" />
               <RetestKpi n={posture.still_open} l="Still open" />
               <RetestKpi n={posture.reintroduced} l="Reintroduced" warn={posture.reintroduced > 0} />

@@ -14,6 +14,10 @@ The fix makes reproduction dynamic per finding:
 """
 from __future__ import annotations
 
+import shlex
+
+import pytest
+
 from heaven.devsecops.evidence import (
     build_curl,
     build_raw_http_request,
@@ -116,6 +120,64 @@ def test_unreproducible_finding_gets_honest_note_not_curl():
     assert cmd == ""
     assert "no single-command reproduction" in note.lower()
     assert "passive_intel" in note
+
+
+# ── Shell-injection safety: a repro command is a copy-paste line, and a finding
+# target can derive from attacker-influenced data (a cert SAN subdomain, a
+# discovered vhost, a DNS/redirect label). Every builder must shell-quote the
+# host so pasting the line cannot execute injected commands. Regression for the
+# gap where only the `dig` builder quoted and the other ~16 did not.
+@pytest.mark.parametrize("vt,host", [
+    ("redis_exposed", "10.0.0.5$(id)"),
+    ("smb_signing_disabled", "host`whoami`"),
+    ("snmp_public", "1.2.3.4 -oG /tmp/pwn"),
+    ("ftp_cleartext", "a.com && rm -rf ~"),
+    ("ssl_weak_cipher", "evil.com;reboot"),
+    ("ldap_anon_bind", "h|cat /etc/passwd"),
+    ("telnet_cleartext", "x.com\nreboot"),
+    ("dns_zone_transfer", "evil.com`id`"),
+    ("mysql_exposed", "db$(touch /tmp/x)"),
+    ("open_port_exposed", "p.com;curl evil"),
+])
+def test_repro_command_shell_quotes_hostile_host(vt, host):
+    cmd, _ = build_repro_command(vt, host)
+    assert cmd, f"{vt} should still produce a command"
+    # The whole command must parse as ONE token list with the hostile host held
+    # verbatim inside a single argument: no shell operator ($() ; && | ` > etc.)
+    # can escape into its own token.
+    tokens = shlex.split(cmd)
+    assert any(host in tok for tok in tokens), (
+        f"host must survive as a literal inside one token, got {tokens!r}")
+    for bad in ("$(id)", "whoami", "rm -rf", "reboot", "/etc/passwd",
+                "touch /tmp/x", "curl evil", "-oG"):
+        if bad in host:
+            # The dangerous substring, if present, lives inside a single quoted
+            # token, never as its own executable token.
+            assert bad not in [t for t in tokens if t != host and host not in t], (
+                f"{bad!r} must not become a standalone token in {tokens!r}")
+
+
+def test_repro_command_leaves_clean_hosts_unquoted():
+    # No behavior change for ordinary hosts: output must be byte-identical to the
+    # pre-fix form (no stray quoting) so operators see clean commands.
+    assert build_repro_command("ssl_weak_cipher", "example.com", {"port": 443})[0] == (
+        "openssl s_client -connect example.com:443 -servername example.com")
+    assert build_repro_command("redis_exposed", "10.0.0.9", {"port": 6379})[0] == (
+        "redis-cli -h 10.0.0.9 -p 6379 INFO")
+    assert build_repro_command("spf_missing", "example.com")[0] == (
+        "dig +dnssec ANY example.com")
+    # IPv6 literal: shlex treats ':' as safe, so it stays unquoted.
+    assert "2001:db8::1" in build_repro_command("smb_signing_disabled", "2001:db8::1")[0]
+
+
+def test_version_confirm_hint_shell_quotes_hostile_host():
+    from heaven.vulnscan.cve_mapper import _version_confirm_hint
+    hostile = _version_confirm_hint("apache", "evil;reboot", 80)
+    assert "'evil;reboot'" in hostile
+    # Clean host is left untouched; the <host> placeholder path still works.
+    assert _version_confirm_hint("apache", "example.com", 80).count("example.com") >= 1
+    assert "example.com;" not in _version_confirm_hint("apache", "example.com", 80)
+    assert "<host>" in _version_confirm_hint("nginx", "", 0)
 
 
 def test_non_http_package_has_no_curl_but_a_note_when_unmatched():

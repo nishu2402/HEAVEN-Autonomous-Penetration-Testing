@@ -171,7 +171,7 @@ def render_markdown(records: Optional[list], *, already_normalized: bool = False
             lines.append("| Subdomain | Addresses |")
             lines.append("| --------- | --------- |")
             for s in subs:
-                addrs = ", ".join(s.get("addresses") or []) or "—"
+                addrs = ", ".join(s.get("addresses") or []) or "n/a"
                 lines.append(f"| {_md_cell(s['name'])} | {_md_cell(addrs)} |")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"

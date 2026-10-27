@@ -842,7 +842,7 @@ def render_coverage_html(std: dict[str, Any], eng_name: str = "") -> str:
  <div class="toolbar no-print"><button class="btn" onclick="window.print()">🖨 Print / Save as PDF</button></div>
  <div class="page">
   <h1>{_esc(title)}: Coverage</h1>
-  <p class="muted">{_esc(sub)} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng_name or '—')}</strong>
+  <p class="muted">{_esc(sub)} &nbsp;·&nbsp; Engagement: <strong>{_esc(eng_name or 'n/a')}</strong>
      &nbsp;·&nbsp; Generated {_esc(generated)}</p>
   <p>{_esc(_coverage_intro(std, eng_name))}</p>
   <div class="kpis">
@@ -864,7 +864,7 @@ def render_coverage_markdown(std: dict[str, Any], eng_name: str = "") -> str:
     lines = [
         f"# {title}: Coverage",
         "",
-        f"*{std.get('subtitle', '')}* · Engagement: **{eng_name or '—'}** · Generated {_generated_at()}",
+        f"*{std.get('subtitle', '')}* · Engagement: **{eng_name or 'n/a'}** · Generated {_generated_at()}",
         "",
         _coverage_intro(std, eng_name),
         "",
@@ -921,7 +921,7 @@ def render_coverage_pdf(std: dict[str, Any], eng_name: str = "") -> bytes:
     def _refs_text(row: dict[str, Any]) -> str:
         refs = row.get("findings") or []
         if not refs:
-            return "—"
+            return "n/a"
         parts = [
             f"{(r.get('severity') or 'info').upper()} "
             f"{r.get('title') or r.get('vuln_type') or 'Finding'}"
@@ -961,7 +961,7 @@ def render_coverage_pdf(std: dict[str, Any], eng_name: str = "") -> bytes:
     return render_matrix_pdf(
         title=f"{title}: Coverage",
         subtitle=sub,
-        meta_lines=[f"Engagement: {eng_name or '—'}  ·  Generated {_generated_at()}"],
+        meta_lines=[f"Engagement: {eng_name or 'n/a'}  ·  Generated {_generated_at()}"],
         intro=_coverage_intro(std, eng_name),
         kpis=[(su.get("total", 0), "Tests mapped"),
               (su.get("covered", 0), "Automated"),

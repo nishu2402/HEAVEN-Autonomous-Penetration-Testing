@@ -38,6 +38,14 @@ _PIXEL = (
     b"\x02D\x01\x00;"
 )
 
+# Bounds for a hostile or noisy caller on a routable collaborator: cap the body
+# we buffer from one callback (the evidence is the request metadata, a large
+# body is never needed), cap how long a single request may hold a worker thread,
+# and cap how many interactions we retain in memory on a long-running public box.
+_MAX_CALLBACK_BODY = 64 * 1024
+_REQUEST_TIMEOUT_S = 10.0
+_MAX_INTERACTIONS = 2048
+
 
 @dataclass
 class Interaction:
@@ -63,16 +71,40 @@ class Interaction:
 class _Handler(BaseHTTPRequestHandler):
     # server.listener is set by OASTListener before serving.
     protocol_version = "HTTP/1.1"
+    # Bound how long one request may hold a worker thread. Without a socket
+    # timeout the stdlib handler lets a slow-loris client (or a hostile
+    # Content-Length whose body never arrives) pin a thread indefinitely.
+    timeout = _REQUEST_TIMEOUT_S
+
+    def version_string(self) -> str:  # noqa: D401 - http.server API
+        # Never advertise the implementation to a caller. The stdlib emits
+        # ``Server: BaseHTTP/x Python/x.y.z`` from send_response AND from the
+        # send_error path (malformed requests), so neutralise it at the source.
+        return ""
+
+    def _safe_body(self) -> str:
+        """Read the callback body without ever crashing or hanging unboundedly.
+
+        A hostile or buggy caller can send a non-numeric, negative or enormous
+        ``Content-Length``; we must still record the callback (the evidence is
+        the request metadata, not the body), never raise, and never buffer more
+        than the cap. The handler ``timeout`` bounds a read that stalls.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", "") or 0)
+        except (TypeError, ValueError):
+            return ""
+        if length <= 0:
+            return ""
+        try:
+            raw = self.rfile.read(min(length, _MAX_CALLBACK_BODY))
+        except Exception:  # noqa: BLE001 - socket timeout / short read; record anyway
+            return ""
+        return raw.decode("utf-8", "replace")
 
     def _record(self) -> None:
         listener: "OASTListener" = self.server.listener  # type: ignore[attr-defined]
-        body = ""
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        if length:
-            try:
-                body = self.rfile.read(length).decode("utf-8", "replace")
-            except Exception:  # noqa: BLE001 - never let a probe body crash the listener
-                body = ""
+        body = self._safe_body()
         listener._record(  # noqa: SLF001 - internal by design
             Interaction(
                 token=self.path.strip("/").split("/")[0].split("?")[0],
@@ -86,7 +118,9 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
     def _respond(self) -> None:
-        self.send_response(200)
+        # send_response_only (not send_response) so the callback response carries
+        # ONLY our own headers, with no Server/Date banner leaking the runtime.
+        self.send_response_only(200)
         self.send_header("Content-Type", "image/gif")
         self.send_header("Content-Length", str(len(_PIXEL)))
         self.send_header("Connection", "close")
@@ -439,6 +473,11 @@ class OASTListener:
     def _record(self, interaction: Interaction) -> None:
         with self._lock:
             self._interactions.append(interaction)
+            if len(self._interactions) > _MAX_INTERACTIONS:
+                # OAST evidence is polled within seconds of the probe, so recency
+                # is relevance: drop the oldest to bound memory on a long-running
+                # public collaborator without dropping an in-flight correlation.
+                del self._interactions[:-_MAX_INTERACTIONS]
         logger.info(
             "OAST callback: %s %s from %s (token=%s)",
             interaction.method, interaction.path, interaction.client_ip, interaction.token,

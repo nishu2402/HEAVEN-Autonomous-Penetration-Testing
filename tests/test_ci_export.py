@@ -219,3 +219,51 @@ def test_export_junit_fail_on_none_never_gates(tmp_path, monkeypatch):
     res = CliRunner().invoke(
         export, ["--format", "junit", "--fail-on", "none", "-o", str(out)])
     assert res.exit_code == 0, res.output
+
+
+# ── `heaven repro`: the finding-level repro command must be REACHABLE ─────────
+# Regression: findings.py and replay.py both registered a `replay` command, so
+# the finding-level one was silently overwritten by the scan-replay and could
+# never be invoked. It was renamed to `repro` to resolve the collision.
+
+def test_repro_command_is_reachable_and_prints_one_curl(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from heaven.engagement import EngagementStore
+    from heaven.cli.findings import repro
+
+    db = tmp_path / "repro.db"
+    store = EngagementStore(db, create=True)
+    fid = store.upsert_finding("scan1", {
+        "vuln_type": "sqli_boolean", "title": "SQLi", "severity": "high",
+        "target": "http://t/item", "confidence": 0.9,
+        "evidence": {"method": "GET", "request_url": "http://t/item?id=1",
+                     "param": "id", "payload": "1 OR 1=1"},
+    })
+    monkeypatch.setenv("HEAVEN_ENGAGEMENT", str(db))
+
+    res = CliRunner().invoke(repro, [fid])
+    assert res.exit_code == 0, res.output
+    assert res.output.strip().startswith("curl"), res.output
+
+
+def test_repro_unknown_finding_exits_2(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from heaven.engagement import EngagementStore
+    from heaven.cli.findings import repro
+
+    db = tmp_path / "repro2.db"
+    EngagementStore(db, create=True)
+    monkeypatch.setenv("HEAVEN_ENGAGEMENT", str(db))
+
+    res = CliRunner().invoke(repro, ["does-not-exist"])
+    assert res.exit_code == 2, res.output
+
+
+def test_repro_and_scan_replay_are_distinct_commands():
+    """Both commands coexist: `repro` (finding) and `replay` (scan). Regression
+    for the silent name collision that made the finding command unreachable."""
+    from heaven.cli import cli
+    assert "repro" in cli.commands
+    assert "replay" in cli.commands
+    assert "repro command" in (cli.commands["repro"].help or "")
+    assert "scan" in (cli.commands["replay"].help or "").lower()

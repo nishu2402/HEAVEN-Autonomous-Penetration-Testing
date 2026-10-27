@@ -344,7 +344,7 @@ export default function Header({ onMenu }) {
               color: siem.siem_backends_active.length ? "var(--brand)" : "var(--text-2)",
             }}
           >
-            SIEM {siem.siem_backends_active.length ? "✓" : "—"}
+            SIEM {siem.siem_backends_active.length ? "✓" : "·"}
           </span>
         )}
         <button

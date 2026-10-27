@@ -87,7 +87,7 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
         cve = f.get("cve_id") or e.get("osv_id", "")
         _print(f"  [{color}]{f['severity'][:4].upper():4}[/{color}] "
                f"cvss {f.get('cvss', 0):<4} {e['package']}@{e['installed_version']}  "
-               f"{cve}  [dim]fix: {e.get('fixed_version') or '—'}[/dim]")
+               f"{cve}  [dim]fix: {e.get('fixed_version') or 'n/a'}[/dim]")
     if len(findings) > 30:
         _print(f"  [dim]… and {len(findings) - 30} more · pass --output for full JSON[/dim]")
 

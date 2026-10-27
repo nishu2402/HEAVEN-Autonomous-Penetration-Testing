@@ -406,7 +406,7 @@ function Decodings({ decodings, best }) {
                   </div>
                 )}
               </td>
-              <td>{d.confidence != null ? Math.round(d.confidence * 100) + "%" : "—"}</td>
+              <td>{d.confidence != null ? Math.round(d.confidence * 100) + "%" : "n/a"}</td>
               <td className="mono" style={{ wordBreak: "break-word", maxWidth: 420 }}>{d.decoded}</td>
               <td className="dim">{d.identified_type || ""}</td>
             </tr>

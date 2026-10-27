@@ -7,6 +7,7 @@ Includes fuzzy CPE matching, version-range CVE database, and zero-day heuristics
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -988,7 +989,11 @@ def _version_confirm_hint(product_key: str, host: str, port: int) -> str:
         "re-observe the service banner, then match it against each affected-"
         "version range below.")
     p = str(port) if port else ""
-    return tmpl.replace("{host}", host or "<host>").replace("{port}", p or "<port>")
+    # Shell-quote the host: this hint embeds a backtick-wrapped command an
+    # operator may paste, and the host can derive from attacker-influenced data
+    # (discovered subdomain/vhost/DNS label). Clean hosts stay unquoted.
+    safe_host = shlex.quote(host) if host else "<host>"
+    return tmpl.replace("{host}", safe_host).replace("{port}", p or "<port>")
 
 
 def _candidate_details(records: list[CVERecord]) -> list[dict]:

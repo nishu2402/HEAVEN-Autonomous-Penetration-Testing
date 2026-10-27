@@ -165,6 +165,23 @@ class TestDiffEngine:
         assert "New findings" in md
         assert "sqli_boolean" in md
 
+    def test_markdown_table_resists_title_injection(self):
+        """A finding title can carry target-influenced bytes (built from a leaked
+        JSON field name / request path). A pipe or newline must not break the
+        diff table row and inject columns or a fake row into the PR comment."""
+        from heaven.devsecops.diff_finder import (
+            DiffReport, FindingDiffRow, render_diff_markdown)
+        rep = DiffReport(baseline_scan_id="base1234", current_scan_id="curr5678")
+        rep.new = [FindingDiffRow(
+            id="1", target="http://shop.example/api", vuln_type="excessive_data_exposure",
+            title="leak 'id|x\n| 🔴 critical | `pwn` | http://evil | 100% | FAKE",
+            severity="high", confidence=0.9)]
+        md = render_diff_markdown(rep)
+        data_rows = [ln for ln in md.splitlines()
+                     if ln.startswith("| 🟠") or ln.startswith("| 🔴")]
+        assert len(data_rows) == 1, data_rows  # the injected fake row did not appear
+        assert "FAKE" in md  # text preserved (escaped), not dropped
+
 
 # ═══════════════════════════════════════════
 # TICKETING — configuration detection (HTTP paths need creds)

@@ -215,11 +215,16 @@ def serve(host: str, port: int, open_browser: bool,
 
         # ssl_certfile / ssl_keyfile default to None (plain HTTP) when TLS is off,
         # so this call is byte-for-byte the old behaviour unless a cert+key are set.
+        # server_header=False suppresses uvicorn's default `Server: uvicorn`
+        # banner, a technology-disclosure header (CWE-200) that HEAVEN's own
+        # scanner flags on targets, so the console must not emit it itself. The
+        # standard Date header is kept (benign, expected on HTTP responses).
         uvicorn.run(
             app,
             host=host,
             port=port,
             log_level="info",
+            server_header=False,
             ssl_certfile=tls_cert if use_tls else None,
             ssl_keyfile=tls_key if use_tls else None,
         )

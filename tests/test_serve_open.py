@@ -184,3 +184,33 @@ def test_serve_fails_fast_when_port_in_use(monkeypatch):
     assert r.exit_code == 1
     assert "already in use" in r.output
     assert ran == []  # bailed out before starting the server
+
+
+# ── Server-banner suppression (internal-exposure hardening) ───────────────────
+def test_serve_suppresses_uvicorn_server_banner(monkeypatch):
+    """`heaven serve` must call uvicorn with server_header=False so the API never
+    emits uvicorn's default `Server: uvicorn` technology-disclosure banner
+    (CWE-200), the very header HEAVEN's own scanner flags on a target. The fix
+    is at the uvicorn.run call site, so lock the kwarg it is invoked with."""
+    import sys
+    import types
+
+    captured: dict = {}
+
+    fake = types.ModuleType("uvicorn")
+    fake.run = lambda *_a, **k: captured.update(k)
+    monkeypatch.setitem(sys.modules, "uvicorn", fake)
+
+    fake_api = types.ModuleType("heaven.api.server")
+    fake_api.create_app = lambda: object()
+    monkeypatch.setitem(sys.modules, "heaven.api.server", fake_api)
+
+    monkeypatch.setattr(srv, "print_banner", lambda: None)
+    monkeypatch.setattr(srv, "_port_available", lambda *a, **k: True)
+    monkeypatch.setattr(srv, "_load_vault_secrets", lambda *a, **k: None)
+
+    r = CliRunner().invoke(srv.serve, ["--no-open", "--port", "9"])
+    assert r.exit_code == 0, r.output
+    assert captured.get("server_header") is False, (
+        "uvicorn.run must be called with server_header=False to suppress the "
+        f"Server banner; got server_header={captured.get('server_header')!r}")

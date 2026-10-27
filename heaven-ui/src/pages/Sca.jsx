@@ -140,7 +140,7 @@ export default function ScaPage() {
                     return (
                       <tr key={i}>
                         <td style={{ color: sevColor(f.severity), fontWeight: 600 }}>{f.severity}</td>
-                        <td className="num">{f.cvss || "—"}</td>
+                        <td className="num">{f.cvss || "n/a"}</td>
                         <td className="mono" style={{ fontSize: 11.5 }}>
                           {e.package}@{e.installed_version}
                         </td>
@@ -148,7 +148,7 @@ export default function ScaPage() {
                           {f.cve_id || e.osv_id}
                         </td>
                         <td className="mono" style={{ fontSize: 11 }}>
-                          {e.fixed_version || "—"}
+                          {e.fixed_version || "n/a"}
                         </td>
                       </tr>
                     );

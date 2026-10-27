@@ -1538,10 +1538,16 @@ class EngagementStore:
         across forms (``www.example.com`` in scope authorizes
         ``https://www.example.com`` and ``www.example.com:443``, and a scoped URL
         authorizes its bare host). Host matching is exact and never widens scope:
-        a scoped ``example.com`` does not authorize ``sub.example.com``. Finally,
-        an IP or CIDR target is authorized when it falls *inside* an in-scope CIDR
-        — so adding ``192.168.1.0/24`` covers every host in it — but never when it
-        is broader than what was authorized."""
+        a scoped ``example.com`` does not authorize ``sub.example.com``. An IP or
+        CIDR target is authorized when it falls *inside* an in-scope CIDR, so
+        adding ``192.168.1.0/24`` covers every host in it, but never when it is
+        broader than what was authorized.
+
+        Out-of-scope entries WIN: an explicit exclusion (an exact host, or a CIDR
+        that contains the target) is subtracted from everything the in-scope
+        entries would otherwise allow, so a target inside an in-scope ``10.0.0.0/8``
+        but also inside an out-of-scope ``10.5.5.0/24`` is NOT authorized. This
+        mirrors ``feedback.ScopeGuard``, which subtracts exclusions at runtime."""
         import ipaddress
         from urllib.parse import urlparse
 
@@ -1550,20 +1556,32 @@ class EngagementStore:
                 "SELECT in_scope FROM scope WHERE target = ?", (target,)
             ).fetchone()
             if row is not None:
+                # An exact entry is the most specific statement about this target
+                # and is authoritative (an explicit `10.5.5.5` in-scope stands
+                # even under an out-of-scope `10.5.5.0/24`).
                 return bool(row["in_scope"])
 
-            # Host match, then range containment. A target is authorized when it
-            # names the SAME host as a scope entry — so adding `www.example.com`
-            # authorizes `https://www.example.com`, `www.example.com:443` and
-            # `www.example.com/path`, and a scoped URL authorizes its bare host —
-            # or when it is an IP/CIDR contained by an in-scope range. Host
-            # matching is EXACT: a scoped `example.com` never pulls in
-            # `sub.example.com`, so scope is matched here, never widened (the
-            # orchestrator's ScopeGuard governs hosts discovered mid-scan).
+            # Host match, then range containment. A target is covered by an entry
+            # when it names the SAME host (so `www.example.com` covers
+            # `https://www.example.com`, `www.example.com:443` and
+            # `www.example.com/path`, and a scoped URL covers its bare host), or
+            # when it is an IP/CIDR contained by the entry's range. Host matching
+            # is EXACT: `example.com` never pulls in `sub.example.com`, so scope
+            # is matched here, never widened (the orchestrator's ScopeGuard
+            # governs hosts discovered mid-scan).
             def _host_key(s: str) -> str:
                 s = (s or "").strip().lower()
                 if not s:
                     return ""
+                # A bare IPv6 literal has >=2 colons and must be bracketed or
+                # urlparse mis-splits it on a colon ("2001:db8::1" -> "2001"),
+                # collapsing every IPv6 host to the same bogus key. Bracket the
+                # host chunk so IPv6 host-equality is exact; an IPv6 CIDR then
+                # yields its network address, which won't equal a host inside it,
+                # so containment is correctly left to the CIDR logic below.
+                body = s.split("://", 1)[-1].split("/", 1)[0]
+                if "[" not in s and body.count(":") >= 2:
+                    s = s.replace(body, f"[{body}]", 1)
                 try:
                     return urlparse(s if "://" in s else "//" + s).hostname or ""
                 except ValueError:
@@ -1578,28 +1596,36 @@ class EngagementStore:
             except ValueError:
                 t_net = None
 
-            for r in c.execute(
-                "SELECT target FROM scope WHERE in_scope = 1"
-            ).fetchall():
-                cand = r["target"]
-                if t_host and _host_key(cand) == t_host:
-                    return True
-                if t_net is None:
-                    continue
-                cand_net = cand
-                if "://" in cand_net:
-                    cand_net = urlparse(cand_net).hostname or ""
-                try:
-                    c_net = ipaddress.ip_network(cand_net, strict=False)
-                except ValueError:
-                    continue
-                try:
-                    # subnet_of raises TypeError across IPv4/IPv6 — caught below.
-                    if t_net.subnet_of(c_net):  # type: ignore[arg-type]
+            def _covered_by(flag: int) -> bool:
+                """True when the target is host-exact or CIDR-contained by any
+                scope row with this ``in_scope`` flag."""
+                for r in c.execute(
+                    "SELECT target FROM scope WHERE in_scope = ?", (flag,)
+                ).fetchall():
+                    cand = r["target"]
+                    if t_host and _host_key(cand) == t_host:
                         return True
-                except TypeError:
-                    continue  # mixed IPv4 / IPv6 — not comparable
-            return False
+                    if t_net is None:
+                        continue
+                    cand_net = cand
+                    if "://" in cand_net:
+                        cand_net = urlparse(cand_net).hostname or ""
+                    try:
+                        c_net = ipaddress.ip_network(cand_net, strict=False)
+                    except ValueError:
+                        continue
+                    try:
+                        # subnet_of raises TypeError across IPv4/IPv6, caught below.
+                        if t_net.subnet_of(c_net):  # type: ignore[arg-type]
+                            return True
+                    except TypeError:
+                        continue  # mixed IPv4 / IPv6, not comparable
+                return False
+
+            # Exclusions are subtracted first, then inclusions are honoured.
+            if _covered_by(0):
+                return False
+            return _covered_by(1)
 
     def criticality_for_target(self, target: str) -> str:
         """Look up the criticality tag for a target. Returns 'medium' (the
@@ -2335,7 +2361,12 @@ class EngagementStore:
         evidence = {}
         if row["evidence_json"]:
             try:
-                evidence = json.loads(row["evidence_json"])
+                parsed = json.loads(row["evidence_json"])
+                # evidence_json is normally an object, but a scanner could have
+                # persisted a bare JSON string/number/list; keep it a dict so
+                # every reader (`show`, `repro`, reports, exports) can rely on
+                # the shape instead of hitting `.get` on a list.
+                evidence = parsed if isinstance(parsed, dict) else {}
             except json.JSONDecodeError:
                 pass
         return Finding(

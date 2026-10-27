@@ -14,6 +14,7 @@ import html
 import json
 from typing import Any
 
+from heaven.utils.markdown import fenced_block
 from heaven.utils.timefmt import stamp
 
 _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -178,9 +179,11 @@ def render_markdown(result: dict[str, Any]) -> str:
         if ev:
             lines.append("<details><summary>Evidence</summary>")
             lines.append("")
-            lines.append("```json")
-            lines.append(json.dumps(ev, indent=2, default=str)[:4000])
-            lines.append("```")
+            # Evidence is derived from an untrusted artifact (a string pulled
+            # from a malicious sample, a filename, a URL in a pcap). json.dumps
+            # does not escape backticks, so a ``` run in a value would break a
+            # fixed fence and render the rest of the report as live Markdown.
+            lines.extend(fenced_block(json.dumps(ev, indent=2, default=str)[:4000], "json"))
             lines.append("</details>")
             lines.append("")
 

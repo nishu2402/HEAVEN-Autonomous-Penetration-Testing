@@ -17,6 +17,12 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+# Keep target-influenced bytes from breaking the Markdown structure of a report
+# or submission: _fenced_block sizes a code fence past any backtick run inside
+# it, _md_table_cell neutralises pipes and newlines in a table cell.
+from heaven.utils.markdown import fenced_block as _fenced_block
+from heaven.utils.markdown import table_cell as _md_table_cell
+
 
 @dataclass
 class EvidencePackage:
@@ -118,11 +124,11 @@ class EvidencePackage:
         out.append("| CVE | CVSS | Severity | Affected versions | Exploit | Description |")
         out.append("|-----|------|----------|-------------------|---------|-------------|")
         for d in details:
-            expl = "public" if d.get("exploit_available") else "—"
+            expl = "public" if d.get("exploit_available") else "n/a"
             out.append(
                 f"| {d.get('cve','')} | {d.get('cvss','')} | "
                 f"{str(d.get('severity','')).title()} | "
-                f"{d.get('affected_versions','') or '—'} | {expl} | "
+                f"{d.get('affected_versions','') or 'n/a'} | {expl} | "
                 f"{str(d.get('title','')).replace('|', '/')} |")
         out.append("")
         hint = self.evidence_data.get("how_to_confirm")
@@ -163,16 +169,15 @@ class EvidencePackage:
 
         if http_txn:
             lines.append("**Request:**")
-            lines.append("```http")
-            lines.append(f"{self.request_method} {self.request_url}")
+            req = [f"{self.request_method} {self.request_url}"]
             for k, v in self.request_headers.items():
-                lines.append(f"{k}: {v}")
+                req.append(f"{k}: {v}")
             if self.request_body:
-                lines.append("")
-                lines.append(self.request_body[:500])
+                req.append("")
+                req.append(self.request_body[:500])
                 if len(self.request_body) > 500:
-                    lines.append("[... truncated ...]")
-            lines.append("```")
+                    req.append("[... truncated ...]")
+            lines.extend(_fenced_block("\n".join(req), "http"))
             lines.append("")
 
             # Only claim a response when we actually captured one. A status of 0
@@ -185,18 +190,15 @@ class EvidencePackage:
                 # can't flood the report.
                 if self.response_headers:
                     shown = list(self.response_headers.items())[:15]
-                    lines.append("```http")
-                    for k, v in shown:
-                        lines.append(f"{k}: {v}")
+                    hdrs = [f"{k}: {v}" for k, v in shown]
                     if len(self.response_headers) > 15:
-                        lines.append("... [truncated] ...")
-                    lines.append("```")
+                        hdrs.append("... [truncated] ...")
+                    lines.extend(_fenced_block("\n".join(hdrs), "http"))
                 if self.response_excerpt:
-                    lines.append("```")
-                    lines.append(self.response_excerpt[:1000])
+                    body = self.response_excerpt[:1000]
                     if len(self.response_excerpt) > 1000:
-                        lines.append("[... truncated ...]")
-                    lines.append("```")
+                        body += "\n[... truncated ...]"
+                    lines.extend(_fenced_block(body))
                 lines.append("")
         else:
             # Non-HTTP finding — render the real observed evidence.
@@ -231,22 +233,16 @@ class EvidencePackage:
         if http_txn:
             if self.curl_command:
                 lines.append("**Reproduce with curl:**")
-                lines.append("```bash")
-                lines.append(self.curl_command)
-                lines.append("```")
+                lines.extend(_fenced_block(self.curl_command, "bash"))
                 lines.append("")
             if self.raw_http_request:
                 lines.append("**Raw HTTP request** (Burp → Paste as request):")
-                lines.append("```http")
-                lines.append(self.raw_http_request)
-                lines.append("```")
+                lines.extend(_fenced_block(self.raw_http_request, "http"))
                 lines.append("")
         else:
             if self.repro_command:
                 lines.append("**Reproduce:**")
-                lines.append("```bash")
-                lines.append(self.repro_command)
-                lines.append("```")
+                lines.extend(_fenced_block(self.repro_command, "bash"))
                 lines.append("")
             elif self.repro_note:
                 lines.append(f"_{self.repro_note}_")
@@ -396,7 +392,7 @@ def _repro_templates() -> list[tuple[tuple[str, ...], int, "object"]]:
           "poodle", "beast", "forward_secrecy", "sweet32"), 443,
          lambda h, p: f"openssl s_client -connect {h}:{p or 443} -servername {h}"),
         (("dnssec", "spf", "dmarc", "dkim", "dns_", "zone_transfer", "caa"), 0,
-         lambda h, p: f"dig +dnssec ANY {shlex.quote(h)}"),
+         lambda h, p: f"dig +dnssec ANY {h}"),
         (("smtp_open_relay", "open_relay"), 25,
          lambda h, p: f"swaks --to test@example.com --from test@{h} --server {h}:{p or 25}"),
         (("smtp", "mail", "starttls"), 25,
@@ -460,6 +456,12 @@ def build_repro_command(vuln_type: str, target: str,
             if not host:
                 break
             port = ev_port or port or default_port
+            # Shell-quote the host before it reaches any command template so a
+            # target derived from attacker-influenced data (cert SAN subdomain,
+            # discovered vhost, DNS/redirect label) cannot inject commands into a
+            # repro line the operator pastes into a shell. Port is always an int.
+            # Clean hosts (hostnames, IPs, IPv6 literals) are left untouched.
+            host = shlex.quote(host)
             try:
                 cmd = builder(host, port)  # type: ignore[operator]
             except Exception:  # noqa: BLE001
@@ -841,28 +843,20 @@ def export_findings_bugbounty(findings: list[dict], engagement_name: str = "",
         if pkg.is_http:
             if pkg.curl_command:
                 out.append("Reproduce with curl:")
-                out.append("```bash")
-                out.append(pkg.curl_command)
-                out.append("```")
+                out.extend(_fenced_block(pkg.curl_command, "bash"))
                 out.append("")
             if pkg.raw_http_request:
                 out.append("Raw HTTP request (Burp → Paste as request):")
-                out.append("```http")
-                out.append(pkg.raw_http_request)
-                out.append("```")
+                out.extend(_fenced_block(pkg.raw_http_request, "http"))
                 out.append("")
             if pkg.response_status > 0:
                 out.append(f"Observed response: HTTP {pkg.response_status}")
                 if pkg.response_excerpt:
-                    out.append("```")
-                    out.append(pkg.response_excerpt[:800])
-                    out.append("```")
+                    out.extend(_fenced_block(pkg.response_excerpt[:800]))
                 out.append("")
         else:
             if pkg.repro_command:
-                out.append("```bash")
-                out.append(pkg.repro_command)
-                out.append("```")
+                out.extend(_fenced_block(pkg.repro_command, "bash"))
                 out.append("")
             elif pkg.repro_note:
                 out.append(f"_{pkg.repro_note}_")
@@ -969,9 +963,11 @@ def _render_compliance_md(findings: list[dict], framework_id: str) -> str:
             for h in hits[:4])
         if len(hits) > 4:
             ex += f"; +{len(hits) - 4} more"
-        cn_esc = str(cn).replace("|", "\\|")
-        ex = ex.replace("|", "\\|")
-        lines.append(f"| {cid} | {cn_esc} | {status} | {len(hits)} | {ex} |")
+        # table_cell escapes pipes AND collapses newlines: an example built from
+        # a finding title can carry a target-influenced newline (a title from a
+        # leaked JSON field name) that would otherwise break this table row.
+        lines.append(f"| {cid} | {_md_table_cell(cn)} | {status} | "
+                     f"{len(hits)} | {_md_table_cell(ex)} |")
     lines.append("")
     return "\n".join(lines)
 

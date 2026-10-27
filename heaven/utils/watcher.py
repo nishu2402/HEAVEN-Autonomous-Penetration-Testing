@@ -271,7 +271,7 @@ async def run_watch(
                     logger.debug("suppressed non-fatal exception", exc_info=True)
 
             logger.info(
-                f"[watch iter {iter_n}] scan={iteration.scan_id[:8] if iteration.scan_id else '—'} "
+                f"[watch iter {iter_n}] scan={iteration.scan_id[:8] if iteration.scan_id else 'n/a'} "
                 f"new={iteration.new} regressed={iteration.regressed} "
                 f"resolved={iteration.resolved} "
                 f"alert={'✓' if iteration.alert_dispatched else '·'} "

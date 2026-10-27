@@ -285,7 +285,7 @@ export default function NetworkTopology3D({ hosts = [] }) {
           <span>
             <span style={{ color: SEV_COLORS[hostSeverity(selected)] }}>●</span>
             {' '}{selected.ip || selected.host}
-            {' · '}{selected.open_ports?.join(', ') || '—'}
+            {' · '}{selected.open_ports?.join(', ') || 'n/a'}
           </span>
           <button
             onClick={() => setSelected(null)}

@@ -47,7 +47,7 @@ function StatCard({ label, value, color, sub, delay = 0, help }) {
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1], delay }}
     >
       <div className="stat-label">{label}{help && <HelpTip term={help} />}</div>
-      <div className="stat-value" style={{ color }}>{value ?? '—'}</div>
+      <div className="stat-value" style={{ color }}>{value ?? 'n/a'}</div>
       {sub && <div className="stat-sub">{sub}</div>}
     </motion.div>
   )

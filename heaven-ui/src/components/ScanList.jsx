@@ -45,7 +45,7 @@ function ProgressFill({ target }) {
 
 function fmtStarted(s) {
   const raw = s.created || s.started_at || "";
-  return raw ? raw.slice(0, 16).replace("T", " ") : "—";
+  return raw ? raw.slice(0, 16).replace("T", " ") : "n/a";
 }
 
 // Human duration: elapsed for a live scan (ticks with `now`), total for a finished one.
@@ -308,7 +308,7 @@ export default function ScanList({
                     </div>
                   ) : (
                     <span className={"scan-findings-chip" + (fc > 0 ? " has-findings" : "")}>
-                      <span className="scan-findings-num">{fc != null ? fc : "—"}</span>
+                      <span className="scan-findings-num">{fc != null ? fc : "n/a"}</span>
                       <span className="scan-findings-lbl">finding{fc === 1 ? "" : "s"}</span>
                     </span>
                   )}

@@ -111,7 +111,7 @@ class WebhookAlerter:
             logger.debug("No WEBHOOK_URL configured, skipping watch alert.")
             return False
 
-        eng = summary_data.get("engagement") or "—"
+        eng = summary_data.get("engagement") or "n/a"
         it = summary_data.get("watch_iteration")
         it_label = f", iteration {it}" if it is not None else ""
         new = int(summary_data.get("new", 0) or 0)
@@ -409,7 +409,7 @@ class JiraAlerter:
             f"Target:     {finding.get('target','')}\n"
             f"Severity:   {sev}\n"
             f"Confidence: {finding.get('confidence', 0):.0%}\n"
-            f"CVE:        {finding.get('cve_id','—')}\n"
+            f"CVE:        {finding.get('cve_id','n/a')}\n"
             f"Title:      {finding.get('title','')}\n\n"
             f"Detected by HEAVEN. Open the finding for evidence + curl repro."
         )
@@ -484,7 +484,7 @@ class LinearAlerter:
             f"**Target:** `{finding.get('target','')}`\n"
             f"**Severity:** {sev}\n"
             f"**Confidence:** {finding.get('confidence', 0):.0%}\n"
-            f"**CVE:** {finding.get('cve_id','—')}\n\n"
+            f"**CVE:** {finding.get('cve_id','n/a')}\n\n"
             f"Detected by HEAVEN. Open the finding evidence for repro details."
         )
         query = """

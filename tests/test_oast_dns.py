@@ -45,6 +45,28 @@ def _resolve(hostname: str, port: int, qtype: int = 1) -> bytes | None:
         s.close()
 
 
+def _http_raw(port: int, payload: bytes, timeout: float = 3.0) -> bytes:
+    """Send raw bytes to the HTTP listener and return the full response, so a
+    test can forge a hostile request line / headers the stdlib client cannot."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(("127.0.0.1", port))
+        s.sendall(payload)
+        chunks = []
+        try:
+            while True:
+                b = s.recv(4096)
+                if not b:
+                    break
+                chunks.append(b)
+        except socket.timeout:
+            pass
+        return b"".join(chunks)
+    finally:
+        s.close()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DNS listener
 # ─────────────────────────────────────────────────────────────────────────────
@@ -213,3 +235,110 @@ async def test_injection_scanner_without_oast_skips_oob_dns():
 
     # No collaborator ⇒ the OOB DNS probe is a no-op; nothing is invented.
     assert [f for f in res["findings"] if f.get("evidence", {}).get("technique") == "oob_dns"] == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTTP listener hardening. A routable collaborator (``heaven oast`` on a public
+# box) parses untrusted inbound requests from real targets AND internet noise,
+# so it must not leak the runtime, crash, hang a worker thread, or grow without
+# bound. Each test pairs the hardened behaviour with the preserved good path.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_http_response_hides_server_and_date_banner():
+    # The stdlib http.server would answer every callback with
+    # ``Server: BaseHTTP/x Python/x.y.z`` (+ Date), advertising the exact runtime
+    # to whoever connects. The collaborator response must disclose neither, while
+    # still serving the 1x1 gif body some SSRF sinks require.
+    with OASTListener() as oast:
+        token = oast.new_token()
+        resp = _http_raw(
+            oast.port,
+            f"GET /{token} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".encode(),
+        )
+    head = resp.split(b"\r\n\r\n", 1)[0].decode("latin-1").lower()
+    assert resp.startswith(b"HTTP/1.1 200 OK")
+    assert "server:" not in head and "date:" not in head
+    assert "python/" not in head and "basehttp" not in head
+    assert b"GIF89a" in resp                                   # good path intact
+    assert oast.hit(token, channel="http") is True
+
+
+def test_http_malformed_content_length_is_recorded_not_crashed():
+    # ``Content-Length: abc`` used to raise ValueError BEFORE the interaction was
+    # recorded, silently losing a genuine callback (and dumping a traceback to
+    # stderr). The callback must still be recorded and answered; the unparseable
+    # length simply yields no body.
+    with OASTListener() as oast:
+        token = oast.new_token()
+        resp = _http_raw(
+            oast.port,
+            (f"POST /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: abc\r\n"
+             f"Connection: close\r\n\r\nhello").encode(),
+        )
+        assert resp.startswith(b"HTTP/1.1 200 OK")
+        assert oast.poll(token, timeout=1.0, channel="http") is True
+        assert oast.interactions(token)[0].body == ""
+
+
+def test_http_negative_content_length_does_not_hang():
+    # ``Content-Length: -1`` used to reach rfile.read(-1), which blocks until EOF
+    # and pins the worker thread. It must short-circuit and answer promptly.
+    import time
+    with OASTListener() as oast:
+        token = oast.new_token()
+        t0 = time.monotonic()
+        resp = _http_raw(
+            oast.port,
+            (f"POST /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: -1\r\n"
+             f"Connection: close\r\n\r\nAB").encode(),
+        )
+        elapsed = time.monotonic() - t0
+    assert resp.startswith(b"HTTP/1.1 200 OK")
+    assert elapsed < 2.0                                       # no hang
+    assert oast.hit(token, channel="http") is True
+
+
+def test_http_oversized_body_is_capped():
+    from heaven.vulnscan.oast import _MAX_CALLBACK_BODY
+    # A huge declared body must never be buffered in full; it is capped so a
+    # hostile caller cannot exhaust memory, and the callback is still recorded.
+    with OASTListener() as oast:
+        token = oast.new_token()
+        big = b"A" * (_MAX_CALLBACK_BODY + 4096)
+        _http_raw(
+            oast.port,
+            (f"POST /{token} HTTP/1.1\r\nHost: x\r\nContent-Length: {len(big)}\r\n"
+             f"Connection: close\r\n\r\n").encode() + big,
+        )
+        assert oast.poll(token, timeout=2.0, channel="http") is True
+        assert len(oast.interactions(token)[0].body) == _MAX_CALLBACK_BODY
+
+
+def test_http_handler_enforces_a_request_timeout():
+    from heaven.vulnscan.oast import _Handler, _REQUEST_TIMEOUT_S
+    # A per-request socket timeout bounds a slow-loris connection that never
+    # finishes its request line; without it the stdlib handler waits forever.
+    assert _Handler.timeout == _REQUEST_TIMEOUT_S
+    assert _Handler.timeout and _Handler.timeout > 0
+
+
+def test_interactions_are_capped_and_recent_callback_survives():
+    import time
+
+    from heaven.vulnscan.oast import Interaction, _MAX_INTERACTIONS
+    # A long-running public collaborator sees internet background noise; the
+    # interaction store must stay bounded, while a just-arrived token still
+    # correlates (a detector polls within seconds of sending its probe).
+    with OASTListener() as oast:
+        early = "oobEARLYSENTINEL"
+        oast._record(Interaction(token=early, method="GET", path=f"/{early}",
+                                 client_ip="1.2.3.4", at=time.monotonic()))
+        for i in range(_MAX_INTERACTIONS + 300):
+            oast._record(Interaction(token=f"oob{i:x}", method="GET", path=f"/oob{i:x}",
+                                     client_ip="1.2.3.4", at=time.monotonic()))
+        recent = "oobRECENTSENTINEL"
+        oast._record(Interaction(token=recent, method="GET", path=f"/{recent}",
+                                 client_ip="1.2.3.4", at=time.monotonic()))
+        assert len(oast._interactions) == _MAX_INTERACTIONS
+        assert oast.hit(recent) is True                        # in-flight correlation kept
+        assert oast.hit(early) is False                        # oldest evicted

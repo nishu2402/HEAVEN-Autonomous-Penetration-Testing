@@ -137,7 +137,7 @@ def watch(
 
     def _on_iteration(it):
         marker = "[bold red]⚠[/bold red]" if (it.new or it.regressed) else "[dim]·[/dim]"
-        _print(f"  {marker} iter {it.n}: scan={it.scan_id[:8] if it.scan_id else '—'} "
+        _print(f"  {marker} iter {it.n}: scan={it.scan_id[:8] if it.scan_id else 'n/a'} "
                f"  new={it.new}  regressed={it.regressed}  resolved={it.resolved}  "
                f"alert={'✓' if it.alert_dispatched else '·'}  "
                f"tix={it.tickets_created}"

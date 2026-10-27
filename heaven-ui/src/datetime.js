@@ -38,9 +38,9 @@ export function localClock(date = new Date()) {
 }
 
 // Local date + time for a stored UTC/ISO string, e.g. "23 Sep 2026, 18:30".
-// Returns "—" for empty input and echoes an unparseable value unchanged.
+// Returns "n/a" for empty input and echoes an unparseable value unchanged.
 export function fmtWhen(iso) {
-  if (!iso) return "—";
+  if (!iso) return "n/a";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString([], {

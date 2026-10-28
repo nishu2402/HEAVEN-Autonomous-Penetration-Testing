@@ -120,9 +120,20 @@ def _make_server(handler_fn: Callable[[str], tuple[int, bytes]]):
 
     # Threaded: the native engine fans out ~510 probes concurrently, which would
     # overflow a single-threaded server's tiny accept backlog and silently drop
-    # connections (masking the test). ThreadingTCPServer serves every probe.
-    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _H)
+    # connections (masking the test). ThreadingTCPServer serves every accepted
+    # probe on its own thread — but the OS-level accept backlog
+    # (``request_queue_size``, default 5) is the real bottleneck: under that burst
+    # of concurrent connects the listen queue overflows and the kernel drops SYNs,
+    # silently losing a probe. In isolation the accept loop keeps up, but under
+    # full-suite CPU contention it falls behind and a probe (e.g. /config.php) is
+    # lost — a load-dependent flake. Defer activation so the backlog is raised
+    # before listen().
+    srv = socketserver.ThreadingTCPServer(
+        ("127.0.0.1", 0), _H, bind_and_activate=False)
+    srv.request_queue_size = 256
     srv.daemon_threads = True
+    srv.server_bind()
+    srv.server_activate()
     return srv
 
 

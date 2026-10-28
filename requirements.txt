@@ -25,22 +25,24 @@
 # Python: >= 3.11   (tested on 3.11, 3.12, 3.13)
 
 # ── Core async engine ─────────────────────────────────────────────────
-uvloop>=0.19.0; sys_platform != "win32"
-aiohttp>=3.14.3           # floor patched: request smuggling + 2026 advisories (OSV/pip-audit)
-aiofiles>=23.2.0
+uvloop>=0.23.0; sys_platform != "win32"
+aiohttp>=3.14.5           # floor patched: request smuggling + Oct-2026 advisory batch
+                          # (CVE-2026-111063/064/065/066/748/749/750,
+                          # GHSA-2g87-pp6c-29x5; fixed 3.14.4) (OSV/pip-audit)
+aiofiles>=25.1.0
 
 # ── Database (PostgreSQL + SQLite offline fallback) ────────────────────
-asyncpg>=0.29.0
-sqlalchemy[asyncio]>=2.0.0
-alembic>=1.13.0
-aiosqlite>=0.19.0         # SQLite offline store (no PostgreSQL required)
+asyncpg>=0.32.0
+sqlalchemy[asyncio]>=2.1.6
+alembic>=1.20.1
+aiosqlite>=0.22.1         # SQLite offline store (no PostgreSQL required)
 
 # ── API server (FastAPI + WebSocket) ───────────────────────────────────
-fastapi>=0.110.0
-starlette>=1.3.1          # security floor: fastapi allows <1.3.1 which has 6 advisories
-uvicorn[standard]>=0.27.0
-websockets>=12.0
-slowapi>=0.1.9
+fastapi>=0.162.0
+starlette>=1.10.0          # floor >= 1.3.1 patched 6 advisories (fastapi allows older); pin tracks tested-latest
+uvicorn[standard]>=0.54.0
+websockets>=17.3
+slowapi>=0.1.10
 python-multipart>=0.0.32  # streamed multipart uploads; floor patched: DoS / arbitrary
                           # file write / parameter smuggling (CVE-2024-53981,
                           # CVE-2026-24486/40347/42561/53537-40, OSV)
@@ -49,68 +51,68 @@ python-multipart>=0.0.32  # streamed multipart uploads; floor patched: DoS / arb
 # The CVSS risk model is a scikit-learn ExtraTreesRegressor loaded with joblib.
 # No xgboost: it was migrated to scikit-learn, and the old CPU/GPU wheel split
 # was a common cross-OS install failure.
-scikit-learn>=1.5.0       # floor patched: GHSA-jw8x-6495-233v (OSV)
-numpy>=1.26.0
-pandas>=2.2.0
-joblib>=1.3.0
+scikit-learn>=1.9.1       # floor patched: GHSA-jw8x-6495-233v (OSV)
+numpy>=2.4.6            # 3.11-safe cap: numpy 2.5.0+ needs Python 3.12 (3.12+ still pulls the latest)
+pandas>=3.1.0
+joblib>=1.6.0
 
 # ── Security & cryptography ─────────────────────────────────────────────
-cryptography>=50.0.0      # floor patched: incl. 2026 advisories thru 49.x (OSV)
-pyjwt>=2.13.0             # floor patched: multiple JWT advisories (OSV)
+cryptography>=50.0.2      # floor patched: incl. 2026 advisories thru 49.x (OSV)
+pyjwt>=2.15.1             # floor patched: multiple JWT advisories (OSV)
 defusedxml>=0.7.1         # XXE-safe XML parsing (untrusted pom.xml / nmap output)
-cvss>=3.0                # reference-grade CVSS v4.0 base scoring
+cvss>=3.6               # reference-grade CVSS v4.0 base scoring
 javalang>=0.13.0         # pure-Python Java parser powering the SAST dataflow
                          # refinement (heaven/vulnscan/java_dataflow.py)
 
 # ── Network reconnaissance ──────────────────────────────────────────────
 # nmap / nuclei / sqlmap are SYSTEM binaries (apt/brew), not pip packages -
 # HEAVEN shells out to them. Shodan recon and WHOIS use plain HTTP (aiohttp).
-scapy>=2.7.0              # floor patched (OSV)
-dnspython>=2.6.1         # floor patched (OSV)
-asyncssh>=2.24.0         # SSH credential testing; floor patched: SCP path-traversal +
+scapy>=2.8.0              # floor patched (OSV)
+dnspython>=2.9.0         # floor patched: CVE-2026-114605 (OSV)
+asyncssh>=2.24.1         # SSH credential testing; floor patched: SCP path-traversal +
                          # AuthorizedKeysFile %u escape (CVE-2026-54590/54591, OSV)
 
 # ── Web reconnaissance & parsing ────────────────────────────────────────
 # The crawler parses with the stdlib "html.parser" backend, so no lxml needed.
-beautifulsoup4>=4.12.0
-httpx>=0.27.0
+beautifulsoup4>=4.15.0
+httpx>=0.28.1
 # Headless-browser DAST (DOM/stored-XSS proof + JS-rendered crawl). The pip
 # wheel ships the driver; the browser bundle is fetched once with
 # `playwright install chromium` (scripts/install.sh does this automatically).
-playwright>=1.40.0
+playwright>=1.64.1
 
 # ── Active Directory & Kerberos ─────────────────────────────────────────
-impacket>=0.11.0
+impacket>=0.13.1
 ldap3>=2.9.1
-pywinrm>=0.4.3           # WinRM credential validation
+pywinrm>=0.5.0           # WinRM credential validation
 
 # ── Container & Kubernetes ──────────────────────────────────────────────
-kubernetes>=29.0.0
-docker>=7.0.0
+kubernetes>=37.0.1
+docker>=7.2.0
 
 # ── Cloud (AWS recon ships by default; GCP/Azure IAM are opt-in extras) ──
-boto3>=1.34.0
+boto3>=1.43.119
 
 # ── Reporting & visualization ───────────────────────────────────────────
 # PDF reports use reportlab (pure-Python, no system libraries). HTML reports
 # use jinja2. No extra system packages required.
 jinja2>=3.1.6            # floor patched: 2026 template advisories (OSV)
-reportlab>=4.0.0
-tabulate>=0.9.0
+reportlab>=5.1.0
+tabulate>=0.10.0
 
 # ── Utilities ───────────────────────────────────────────────────────────
-apscheduler>=3.10.0
-pydantic>=2.6.0
-pydantic-settings>=2.14.2   # floor patched: GHSA-4xgf-cpjx-pc3j (pip-audit)
-rich>=13.7.0
-click>=8.3.3             # floor patched: PYSEC-2026-2132 (OSV)
-rich-click>=1.7.0
-python-dotenv>=1.2.2     # floor patched: PYSEC-2026-2270 (OSV)
-tzdata>=2024.1           # bundled IANA tz database so HEAVEN_REPORT_TZ resolves
+apscheduler>=3.11.3
+pydantic>=2.14.1
+pydantic-settings>=2.16.1   # floor patched: GHSA-4xgf-cpjx-pc3j (pip-audit)
+rich>=15.0.0
+click>=8.5.0             # floor patched: PYSEC-2026-2132 (OSV)
+rich-click>=1.9.9
+python-dotenv>=1.2.4     # floor patched: PYSEC-2026-2270 (OSV)
+tzdata>=2026.5           # bundled IANA tz database so HEAVEN_REPORT_TZ resolves
                          # on any host (Windows / minimal containers ship none)
 
 # ── AI (default LLM provider) ───────────────────────────────────────────
 # Gemini ships by default so the AI features (recon-parse, planner, FP-review,
 # autonomous, coverage) work as soon as a key is added. HEAVEN still runs fully
 # without a key (deterministic fallback). Claude/GPT are opt-in (see header).
-google-genai>=1.0.0
+google-genai>=2.33.0

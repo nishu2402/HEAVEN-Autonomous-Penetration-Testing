@@ -634,7 +634,7 @@ async def _stream_job_updates(
         await _pump_stream_until_done(websocket, queue)
     except WebSocketDisconnect:
         pass
-    except Exception as e:  # noqa: BLE001: never let a socket error crash the worker
+    except Exception as e:  # noqa: BLE001  (never let a socket error crash the worker)
         logger.debug("%s stream error for %s: %s", label, job_id, e)
     finally:
         subs = subscribers.get(job_id)

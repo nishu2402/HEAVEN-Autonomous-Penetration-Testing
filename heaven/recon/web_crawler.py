@@ -300,6 +300,52 @@ TECH_FINGERPRINTS = {
 }
 
 
+# ── Crawl-trap fan-out cap ──────────────────────────────────────────────────
+# A hostile or pathological site can regenerate pages without end: an infinite
+# calendar (/blog/2026/11/01 → …/02 → …), unbounded ``?page=N`` pagination, a
+# numeric / hash / uuid id-tree, or a session id baked into the path. ``max_pages``
+# already guarantees the crawl TERMINATES, so this is never a hang or a DoS. But a
+# naive BFS spends its whole page budget on thousands of near-identical trap pages
+# and never reaches the login / admin / upload / API endpoints that carry the real
+# attack surface. We bound the fan-out PER URL TEMPLATE: the path with data-shaped
+# segments (numeric, ISO date, hex/hash, uuid) and query VALUES collapsed, so every
+# page of one regenerating template shares a single key. Only data-shaped segments
+# collapse, so a NAMED route (/admin, /api/users, /login) always keeps its own
+# template and is never capped — distinct endpoints are always admitted. A
+# template's first _MAX_URLS_PER_TEMPLATE pages already characterise its surface
+# (they are one code path), and id-range walking is the idor scanner's job, not the
+# crawler's, so the cap is recall-safe while it denies a trap its budget monopoly.
+_MAX_URLS_PER_TEMPLATE = 64
+
+# A path segment that is DATA, not structure. A hex/hash match must contain a
+# digit so a pure-letter word that happens to be hex-valid (``deadbeef``) is kept
+# as a real route, not mistaken for an id.
+_DATA_SEGMENT_RE = re.compile(
+    r"^(?:"
+    r"\d+"                                                            # numeric id / page / year
+    r"|\d{4}-\d{2}-\d{2}"                                             # ISO date
+    r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"  # uuid
+    r"|(?=[0-9a-f]*\d)[0-9a-f]{8,}"                                   # hex / md5 / sha (has a digit)
+    r")$",
+    re.IGNORECASE,
+)
+
+
+def _url_template(url: str) -> str:
+    """Collapse a URL to its structural template, for the fan-out cap.
+
+    Data-shaped path segments (numeric / date / hex / uuid) become ``#`` and
+    named segments are kept, so every page of one regenerating template maps to a
+    single key while genuinely distinct routes stay distinct. Query keys are kept
+    (sorted, de-duplicated); their values are dropped, so ``?page=1`` and
+    ``?page=2`` collapse too. Scheme is ignored."""
+    parts = urlsplit(url)
+    segs = ["#" if (seg and _DATA_SEGMENT_RE.match(seg)) else seg.lower()
+            for seg in parts.path.split("/")]
+    keys = sorted({k for k, _ in parse_qsl(parts.query, keep_blank_values=True)})
+    return f"{parts.netloc.lower()}/{'/'.join(segs).lstrip('/')}?{','.join(keys)}"
+
+
 async def crawl_url(
     url: str, max_depth: int = 3, max_pages: int = 200,
     timeout: float = 10.0, semaphore: Optional[asyncio.Semaphore] = None,
@@ -315,6 +361,8 @@ async def crawl_url(
     endpoints: list[WebEndpoint] = []
     queue: deque[tuple[str, int]] = deque([(url, 0)])
     base_domain = urlparse(url).netloc
+    template_counts: dict[str, int] = {}   # URL-template → times enqueued (trap cap)
+    trap_capped = 0
 
     _cookies: dict = {}
     _extra_headers: dict = {}
@@ -367,6 +415,11 @@ async def crawl_url(
                                 if _is_session_destroying(link):
                                     continue  # don't log ourselves out mid-crawl
                                 if urlparse(link).netloc == base_domain and link not in visited:
+                                    _tmpl = _url_template(link)
+                                    if template_counts.get(_tmpl, 0) >= _MAX_URLS_PER_TEMPLATE:
+                                        trap_capped += 1   # bound a regenerating trap template
+                                        continue
+                                    template_counts[_tmpl] = template_counts.get(_tmpl, 0) + 1
                                     queue.append((link, depth + 1))
 
                             # Extract JS files
@@ -427,6 +480,11 @@ async def crawl_url(
                 except Exception as e:
                     logger.debug(f"Crawl error on {current_url}: {e}")
 
+    if trap_capped > max_pages:
+        logger.warning(
+            f"Possible crawl trap on {base_domain}: capped {trap_capped} "
+            f"near-identical same-template link(s) at {_MAX_URLS_PER_TEMPLATE}/"
+            f"template so the page budget covered distinct endpoints instead")
     logger.info(f"Crawled {len(endpoints)} pages on {base_domain}")
     return endpoints
 
@@ -862,6 +920,8 @@ async def crawl_url_js(
     endpoints: list[WebEndpoint] = []
     visited: set[str] = set()
     base_domain = urlparse(url).netloc
+    template_counts: dict[str, int] = {}   # URL-template → times enqueued (trap cap)
+    trap_capped = 0
 
     launch_args = ["--no-sandbox", "--disable-dev-shm-usage"]
     extra_headers = dict(evasion_headers or {})
@@ -912,6 +972,11 @@ async def crawl_url_js(
                             continue  # don't log ourselves out mid-crawl
                         parsed = urlparse(link)
                         if parsed.netloc == base_domain and link not in visited:
+                            _tmpl = _url_template(link)
+                            if template_counts.get(_tmpl, 0) >= _MAX_URLS_PER_TEMPLATE:
+                                trap_capped += 1   # bound a regenerating trap template
+                                continue
+                            template_counts[_tmpl] = template_counts.get(_tmpl, 0) + 1
                             queue.append((link, depth + 1))
 
                     # Extract forms
@@ -937,6 +1002,11 @@ async def crawl_url_js(
                 except Exception as page_err:
                     logger.debug(f"Playwright page error {current_url}: {page_err}")
 
+            if trap_capped > max_pages:
+                logger.warning(
+                    f"Possible crawl trap on {base_domain}: capped {trap_capped} "
+                    f"near-identical same-template link(s) at "
+                    f"{_MAX_URLS_PER_TEMPLATE}/template")
             await browser.close()
     except Exception as exc:
         logger.warning(f"Playwright crawl failed for {url}: {exc}: falling back to aiohttp")

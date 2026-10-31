@@ -492,3 +492,133 @@ def test_crawl_targets_recovers_spa_surface_without_browser(monkeypatch) -> None
                 if n.get("type") == "spa_render_reduced_fidelity")
     assert note.get("recovered_endpoints", 0) >= 2
     assert note.get("recovered_input_vectors", 0) >= 4
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Crawl-trap fan-out cap — a self-regenerating site (infinite calendar / id tree
+# / ?page=N / session-in-path) must not monopolise the page budget. ``max_pages``
+# already bounds the crawl; these pin that the budget is spent on DISTINCT URL
+# templates, so a real endpoint co-present with a trap is still reached, while
+# legitimate template reuse below the cap is untouched. See
+# heaven/recon/web_crawler.py::_url_template.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("a,b", [
+    ("http://t/blog/2026/11/01", "http://t/blog/2026/11/02"),        # calendar
+    ("http://t/post/5", "http://t/post/6"),                          # numeric id
+    ("http://t/p?page=1", "http://t/p?page=2"),                      # pagination query
+    ("http://t/u/9f8e7d6c5b4a3210", "http://t/u/0123456789abcdef"),  # hex / hash id
+    ("http://t/s/550e8400-e29b-41d4-a716-446655440000",
+     "http://t/s/6ba7b810-9dad-11d1-80b4-00c04fd430c8"),             # uuid
+])
+def test_url_template_collapses_data_variants(a: str, b: str) -> None:
+    from heaven.recon.web_crawler import _url_template
+    assert _url_template(a) == _url_template(b)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("http://t/admin", "http://t/login"),                            # distinct named routes
+    ("http://t/api/users", "http://t/api/orders"),
+    ("http://t/v1/x", "http://t/v2/x"),                              # API versions kept
+    ("http://t/password-reset", "http://t/account-settings"),        # word slugs kept
+    ("http://t/deadbeef", "http://t/cafebabe"),                      # hex-valid words, no digit → kept
+])
+def test_url_template_keeps_distinct_named_routes(a: str, b: str) -> None:
+    from heaven.recon.web_crawler import _url_template
+    assert _url_template(a) != _url_template(b)
+
+
+def test_crawl_trap_fanout_capped_real_endpoint_survives() -> None:
+    """A self-regenerating trap (500 same-template links at depth 1, each page
+    spawning a fresh child) must not consume the page budget: the distinct
+    ``/login`` page enqueued AFTER the trap is still crawled, and the trap
+    template is bounded to the fan-out cap. Without the cap a BFS fetches
+    ``max_pages`` trap pages first and never reaches /login — this pins that it
+    does."""
+    from heaven.recon.web_crawler import _MAX_URLS_PER_TEMPLATE, crawl_url
+
+    index = (b"<html><body>"
+             + b"".join(f'<a href="/t/{n}">t{n}</a>'.encode() for n in range(500))
+             + b'<a href="/login">login</a>'
+             + b"</body></html>")
+
+    class _Trap(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler contract
+            path = self.path.split("?", 1)[0]
+            if path in ("/", "/index.html"):
+                body = index
+            elif path.startswith("/t/"):
+                try:
+                    n = int(path[3:])
+                except ValueError:
+                    n = 0
+                # Each trap page regenerates a fresh same-template child.
+                body = f'<html><body><a href="/t/{n + 1000}">next</a></body></html>'.encode()
+            else:  # /login and anything else: a plain terminal page
+                body = b"<html><body>real page</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            return
+
+    with socketserver.TCPServer(("127.0.0.1", 0), _Trap) as srv:
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            eps = asyncio.run(crawl_url(
+                f"http://127.0.0.1:{port}/", max_depth=5, max_pages=100))
+        finally:
+            srv.shutdown()
+
+    urls = [e.url for e in eps]
+    trap_hits = [u for u in urls if "/t/" in u]
+    assert any(u.rstrip("/").endswith("/login") for u in urls), \
+        f"real /login crowded out by trap: {len(urls)} pages, {len(trap_hits)} trap"
+    assert len(trap_hits) <= _MAX_URLS_PER_TEMPLATE, \
+        f"trap template not capped: {len(trap_hits)} > {_MAX_URLS_PER_TEMPLATE}"
+
+
+def test_crawl_legit_template_reuse_under_cap_fully_crawled() -> None:
+    """Legitimate template reuse BELOW the cap is untouched: a shop with a modest
+    set of /product/<id> pages is crawled in full (the cap only bites a runaway
+    fan-out, never ordinary reuse)."""
+    from heaven.recon.web_crawler import crawl_url
+
+    n_products = 12
+    index = (b"<html><body>"
+             + b"".join(f'<a href="/product/{i}">p{i}</a>'.encode()
+                        for i in range(n_products))
+             + b"</body></html>")
+
+    class _Shop(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler contract
+            path = self.path.split("?", 1)[0]
+            body = (index if path in ("/", "/index.html")
+                    else b"<html><body>product</body></html>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            return
+
+    with socketserver.TCPServer(("127.0.0.1", 0), _Shop) as srv:
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            eps = asyncio.run(crawl_url(
+                f"http://127.0.0.1:{port}/", max_depth=3, max_pages=200))
+        finally:
+            srv.shutdown()
+
+    product_hits = {e.url for e in eps if "/product/" in e.url}
+    assert len(product_hits) == n_products, \
+        f"legit reuse under cap must be fully crawled: {len(product_hits)}/{n_products}"

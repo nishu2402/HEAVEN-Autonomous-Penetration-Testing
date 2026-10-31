@@ -2393,30 +2393,39 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
             # Build scan_data from completed recon results so JWT + race tests fire
             scan_data: dict = {"jwt_tokens": [], "critical_endpoints": []}
 
-            def _endpoint_url(ep: Any) -> str:
+            def _endpoint(ep: Any, default_method: str = "GET") -> dict:
                 # Recon emits endpoints in several shapes: a bare URL string, a
-                # crawler dict ({"url": ...}) or a form dict ({"action": ...}).
-                # The race tester needs a URL string; coerce here so a dict can
-                # never reach ``.lower()`` and crash the whole ADVANCED phase.
+                # crawler dict ({"url": ..., "method": ...}) or a form dict
+                # ({"action": ..., "method": ...}). The race tester needs a URL
+                # string AND the method the endpoint was DISCOVERED with: force-
+                # POSTing a navigational GET link turns an ordinary read into a
+                # spurious "limit overrun" (a connection/worker timing artifact),
+                # so carry the real verb through and let the detector skip GETs.
+                # Coerce here so a dict can never reach ``.lower()`` and crash the
+                # whole ADVANCED phase.
                 if isinstance(ep, str):
-                    return ep.strip()
+                    return {"url": ep.strip(), "method": default_method}
                 if isinstance(ep, dict):
-                    return str(ep.get("url") or ep.get("action") or "").strip()
-                return ""
+                    return {
+                        "url": str(ep.get("url") or ep.get("action") or "").strip(),
+                        "method": str(ep.get("method") or default_method).upper(),
+                    }
+                return {"url": "", "method": default_method}
 
             for tid, res in orch.results.items():
                 if res.state != TaskState.COMPLETED or not res.data:
                     continue
                 data = res.data if isinstance(res.data, dict) else {}
                 scan_data["jwt_tokens"].extend(data.get("jwt_tokens", []))
+                # Crawled navigational links are GET; forms carry their own method.
                 for ep in data.get("endpoints", []):
-                    u = _endpoint_url(ep)
-                    if u:
-                        scan_data["critical_endpoints"].append(u)
+                    e = _endpoint(ep, default_method="GET")
+                    if e["url"]:
+                        scan_data["critical_endpoints"].append(e)
                 for ep in data.get("forms", []):
-                    u = _endpoint_url(ep)
-                    if u:
-                        scan_data["critical_endpoints"].append(u)
+                    e = _endpoint(ep, default_method="GET")
+                    if e["url"]:
+                        scan_data["critical_endpoints"].append(e)
             # The per-URL battery (default-cred spray, race, CL.TE smuggling) is
             # the heaviest web task, so bound it two ways, mirroring the anomaly
             # probe: skip URLs with no injectable surface (a parameter-less

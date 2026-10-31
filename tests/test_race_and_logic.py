@@ -93,6 +93,102 @@ async def test_unlimited_endpoint_is_not_flagged():
     assert f is None  # sequential also succeeds repeatedly → not a race bug
 
 
+@pytest.mark.asyncio
+async def test_static_resource_is_not_race_flagged():
+    """A forced-POST race probe must never fire on a static asset or document
+    download (README.md, a PDF, JS/CSS, …): those are served identically and
+    change no state, so a "limit overrun" there is only a connection/worker
+    timing artifact. The guard is URL-based and short-circuits before any
+    request, so a server that WOULD look racy still yields nothing — and the
+    handler is proven never to be hit. Regression test for the DVWA live-lab
+    false positives on /README.*.md and /docs/DVWA_v1.3.pdf."""
+    hits = {"n": 0}
+
+    async def doc(request):
+        hits["n"] += 1
+        # The exact shape the detector would otherwise flag: the first few
+        # concurrent arrivals commit an identical fresh success, later ones 409.
+        if hits["n"] <= 3:
+            return web.Response(text="STATIC DOC BODY")
+        return web.Response(status=409, text="nope")
+
+    app = web.Application()
+    for path in ("/docs/README.md", "/assets/app.js", "/docs/manual.pdf"):
+        app.router.add_post(path, doc)
+    runner, base = await _serve(app)
+    try:
+        for path in ("/docs/README.md", "/assets/app.js", "/docs/manual.pdf"):
+            f = await RaceConditionDetector.test_single_packet_race(base + path, n=10)
+            assert f is None, f"static resource {path} must not be race-flagged"
+    finally:
+        await runner.cleanup()
+    assert hits["n"] == 0, "guard must short-circuit before sending any request"
+
+
+@pytest.mark.asyncio
+async def test_get_method_short_circuits_before_any_request():
+    """A navigational GET link (DVWA instructions.php?doc=, /vulnerabilities/
+    javascript/) must never be race-probed. The crawler records the method, the
+    orchestrator threads it through critical_endpoints, and the detector short-
+    circuits on GET before sending a request — even on a dynamic path with NO
+    static suffix that WOULD look racy under a forced POST. Regression test for
+    the DVWA residual race false positives on dynamic reads."""
+    hits = {"n": 0}
+
+    async def doc(request):
+        hits["n"] += 1
+        if hits["n"] <= 3:
+            return web.Response(text="<!DOCTYPE html><html><body>ok</body></html>")
+        return web.Response(status=409, text="nope")
+
+    app = web.Application()
+    # Dynamic reads, no static suffix — the _NONACTIONABLE_SUFFIXES guard does
+    # not cover these; only the GET short-circuit does.
+    app.router.add_route("*", "/vulnerabilities/javascript/", doc)
+    app.router.add_route("*", "/instructions.php", doc)
+    runner, base = await _serve(app)
+    try:
+        for path in ("/vulnerabilities/javascript/", "/instructions.php?doc=changelog"):
+            f = await RaceConditionDetector.test_single_packet_race(
+                base + path, method="GET", n=10)
+            assert f is None, f"GET read {path} must not be race-flagged"
+    finally:
+        await runner.cleanup()
+    assert hits["n"] == 0, "GET guard must short-circuit before sending any request"
+
+
+@pytest.mark.asyncio
+async def test_run_advanced_tests_honors_discovered_get_method():
+    """End-to-end wiring: an endpoint discovered via GET rides into
+    ``critical_endpoints`` as {"url", "method": "GET"} and is NOT race-flagged,
+    even though force-POSTing it would look like a limit overrun. Proves the
+    orchestrator → detector method hand-off that fixes the DVWA residual FPs."""
+    import aiohttp
+
+    from heaven.vulnscan.advanced_attacks import run_advanced_tests
+
+    async def page(request):
+        return web.Response(text="<!DOCTYPE html><html>nav page</html>")
+
+    app = web.Application()
+    app.router.add_route("*", "/vulnerabilities/javascript/", page)
+    runner, base = await _serve(app)
+    try:
+        scan_data = {
+            "jwt_tokens": [],
+            "critical_endpoints": [
+                {"url": base + "/vulnerabilities/javascript/", "method": "GET"},
+            ],
+        }
+        async with aiohttp.ClientSession() as session:
+            found = await run_advanced_tests(
+                session, base + "/", scan_data=scan_data, include_smuggling=False)
+    finally:
+        await runner.cleanup()
+    assert not any(f.vuln_type == "race_condition_limit_overrun" for f in found), \
+        [f.vuln_type for f in found]
+
+
 # ── business logic ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

@@ -131,6 +131,16 @@ def _run_heaven_scan(
         for _k, _v in {"HEAVEN_THROTTLE_START": "8", "HEAVEN_THROTTLE_MAX": "16",
                        "HEAVEN_THROTTLE_MIN": "2"}.items():
             env.setdefault(_k, _v)
+        # Bound the scan's wall-clock so a rate-limited AI provider degrades
+        # gracefully instead of being SIGKILLed. The core scan (recon, crawl,
+        # injection) is sub-minute; only the optional AI phases can stall, on a
+        # throttled key's slow 504 / DEADLINE_EXCEEDED retries. Without a deadline
+        # those retries can exceed the subprocess timeout below, which SIGKILLs
+        # the scan and loses EVERY finding (returncode -9) — the whole benchmark
+        # then fails on an environment problem, not a detection regression.
+        # HEAVEN_SCAN_DEADLINE lets the orchestrator finalize and persist what it
+        # has, with margin before the hard kill. Operator env still wins.
+        env.setdefault("HEAVEN_SCAN_DEADLINE", str(max(300, _scan_timeout() - 120)))
         # Pre-create the engagement DB shell
         init_cmd = [heaven, "engage", "init", engagement_name, "--client", "benchmark"]
         subprocess.run(init_cmd, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)

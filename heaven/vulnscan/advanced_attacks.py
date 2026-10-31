@@ -224,6 +224,25 @@ class RaceConditionDetector:
                          "nginx_status", "status?full", "opcache", "apc.php",
                          "info.php", "/status", "/metrics", "/health")
 
+    # Static assets and document downloads are served byte-identically on every
+    # fetch and change no server state, so they can never overrun a limit. A
+    # caller that forces POST on every crawled URL (see ``run_advanced_tests``)
+    # would otherwise raise a spurious limit-overrun race on a README or a PDF
+    # (the concurrent burst all get the same 200 body; a sequential control can
+    # diverge purely from connection/worker timing). Guarding by suffix is
+    # recall-safe: coupon / balance / vote / transfer endpoints never carry
+    # these extensions.
+    _NONACTIONABLE_SUFFIXES = (
+        ".md", ".pdf", ".txt", ".rtf", ".csv", ".log",
+        ".js", ".mjs", ".css", ".map", ".json", ".xml", ".yaml", ".yml",
+        ".html", ".htm",
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".bmp",
+        ".woff", ".woff2", ".ttf", ".otf", ".eot",
+        ".mp4", ".mp3", ".avi", ".mov", ".webm", ".ogg", ".wav",
+        ".zip", ".tar", ".gz", ".tgz", ".bz2", ".7z", ".rar",
+        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    )
+
     # ── true single-packet race (HTTP/1.1 last-byte synchronisation) ──────────
     @staticmethod
     def _build_raw_request(method: str, parsed, body: bytes,
@@ -348,6 +367,12 @@ class RaceConditionDetector:
         parsed = urllib.parse.urlparse(url)
         if not parsed.hostname:
             return None
+        # Static asset / document download → not a state-changing action, so a
+        # "limit overrun" here is a forced-POST timing artifact, never a real bug
+        # (see _NONACTIONABLE_SUFFIXES). Recall-safe; short-circuits before any
+        # request is sent.
+        if parsed.path.lower().endswith(cls._NONACTIONABLE_SUFFIXES):
+            return None
 
         body = urllib.parse.urlencode(data or {}).encode()
         cookie = ""
@@ -436,6 +461,11 @@ class RaceConditionDetector:
         u = url.lower()
         if any(m in u for m in _READONLY_MARKERS):
             return None
+        # A GET carries no state, so it can never evidence a race. The caller
+        # passes the method the endpoint was discovered with, so a navigational
+        # GET link short-circuits here before firing a single request.
+        if method.upper() == "GET":
+            return None
 
         async def send_request():
             try:
@@ -463,11 +493,8 @@ class RaceConditionDetector:
         # rate-limiting, or transient error — NOT a race. The previous
         # ``len(unique_statuses) > 1`` test fired on any admin panel that merely
         # answered inconsistently (e.g. /cpanel → a spread of 301/401/403),
-        # manufacturing bogus "Race Condition Detected" highs. A GET carries no
-        # state, so it can never evidence a race here.
-        if method.upper() == "GET":
-            return None
-
+        # manufacturing bogus "Race Condition Detected" highs. (A GET short-
+        # circuits at the top of this method, before any request is fired.)
         successes = [r for r in results if 200 <= r["status"] < 300]
         # Need several concurrent successes to talk about a race at all.
         if len(successes) < 3:
@@ -944,21 +971,29 @@ async def run_advanced_tests(session: aiohttp.ClientSession, url: str,
     # phase (which would also cascade-skip Nuclei + PoC validation downstream).
     if scan_data:
         for endpoint in scan_data.get("critical_endpoints", []):
+            # Probe with the method the endpoint was DISCOVERED with. A crawled
+            # navigational link is a GET: force-POSTing it turns an ordinary read
+            # into a spurious "limit overrun" (a connection/worker timing
+            # artifact), so the detectors' GET short-circuit must see the real
+            # verb. A bare string (ad-hoc caller) keeps the historical POST.
+            method = "POST"
             if isinstance(endpoint, dict):
+                method = str(endpoint.get("method") or "POST").upper()
                 endpoint = str(endpoint.get("url") or endpoint.get("action") or "")
             elif not isinstance(endpoint, str):
                 endpoint = str(endpoint or "")
             endpoint = endpoint.strip()
             if not endpoint:
                 continue
-            race = await RaceConditionDetector.test_race(session, endpoint)
+            race = await RaceConditionDetector.test_race(session, endpoint, method=method)
             if race:
                 all_findings.append(race)
             # True single-packet (last-byte-sync) race: proves a limit overrun
             # the concurrent-burst heuristic above can only hint at. Reproduce-
             # first via its own sequential control, so it adds no false positive.
             try:
-                spr = await RaceConditionDetector.test_single_packet_race(endpoint)
+                spr = await RaceConditionDetector.test_single_packet_race(
+                    endpoint, method=method)
                 if spr:
                     all_findings.append(spr)
             except Exception as e:  # noqa: BLE001 - a probe error never fails the phase

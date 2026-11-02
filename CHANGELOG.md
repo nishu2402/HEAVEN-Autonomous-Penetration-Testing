@@ -9,6 +9,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0]: 2026-11-02
+
+### Added
+
+- **One `--profile` switch aims the same deep engine at a pentest or a bug
+  bounty.** `heaven scan --profile bugbounty` overlays scope discipline, polite
+  adaptive rate limiting, routable out-of-band callbacks, and a submission-ready
+  export on top of the existing scan modes, so the full web, API, and cloud depth
+  can run against scope-constrained, internet-facing programs. The default stays
+  `pentest` for a full internal or external assessment. The overlay
+  (`heaven/profiles.py`) is orthogonal to the scan mode, so nothing on the
+  deep-pentest path changes when it is off.
+- **Program-scope import for bug-bounty platforms.** `heaven engage scope-import
+  <file>` reads a HackerOne or Bugcrowd style scope (in-scope hosts and URLs,
+  `*.example.com` wildcards, and an explicit out-of-scope list) into the
+  engagement store. Wildcard entries become subdomain-wide recon targets and feed
+  `ScopeGuard`, so breadth recon and every scanner stay inside the program's
+  rules.
+- **In-house DNS and HTTP out-of-band collaborator.** `heaven/vulnscan/oast.py`
+  now runs a real UDP DNS responder beside the existing HTTP listener, keyed to
+  the same per-probe token, and `heaven oast` runs the collaborator standalone on
+  a public box (delegate an NS record to it, or point it at a public IP). With
+  `HEAVEN_OAST_DNS_ZONE` set, blind SSRF, XXE, OS command injection, and SQL
+  injection that only trigger a DNS lookup are proven by the observed callback, so
+  each is reported on real evidence rather than a guess. Without a zone it degrades
+  to the HTTP-only channel it had before.
+- **OAuth, OIDC, and SAML flow abuse.** A new `heaven/vulnscan/oauth_scanner.py`
+  works from `.well-known/openid-configuration` and SAML metadata to test
+  `redirect_uri` manipulation, a missing `state` or PKCE, implicit-flow tokens in
+  the URL, SAML signature stripping, and password-reset host-header poisoning.
+  Each result is marked Confirmed or Potential and reuses the primary and
+  low-privilege identities the scan already holds.
+- **Single-packet race and business-logic probes.** `RaceConditionDetector`
+  (`heaven/vulnscan/advanced_attacks.py`) adds a true single-packet race
+  (last-byte-synchronised across many connections) against state-changing
+  endpoints, reads a limit overrun off the divergent success count, and reproduces
+  the finding before reporting it. A new `heaven/vulnscan/logic_scanner.py` adds
+  numeric and quantity tampering and workflow step-skip checks.
+- **Cross-identity BOLA with ground truth.** The IDOR scanner
+  (`heaven/vulnscan/idor_scanner.py`) now has each identity hold its own canary
+  object and proves that one identity can read the other's object and back again,
+  a reciprocal cross-read, instead of inferring access from a single swap.
+- **Submission-ready per-finding report.** `heaven findings export --format
+  bugbounty` writes one markdown report per finding (title, severity with its CVSS
+  vector, CWE, copy-paste request and response, impact, remediation, and the OAST
+  callback when there is one), and `--platform hackerone|bugcrowd|intigriti`
+  tailors the section wording.
+- **Create an engagement from the web UI.** The React app and the API create a new
+  engagement from a form (`POST /api/engagements`), so a fresh install no longer
+  has to drop to the CLI to start, and a brand-new engagement appears immediately
+  rather than showing the empty state.
+- **Active Directory ACL takeover analysis.** `heaven/recon/ad_acl.py` parses
+  security descriptors to surface DCSync rights, ACL-takeover edges, and RBCD,
+  gated on a privileged security identifier so it does not fabricate a path to
+  Domain Admin.
+
+### Changed
+
+- **Dependency floors now track the tested-green baseline.** Every manifest
+  (`pyproject.toml`, `requirements.txt`) pins the floor to the version this release
+  is built and CI-tested against, while a fresh install still resolves to the
+  latest compatible release. `numpy` is capped at the newest line that still
+  supports Python 3.11, which remains a CI matrix leg.
+- **Engagement handling and input validation** were tightened across the create,
+  rename, and resolution paths, with stricter checks on the values that reach them.
+- **CI and container workflows** were updated for faster, steadier builds.
+
+### Fixed
+
+- **A self-regenerating crawl trap can no longer starve the crawler.** The web
+  crawler (`heaven/recon/web_crawler.py`) caps how many URLs of one template it
+  will enqueue, so an infinite calendar or id-tree tarpit cannot spend the whole
+  page budget and crowd out real routes such as `/login`, `/admin`, and the API.
+  Named routes are never capped, so recall on a benign site is unchanged.
+- **WebSocket push streams no longer leak a subscriber on an abnormal
+  disconnect.** The stream pump races the client receive against the queue read and
+  removes the subscriber when the socket drops.
+- **False-positive precision.** Several detectors were tightened against live
+  traffic: the directory fuzzer no longer reports a blanket-deny WAF or CDN 403 as
+  a finding, the catch-all-host fuzz path no longer invents endpoints, the race
+  detector no longer force-POSTs a crawled GET link, and the YARA engine no longer
+  reads a bare `<%` as a PHP web shell.
+- **Markdown rendering** in reports and the UI was corrected, and a timezone test
+  was made deterministic.
+
+### Security
+
+- **The dependency batch clears the October 2026 advisories.** The upgraded floors
+  resolve the known CVEs across `aiohttp` (request smuggling), `python-multipart`,
+  `jinja2`, `cryptography`, `pyjwt`, `click`, `python-dotenv`, `dnspython`,
+  `asyncssh`, and `starlette`, bringing the audited set to zero known
+  vulnerabilities.
+- **API input and error hardening.** A request body of the wrong JSON shape now
+  returns a clean 422 instead of a 500, and a crashed scan, job, or fleet task
+  returns a safe error message that does not leak internal details.
+
 ## [4.3.0]: 2026-10-12
 
 ### Added

@@ -10,10 +10,10 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
-    {name = "Nisarg Chasmawala", email = "137988021+nishu2402@users.noreply.github.com"}
+    {name = "Nisarg Chasmawala"}
 ]
 maintainers = [
-    {name = "Nisarg Chasmawala", email = "137988021+nishu2402@users.noreply.github.com"}
+    {name = "Nisarg Chasmawala"}
 ]
 # NOTE: PyPI trove `classifiers` and search `keywords` are intentionally omitted.
 # HEAVEN is distributed via GitHub Releases + install-from-source, never uploaded

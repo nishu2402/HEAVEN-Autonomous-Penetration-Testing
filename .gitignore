@@ -57,9 +57,6 @@ scripts/data/
 *.sqlite
 *.db
 
-# Claude Code local settings (machine-specific, not for repo)
-.claude/
-
 # Hypothesis testing artifacts
 .hypothesis/
 

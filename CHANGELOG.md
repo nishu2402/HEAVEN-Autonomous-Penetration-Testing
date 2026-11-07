@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pentest` for a full internal or external assessment. The overlay
   (`heaven/profiles.py`) is orthogonal to the scan mode, so nothing on the
   deep-pentest path changes when it is off.
-- **Program-scope import for bug-bounty platforms.** `heaven engage scope-import
+- **Program-scope import for bug-bounty platforms.** `heaven scope import
   <file>` reads a HackerOne or Bugcrowd style scope (in-scope hosts and URLs,
   `*.example.com` wildcards, and an explicit out-of-scope list) into the
   engagement store. Wildcard entries become subdomain-wide recon targets and feed
@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`heaven/vulnscan/idor_scanner.py`) now has each identity hold its own canary
   object and proves that one identity can read the other's object and back again,
   a reciprocal cross-read, instead of inferring access from a single swap.
-- **Submission-ready per-finding report.** `heaven findings export --format
+- **Submission-ready per-finding report.** `heaven export --format
   bugbounty` writes one markdown report per finding (title, severity with its CVSS
   vector, CWE, copy-paste request and response, impact, remediation, and the OAST
   callback when there is one), and `--platform hackerone|bugcrowd|intigriti`

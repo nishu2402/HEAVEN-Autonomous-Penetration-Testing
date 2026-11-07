@@ -159,7 +159,7 @@ with `heaven train-model`.
 - **No model signing.** The file is loaded by `joblib.load`, which
   executes arbitrary pickle. **Never deploy a model file from an
   untrusted source.** Always retrain from the trainer code in this repo.
-- **~6 MB binary.** Out-of-band distribution (GitHub Release asset, fetched by
+- **~10 MB binary.** Out-of-band distribution (GitHub Release asset, fetched by
   `heaven download-model` and SHA-256 verified), not committed to git.
 
 ## Citation

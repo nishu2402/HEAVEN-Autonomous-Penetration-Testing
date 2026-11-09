@@ -189,9 +189,9 @@ export default function Header({ onMenu }) {
   useEffect(() => {
     let alive = true;
     const poll = () =>
-      Scans.list(50)
+      Scans.runningCount()
         .then((d) => {
-          if (alive) setRunning((d.scans || []).filter((s) => s.status === "running").length);
+          if (alive) setRunning(d.running || 0);
         })
         .catch(() => {});
     poll();

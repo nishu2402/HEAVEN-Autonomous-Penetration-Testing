@@ -1656,11 +1656,12 @@ def create_app() -> FastAPI:
         code_scan_ids: set[str] = set()
         if eng_store:
             try:
-                for s in eng_store.list_scans(limit=1000):
-                    if _scan_mode_of(s) in CODE_ANALYSIS_MODES:
-                        sid = s.get("id") or s.get("scan_id")
-                        if sid:
-                            code_scan_ids.add(sid)
+                # Only the (id, mode) pair is needed here — iter_scan_modes skips
+                # the config_json blob and finding-count subquery that a full
+                # list_scans() would load for every scan on each 8s poll.
+                for sid, mode in eng_store.iter_scan_modes():
+                    if mode in CODE_ANALYSIS_MODES and sid:
+                        code_scan_ids.add(sid)
             except Exception:
                 logger.debug("suppressed non-fatal exception", exc_info=True)
         from heaven.engagement import _host_key
@@ -1918,6 +1919,28 @@ def create_app() -> FastAPI:
         combined.sort(key=lambda s: s.get("created") or s.get("started_at") or "", reverse=True)
         return {"scans": combined[:limit]}
 
+    # NOTE: this literal route MUST stay registered before "/api/scans/{scan_id}"
+    # below, or Starlette matches "running-count" as a scan_id and never reaches it.
+    @app.get("/api/scans/running-count")
+    async def running_scan_count(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """Cheap count of scans currently running, for the header's badge.
+
+        The header polls this every 10s. It used to call GET /api/scans and pull a
+        full page of rows (``SELECT *`` plus a per-row finding-count subquery) only
+        to count how many have status ``running``. This reads the in-memory
+        active-scan registry instead, so there is no DB query at all. SAST/SCA
+        code-analysis scans are excluded to match the pentest section the badge
+        reflects, exactly as the old client-side ``kind='pentest'`` filter did.
+        """
+        running = sum(
+            1 for v in active_scans.values()
+            if v.get("status") == "running"
+            and _scan_mode_of(v) not in CODE_ANALYSIS_MODES
+        )
+        return {"running": running}
+
     @app.get("/api/scans/{scan_id}")
     async def get_scan(
         scan_id: str,
@@ -1964,14 +1987,17 @@ def create_app() -> FastAPI:
     @app.delete("/api/scans/{scan_id}")
     async def delete_scan(
         scan_id: str,
+        permanent: bool = False,
         user: User = Depends(require_permission("scan.cancel")),
     ):
-        """Cancel a running scan, or permanently remove a finished one.
+        """Cancel a running scan, or remove a finished one (to the Bin by default).
 
         - Running/pending scans are *cancelled* (findings kept).
-        - Otherwise the scan is *deleted*: its findings, checkpoints, the report
-          JSON file and the in-memory record are all removed. This backs the
-          web-UI "Remove scan" action.
+        - A finished scan is moved to the Recycle Bin: its rows and report file
+          are set aside so it can be restored, and ``{status: "trashed",
+          trash_id}`` is returned. This backs the web-UI "Remove scan" action.
+        - ``?permanent=1`` skips the Bin and deletes it outright (findings,
+          checkpoints, report JSON and in-memory record all removed).
         """
         # scan_id is interpolated into a filename below (report_<id>.json) and
         # passed to the store — reject traversal/oddball ids before any file op.
@@ -2009,6 +2035,20 @@ def create_app() -> FastAPI:
             except Exception:  # noqa: BLE001
                 logger.debug("suppressed non-fatal exception", exc_info=True)
             return {"status": "interrupted", "scan_id": scan_id}
+
+        # Soft delete (default): set the scan aside in the Recycle Bin so it can
+        # be reviewed and restored. ?permanent=1 falls through to the hard delete.
+        if not permanent:
+            from heaven import trash
+            try:
+                entry = trash.trash_scan(
+                    _engagement_store_factory(), scan_id,
+                    engagement=_resolve_engagement_name(), by=user.username)
+                active_scans.pop(scan_id, None)
+                return {"status": "trashed", "scan_id": scan_id,
+                        "trash_id": entry["id"], "engagement": entry["engagement"]}
+            except LookupError:
+                pass  # nothing in the store to bin — fall through to the hard path
 
         removed = False
         # 1. Report JSON file (powers the dashboard's report-file fallback)
@@ -2628,12 +2668,15 @@ def create_app() -> FastAPI:
     @app.delete("/api/engagements/{name}")
     async def delete_engagement_endpoint(
         name: str,
+        permanent: bool = False,
         user: User = Depends(require_permission("scan.cancel")),
     ):
-        """Permanently delete an engagement store (its scans, findings and scope).
+        """Delete an engagement store, to the Recycle Bin by default.
 
-        Backs the dashboard "remove engagement" action so operators can clean up
-        stray/empty engagements the switcher would otherwise list forever. If the
+        Backs the dashboard "remove engagement" action. The engagement's DB (its
+        scans, findings and scope) is moved to the Bin so it can be restored;
+        ``?permanent=1`` deletes it outright. An empty engagement (no scans and no
+        findings) is always hard-deleted: there is nothing to restore. If the
         engagement being deleted is the one the app is currently viewing, the
         active pointer is repointed to the best remaining engagement (the one with
         the most findings, real engagements before the sample 'demo' one) or
@@ -2650,7 +2693,17 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Engagement not found")
 
         was_active = _resolve_engagement_name() == name
-        _delete_engagement_store(db)
+        trash_id: Optional[str] = None
+        permanently = permanent
+        if permanent:
+            _delete_engagement_store(db)
+        else:
+            from heaven import trash
+            result = trash.trash_engagement(name, by=user.username)
+            if result.get("permanent"):
+                permanently = True  # empty engagement — hard-deleted, not binned
+            else:
+                trash_id = result.get("id")
 
         new_active: Optional[str] = None
         if was_active:
@@ -2679,9 +2732,12 @@ def create_app() -> FastAPI:
                 _clear_active_engagement()
                 new_active = _resolve_engagement_name()
 
-        logger.info("Engagement '%s' deleted by %s (was_active=%s, new_active=%s)",
-                    name, user.username, was_active, new_active)
-        return {"ok": True, "deleted": name, "active": new_active or _resolve_engagement_name()}
+        logger.info("Engagement '%s' %s by %s (was_active=%s, new_active=%s)",
+                    name, "deleted" if permanently else "moved to Bin",
+                    user.username, was_active, new_active)
+        return {"ok": True, "deleted": name,
+                "active": new_active or _resolve_engagement_name(),
+                "trash_id": trash_id, "permanent": permanently}
 
     @app.post("/api/engagements/{name}/rename")
     async def rename_engagement_endpoint(
@@ -2740,6 +2796,66 @@ def create_app() -> FastAPI:
                     name, new_name, user.username, was_active)
         return {"ok": True, "renamed": {"from": name, "to": new_name},
                 "active": _resolve_engagement_name()}
+
+    @app.get("/api/trash")
+    async def list_trash_endpoint(
+        user: User = Depends(require_permission("scan.view")),
+    ):
+        """List items in the Recycle Bin (deleted scans and engagements), newest
+        first, after auto-purging anything past the retention window. Backs the
+        Bin page so an operator can review a delete before it becomes permanent."""
+        from heaven import trash
+        items = trash.list_items()
+        return {"items": items, "count": len(items),
+                "retention_days": trash.retention_days()}
+
+    @app.post("/api/trash/empty")
+    async def empty_trash_endpoint(
+        user: User = Depends(require_permission("scan.cancel")),
+    ):
+        """Permanently delete every item in the Bin. This cannot be undone."""
+        from heaven import trash
+        count = trash.empty()
+        logger.info("Bin emptied by %s (%d item(s))", user.username, count)
+        return {"ok": True, "purged_count": count}
+
+    @app.post("/api/trash/{tid}/restore")
+    async def restore_trash_endpoint(
+        tid: str,
+        user: User = Depends(require_permission("scan.cancel")),
+    ):
+        """Restore a trashed scan or engagement to its original place and drop it
+        from the Bin. A scan whose owning engagement no longer exists returns 409
+        (restore that engagement from the Bin first)."""
+        from heaven import trash
+        if not trash.is_valid_trash_id(tid):
+            raise HTTPException(400, "Invalid trash id")
+        try:
+            result = trash.restore(tid)
+        except KeyError:
+            raise HTTPException(404, "Item not found in Bin")
+        except trash.TrashPayloadError as e:
+            raise HTTPException(409, f"Cannot restore from Bin: {e}")
+        except FileNotFoundError as e:
+            raise HTTPException(
+                409, f"Owning engagement '{e}' no longer exists; "
+                     "restore it from the Bin first")
+        logger.info("Trash item '%s' restored by %s", tid, user.username)
+        return {"ok": True, **result}
+
+    @app.delete("/api/trash/{tid}")
+    async def purge_trash_endpoint(
+        tid: str,
+        user: User = Depends(require_permission("scan.cancel")),
+    ):
+        """Permanently delete one item from the Bin. This cannot be undone."""
+        from heaven import trash
+        if not trash.is_valid_trash_id(tid):
+            raise HTTPException(400, "Invalid trash id")
+        if not trash.purge(tid):
+            raise HTTPException(404, "Item not found in Bin")
+        logger.info("Trash item '%s' permanently deleted by %s", tid, user.username)
+        return {"ok": True, "purged": tid}
 
     @app.get("/api/engagement/findings")
     async def engagement_findings(

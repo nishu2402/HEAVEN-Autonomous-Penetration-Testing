@@ -63,6 +63,7 @@ const GROUPS = [
     name: "System",
     items: [
       { to: "/health",      label: "System Health", icon: "🩺" },
+      { to: "/bin",         label: "Bin",           icon: "🗑" },
       { to: "/settings",    label: "Settings",      icon: "⚙" },
     ],
   },

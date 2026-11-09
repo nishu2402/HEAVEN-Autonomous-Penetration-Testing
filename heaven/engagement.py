@@ -250,6 +250,10 @@ CREATE TABLE IF NOT EXISTS scans (
     summary_json    TEXT
 );
 
+-- list_scans() and the dashboard/header polls read scans newest-first; without
+-- this index that ORDER BY is a full scan + filesort on every poll.
+CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at);
+
 CREATE TABLE IF NOT EXISTS scan_checkpoints (
     scan_id         TEXT NOT NULL,
     task_id         TEXT NOT NULL,
@@ -1816,6 +1820,21 @@ class EngagementStore:
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def iter_scan_modes(self) -> list[tuple[str, str]]:
+        """``(scan_id, mode)`` for every scan, with ``mode`` lower-cased.
+
+        A deliberately cheap companion to :meth:`list_scans` for callers that
+        only need to classify scans by mode — e.g. the dashboard excluding
+        SAST/SCA code-analysis scans from the host topology on every poll. It
+        skips the ``config_json`` blob and the per-scan finding-count subquery
+        that ``SELECT *`` carries, so it stays fast on a long-running engagement
+        with hundreds of scans. ``mode`` matches what ``_scan_mode_of`` reads for
+        a persisted row (the ``mode`` column), so the result is equivalent.
+        """
+        with self._conn() as c:
+            rows = c.execute("SELECT id, mode FROM scans").fetchall()
+            return [(r["id"], (r["mode"] or "").lower()) for r in rows]
 
     # ── Scan checkpoints (resumable scans) ─────────────────────────────
     def checkpoint_task(self, scan_id: str, task_id: str, task_name: str,

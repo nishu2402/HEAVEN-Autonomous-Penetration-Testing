@@ -167,19 +167,23 @@ export default function ScanList({
     }
   }
 
-  // Cancel a running scan, or permanently remove a finished one.
+  // Cancel a running scan, or move a finished one to the Recycle Bin.
   async function removeScan(id, status) {
     const running = status === "running" || status === "pending";
     const msg = running
       ? "Cancel this running scan?"
-      : "Remove this scan and its findings permanently? This cannot be undone.";
+      : "Move this scan to the Bin? You can restore it from the Bin later.";
     if (!window.confirm(msg)) return;
     setDeleting((d) => ({ ...d, [id]: true }));
     try {
       const r = await ScansApi.remove(id);
-      const label = { cancelled: "Scan cancelled", interrupted: "Scan interrupted" }[r.status]
-        || "Scan removed";
-      toast.success(label);
+      const label = {
+        cancelled: "Scan cancelled",
+        interrupted: "Scan interrupted",
+        trashed: "Scan moved to Bin",
+      }[r.status] || "Scan removed";
+      const body = r.status === "trashed" ? "Restore it from the Bin page." : undefined;
+      toast.success(label, body);
       if (selected === id) setSelected(null);
       setDetails((d) => { const n = { ...d }; delete n[id]; return n; });
       load();
@@ -350,7 +354,7 @@ export default function ScanList({
                     <button
                       className="btn-small scan-remove"
                       disabled={!!deleting[id]}
-                      title={running ? "Cancel this running scan" : "Remove this scan and its findings"}
+                      title={running ? "Cancel this running scan" : "Move this scan to the Bin (restorable)"}
                       onClick={() => removeScan(id, s.status)}
                     >
                       {deleting[id] ? "…" : (running ? "✕ Cancel" : "🗑 Remove")}

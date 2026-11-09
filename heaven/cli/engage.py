@@ -116,13 +116,17 @@ def engage_list() -> None:
 @engage.command("delete")
 @click.argument("name")
 @click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
-def engage_delete(name: str, yes: bool) -> None:
-    """Permanently delete an engagement (its scans, findings and scope).
+@click.option("--permanent", "-p", is_flag=True,
+              help="Delete immediately instead of moving to the Recycle Bin.")
+def engage_delete(name: str, yes: bool, permanent: bool) -> None:
+    """Delete an engagement (its scans, findings and scope).
 
-    Removes the SQLite DB and its WAL sidecars. If the deleted engagement is the
-    current selection, the sticky `heaven use` context and the web UI's active
-    pointer are cleared so nothing keeps pointing at a store that no longer
-    exists.
+    By default the engagement is moved to the Recycle Bin, where it can be
+    reviewed and restored (`heaven trash list` / `heaven trash restore <id>`); an
+    empty engagement is removed outright. Use --permanent to skip the Bin and
+    delete the SQLite DB (and its WAL sidecars) now. If the deleted engagement is
+    the current selection, the sticky `heaven use` context and the web UI's active
+    pointer are cleared so nothing keeps pointing at a store that no longer exists.
     """
     from heaven.engagement import (
         EngagementStore,
@@ -143,23 +147,35 @@ def engage_delete(name: str, yes: bool) -> None:
     except Exception:  # noqa: BLE001
         summary = "unknown contents"
     if not yes:
-        _print(f"[yellow]About to permanently delete[/yellow] "
+        verb = "permanently delete" if permanent else "move to the Recycle Bin"
+        warn = ("This cannot be undone." if permanent
+                else "You can restore it from the Bin.")
+        _print(f"[yellow]About to {verb}[/yellow] "
                f"[bold]{name}[/bold] ({summary}) at [dim]{path}[/dim].")
-        if not click.confirm("This cannot be undone. Continue?", default=False):
+        if not click.confirm(f"{warn} Continue?", default=False):
             _print("[dim]Aborted.[/dim]")
             return
 
-    if not delete_engagement_store(path):
-        _print(f"[red]Nothing was deleted for {name}.[/red]")
-        sys.exit(1)
+    if permanent:
+        if not delete_engagement_store(path):
+            _print(f"[red]Nothing was deleted for {name}.[/red]")
+            sys.exit(1)
+        _print(f"[green]✓[/green] Permanently deleted engagement [bold]{name}[/bold].")
+    else:
+        from heaven import trash
+        result = trash.trash_engagement(name, by="cli", db_path=path)
+        if result.get("permanent"):
+            _print(f"[green]✓[/green] Deleted empty engagement [bold]{name}[/bold] "
+                   f"[dim](nothing to keep in the Bin).[/dim]")
+        else:
+            _print(f"[green]✓[/green] Moved [bold]{name}[/bold] to the Recycle Bin. "
+                   f"[dim]Restore with heaven trash restore {result['id']}[/dim]")
 
     # Drop any pointer that still names the now-deleted engagement.
     if get_current_engagement() == name:
         clear_current_engagement()
     if get_active_engagement() == name:
         clear_active_engagement()
-
-    _print(f"[green]✓[/green] Deleted engagement [bold]{name}[/bold].")
 
 
 @engage.command("rename")

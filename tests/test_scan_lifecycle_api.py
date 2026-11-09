@@ -145,7 +145,7 @@ def test_assets_default_prefers_scan_with_open_ports(client):
 
 def test_scan_detail_and_delete(client):
     """A completed scan not in memory is still viewable (store fallback), and a
-    finished scan can be permanently removed."""
+    finished scan can be removed to the Recycle Bin (recoverable, not destroyed)."""
     client.post("/api/engagements/active", json={"name": "e2e-delete"})
     _seed("e2e-delete", {
         "scanA": [{"target": "https://a", "vuln_type": "xss", "title": "Reflected XSS",
@@ -167,12 +167,19 @@ def test_scan_detail_and_delete(client):
     row = next(e for e in js["engagements"] if e["name"] == "e2e-delete")
     assert row["active"] and row["findings"] == 2
 
-    # Remove scanA → its finding is gone; scanB is untouched
+    # Remove scanA → it moves to the Bin; its finding is gone from the live
+    # engagement and scanB is untouched, but it is recoverable (not destroyed).
     r = client.delete("/api/scans/scanA")
-    assert r.status_code == 200 and r.json()["status"] == "deleted", r.text
+    assert r.status_code == 200 and r.json()["status"] == "trashed", r.text
     assert client.get("/api/engagement/findings?scan_id=scanA").json()["findings"] == []
     assert client.get("/api/scans/scanA").status_code == 404
     assert client.get("/api/scans/scanB").status_code == 200
+    assert client.get("/api/trash").json()["count"] == 1   # recoverable from the Bin
+
+    # ?permanent=1 still hard-deletes without touching the Bin.
+    r = client.delete("/api/scans/scanB?permanent=1")
+    assert r.status_code == 200 and r.json()["status"] == "deleted", r.text
+    assert client.get("/api/trash").json()["count"] == 1   # scanB did not get binned
 
 
 _FINDING = {"target": "https://a", "vuln_type": "xss", "title": "Reflected XSS",
@@ -522,6 +529,33 @@ def test_live_running_scan_is_not_reconciled(client):
         assert store.get_scan_state("live1")["status"] == "running"
     finally:
         server._scan_tasks_by_id.pop("live1", None)
+
+
+def test_running_scan_count_counts_in_memory_running_only(client):
+    """GET /api/scans/running-count is the header badge's cheap source: it counts
+    in-memory scans with status 'running', excludes SAST/SCA (the pentest section
+    the badge reflects), and issues no DB query. Equivalent to the old client-side
+    `Scans.list(50).filter(status == 'running')` for same-process scans."""
+    from heaven.api import server
+
+    snapshot = dict(server.active_scans)
+    server.active_scans.clear()
+    try:
+        assert client.get("/api/scans/running-count").json() == {"running": 0}
+
+        server.active_scans["r1"] = {"status": "running", "mode": "web"}
+        server.active_scans["r2"] = {"status": "running", "config": {"mode": "network"}}
+        server.active_scans["done"] = {"status": "completed", "mode": "web"}
+        server.active_scans["pending"] = {"status": "pending", "mode": "web"}
+        server.active_scans["sast"] = {"status": "running", "mode": "sast"}  # excluded
+
+        r = client.get("/api/scans/running-count")
+        assert r.status_code == 200
+        # Only r1 + r2: 'done'/'pending' aren't running; 'sast' is code-analysis.
+        assert r.json() == {"running": 2}
+    finally:
+        server.active_scans.clear()
+        server.active_scans.update(snapshot)
 
 
 def test_evict_terminal_scans_bounds_memory_without_touching_live():

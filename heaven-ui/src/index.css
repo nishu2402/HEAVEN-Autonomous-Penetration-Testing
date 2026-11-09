@@ -736,6 +736,26 @@ a:hover { color: var(--accent-2); }
   text-decoration: none; transition: all 0.16s;
 }
 .btn-small:hover { border-color: var(--border-accent); color: var(--text-0); background: rgba(109,124,255,0.10); }
+.btn-small.danger:hover:not(:disabled) { border-color: rgba(255,77,106,0.45); color: var(--crit); background: rgba(255,77,106,0.10); }
+.btn-small:disabled { cursor: default; opacity: 0.5; }
+
+/* ── Recycle Bin ── */
+.bin-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.bin-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--overlay-med);
+}
+.bin-icon { font-size: 18px; flex: none; }
+.bin-main { flex: 1 1 auto; min-width: 0; }
+.bin-label { color: var(--text-0); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.bin-kind {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 7px;
+}
+.bin-meta { font-size: 12px; color: var(--text-1); margin-top: 2px; }
+.bin-actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 
 /* ── Forms ── */
 .filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }

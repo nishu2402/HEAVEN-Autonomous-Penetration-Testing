@@ -162,6 +162,119 @@ class TestConnectionPublicAPI:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PostgreSQL TLS — _build_ssl_context (pure function, no socket / no server)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestBuildSSLContext:
+    """ssl_mode / ssl_ca_cert must drive the asyncpg TLS context correctly.
+
+    The latent gap these cover: a Postgres connection was permanently
+    ``CERT_NONE`` / ``check_hostname=False`` (encrypted but MITM-exposed) with no
+    config knob to enable verification. ``_build_ssl_context`` now honours
+    libpq-style ssl_mode values. These are pure checks — no PostgreSQL, no socket.
+    """
+
+    def _cfg(self, **kw):
+        from types import SimpleNamespace
+        base = {"ssl_mode": "prefer", "ssl_ca_cert": ""}
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    def test_disable_returns_false_no_tls(self):
+        from heaven.db.connection import _build_ssl_context
+        assert _build_ssl_context(self._cfg(ssl_mode="disable")) is False
+
+    def test_prefer_encrypts_but_does_not_verify(self):
+        import ssl
+        from heaven.db.connection import _build_ssl_context
+        ctx = _build_ssl_context(self._cfg(ssl_mode="prefer"))
+        assert isinstance(ctx, ssl.SSLContext)
+        assert ctx.verify_mode == ssl.CERT_NONE
+        assert ctx.check_hostname is False
+
+    def test_verify_ca_requires_cert_but_not_hostname(self):
+        import ssl
+        from heaven.db.connection import _build_ssl_context
+        ctx = _build_ssl_context(self._cfg(ssl_mode="verify-ca"))
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is False
+
+    def test_verify_full_requires_cert_and_hostname(self):
+        import ssl
+        from heaven.db.connection import _build_ssl_context
+        ctx = _build_ssl_context(self._cfg(ssl_mode="verify-full"))
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+
+    def test_unknown_mode_degrades_to_unverified_not_strict(self):
+        # An unrecognised mode must NOT silently become verify-full (that would
+        # break every connection); it degrades to encrypted-but-unverified.
+        import ssl
+        from heaven.db.connection import _build_ssl_context
+        ctx = _build_ssl_context(self._cfg(ssl_mode="totally-bogus"))
+        assert ctx.verify_mode == ssl.CERT_NONE
+        assert ctx.check_hostname is False
+
+    def test_missing_attr_defaults_to_prefer(self):
+        # A config object predating the new fields must still yield a context.
+        import ssl
+        from types import SimpleNamespace
+        from heaven.db.connection import _build_ssl_context
+        ctx = _build_ssl_context(SimpleNamespace())
+        assert isinstance(ctx, ssl.SSLContext)
+        assert ctx.verify_mode == ssl.CERT_NONE
+
+    def test_ca_cert_is_loaded_when_set(self, monkeypatch):
+        # When ssl_ca_cert is set it must be handed to load_verify_locations.
+        # Spy on the method so no real CA file is needed.
+        import ssl
+        from heaven.db.connection import _build_ssl_context
+        seen = {}
+
+        def _spy(self, *args, **kwargs):
+            seen["args"] = args
+            seen["kwargs"] = kwargs
+
+        monkeypatch.setattr(ssl.SSLContext, "load_verify_locations", _spy)
+        _build_ssl_context(self._cfg(ssl_mode="verify-full",
+                                     ssl_ca_cert="/etc/ssl/heaven-ca.pem"))
+        assert seen, "load_verify_locations must be called when ssl_ca_cert is set"
+        assert "/etc/ssl/heaven-ca.pem" in seen["args"]
+
+    def test_no_ca_cert_does_not_load(self, monkeypatch):
+        import ssl
+        from heaven.db.connection import _build_ssl_context
+        called = {"n": 0}
+
+        def _spy(self, *args, **kwargs):
+            called["n"] += 1
+
+        monkeypatch.setattr(ssl.SSLContext, "load_verify_locations", _spy)
+        _build_ssl_context(self._cfg(ssl_mode="verify-full", ssl_ca_cert=""))
+        assert called["n"] == 0, "empty ssl_ca_cert must not call load_verify_locations"
+
+
+class TestDatabaseConfigSSL:
+    """DatabaseConfig exposes the ssl knobs and reads them from the environment."""
+
+    def test_defaults_when_env_unset(self, monkeypatch):
+        for k in ("HEAVEN_DB_SSL_MODE", "HEAVEN_DB_SSL_CA_CERT"):
+            monkeypatch.delenv(k, raising=False)
+        from heaven.config import DatabaseConfig
+        cfg = DatabaseConfig()
+        assert cfg.ssl_mode == "prefer"
+        assert cfg.ssl_ca_cert == ""
+
+    def test_env_overrides_are_honoured(self, monkeypatch):
+        monkeypatch.setenv("HEAVEN_DB_SSL_MODE", "verify-full")
+        monkeypatch.setenv("HEAVEN_DB_SSL_CA_CERT", "/etc/ssl/heaven-ca.pem")
+        from heaven.config import DatabaseConfig
+        cfg = DatabaseConfig()
+        assert cfg.ssl_mode == "verify-full"
+        assert cfg.ssl_ca_cert == "/etc/ssl/heaven-ca.pem"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SQLite offline store
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -170,18 +170,20 @@ export default function Dashboard() {
   const deleteEngagement = async (name) => {
     if (busyEng) return
     const target = engList.find((e) => e.name === name)
+    const isEmpty = target && !target.findings && !target.scans
     const detail = target?.findings
       ? `${target.findings} finding${target.findings !== 1 ? 's' : ''}`
       : 'no findings'
-    if (!window.confirm(
-      `Delete engagement "${name}" (${detail})? This permanently removes its ` +
-      `scans and findings and cannot be undone.`
-    )) return
+    const msg = isEmpty
+      ? `Delete empty engagement "${name}"? It has no scans or findings, so it is removed permanently.`
+      : `Move engagement "${name}" (${detail}) to the Bin? You can restore it from the Bin.`
+    if (!window.confirm(msg)) return
     setBusyEng(name)
     try {
-      await Engagements.remove(name)
+      const r = await Engagements.remove(name)
       await refresh()
-      toast.success(`Deleted "${name}"`)
+      if (r && r.permanent) toast.success(`Deleted "${name}"`)
+      else toast.success(`Moved "${name}" to Bin`, 'Restore it from the Bin page.')
     } catch (e) {
       toast.error(e.message || 'Could not delete engagement')
     } finally {
@@ -421,7 +423,9 @@ export default function Dashboard() {
                         className="eng-switch-del"
                         disabled={!!busyEng}
                         onClick={() => deleteEngagement(e.name)}
-                        title={`Delete "${e.name}" permanently`}
+                        title={(!e.findings && !e.scans)
+                          ? `Delete empty "${e.name}"`
+                          : `Move "${e.name}" to the Bin (restorable)`}
                         aria-label={`Delete engagement ${e.name}`}
                       >
                         {busy ? '…' : '🗑'}

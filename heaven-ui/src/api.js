@@ -346,6 +346,9 @@ export const Scans = {
   remove: (id) => api(`/scans/${encodeURIComponent(id)}`, { method: "DELETE" }),
   // Resume an interrupted / paused scan from its last checkpoints.
   resume: (id) => api(`/scans/${encodeURIComponent(id)}/resume`, { method: "POST" }),
+  // Count of currently-running scans — cheap in-memory count for the header
+  // badge, instead of pulling a full scan page just to count locally.
+  runningCount: () => api("/scans/running-count"),
 };
 
 // Host & service inventory — open ports, service versions and OS per host, as
@@ -405,6 +408,25 @@ export const Engagements = {
     api(`/engagements/${encodeURIComponent(name)}/rename`,
         { method: "POST", body: JSON.stringify({ new_name: newName }) })
       .then((r) => { notifyEngagementChanged(); return r; }),
+};
+
+// Recycle Bin — deleted scans and engagements land here first (see the Scans
+// "Remove" action and the Dashboard engagement delete) so an operator can review
+// and restore them before they are removed permanently. Items auto-purge after
+// the server's retention window. Backs the Bin page.
+export const Trash = {
+  // Items currently in the Bin, newest first, plus { retention_days }.
+  list: () => api("/trash"),
+  // Restore a trashed scan/engagement to its original place and drop it from the
+  // Bin. Restoring an engagement can change the active selection, so refresh the
+  // header chip. A scan whose owning engagement is gone returns 409.
+  restore: (id) =>
+    api(`/trash/${encodeURIComponent(id)}/restore`, { method: "POST" })
+      .then((r) => { notifyEngagementChanged(); return r; }),
+  // Permanently delete ONE item (cannot be undone).
+  remove: (id) => api(`/trash/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // Permanently delete EVERY item (cannot be undone).
+  empty: () => api("/trash/empty", { method: "POST" }),
 };
 
 export const Vulns = {

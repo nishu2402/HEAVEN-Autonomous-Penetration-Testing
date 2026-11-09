@@ -46,6 +46,10 @@ uv.lock
 engagement.db
 engagements/
 .heaven/
+# Recycle Bin: deleted engagement DBs + scan bundles live under <data_dir>/.trash
+# (already covered by /data/* for the default data dir; this also covers a
+# repo-relative HEAVEN_DATA_DIR).
+.trash/
 /data/*
 # ...but DO ship the hand-written model-card docs under data/models/ (the README
 # and CHANGELOG link to them); only the model binaries/metrics stay out of git.

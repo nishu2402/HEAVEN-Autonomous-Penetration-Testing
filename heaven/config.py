@@ -132,6 +132,15 @@ class DatabaseConfig:
     name: str = "heaven"
     user: str = "heaven"
     password: str = ""
+    # TLS to PostgreSQL, mirroring libpq's names so _build_ssl_context can honour
+    # them: "disable" (no TLS) | "prefer" (default: TLS if offered, cert NOT
+    # verified) | "verify-ca" | "verify-full" (verify the server cert, and the
+    # hostname too). ssl_ca_cert is an optional CA-bundle path for the verify
+    # modes. These exist so an operator on an untrusted network can actually set
+    # HEAVEN_DB_SSL_MODE=verify-full (+ HEAVEN_DB_SSL_CA_CERT) and get a
+    # MITM-resistant connection, instead of being stuck at CERT_NONE with no knob.
+    ssl_mode: str = "prefer"
+    ssl_ca_cert: str = ""
 
     def __post_init__(self):
         self.host = _env("HEAVEN_DB_HOST", self.host or "localhost")
@@ -143,6 +152,8 @@ class DatabaseConfig:
             "HEAVEN_DB_PASSWORD", "DB password",
             fallback_generator=lambda: secrets.token_urlsafe(24),
         )
+        self.ssl_mode = _env("HEAVEN_DB_SSL_MODE", self.ssl_mode)
+        self.ssl_ca_cert = _env("HEAVEN_DB_SSL_CA_CERT", self.ssl_ca_cert)
 
     @property
     def dsn(self) -> str:
@@ -352,12 +363,15 @@ class HeavenConfig:
         (a non-POSIX filesystem) must never block startup."""
         for d in (self.data_dir, self.data_dir / "scans", self.data_dir / "reports",
                   self.data_dir / "models", self.data_dir / "cache",
+                  self.data_dir / ".trash",
                   self.security.audit_log_dir):
             try:
                 d.mkdir(parents=True, exist_ok=True)
             except OSError:
                 pass
-        for d in (self.data_dir, self.security.audit_log_dir):
+        # The Recycle Bin holds deleted engagement DBs and scan bundles (the same
+        # client findings the engagement stores carry), so lock it owner-only too.
+        for d in (self.data_dir, self.data_dir / ".trash", self.security.audit_log_dir):
             try:
                 os.chmod(d, 0o700)
             except OSError:

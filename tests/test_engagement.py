@@ -525,6 +525,30 @@ class TestFindingDedup:
         assert store.list_scans()[0]["findings_count"] == 2
         assert store.get_scan("s1")["findings_count"] == 2
 
+    def test_iter_scan_modes_matches_list_scans(self, store):
+        """iter_scan_modes (the dashboard's cheap code-scan classifier) must
+        return the same lower-cased (id -> mode) mapping the full list_scans()
+        path derives from the `mode` column, for every scan — including one
+        auto-registered via a finding (mode NULL) and one recorded upper-cased."""
+        store.record_scan_start("s-web", name="w", mode="web")
+        store.record_scan_start("s-sast", name="code", mode="SAST")   # upper-case
+        # Auto-registered by a finding with no record_scan_start → mode is NULL.
+        store.upsert_finding("s-auto", {"target": "h", "vuln_type": "sqli",
+                                        "severity": "high", "confidence": 0.9})
+
+        modes = dict(store.iter_scan_modes())
+        assert modes["s-web"] == "web"
+        assert modes["s-sast"] == "sast"        # normalised to lower-case
+        assert modes["s-auto"] == ""            # NULL mode → ""
+        assert set(modes) == {"s-web", "s-sast", "s-auto"}
+
+        # Equivalence with the full-row path the optimization replaced.
+        from_rows = {
+            (s.get("id") or s.get("scan_id")): str(s.get("mode") or "").lower()
+            for s in store.list_scans(limit=1000)
+        }
+        assert modes == from_rows
+
     def test_dedup_preserves_operator_status(self, store):
         finding = {"target": "x", "vuln_type": "sqli", "param": "id",
                    "severity": "high", "confidence": 0.8}

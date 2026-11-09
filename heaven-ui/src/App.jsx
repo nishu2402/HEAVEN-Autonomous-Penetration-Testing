@@ -52,6 +52,7 @@ const WatchPage      = lazy(() => import("./pages/Watch.jsx"));
 const Reports        = lazy(() => import("./pages/Reports.jsx"));
 const SettingsPage   = lazy(() => import("./pages/Settings.jsx"));
 const HealthPage     = lazy(() => import("./pages/Health.jsx"));
+const Bin            = lazy(() => import("./pages/Bin.jsx"));
 
 function RouteFallback() {
   return (
@@ -181,6 +182,7 @@ function Shell() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/health" element={<HealthPage />} />
+              <Route path="/bin" element={<Bin />} />
               <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/sast" element={<SastPage />} />
               <Route path="/sca" element={<ScaPage />} />

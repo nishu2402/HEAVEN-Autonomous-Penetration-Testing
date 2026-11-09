@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A Recycle Bin for deleted scans and engagements.** Removing a scan or an
+  engagement now moves it to a Bin instead of destroying it, so an accidental
+  delete is recoverable. The new Bin page (and `heaven trash list / restore /
+  purge / empty`) lists recently deleted items with their owning engagement,
+  counts and when they were deleted, and restores or permanently deletes each
+  one. Items auto-purge after a retention window
+  (`HEAVEN_TRASH_RETENTION_DAYS`, 30 days by default). An empty engagement is
+  still removed outright, and `?permanent=1` on the delete endpoints (or
+  `heaven engage delete --permanent`) skips the Bin.
+
+### Security
+
+- **Verifiable TLS to the optional PostgreSQL backend.** When HEAVEN is run
+  against a PostgreSQL database (`heaven init-db`), it can now verify the
+  database server's certificate. `HEAVEN_DB_SSL_MODE` selects `disable`,
+  `prefer` (the default: TLS when the server offers it, with the certificate
+  not verified), `verify-ca`, or `verify-full` (verify both the certificate and
+  the hostname), and `HEAVEN_DB_SSL_CA_CERT` points at a CA bundle for the
+  verify modes. Earlier builds always connected with the certificate unverified
+  and no way to change it, so an operator on an untrusted network can now set
+  `HEAVEN_DB_SSL_MODE=verify-full` for a connection that resists an active
+  man-in-the-middle. The default behaviour is unchanged.
+
 ## [4.4.0]: 2026-11-03
 
 ### Added

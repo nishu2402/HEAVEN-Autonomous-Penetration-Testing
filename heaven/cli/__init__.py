@@ -179,7 +179,7 @@ if HAS_CLICK:
         sast, sbom as sbom_module, sca as sca_module, scan, server,
         ssh as ssh_module,
         status as status_module, tickets,
-        train, update as update_module, use as use_module,
+        train, trash as trash_module, update as update_module, use as use_module,
         vault as vault_module, vpn as vpn_module, watch,
     )
     ai_module.register(cli)
@@ -227,6 +227,7 @@ if HAS_CLICK:
     status_module.register(cli)
     tickets.register(cli)
     train.register(cli)
+    trash_module.register(cli)
     update_module.register(cli)
     use_module.register(cli)
     vault_module.register(cli)

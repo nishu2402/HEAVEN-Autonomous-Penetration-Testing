@@ -76,6 +76,10 @@ asyncssh>=2.24.1         # SSH credential testing; floor patched: SCP path-trave
 # The crawler parses with the stdlib "html.parser" backend, so no lxml needed.
 beautifulsoup4>=4.15.0
 httpx>=0.28.1
+# HTTP/2 framing + HPACK for the h2c request-smuggling detector (pure-Python,
+# zero transitive deps; the reference libs behind httpx/hypercorn HTTP/2).
+hpack>=4.2.0
+hyperframe>=6.1.0
 # Headless-browser DAST (DOM/stored-XSS proof + JS-rendered crawl). The pip
 # wheel ships the driver; the browser bundle is fetched once with
 # `playwright install chromium` (scripts/install.sh does this automatically).

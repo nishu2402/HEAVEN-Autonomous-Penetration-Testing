@@ -717,6 +717,31 @@ class PDFReportGenerator:
         else:
             story.append(Paragraph("No explicit scope recorded; findings list their own targets.",
                                    styles["small"]))
+
+        # Chain of authorization: who acknowledged authorization, when, how, and
+        # which intrusive capabilities were enabled. Only when the run recorded it.
+        auth = data.get("authorization")
+        if isinstance(auth, dict) and auth:
+            from heaven.devsecops.authorization_record import _intrusive_summary
+            story.append(Paragraph("Authorization", styles["h3"]))
+            method_label = {"flag": "explicit --i-have-authorization flag",
+                            "env": "HEAVEN_AUTHORIZED_SCOPE allow-list",
+                            "interactive": "interactive operator confirmation"}.get(
+                str(auth.get("method")), str(auth.get("method") or "unknown"))
+            arows = [
+                [Paragraph("Operator", styles["cellb"]),
+                 Paragraph(_esc(str(auth.get("operator", "unknown"))), styles["cell"])],
+                [Paragraph("Authorized (UTC)", styles["cellb"]),
+                 Paragraph(_esc(str(auth.get("authorized_at", ""))[:19]), styles["cell"])],
+                [Paragraph("Acknowledgement", styles["cellb"]),
+                 Paragraph(_esc(method_label), styles["cell"])],
+                [Paragraph("Authorized targets", styles["cellb"]),
+                 Paragraph(str(len(auth.get("targets") or [])), styles["cell"])],
+                [Paragraph("Intrusive testing", styles["cellb"]),
+                 Paragraph(_esc(_intrusive_summary(auth)), styles["cell"])],
+            ]
+            story.append(table(arows, [40 * mm, cw - 40 * mm], header=False))
+
         story.append(Paragraph("Testing Approach", styles["h3"]))
         story.append(Paragraph(
             "Testing followed a structured methodology aligned with industry standards, progressing "
@@ -981,10 +1006,40 @@ class PDFReportGenerator:
         story.append(Paragraph(
             f"Recommended remediation order, prioritised by severity, covering all "
             f"{len(findings)} findings. Address higher-severity items first; SLAs "
-            "are guidance.", styles["body"]))
+            "are guidance. The <b>Effort</b> column estimates the fix cost by "
+            "weakness class so planning can weigh impact against work.", styles["body"]))
+
+        # Remediation economics: effort per finding, plus the quick wins (high
+        # impact, low effort) a client should fix immediately.
+        try:
+            from heaven.devsecops.remediation_economics import (
+                quick_wins as _quick_wins, remediation_effort as _effort_of)
+        except Exception:  # noqa: BLE001 — economics is additive
+            _quick_wins = None  # type: ignore[assignment]
+            _effort_of = None   # type: ignore[assignment]
+
+        if findings and _quick_wins is not None:
+            wins = _quick_wins(findings)
+            if wins:
+                story.append(Paragraph("Quick wins (high impact, low effort)", styles["h3"]))
+                story.append(Paragraph(
+                    "Fix these first: each removes a high-impact issue with a "
+                    "configuration, header or flag change, minimal work for an "
+                    "immediate risk reduction.", styles["small"]))
+                qw = [[Paragraph(h, styles["th"]) for h in
+                       ("#", "Severity", "Finding", "Target")]]
+                for i, f in enumerate(wins, 1):
+                    qw.append([Paragraph(str(i), styles["cell"]), pill(_sev_of(f)),
+                               Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"),
+                                         styles["small"]),
+                               Paragraph(_esc(str(f.get("target") or f.get("url") or "")),
+                                         styles["small"])])
+                story.append(table(qw, [8 * mm, 24 * mm, cw - 92 * mm, 60 * mm]))
+                story.append(Spacer(1, 4 * mm))
+
         if findings:
             rr = [[Paragraph(h, styles["th"]) for h in
-                   ("#", "Severity", "Finding", "Recommended action", "SLA")]]
+                   ("#", "Severity", "Finding", "Recommended action", "Effort", "SLA")]]
             # Every finding earns a row — no severity filter, no top-25 cap. Each
             # numbered step renders on its own line (via <br/>), whole sentences,
             # no mid-word ellipsis; the full remediation is in the finding detail.
@@ -992,11 +1047,14 @@ class PDFReportGenerator:
                 ev = f.get("evidence") or {}
                 lines = roadmap_action_lines(ev.get("remediation") or f.get("remediation") or "")
                 action_html = "<br/>".join(_esc(ln) for ln in lines)
+                effort = (f.get("remediation_effort")
+                          or (_effort_of(f) if _effort_of is not None else "")) or ""
                 rr.append([Paragraph(str(i), styles["cell"]), pill(_sev_of(f)),
                            Paragraph(_esc(f.get("title") or f.get("vuln_type") or "Finding"), styles["cell"]),
                            Paragraph(action_html, styles["small"]),
+                           Paragraph(_esc(str(effort).title()), styles["small"]),
                            Paragraph(SEVERITY_META[_sev_of(f)]["sla"], styles["small"])])
-            story.append(table(rr, [8 * mm, 24 * mm, 48 * mm, cw - 110 * mm, 30 * mm]))
+            story.append(table(rr, [8 * mm, 22 * mm, 40 * mm, cw - 122 * mm, 24 * mm, 28 * mm]))
         story.append(PageBreak())
 
         # ── Leads for manual review (only when present) ──
@@ -1014,6 +1072,48 @@ class PDFReportGenerator:
             "Assessment performed with the HEAVEN Autonomous Penetration-Testing Platform, which "
             "orchestrates reconnaissance, vulnerability scanning, NVD/EPSS/KEV enrichment, and "
             "ML-assisted risk scoring.", styles["body"]))
+
+        # ── Evidence integrity (chain of custody) ──
+        # Each finding's proof is hashed (SHA-256) at collection time so this
+        # deliverable is defensible: a reviewer can confirm the evidence shown is
+        # exactly what was captured. Rendered as a manifest, one row per finding.
+        if findings:
+            try:
+                from heaven.devsecops.chain_of_custody import manifest as _coc_manifest
+                rows = _coc_manifest(findings)
+            except Exception:  # noqa: BLE001 — manifest is additive
+                rows = []
+            if rows:
+                story.append(Paragraph("Evidence Integrity (Chain of Custody)", styles["h3"]))
+                story.append(Paragraph(
+                    "Each finding's proof (request, response, payload and observed evidence) was "
+                    "hashed with SHA-256 at collection time. The digest lets a reviewer verify the "
+                    "evidence in this report is exactly what HEAVEN captured, re-hashing an altered "
+                    "proof will not match.", styles["small"]))
+                _MAX_MANIFEST = 120
+                shown = rows[:_MAX_MANIFEST]
+                mt = [[Paragraph(h, styles["th"]) for h in
+                       ("#", "Finding", "Collected (UTC)", "Method", "SHA-256")]]
+                for i, r in enumerate(shown, 1):
+                    name = r.get("vuln_type") or r.get("target") or "Finding"
+                    collected = str(r.get("collected_at") or "")[:19] or "n/a"
+                    method = str(r.get("collection_method") or "")
+                    digest = str(r.get("sha256") or "")
+                    mt.append([Paragraph(str(i), styles["cell"]),
+                               Paragraph(_esc(str(name)), styles["small"]),
+                               Paragraph(_esc(collected), styles["small"]),
+                               Paragraph(_esc(method), styles["small"]),
+                               Paragraph(_esc(digest[:24] + "…" if len(digest) > 24 else digest),
+                                         styles["small"])])
+                story.append(table(mt, [8 * mm, cw - 128 * mm, 32 * mm, 40 * mm, 48 * mm]))
+                if len(rows) > _MAX_MANIFEST:
+                    story.append(Paragraph(
+                        f"… and {len(rows) - _MAX_MANIFEST} more; the full manifest with complete "
+                        "digests is available in the exported findings data.", styles["small"]))
+                story.append(Paragraph(
+                    f"Tool: HEAVEN v{_esc(str(rows[0].get('tool_version') or ''))} · "
+                    f"algorithm: SHA-256 · {len(rows)} artifact(s).", styles["small"]))
+
         story.append(Paragraph("Glossary", styles["h3"]))
         gloss = [["CVSS", "Common Vulnerability Scoring System, a 0-10 severity score."],
                  ["CVSS base", "The base score, a property of the weakness class, so two findings "

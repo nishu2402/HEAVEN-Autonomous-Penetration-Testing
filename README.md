@@ -4,7 +4,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/heaven-poster.svg"/>
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/heaven-poster-light.svg"/>
-  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3810 tests · 71 CLI commands · 112 API routes · 33 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.99 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
+  <img src="docs/assets/heaven-poster.svg" width="100%" alt="HEAVEN: Autonomous Penetration-Testing Framework · Recon → ML Risk Scoring → Verified Exploitation → Reporting · 3912 tests · 71 CLI commands · 112 API routes · 33 UI pages · 15 scan modes · hybrid CVSS ML predictor R²=0.99 · LLM observe→plan→act with deterministic fallback (no API key required)"/>
 </picture>
 </p>
 
@@ -21,7 +21,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-247-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
+    <img src="https://img.shields.io/badge/Modules-252-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
     <img src="https://img.shields.io/badge/CLI_Commands-71-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
     <img src="https://img.shields.io/badge/UI_Pages-33-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
     <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
@@ -112,9 +112,9 @@ It runs three ways from the **same engagement dataset**:
 
 | Metric | Value |
 |---|---|
-| 🧪 **Tests** | 3810 tests (pytest matrix: Python 3.11 / 3.12) |
+| 🧪 **Tests** | 3912 tests (pytest matrix: Python 3.11 / 3.12) |
 | 📈 **Benchmark** | Verified against **live DVWA**: autonomous authenticated SQLi/LFI/cmdi detection → [**Results**](docs/BENCHMARK_RESULTS.md) |
-| 🧩 **Modules** | 247 |
+| 🧩 **Modules** | 252 |
 | ⌨️ **CLI Commands** | 71 |
 | 🌐 **API Routes** | 112 RBAC-protected routes |
 | 🖥️ **UI Pages** | 33 (React + Vite, dark glassmorphic) |
@@ -145,13 +145,13 @@ It runs three ways from the **same engagement dataset**:
 | Area | What It Does |
 |---|---|
 | 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud (AWS/GCP/Azure) · containers & Kubernetes (Docker socket / K8s API / RBAC) · IoT/SCADA · Git secrets · email OSINT · honeypot detection · firewall / IDS-IPS / WAF detection + adaptive evasion re-probe (`--evade`) |
-| 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS (reflected-origin + credentials) · CRLF · open redirect (canary-confirmed) · IDOR · mass assignment · dir/file fuzzing · JWT attacks (alg:none · weak-secret crack) · insecure session cookies · race conditions (incl. **true single-packet last-byte-sync** limit-overrun, reproduce-first) · **business-logic abuse** (numeric/quantity tampering · workflow step-skip) · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
+| 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS (reflected-origin + credentials) · CRLF · open redirect (canary-confirmed) · IDOR · mass assignment · dir/file fuzzing · JWT attacks (alg:none · weak-secret crack) · insecure session cookies · race conditions (incl. **true single-packet last-byte-sync** limit-overrun, reproduce-first) · **business-logic abuse** (numeric/quantity tampering · workflow step-skip · mass-assignment binding · password-reset host poisoning, each evidence-first with a control comparison) · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
 | 🗝️ **Active Directory & Identity** | authenticated LDAP assessment (Kerberoasting · AS-REP roasting via LDAP *and* credential-free Kerberos pre-auth · DCSync rights · unconstrained/constrained delegation · SMB-signing / SMBv1 / NTLMv1 · anonymous LDAP) · **AD CS certificate-template abuse (ESC1 to ESC4 · ESC8 web-enrolment relay)** · **NTLM coercion surface (PetitPotam · PrinterBug · DFSCoerce, bind-only, never triggers coercion)** · Kerberos pre-auth username enumeration · BloodHound-style path analysis · SSO & OAuth/OIDC/SAML flow abuse (redirect_uri off-origin bypass proven from an observed `Location` · password-reset host-header poisoning from a reflected marker · implicit-flow / ROPC / PKCE-not-advertised read from OIDC discovery metadata · **SAML** assertion-signing not enforced · RelayState open redirect) |
 | 🌐 **Network & Threat** | cleartext/legacy protocols · SNMP/IPMI/NFS/VNC exposure · Cisco Smart Install · SMB-signing → NTLM-relay · **internet-facing edge/VPN appliance KEV fingerprint** (Citrix NetScaler · Ivanti Connect Secure · FortiOS SSL-VPN · PAN GlobalProtect · Exchange · F5 BIG-IP → actively-exploited CVEs) · **DoS/DDoS susceptibility**: amplification-reflector detection with a *measured* factor (NTP monlist · open DNS · memcached · SSDP · CLDAP · chargen · RIPv1 · NetBIOS) + Slowloris slow-HTTP (`-m dos`, one benign probe, never a flood) · **sniffing / internal MITM**: LLMNR / NBT-NS / mDNS name-poisoning + mitm6 dual-stack susceptibility (`-m sniff`) · **malware / backdoor**: Ingreslock/NetBus/Back-Orifice listeners · unauthenticated-shell banners · trojaned vsftpd 2.3.4 / UnrealIRCd / ProFTPD · webshell signature sweep (`-m malware`) |
 | 📱 **Offline & Mobile Analysis** | `heaven analyze` / `heaven mobile`: binary (ELF/PE/Mach-O hardening) · firmware carving · pcap · steganography · documents/archives · audio/video media · hash/crypto · **mobile apps: Android APK + iOS IPA scored vs OWASP Mobile Top 10** (embedded secrets · cleartext/ATS · permissions · debuggable/allowBackup · URL schemes) |
-| 🧬 **API Security** | OWASP API Top 10: BOLA/IDOR (**cross-identity BOLA proven by a reciprocal ground-truth read**: A reads B's object *and* B reads A's, two distinct access-controlled objects, anon denied both) · broken auth · mass assignment · excessive data exposure (REST + GraphQL) |
+| 🧬 **API Security** | OWASP API Top 10: BOLA/IDOR (**cross-identity BOLA proven by a reciprocal ground-truth read**: A reads B's object *and* B reads A's, two distinct access-controlled objects, anon denied both) · broken auth · mass assignment · excessive data exposure (REST + GraphQL) · authenticated via cookie, **bearer token, or JSON/API login with mid-scan token refresh** for SPAs and token-based APIs |
 | 🧾 **CVE Intelligence** | Curated **offline** inline CVE DB (~150 CVEs, version-range matched) **+ dynamic live fallback**: any product/version *not* in the local DB is looked up in real time against **NVD + CIRCL**, merged/de-duped, version-confirmed, **KEV-flagged, EPSS-scored (real-world exploitation probability) and Exploit-DB-correlated (public PoC link)**, and disk-cached (7-day TTL) · degrades gracefully offline · `heaven cve <product> [version] [--engagement]` |
-| 💥 **Verified Exploitation** | Active proof, not guesses: sqlmap SQLi dump · RCE canary file drop/read · **in-house HTTP + DNS OAST collaborator** proving SSRF · XXE · **blind command injection** · **blind SQLi** out-of-band, each requiring an observed callback (zero false positive · no Burp Collaborator / interactsh dependency · run it on a public box with `heaven oast` so internet targets can call back) |
+| 💥 **Verified Exploitation** | Active proof, not guesses: sqlmap SQLi dump · RCE canary file drop/read · **in-house HTTP + DNS OAST collaborator** proving SSRF · XXE · **blind command injection** · **blind SQLi** out-of-band, each requiring an observed callback (zero false positive · no Burp Collaborator / interactsh dependency · run it on a public box with `heaven oast` so internet targets can call back) · **confirm-first safe active verification** promotes version-banner CVEs Potential→Confirmed with a benign read-only oracle only (Apache path-traversal file read · Shellshock · PHPUnit eval-stdin · Struts2 OGNL arithmetic echo, never a destructive payload) |
 | 🔓 **Post-Exploitation** | **self-contained privesc engines for Linux _and_ Windows**. Linux: GTFOBins-scored SUID/sudo/caps · docker/lxd escape · writable `/etc/passwd` · cron/PATH hijack; Windows: unquoted service paths · writable service binaries · `SeImpersonate`/`SeBackup` token privileges · AlwaysInstallElevated · autologon/registry creds · UAC posture, no linPEAS/WinPEAS download · **loot harvester** (SSH keys · AWS/GCP/Azure creds · kubeconfig · `.env`/`.netrc`/`.pgpass`/history; secrets redacted, plaintext never persisted) · **credential-reuse loop** feeding SSH/SMB/PsExec lateral movement + pass-the-hash · **ATT&CK-tagged kill-chain** · optional LLM path prioritisation · BloodHound AD collection. Run `heaven postex {enum,loot,full}` (`--os windows` / auto-detected) |
 | ☁️ **Cloud Misconfiguration** | **credential-free** public storage-bucket exposure (S3 / GCS / Azure Blob, listable vs private proven from the provider's own response, not guessed) · cloud-metadata SSRF catalog (AWS IMDS / GCP / Azure) that turns an SSRF into confirmed credential theft · plus **authenticated** account audit (EC2/S3 public ACL & policy & encryption · security-group `0.0.0.0/0` on sensitive ports · public RDS · IAM admin policies) · read-only **IAM privilege audit** of the *authenticated identity*: over-privileged principals (`*`/`*`) · console users without MFA · stale/unrotated & root access keys · weak password policy (`heaven cloud iam`, secret never read/logged). Run `heaven cloud storage <target>` |
 | 🤖 **Autonomous AI** | LLM observe→plan→act loop · recon agent · attack-chain planner · LLM FP review · AI remediation (`heaven remediate`) · cross-engagement knowledge graph · provider-agnostic (Anthropic / OpenAI / Gemini / DeepSeek / local) · **deterministic fallback needs no API key** |
@@ -159,7 +159,7 @@ It runs three ways from the **same engagement dataset**:
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
 | 🔗 **Combined Risk** | Correlates individually-rated findings into materially worse combined issues, then chains them into end-to-end attack paths where each step yields a capability the next one uses · ranks the single "break the chain" fixes that collapse the most paths · OWASP Top 10:2025 crosswalk · rendered in the web UI, the CLI, and the PDF/HTML reports |
 | 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA: dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
-| 📄 **Reporting** | 10 formats from CLI and web UI: PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · JUnit XML · Burp XML · proxy-JSONL · bug-bounty submission (H1/Bugcrowd/Intigriti) |
+| 📄 **Reporting** | 10 formats from CLI and web UI: PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · JUnit XML · Burp XML · proxy-JSONL · bug-bounty submission (H1/Bugcrowd/Intigriti) · every finding **SHA-256 evidence-integrity hashed** for chain of custody (verifiable, tamper-evident, manifest in the report) · **remediation roadmap is risk×effort** with a quick-wins view (fix the cheap high-impact items first) · **authorization record** (operator · time · acknowledgement method · scope · intrusive capabilities enabled) |
 | 🔇 **FP Suppression + Calibration** | Two-stage confirmation pass · source-weighted **confidence calibration** (a validated proof scores high, a version-only CVE match scores honestly low) · a substantiated signal below the finding bar becomes a **lead** for a human, never a silent drop · optional LLM second opinion |
 | 🎯 **Bug Bounty Mode** | `heaven scan --profile bugbounty` overlays the same deep core for scope-constrained, internet-facing programs: polite adaptive rate limiting · **program-scope import** (`heaven scope import <file> --program`: HackerOne/Bugcrowd JSON, out-of-scope subtraction, `*.wildcard` entries) feeds the runtime scope guard · **routable HTTP + DNS out-of-band** collaborator (`heaven oast`) · active **OAuth/OIDC/SAML flow abuse** · **true single-packet race** · **business-logic abuse** · **reciprocal-proof BOLA** · **submission-ready per-finding report** (`heaven export --format bugbounty --platform hackerone\|bugcrowd\|intigriti`, also one click in the web UI) |
 
@@ -799,7 +799,7 @@ The models (~6 MB vector + ~2 MB description) aren't bundled in the wheel or git
 </p>
 
 ```
-heaven/                   ← Python package (247 modules)
+heaven/                   ← Python package (252 modules)
 ├── recon/                network · web · DNS · cloud · containers/K8s · AD · IoT · Git · email
 ├── vulnscan/             injection · IDOR · API · misconfig (CORS/JWT/cookies) · OOB SSRF/XXE · OAST collaborator · SSL · Nuclei · exploit-proof · exploitdb · SAST · FP-suppress
 ├── postex/               privesc enum engines - Linux (GTFOBins) + Windows (services/privileges/AIE) · loot harvester · session/kill-chain · BloodHound · lateral movement · credential reuse
@@ -813,7 +813,7 @@ heaven/                   ← Python package (247 modules)
 └── cli/                  Click CLI - one module per command group (71 commands)
 
 heaven-ui/                React + Vite web console (33 pages)
-tests/                    3810 pytest tests + native & DVWA benchmark suites
+tests/                    3912 pytest tests + native & DVWA benchmark suites
 docs/                     QUICKSTART · methodology (OWASP/NIST/PTES + CE/ISO27001/PCI/CIS/CSF/SOC2)
 data/models/              NVD_model.pkl · MODEL_CARD.md
 scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall.ps1 (Windows)
@@ -832,7 +832,7 @@ scripts/                  install.sh · uninstall.sh · install.ps1 · uninstall
 pip install -e ".[dev]"
 ruff check heaven/ tests/      # lint
 mypy heaven/                   # type-check
-pytest tests/                  # full suite, ~3.5 min (3810 tests)
+pytest tests/                  # full suite, ~3.5 min (3912 tests)
 heaven self-audit              # security self-check
 ```
 
@@ -899,7 +899,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<strong>3810 tests · 247 modules · 71 CLI commands · 112 API routes · 33 UI pages · PostgreSQL + SQLite · MIT</strong>
+<strong>3912 tests · 252 modules · 71 CLI commands · 112 API routes · 33 UI pages · PostgreSQL + SQLite · MIT</strong>
 </p>
 
 <p align="center">

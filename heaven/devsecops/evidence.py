@@ -90,6 +90,15 @@ class EvidencePackage:
     status: str = "open"
     timestamp: str = ""
 
+    # Evidence integrity / chain of custody: a SHA-256 over the proof content,
+    # when it was collected (UTC), by what tool version, and how. Populated from
+    # the finding's stored ``evidence.chain_of_custody`` record when present, else
+    # computed at package time so a report always carries a verifiable digest.
+    evidence_sha256: str = ""
+    collected_at: str = ""
+    tool_version: str = ""
+    collection_method: str = ""
+
     def to_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
 
@@ -151,6 +160,12 @@ class EvidencePackage:
         if self.cwe_id:
             lines.append(f"**CWE:** {self.cwe_id}  ")
         lines.append(f"**Status:** {self.status}")
+        if self.evidence_sha256:
+            integ = f"**Evidence SHA-256:** `{self.evidence_sha256[:16]}…`"
+            if self.collected_at:
+                integ += f"  ·  collected {self.collected_at[:19]} UTC"
+            lines.append("  ")
+            lines.append(integ)
         lines.append("")
 
         if self.technique:
@@ -577,6 +592,28 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
     if not reasons and _kb.get("title"):
         reasons = [f"Matches the {_kb['title']} class ({_kb.get('cwe', '')})."]
 
+    # Mass assignment is proven by a control DIFFERENTIAL, not a single response:
+    # a privileged field the form never exposed was bound and reflected, while a
+    # garbage control field sent in the same request was not. The finding renders
+    # as an HTTP transaction, so that differential would otherwise never reach the
+    # report. Name it in "Why this is flagged". Both values are HEAVEN-generated
+    # (the probed field name from a fixed list + our own control field), never
+    # reflected target content, so there is nothing to sanitise. `control_field`
+    # is set by exactly one detector (logic_scanner mass assignment), so this
+    # never touches any other finding type.
+    _bound_field = evidence.get("parameter")
+    _control_field = evidence.get("control_field")
+    if _bound_field and _control_field:
+        _diff_reason = (
+            f"The server bound the privileged field `{_bound_field}`, which the "
+            f"form never exposed, and reflected it back as accepted; the garbage "
+            f"control field `{_control_field}` sent in the same request was not "
+            f"reflected, so the server is not allow-listing writable fields rather "
+            f"than merely re-echoing every input."
+        )
+        if _diff_reason not in reasons:
+            reasons = [_diff_reason, *reasons]
+
     # A stable id for the report even when the finding has not been persisted yet:
     # the inline `scan -o markdown` path renders from the raw scan summary, whose
     # findings carry no id, so the ID column came out blank and two distinct
@@ -626,6 +663,20 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
         mitre=_mitre,
     )
 
+    # Evidence integrity / chain of custody. Prefer the record the orchestrator
+    # stamped at scan finalisation (its digest + true collection time), else
+    # compute the digest now so a report rendered straight off a raw scan summary
+    # still carries a verifiable integrity line.
+    try:
+        from heaven.devsecops import chain_of_custody as _coc
+        _rec = _coc.get_record(finding)
+        pkg.evidence_sha256 = str(_rec.get("sha256") or "") or _coc.evidence_digest(finding)
+        pkg.collected_at = str(_rec.get("collected_at") or pkg.timestamp)
+        pkg.tool_version = str(_rec.get("tool_version") or "")
+        pkg.collection_method = str(_rec.get("collection_method") or _coc.collection_method(finding))
+    except Exception:  # noqa: BLE001 — integrity is additive, never block packaging
+        pass
+
     # Reproduction is chosen dynamically per finding — never a bogus curl on a
     # finding that made no HTTP request. An HTTP finding gets a faithful curl +
     # a raw HTTP request (Burp paste); everything else gets a class-appropriate
@@ -653,7 +704,8 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
                              assets: Optional[list[dict]] = None,
                              dns_records: Optional[list[dict]] = None,
                              compliance_framework: Optional[str] = None,
-                             leads: Optional[list[dict]] = None) -> str:
+                             leads: Optional[list[dict]] = None,
+                             authorization: Optional[dict] = None) -> str:
     """Render multiple findings as a single Markdown report.
 
     When ``assets`` (raw network-scan host records) are supplied, a
@@ -678,6 +730,17 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
     out.append(f"\n**Total findings:** {len(findings)}")
     out.append("")
 
+    # Chain of authorization: who authorized this run, when, how, and which
+    # intrusive capabilities were enabled. Only when the run recorded it.
+    if authorization:
+        try:
+            from heaven.devsecops.authorization_record import render_markdown as _auth_md
+            block = _auth_md(authorization)
+            if block:
+                out.append(block)
+        except Exception:  # noqa: BLE001 — additive
+            pass
+
     # Severity histogram
     by_sev: dict[str, int] = {}
     for f in findings:
@@ -688,6 +751,17 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
         if sev in by_sev:
             out.append(f"- **{sev.title()}:** {by_sev[sev]}")
     out.append("")
+
+    # Quick wins first: high-impact, low-effort fixes a client can knock out
+    # immediately. Risk x effort, not severity alone. Only renders when some
+    # finding qualifies; never changes the finding count or severity math.
+    try:
+        from heaven.devsecops.remediation_economics import render_quick_wins_markdown
+        qw = render_quick_wins_markdown(findings)
+        if qw:
+            out.append(qw)
+    except Exception:  # noqa: BLE001 — economics is additive
+        pass
 
     # Per-finding sections, sorted by severity then confidence
     sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -723,6 +797,18 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
         section = _render_leads_md(leads)
         if section:
             out.append(section)
+
+    # Evidence-integrity manifest: one SHA-256 per finding so the deliverable is
+    # a defensible document (the proof can be shown untampered). Appended last, as
+    # a report appendix.
+    if findings:
+        try:
+            from heaven.devsecops.chain_of_custody import render_manifest_markdown
+            section = render_manifest_markdown(findings)
+            if section:
+                out.append(section)
+        except Exception:  # noqa: BLE001 — manifest is additive
+            pass
 
     return "\n".join(out)
 

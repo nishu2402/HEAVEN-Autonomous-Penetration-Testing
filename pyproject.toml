@@ -73,6 +73,12 @@ dependencies = [
                        # Asia/Kolkata) resolves on any host — Windows ships no
                        # system zoneinfo, and minimal containers often omit it.
     "httpx>=0.28.1",
+    # HTTP/2 framing + HPACK for the h2c request-smuggling detector
+    # (heaven/vulnscan/h2c_smuggling.py confirms an access-control bypass by
+    # sending a real HTTP/2 request through an h2c tunnel). Tiny, pure-Python,
+    # zero transitive deps — the reference libraries behind httpx/hypercorn HTTP/2.
+    "hpack>=4.2.0",
+    "hyperframe>=6.1.0",
     # Security + the default offline data store. These power the documented
     # out-of-the-box experience (JWT sessions, vault encryption, SQLite mode),
     # so they belong in the base install rather than an extra.

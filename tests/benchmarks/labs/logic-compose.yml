@@ -1,0 +1,31 @@
+# HEAVEN benchmark: business-logic mass-assignment lab (web tier)
+#
+# The one web-tier flaw with no live lab until now: form-based MASS ASSIGNMENT,
+# which HEAVEN's business-logic scanner (heaven/vulnscan/logic_scanner.py,
+# _audit_mass_assignment) audits -- distinct from the API scanner's JSON
+# mass-assignment on the native API app / VAmPI. The service is HEAVEN's own
+# inert sign-up app (labs/logic-root/massassign_app.py): a registration form
+# that only exposes username/email/password, bound onto a User model that also
+# carries the privileged columns role / is_admin with no writable-field
+# allow-list. It echoes bound columns back but drops unknown field names.
+#
+# What HEAVEN detects here, live, through its normal form audit (one POST per
+# form, evidence-first):
+#   * mass_assignment (high, CWE-915) -- a privileged column the form never
+#     offered (role / is_admin) is accepted and reflected as bound, while a
+#     garbage control field sent in the SAME request is not, so the server is
+#     not allow-listing writable fields. The control differential is what keeps
+#     this a true positive and not a page that merely re-echoes every input.
+#
+# Pure standard library, so the image build is just a COPY onto python:3.12-slim
+# (see ./logic/Dockerfile) -- no bind mount, which also keeps it portable across
+# Docker backends whose VM cannot mount an arbitrary host path. Binds to loopback
+# ONLY. Deliberately insecure by design.
+
+services:
+  massassign:
+    build: ./logic
+    container_name: heaven-lab-massassign
+    ports:
+      - "127.0.0.1:5002:80"
+    restart: "no"

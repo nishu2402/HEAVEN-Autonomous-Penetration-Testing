@@ -229,3 +229,135 @@ async def test_verify_findings_batch_promotes(monkeypatch):
     res = await verify_findings(findings=findings, authorized=True)
     assert res["candidates"] == 1 and res["promoted"] == 1
     assert is_confirmed_finding(findings[0])
+
+
+# ── Broadened probe set: PHPUnit eval-stdin + Struts2 OGNL (arithmetic oracle) ──
+
+class _EvalResp:
+    def __init__(self, status: int, body: str):
+        self._status, self._body = status, body
+
+    @property
+    def status(self) -> int:
+        return self._status
+
+    async def text(self, *a, **k) -> str:
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _EvalSession:
+    """Simulates a vulnerable (eval) or reflection-only endpoint.
+
+    ``mode='eval'`` computes the arithmetic product the way a vulnerable target
+    would; ``mode='reflect'`` echoes the raw payload back (the literal
+    expression), which must NOT satisfy the product marker.
+    """
+
+    _PHP_RE = re.compile(r"echo '(HVN[0-9a-f]+)'\.\((\d+)\*(\d+)\)")
+    _OGNL_RE_ID = re.compile(r"print\('(HVN[0-9a-f]+)'\)")
+    _OGNL_RE_MUL = re.compile(r"print\((\d+)\*(\d+)\)")
+
+    def __init__(self, kind: str, mode: str):
+        self.kind, self.mode = kind, mode  # kind: 'php'|'struts'
+        self.calls: list[dict] = []
+
+    def _php_body(self, data):
+        text = data if isinstance(data, str) else ""
+        if self.mode == "reflect":
+            return text  # literal expression, product never appears
+        m = self._PHP_RE.search(text)
+        if not m:
+            return "no match"
+        rid, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+        return f"<html>{rid}{a * b}</html>"
+
+    def _struts_body(self, headers):
+        ct = (headers or {}).get("Content-Type", "")
+        if self.mode == "reflect":
+            return f"error parsing {ct}"  # literal OGNL echoed, no product
+        mid = self._OGNL_RE_ID.search(ct)
+        mul = self._OGNL_RE_MUL.search(ct)
+        if not (mid and mul):
+            return "no match"
+        rid = mid.group(1)
+        prod = int(mul.group(1)) * int(mul.group(2))
+        return f"{rid}{prod}"
+
+    def post(self, url, data=None, headers=None, **kw):
+        self.calls.append({"m": "POST", "url": url, "data": data, "headers": headers or {}})
+        if self.kind == "php" and url.endswith("eval-stdin.php"):
+            return _EvalResp(200, self._php_body(data))
+        return _EvalResp(404, "not found")
+
+    def get(self, url, headers=None, **kw):
+        self.calls.append({"m": "GET", "url": url, "headers": headers or {}})
+        if self.kind == "struts":
+            return _EvalResp(200, self._struts_body(headers))
+        return _EvalResp(404, "not found")
+
+
+@pytest.mark.asyncio
+async def test_phpunit_probe_proves_on_eval_endpoint():
+    sess = _EvalSession("php", "eval")
+    res = await av._probe_phpunit_evalstdin(sess, "http://t")
+    assert res.proved is True and res.technique == "php_eval_stdin"
+    assert res.evidence["canary"] in res.evidence["response_excerpt"]
+
+
+@pytest.mark.asyncio
+async def test_phpunit_probe_not_fooled_by_reflection():
+    """A reflection-only endpoint echoes the literal expression → not proved."""
+    sess = _EvalSession("php", "reflect")
+    res = await av._probe_phpunit_evalstdin(sess, "http://t")
+    assert res.proved is False
+
+
+@pytest.mark.asyncio
+async def test_struts_probe_proves_on_ognl_eval():
+    sess = _EvalSession("struts", "eval")
+    res = await av._probe_struts2_ognl(sess, "http://t")
+    assert res.proved is True and res.technique == "struts2_ognl_eval"
+
+
+@pytest.mark.asyncio
+async def test_struts_probe_not_fooled_by_reflection():
+    sess = _EvalSession("struts", "reflect")
+    res = await av._probe_struts2_ognl(sess, "http://t")
+    assert res.proved is False
+
+
+@pytest.mark.asyncio
+async def test_struts_payload_is_benign_no_command_exec():
+    """The Struts OGNL must only write to the response, never run a command."""
+    sess = _EvalSession("struts", "eval")
+    await av._probe_struts2_ognl(sess, "http://t")
+    sent = sess.calls[0]["headers"].get("Content-Type", "")
+    low = sent.lower()
+    for forbidden in ("runtime", "getruntime", "exec(", "processbuilder",
+                      "/bin/", "cmd.exe"):
+        assert forbidden not in low, f"unsafe token in OGNL payload: {forbidden}"
+
+
+def test_supported_cves_includes_new_probes():
+    cves = supported_cves()
+    assert "CVE-2017-9841" in cves   # PHPUnit eval-stdin
+    assert "CVE-2017-5638" in cves   # Struts2 OGNL
+
+
+@pytest.mark.asyncio
+async def test_verify_finding_promotes_phpunit():
+    """End to end: a Potential PHPUnit finding is promoted when the probe proves."""
+    f = {"target": "http://app.example.com", "vuln_type": "vulnerable_service",
+         "cve": "CVE-2017-9841", "severity": "critical", "confidence": 0.8,
+         "evidence": {}}
+    sess = _EvalSession("php", "eval")
+    out = await verify_finding(f, session=sess, authorized=True)
+    assert out["validated"] is True
+    assert out["evidence"]["active_verification"]["proved"] is True
+    assert is_confirmed_finding(out)

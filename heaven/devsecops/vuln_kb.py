@@ -1409,6 +1409,38 @@ _KB: dict[str, dict[str, Any]] = {
         ),
         "references": ["https://portswigger.net/web-security/request-smuggling"],
     },
+    "h2c_smuggling": {
+        "title": "HTTP/2 Cleartext (h2c) Smuggling — Access-Control Bypass",
+        "cwe": "CWE-444",
+        "owasp": "A02:2025 Security Misconfiguration",
+        "mitre": "T1190 · Exploit Public-Facing Application",
+        "typical_cvss": 8.1,
+        "description": (
+            "A reverse proxy forwards an HTTP/1.1 `Upgrade: h2c` (or a raw HTTP/2 "
+            "prior-knowledge preface) to an h2c-speaking backend and then pipes raw "
+            "bytes once the backend answers 101. The client then speaks HTTP/2 "
+            "directly to the backend, past every access-control rule the proxy "
+            "enforced on the HTTP/1.1 layer — confirmed here by reaching a "
+            "proxy-denied path through the tunnel."
+        ),
+        "impact": (
+            "Bypass of proxy-enforced access control, authentication gateways and "
+            "internal-only routing; reaching admin/management/internal endpoints the "
+            "edge was relied on to protect."
+        ),
+        "remediation": (
+            "1. Strip the hop-by-hop `Upgrade`/`Connection` headers at the reverse "
+            "proxy; never forward `Upgrade: h2c` to the backend.\n"
+            "2. Disable h2c (upgrade AND prior-knowledge) on the backend unless it is "
+            "the front-facing listener.\n"
+            "3. Enforce access control on the backend itself, not only at the proxy, "
+            "so a tunnel cannot bypass it."
+        ),
+        "references": [
+            "https://bishopfox.com/blog/h2c-smuggling-request",
+            "https://portswigger.net/web-security/request-smuggling",
+        ],
+    },
     "subdomain_takeover": {
         "title": "Subdomain Takeover",
         "cwe": "CWE-350",
@@ -1974,6 +2006,39 @@ _KB: dict[str, dict[str, Any]] = {
             "3. Apply virtual patching/WAF rules as an interim control."
         ),
         "references": ["https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/"],
+    },
+    "dependency_confusion": {
+        "title": "Dependency Confusion / Package Substitution Exposure",
+        "cwe": "CWE-427",
+        "owasp": "A03:2025 Software Supply Chain Failures",
+        "mitre": "T1195.001 · Supply Chain Compromise: Software Dependencies",
+        "typical_cvss": 8.1,
+        "description": (
+            "A package the project depends on does not exist on its public "
+            "registry, so the name is unclaimed. If the build can reach the public "
+            "registry, an attacker who registers that name has their package pulled "
+            "in ahead of (or instead of) the intended internal one — the "
+            "dependency-confusion / substitution attack."
+        ),
+        "impact": (
+            "Attacker-controlled code execution on developer machines and CI/CD "
+            "runners during dependency install, a direct path to supply-chain "
+            "compromise of the build and its artifacts."
+        ),
+        "remediation": (
+            "1. Claim the name defensively on the public registry (publish a stub "
+            "you control), or reserve the npm scope.\n"
+            "2. Pin internal packages to the private feed with no public fallback: "
+            "scope npm packages and set `@scope:registry`; use pip `--index-url` "
+            "(not `--extra-index-url`) for the private index.\n"
+            "3. Verify resolver/mirror priority so a public package can never be "
+            "substituted for an internal one, and enable install-time integrity "
+            "checks (lockfiles with resolved URLs + integrity hashes)."
+        ),
+        "references": [
+            "https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610",
+            "https://owasp.org/Top10/2025/A03_2025-Software_Supply_Chain_Failures/",
+        ],
     },
     "outdated_patch_level": {
         "title": "Outdated Software / Firmware Patch Level",

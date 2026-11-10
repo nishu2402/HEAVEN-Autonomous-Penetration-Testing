@@ -780,3 +780,99 @@ def test_webshell_lab_detects_dropped_shells():
         assert generic, f"generic YARA webshell path missed shell.php; got {paths}"
         assert generic[0]["evidence"]["signature"] == "PHP_Webshell_Eval_Superglobal"
         assert all(f["severity"] == "critical" for f in shells)
+
+
+# ── web (business logic): form-based mass assignment ─────────────────────────
+
+
+def test_logic_lab_proves_mass_assignment():
+    """Form-based mass assignment (CWE-915) proven live against a real HTTP app.
+
+    HEAVEN's business-logic form audit is unit-tested with a fake session; here it
+    fires against a genuine server whose sign-up form binds the privileged columns
+    role / is_admin onto its User model with no writable-field allow-list, while
+    dropping unknown field names. Because the garbage control field HEAVEN sends in
+    the same request is therefore never reflected, a mass_assignment finding here is
+    a true positive, not an echo-everything false positive (which the audit
+    suppresses). This is the WEB form path, distinct from the API scanner's JSON
+    mass-assignment proven on the native API app / VAmPI.
+    """
+    _skip_if_unavailable()
+    from heaven.vulnscan.logic_scanner import scan_business_logic
+
+    base = "http://127.0.0.1:5002"
+    with LabStack("logic-compose.yml", build=True):
+        ready = wait_until(
+            lambda: http_status(f"{base}/") == 200
+            and 'name="username"' in http_body(f"{base}/"),
+            timeout_s=90.0)
+        assert ready, "mass-assignment lab (sign-up app) never became reachable"
+
+        # The form the app serves on "/": only username/email/password are
+        # exposed; role / is_admin are privileged columns it never offers.
+        forms = {f"{base}/": [{
+            "action": "/register",
+            "fields": [{"name": "username", "value": ""},
+                       {"name": "email", "value": ""},
+                       {"name": "password", "value": ""}],
+        }]}
+        res = asyncio.run(scan_business_logic([f"{base}/"], forms_by_url=forms))
+        findings = res["findings"]
+        ma = [f for f in findings if f["vuln_type"] == "mass_assignment"]
+        # A mass_assignment finding at all proves the control field did NOT
+        # reflect (the audit suppresses entirely when a page echoes it).
+        assert ma, ("no mass_assignment finding; got "
+                    f"{[f['vuln_type'] for f in findings]}")
+        params = {f["evidence"]["parameter"] for f in ma}
+        # Only the columns the model actually binds are flagged (role, is_admin);
+        # account_type / is_verified / permissions / balance are sent but dropped,
+        # so they must NOT produce a finding -- the detector is evidence-first.
+        assert params <= {"role", "is_admin"}, params
+        assert {"role", "is_admin"} & params, params
+        assert all(f["cwe"] == "CWE-915" for f in ma), ma
+        assert all(f["severity"] == "high" for f in ma), ma
+
+
+def test_h2c_lab_proves_access_control_bypass():
+    """h2c smuggling (CWE-444) proven live against a real proxy+backend chain.
+
+    The h2c detector is unit-tested against an in-memory transport; here it fires
+    against a genuine nginx reverse proxy that blocks /admin over HTTP/1.1 (403)
+    but forwards the `Upgrade: h2c` to a Go h2c backend. Once the backend answers
+    101, nginx byte-pipes the connection, and an HTTP/2 request sent through the
+    tunnel reaches /admin on the backend (200). A finding here is a confirmed
+    access-control bypass — the proxy's 403 defeated by a real HTTP/2 request over
+    the tunnel — not a bare "server supports h2c" indicator (which the detector
+    never reports). The random control path answering 404 proves the backend is
+    not a catch-all, so the differential is real.
+    """
+    _skip_if_unavailable()
+    from heaven.vulnscan.h2c_smuggling import available, scan_h2c_smuggling
+
+    if not available():
+        import pytest
+        pytest.skip("hpack/hyperframe not installed")
+
+    base = "http://127.0.0.1:5003"
+    with LabStack("h2c-compose.yml", build=True):
+        ready = wait_until(
+            lambda: http_status(f"{base}/") == 200
+            and http_status(f"{base}/admin") == 403,
+            timeout_s=120.0)
+        assert ready, "h2c lab (proxy+backend) never became reachable"
+
+        findings = asyncio.run(scan_h2c_smuggling([base], timeout=10.0))
+        assert findings, "no h2c_smuggling finding against the vulnerable lab"
+        f = findings[0]
+        assert f["vuln_type"] == "h2c_smuggling"
+        assert f["severity"] == "high"
+        assert f["cwe"] == "CWE-444"
+        ev = f["evidence"]
+        assert ev["variant"] == "upgrade"
+        bypassed = {b["path"]: (b["baseline_status"], b["tunnel_status"])
+                    for b in ev["bypassed_paths"]}
+        assert "/admin" in bypassed, bypassed
+        assert bypassed["/admin"] == (403, 200), bypassed
+        # catch-all guard: the random control path must NOT be a 2xx.
+        assert not (ev["control_path_status"] and
+                    200 <= ev["control_path_status"] < 300), ev["control_path_status"]

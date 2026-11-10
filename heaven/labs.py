@@ -96,6 +96,8 @@ _LAB_WEBSHELL = "tests/benchmarks/labs/webshell-compose.yml"
 _LAB_CLOUD_SSRF = "tests/benchmarks/labs/cloud-ssrf-compose.yml"
 _LAB_WIRELESS = "tests/benchmarks/labs/wireless-compose.yml"
 _LAB_SMTP_VRFY = "tests/benchmarks/labs/smtp-vrfy-compose.yml"
+_LAB_LOGIC = "tests/benchmarks/labs/logic-compose.yml"
+_LAB_H2C = "tests/benchmarks/labs/h2c-compose.yml"
 
 LAB_MATRIX: dict[ScanMode, list[Lab]] = {
     ScanMode.FULL: [
@@ -135,6 +137,46 @@ LAB_MATRIX: dict[ScanMode, list[Lab]] = {
                  "The gated live test is test_juiceshop_lab_proves_dom_xss in "
                  "tests/benchmarks/test_domain_labs.py.",
             artifact=_LAB_JUICESHOP, target="http://127.0.0.1:3000"),
+        Lab("Business-logic mass assignment (HEAVEN inert sign-up app)",
+            COMPOSE, GREEN,
+            "Form-based mass assignment scored live. A registration form that "
+            "exposes only username/email/password is bound onto a User model that "
+            "also carries the privileged columns role and is_admin, with no "
+            "writable-field allow-list. HEAVEN's business-logic form audit "
+            "(logic_scanner._audit_mass_assignment) sends those privileged columns "
+            "plus a garbage control field, each with a unique canary, and fires "
+            "mass_assignment (high, CWE-915) only because the privileged canaries "
+            "are reflected as bound while the control canary is not. That "
+            "differential is what separates genuine attribute binding from a page "
+            "that merely re-echoes every input (which would reflect the control "
+            "too, and HEAVEN suppresses).",
+            note="Distinct from the API scanner's JSON mass-assignment on the "
+                 "native API app / VAmPI; this proves the WEB form path. The "
+                 "service is HEAVEN's own inert app "
+                 "(labs/logic/massassign_app.py), pure standard library so the "
+                 "image build is a single COPY, and the container binds to "
+                 "loopback only. The gated live test is "
+                 "test_logic_lab_proves_mass_assignment in "
+                 "tests/benchmarks/test_domain_labs.py.",
+            artifact=_LAB_LOGIC, target="http://127.0.0.1:5002"),
+        Lab("HTTP/2 cleartext (h2c) smuggling — access-control bypass",
+            COMPOSE, GREEN,
+            "Confirmed h2c smuggling scored live against a real proxy+backend "
+            "chain. An nginx reverse proxy blocks /admin over HTTP/1.1 (403) but "
+            "forwards the client's Upgrade/Connection headers verbatim to a Go h2c "
+            "backend; once the backend answers 101, nginx byte-pipes the "
+            "connection. HEAVEN's h2c detector (h2c_smuggling.scan_h2c_smuggling) "
+            "establishes the tunnel, sends a real HTTP/2 request to /admin through "
+            "it, and fires h2c_smuggling (high, CWE-444) only on the proven "
+            "differential: 403 through the proxy, 200 through the tunnel, with a "
+            "random control path answering 404 so the backend is not a catch-all. "
+            "A bare 'server accepts h2c' is never reported.",
+            note="Confirmation-grade, not an indicator: the proof is the tunnelled "
+                 "GET /admin reaching 200 past the proxy's 403. Build-based images "
+                 "(Go h2c backend + nginx) bind to loopback only. The gated live "
+                 "test is test_h2c_lab_proves_access_control_bypass in "
+                 "tests/benchmarks/test_domain_labs.py.",
+            artifact=_LAB_H2C, target="http://127.0.0.1:5003"),
     ],
     ScanMode.API: [
         Lab("HEAVEN native API app (OWASP API Top 10)", NATIVE, GREEN,

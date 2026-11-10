@@ -1561,6 +1561,35 @@ class ScanOrchestrator:
             if sev in sev_counts:
                 sev_counts[sev] += 1
 
+        # Remediation economics: stamp each finding with its fix effort
+        # (low/medium/high, by weakness class), a return-on-effort priority score
+        # (risk lifted by KEV/exploit/EPSS, divided by effort) and a quick-win
+        # flag (high impact + low effort). This lets the report lead with the
+        # cheap high-value fixes instead of a flat severity list. Additive
+        # metadata — never block a scan on it.
+        try:
+            from heaven.devsecops.remediation_economics import annotate as _annotate_econ
+            annotated = _annotate_econ(all_vulns)
+            if annotated:
+                logger.debug(f"remediation economics: annotated {annotated} finding(s)")
+        except Exception:  # noqa: BLE001 — economics is additive, never fatal
+            logger.debug("remediation economics annotation failed", exc_info=True)
+
+        # Chain of custody: stamp each finalised finding with a SHA-256 digest of
+        # its proof content + the UTC collection time + the tool version + the
+        # collection method, so the delivered report carries verifiable evidence
+        # integrity (an auditor/insurer/legal reviewer can confirm nothing was
+        # altered after capture). Done here, after dedup + severity reconciliation,
+        # so the digest covers the final proof. One shared collection time for the
+        # run. Best-effort — integrity stamping must never fail a scan.
+        try:
+            from heaven.devsecops.chain_of_custody import stamp_all as _stamp_custody
+            stamped = _stamp_custody(all_vulns)
+            if stamped:
+                logger.debug(f"chain-of-custody: stamped {stamped} finding(s)")
+        except Exception:  # noqa: BLE001 — evidence integrity must never break a scan
+            logger.debug("chain-of-custody stamping failed", exc_info=True)
+
         # Disclose where coverage was partial or missing: a scanner that hit its
         # soft budget (COMPLETED with partial findings) or that failed / timed out
         # (ZERO findings — the harvest loop above skips non-COMPLETED tasks). Both
@@ -1584,6 +1613,15 @@ class ScanOrchestrator:
             **sev_counts,
             "results": {r.task_id: r.state.value for r in all_results},
         }
+
+        # Chain of authorization: carry the run's authorization record (operator,
+        # time, method, targets, intrusive capabilities) into the summary so it
+        # reaches the report and the JSON output. Set by the CLI after the gate
+        # passed; absent for programmatic runs that never populated it.
+        _auth_record = (self.scan_targets or {}).get("authorization") \
+            if isinstance(self.scan_targets, dict) else None
+        if _auth_record:
+            summary["authorization"] = _auth_record
 
         status = "CANCELLED" if self._cancelled else "COMPLETED"
         logger.info(
@@ -2910,6 +2948,61 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
         modes=WEB_MODES,
         concurrency_group="web", timeout=600,
+    )
+
+    async def _h2c_smuggle(**kw):
+        """Confirm h2c-smuggling access-control bypasses on web origins.
+
+        Reduces the target URLs to unique origins and feeds the detector any
+        path the scan already saw answer 403 (the proxy-guarded routes most
+        worth testing through the tunnel), alongside its built-in guarded-path
+        list. Reports only confirmed differentials (proxy-denied → tunnel-2xx).
+        """
+        try:
+            from heaven.vulnscan.h2c_smuggling import (
+                available, scan_h2c_smuggling,
+            )
+        except ImportError:
+            return {}
+        if not available():
+            return {}
+        from urllib.parse import urlparse
+
+        origins: list[str] = []
+        seen: set[str] = set()
+        restricted: set[str] = set()
+        # Harvest 403 paths the scan already observed (best-effort).
+        for _tid, res in orch.results.items():
+            data = res.data if (res.data and isinstance(res.data, dict)) else {}
+            for f in data.get("findings", []) or []:
+                if not isinstance(f, dict):
+                    continue
+                ev = f.get("evidence", {}) if isinstance(f.get("evidence"), dict) else {}
+                if str(ev.get("status") or ev.get("status_code") or "") == "403":
+                    u = ev.get("url") or f.get("target") or ""
+                    path = urlparse(u).path if "://" in str(u) else ""
+                    if path and path != "/":
+                        restricted.add(path)
+        for u in targets.get("urls", []):
+            p = urlparse(u if "://" in u else f"http://{u}")
+            if not p.hostname:
+                continue
+            origin = f"{p.scheme or 'http'}://{p.hostname}" + (
+                f":{p.port}" if p.port else "")
+            if origin not in seen:
+                seen.add(origin)
+                origins.append(origin)
+        if not origins:
+            return {"skipped": True, "reason": "no web origins"}
+        findings = await scan_h2c_smuggling(
+            origins, restricted_paths=sorted(restricted)[:8],
+            timeout=min(10.0, max(4.0, current_task_budget() / max(1, len(origins)))))
+        return {"findings": findings, "total": len(findings)}
+
+    orch.add_task(
+        "h2c Smuggling (access-control bypass)", _h2c_smuggle,
+        phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id, deep_id],
+        modes=WEB_MODES, concurrency_group="web", timeout=180,
     )
 
     # ═══ Phase: WEB-TIER TECH FINGERPRINT (EOL + CVE from HTTP headers) ═══

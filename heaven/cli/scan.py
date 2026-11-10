@@ -171,8 +171,10 @@ Tip: run `heaven use <engagement>` once to stop repeating --engagement.
 @click.option("--cookie-file", type=click.Path(exists=True, dir_okay=False), default=None,
               help="Netscape cookie file (curl/wget -c format) used for authenticated scans.")
 @click.option("--auth", default="", metavar="SPEC",
-              help='Form-login spec: "url=/login,user=admin,pass=password[,csrf_field=token]". '
-                   "HEAVEN logs in once and reuses the session cookies for the whole scan.")
+              help='Auth spec. Cookie form login: "url=/login,user=admin,pass=pw[,csrf_field=token]". '
+                   'JSON/API login: "login_json=1,url=/api/login,user=admin,pass=pw,token_json=access_token". '
+                   'Static bearer token: "token=<JWT>". API-key header: "header=X-API-Key: abc". '
+                   "HEAVEN authenticates once and reuses the session for the whole scan.")
 @click.option("--low-priv-cookie-file", type=click.Path(exists=True, dir_okay=False), default=None,
               help="Netscape cookie file for a SECOND, lower-privilege user. Enables the "
                    "multi-role Broken Access Control audit (OWASP A01): HEAVEN proves when a "
@@ -242,7 +244,7 @@ def scan(
     # Activated process-wide so every scanner module picks it up.
     if cookie_file or auth:
         from heaven.recon.auth_session import (
-            load_cookie_file, parse_auth_string, perform_form_login,
+            establish_auth_session, load_cookie_file, parse_auth_string,
             remember_login, set_active_session,
         )
         try:
@@ -253,9 +255,12 @@ def scan(
             if auth:
                 spec = parse_auth_string(auth)
                 base = url[0] if url else (target[0] if target else "http://localhost")
-                sess = asyncio.run(perform_form_login(base, spec))
+                # Dispatches cookie form login, JSON/API login, or a static bearer
+                # token / API-key header, by the shape of the spec.
+                sess = asyncio.run(establish_auth_session(base, spec))
                 set_active_session(sess)
-                # Remember the login so a session that dies mid-scan can be renewed.
+                # Remember the login so a session that dies mid-scan can be renewed
+                # (a JSON/API login re-fetches a fresh token on refresh).
                 remember_login(base, spec)
                 _print(f"[cyan]Authenticated scan:[/cyan] {sess.label}")
         except Exception as e:
@@ -267,8 +272,8 @@ def scan(
     # uses; this one only feeds the differential comparison.
     if low_priv_cookie_file or low_priv_auth:
         from heaven.recon.auth_session import (
-            load_cookie_file, parse_auth_string,
-            perform_form_login, set_low_priv_session,
+            establish_auth_session, load_cookie_file, parse_auth_string,
+            set_low_priv_session,
         )
         try:
             if low_priv_cookie_file:
@@ -278,7 +283,7 @@ def scan(
             if low_priv_auth:
                 spec = parse_auth_string(low_priv_auth)
                 base = url[0] if url else (target[0] if target else "http://localhost")
-                lp = asyncio.run(perform_form_login(base, spec))
+                lp = asyncio.run(establish_auth_session(base, spec))
                 set_low_priv_session(lp)
                 _print(f"[cyan]Low-priv session:[/cyan] {lp.label}")
         except Exception as e:
@@ -495,6 +500,18 @@ def scan(
     # Authorization gate — REFUSE to scan without explicit ack
     if not _verify_authorization(targets, i_have_authorization):
         sys.exit(3)
+
+    # Chain of authorization: now that the gate has passed, record WHO authorized
+    # this run, WHEN, HOW, for WHICH targets, and with WHICH intrusive
+    # capabilities enabled. Travels in the scan summary into the report, the
+    # counterpart to the per-finding chain of custody. Best-effort — the audit
+    # record must never block an authorized scan.
+    try:
+        from heaven.devsecops.authorization_record import build_record, infer_method
+        targets["authorization"] = build_record(
+            targets, method=infer_method(i_have_authorization))
+    except Exception:  # noqa: BLE001 — authorization recording is additive
+        pass
 
     # Dependency validation — non-fatal warning
     if not skip_dep_check:
@@ -987,7 +1004,7 @@ def scan(
                 # above (calibrated engagement leads when available).
                 Path(output_file).write_text(export_findings_markdown(
                     findings_in_summary, assets=summary.get("assets"),
-                    leads=report_leads))
+                    leads=report_leads, authorization=summary.get("authorization")))
                 _print(f"  Markdown report written to: {output_file}")
             else:
                 Path(output_file).write_text(json.dumps(summary, indent=2, default=str))

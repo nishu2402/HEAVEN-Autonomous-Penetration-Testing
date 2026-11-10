@@ -61,10 +61,12 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
         sys.exit(2)
 
     result = asyncio.run(scan_path(path, max_files=max_files))
-    findings = [enrich_finding(f) for f in result.get("findings", [])]
+    enriched = [enrich_finding(f) for f in result.get("findings", [])]
+    confusion = [f for f in enriched if f.get("vuln_type") == "dependency_confusion"]
+    findings = [f for f in enriched if f.get("vuln_type") != "dependency_confusion"]
 
     if json_output():
-        print(json.dumps({**result, "findings": findings}, indent=2, default=str))
+        print(json.dumps({**result, "findings": enriched}, indent=2, default=str))
         return
 
     sev_counts: dict[str, int] = {}
@@ -94,6 +96,20 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
     if not findings:
         _print("[green]No known-vulnerable dependencies found.[/green]")
 
+    if confusion:
+        _print(f"\n[bold]Dependency-confusion exposure[/bold] · "
+               f"[bold]{len(confusion)}[/bold] candidate(s) "
+               f"[dim](dependency names unclaimed on their public registry)[/dim]")
+        for f in sorted(confusion, key=lambda x: order.get(x["severity"], 5)):
+            e = f["evidence"]
+            color = {"high": "red", "medium": "yellow"}.get(f["severity"], "dim")
+            priv = " [dim](private feed configured)[/dim]" if any(
+                s not in ("public_registry_absent",) and not s.startswith("scoped_package")
+                for s in e.get("signals", [])) else ""
+            _print(f"  [{color}]{f['severity'][:4].upper():4}[/{color}] "
+                   f"{e['package']} [dim]({e['ecosystem']})[/dim]  "
+                   f"[dim]unclaimed on public registry[/dim]{priv}")
+
     if engagement:
         from heaven.engagement import EngagementStore
         db_path = _engagement_db_path(engagement)
@@ -117,7 +133,7 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
                     "manifests": result["manifests"]},
         )
         persisted = 0
-        for f in findings:
+        for f in enriched:
             store.upsert_finding(scan_id, f)
             persisted += 1
         store.record_scan_complete(scan_id, {"findings_count": persisted})
@@ -126,7 +142,7 @@ def sca(path: str, engagement: Optional[str], output: Optional[str],
 
     if output:
         Path(output).write_text(
-            json.dumps({**result, "findings": findings}, indent=2, default=str))
+            json.dumps({**result, "findings": enriched}, indent=2, default=str))
         _print(f"\n[green]JSON written:[/green] {output}")
 
 

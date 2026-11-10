@@ -1,0 +1,20 @@
+# HEAVEN h2c-smuggling lab: an HTTP/1.1 reverse proxy that forwards the h2c
+# upgrade to an h2c backend. The proxy blocks /admin over HTTP/1.1 (403) but an
+# h2c tunnel reaches it on the backend (200) — the access-control bypass.
+#
+# Loopback-only (127.0.0.1): deliberately insecure, never bound to a reachable
+# interface. Build-based (no host bind-mounts) to dodge the colima mount gotcha.
+services:
+  backend:
+    build: ./h2c/backend
+    container_name: heaven-lab-h2c-backend
+    restart: "no"
+
+  proxy:
+    build: ./h2c/proxy
+    container_name: heaven-lab-h2c-proxy
+    ports:
+      - "127.0.0.1:5003:80"
+    depends_on:
+      - backend
+    restart: "no"

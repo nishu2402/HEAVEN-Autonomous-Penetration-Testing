@@ -624,14 +624,48 @@ async def scan_manifest_text(filename: str, text: str, *,
     return findings
 
 
+async def _dep_confusion_findings(root: str,
+                                  packages: list[Package]) -> list[dict[str, Any]]:
+    """Audit resolved packages for dependency-confusion (offline-safe, never raises).
+
+    Harvests the codebase's own package names and private-registry configuration
+    so workspace/monorepo packages are suppressed and a genuine private-feed
+    setup escalates severity, then checks each remaining dependency for a
+    definitive public-registry 404. Any failure degrades to an empty list — the
+    confusion check never breaks an SCA run.
+    """
+    try:
+        from heaven.vulnscan.dep_confusion import (
+            audit_packages, collect_local_signals,
+        )
+    except ImportError:
+        return []
+    try:
+        sig = collect_local_signals(root)
+        return await audit_packages(
+            packages,
+            local_names=sig["local_names"],
+            private_registry=sig["private_registry"],
+            private_registry_signals=sig["signals"],
+        )
+    except Exception:  # noqa: BLE001 — supply-chain audit is best-effort
+        logger.debug("dependency-confusion audit failed", exc_info=True)
+        return []
+
+
 async def scan_path(root: str, *, max_files: int = 200,
                     client: Optional[OSVClient] = None,
-                    enrich_intel: bool = True) -> dict[str, Any]:
+                    enrich_intel: bool = True,
+                    check_confusion: bool = True) -> dict[str, Any]:
     """Walk a local codebase, parse every supported manifest, and audit it.
 
     Returns ``{"packages", "manifests", "findings", "summary"}``. When
     ``enrich_intel`` is set (default), vulnerable-dependency findings are
-    stamped with live CISA-KEV / EPSS intel (best-effort, offline-safe).
+    stamped with live CISA-KEV / EPSS intel (best-effort, offline-safe). When
+    ``check_confusion`` is set (default), the resolved packages are also audited
+    for dependency-confusion exposure and those findings are appended to
+    ``findings`` (``vuln_type == "dependency_confusion"``); the summary carries
+    their count under ``"dependency_confusion"``.
     """
     base = Path(root).expanduser().resolve()
     if not base.exists():
@@ -673,9 +707,16 @@ async def scan_path(root: str, *, max_files: int = 200,
     findings = await scan_packages(all_packages, client=client)
     if enrich_intel:
         await _apply_kev_epss(findings)
+    summary = _summarize(findings)
+
+    confusion: list[dict[str, Any]] = []
+    if check_confusion:
+        confusion = await _dep_confusion_findings(root, all_packages)
+    summary["dependency_confusion"] = len(confusion)
+
     return {
         "packages": len(all_packages),
         "manifests": manifests,
-        "findings": findings,
-        "summary": _summarize(findings),
+        "findings": findings + confusion,
+        "summary": summary,
     }

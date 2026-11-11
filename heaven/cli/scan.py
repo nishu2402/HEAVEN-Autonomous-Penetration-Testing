@@ -510,7 +510,7 @@ def scan(
         from heaven.devsecops.authorization_record import build_record, infer_method
         targets["authorization"] = build_record(
             targets, method=infer_method(i_have_authorization))
-    except Exception:  # noqa: BLE001 — authorization recording is additive
+    except Exception:  # noqa: BLE001 — authorization recording is additive  # nosec B110
         pass
 
     # Dependency validation — non-fatal warning

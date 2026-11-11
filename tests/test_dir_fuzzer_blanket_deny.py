@@ -103,6 +103,74 @@ def test_collapse_scopes_per_host():
     assert hosts == {"real.example"}, f"only the blanket-deny host is swept; got {hosts}"
 
 
+def test_collapse_drops_byte_uniform_deny_below_min():
+    # cPanel :2078 regression: a control-panel port answers every guessed path with
+    # the SAME 36-byte 401. Only ~6 wordlist names matched — below _DENY_MIN (10) —
+    # yet the byte-for-byte uniformity across DISTINCT names is itself proof of a
+    # blanket policy (the ffuf backend has no per-base wildcard probe to catch it).
+    findings = [_ac(p, 36, status=401, host="certifiedhacker.com:2078")
+                for p in ("/phpMyAdmin", "/pma", "/admin-panel",
+                          "/admin.asp", "/admin.aspx", "/admin_panel")]
+    out = DirectoryFuzzer._collapse_blanket_deny(findings)
+    assert out == [], f"a byte-uniform blanket-401 run must be dropped; kept {len(out)}"
+
+
+def test_collapse_keeps_two_uniform_protected_paths():
+    # Below _DENY_UNIFORM_MIN (3): two same-size protected paths are too few to call
+    # a blanket policy and remain honest discovery.
+    findings = [_ac("/admin", 120, status=401), _ac("/secret", 120, status=401)]
+    out = DirectoryFuzzer._collapse_blanket_deny(findings)
+    assert len(out) == 2, "two protected paths are honest discovery, not a blanket deny"
+
+
+def test_collapse_keeps_uniform_run_of_unknown_sizes():
+    # The uniformity rule must key on a REAL size bucket, never the -1 "size unknown"
+    # sentinel — three findings with no captured size are not a proven blanket deny.
+    findings = [{"target": f"https://h/p{i}", "vuln_type": "sensitive_file",
+                 "evidence": {"status_code": 401, "path": f"/p{i}"}} for i in range(5)]
+    out = DirectoryFuzzer._collapse_blanket_deny(findings)
+    assert len(out) == 5, "missing-size hits are not collapsed on uniformity alone"
+
+
+# ── control-panel surfaces + Apache .ht* deny (residual catch-all FPs) ───────
+
+def _ff(path: str, status: int = 200, body: str = "", host: str = "h") -> dict:
+    return {"target": f"https://{host}{path}", "vuln_type": "sensitive_file",
+            "evidence": {"status_code": status, "response_body": body, "path": path}}
+
+
+def test_drop_apache_dotht_deny():
+    # Apache's universal <Files ~ "^\.ht"> rule 403s every .ht* path whether or not
+    # it exists, so a 401/403 there is the global deny, never a disclosure — but a
+    # 200 (a real leaked .htaccess carrying its bytes) survives.
+    findings = [_ff("/.htaccess", 403, "<title>403 Forbidden</title>"),
+                _ff("/.htpasswd", 403, "<title>403 Forbidden</title>"),
+                _ff("/.htaccess", 200, "RewriteEngine On\nAuthUserFile /etc/x")]
+    out = DirectoryFuzzer._drop_control_panel_and_dotht(findings)
+    kept = [(f["evidence"]["path"], f["evidence"]["status_code"]) for f in out]
+    assert kept == [("/.htaccess", 200)], f"only the served .htaccess survives; got {kept}"
+
+
+def test_drop_control_panel_surface():
+    # cPanel/WHM/Webmail own login/landing pages served for a probed path are the
+    # panel UI, not a discovered sensitive file (regression: /img, /whm).
+    findings = [_ff("/img", 200, '<html><head><title>cPanel Login</title></head>'),
+                _ff("/whm", 200, '<!DOCTYPE html><title>cPanel Redirect</title>'),
+                _ff("/mail", 200, '<title>Webmail :: Welcome</title>')]
+    out = DirectoryFuzzer._drop_control_panel_and_dotht(findings)
+    assert out == [], f"panel surfaces must be dropped; kept {[f['evidence']['path'] for f in out]}"
+
+
+def test_keep_real_disclosure_through_panel_guard():
+    # A genuine sensitive file / directory listing carries no control-panel title and
+    # is not a .ht* deny → kept, so recall is preserved.
+    findings = [_ff("/.env", 200, "DB_PASSWORD=s3cr3t\nAPI_KEY=abc"),
+                _ff("/backup/", 200, "<title>Index of /backup</title>"),
+                _ff("/config.php.bak", 200, "<?php $db_pass='x'; ?>")]
+    out = DirectoryFuzzer._drop_control_panel_and_dotht(findings)
+    assert len(out) == 3, "real disclosures must survive the control-panel/.ht* guard"
+
+
 # ── live end-to-end: native engine on a blanket-403 origin ───────────────────
 
 def _make_server(handler_fn: Callable[[str], tuple[int, bytes]]):

@@ -64,6 +64,10 @@ _COMMON_USERNAMES = [
 # ── Login form field name heuristics ──────────────────────────────────────────
 _USER_FIELDS  = re.compile(r"user(name)?|email|login|uid|account", re.IGNORECASE)
 _PASS_FIELDS  = re.compile(r"pass(word)?|pwd|secret|credential", re.IGNORECASE)
+# A password input still present in a response body means we are still looking at
+# a login form, not an authenticated page — the decisive "this login did NOT
+# succeed" signal that a keyword/length heuristic alone misses.
+_PW_INPUT_RE  = re.compile(r"""type\s*=\s*['"]?password""", re.IGNORECASE)
 _CSRF_FIELDS  = re.compile(r"csrf|_token|authenticity_token|__RequestVerificationToken|nonce",
                             re.IGNORECASE)
 _CSRF_HEADERS = re.compile(r"x-csrf|x-xsrf|x-anti-forgery", re.IGNORECASE)
@@ -492,6 +496,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
     found: list[tuple[str, str]] = []
     lockout_detected = False
     errored_attempts = 0  # timeouts / connection drops — often an IP-level block
+    saw_normal_response = False  # any answer that was NOT an auth-challenge/throttle
 
     # Measure baseline response for failed login (length / status)
     try:
@@ -507,7 +512,7 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
         return findings
 
     async def _try(user: str, passwd: str) -> None:
-        nonlocal lockout_detected, errored_attempts
+        nonlocal lockout_detected, errored_attempts, saw_normal_response
         async with sem:
             if found or lockout_detected:
                 return
@@ -530,14 +535,29 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
                                  "account is locked", "has been locked", "blocked"))):
                         lockout_detected = True
                         return
-                    # Heuristic: post-login keywords present AND response meaningfully differs
+                    # An auth-challenge status (401/403) is a FAILED login, never a
+                    # success. A control panel (cPanel/WHM/Webmail) answers every bad
+                    # credential with 401 + its login page, whose per-request token
+                    # jitter alone cleared the length baseline below and fired a bogus
+                    # "Default/Weak Login Credentials Found" CRITICAL on a 401.
+                    if r.status in (401, 403):
+                        return
+                    # The endpoint handled the attempt with a normal (non-challenge,
+                    # non-throttle) response — enough to judge throttling further down.
+                    saw_normal_response = True
+                    # Heuristic: post-login keywords present AND the response
+                    # meaningfully differs AND we are no longer sitting on a login
+                    # form. The password-field guard defeats a login page that merely
+                    # re-renders with a changed CSRF/nonce (a >300-byte jitter the old
+                    # check mistook for "logged in").
                     body_len = len(body)
                     success_kw = any(kw in body.lower() for kw in
                                      ("logout", "dashboard", "welcome", "account",
                                       "profile", "signout", "sign out", "my account"))
                     response_differs = (r.status != fail_status
                                         or abs(body_len - fail_len) > 300)
-                    if success_kw and response_differs:
+                    still_login_form = bool(_PW_INPUT_RE.search(body))
+                    if success_kw and response_differs and not still_login_form:
                         found.append((user, passwd))
             except Exception:
                 errored_attempts += 1
@@ -563,17 +583,25 @@ async def _brute_login_form(session: "aiohttp.ClientSession",
             confidence=0.80,
         ))
     elif not found and not lockout_detected:
-        # Only claim "no lockout" if the endpoint kept answering normally for
-        # ALL attempts. Many errored requests = the endpoint likely blocked us
-        # (IP ban / connection drop) — reporting "no lockout" then is a false
-        # positive, so the result is inconclusive instead.
-        if errored_attempts > len(pairs) // 3:
+        # Only claim "no lockout" if the endpoint actually PROCESSED login attempts
+        # with normal responses. Two cases make it inconclusive instead: many
+        # errored requests (IP ban / connection drop), or EVERY attempt answered
+        # with an auth-challenge (401/403) — an HTTP-Basic realm or a control-panel
+        # login (cPanel/WHM) — where the throttling behaviour was never observed, so
+        # asserting its absence is a false positive.
+        if errored_attempts > len(pairs) // 3 or not saw_normal_response:
+            reason = (
+                f"{errored_attempts}/{len(pairs)} brute-force attempts failed to "
+                f"complete (timeouts/drops)"
+                if errored_attempts > len(pairs) // 3 else
+                "every attempt returned an auth-challenge (401/403) with no normal "
+                "login response"
+            )
             findings.append(_make_finding(
                 action, "lockout_inconclusive", "info",
                 "Account Lockout: Inconclusive",
-                f"{errored_attempts}/{len(pairs)} brute-force attempts failed to "
-                f"complete (timeouts/drops). The endpoint may be blocking "
-                f"automated logins. Verify the lockout policy manually.",
+                f"{reason}. The endpoint may be blocking automated logins or use a "
+                f"challenge-based auth scheme; verify the lockout policy manually.",
                 confidence=0.50,
             ))
         else:

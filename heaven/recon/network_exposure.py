@@ -971,6 +971,58 @@ async def _tomcat_manager_default_creds(host: str, port: int,
 
 
 # ── PostgreSQL default-credential check (read-only) ──────────────────────────
+_PANEL_LOGIN_TITLE_RE = re.compile(
+    r"<title[^>]*>[^<]*\b(?:cpanel|whm|webmail|plesk|directadmin|virtualmin|"
+    r"cyberpanel|webmin|usermin)\b", re.IGNORECASE)
+_PANEL_PW_FIELD_RE = re.compile(r"<input[^>]+type\s*=\s*['\"]?password",
+                                re.IGNORECASE)
+_PANEL_TITLE_TEXT_RE = re.compile(r"<title[^>]*>([^<]{0,80})", re.IGNORECASE)
+_PANEL_FORM_ACTION_RE = re.compile(
+    r"<form[^>]*\baction\s*=\s*['\"]?([^'\">\s]+)", re.IGNORECASE)
+
+
+async def _cleartext_http_login_panel(host: str, port: int,
+                                      timeout: float = 6.0) -> Optional[dict]:
+    """Detect a login/admin panel served over *cleartext* HTTP (CWE-319).
+
+    Read-only: a single GET of ``http://host:port/`` with redirects NOT
+    followed. Fires only on a 200 whose body carries a password input field (a
+    real login form delivered in the clear) — so a port that 301/302-redirects
+    to its HTTPS twin (the common cPanel "always redirect to SSL" config) is
+    never flagged, and neither is a non-login page. Returns evidence, or None."""
+    try:
+        import aiohttp
+    except ImportError:
+        return None
+    url = f"http://{host}:{port}/"
+    to = aiohttp.ClientTimeout(total=timeout)
+    try:
+        async with aiohttp.ClientSession(timeout=to) as session:
+            async with session.get(url, allow_redirects=False) as r:
+                if r.status != 200:
+                    return None            # a redirect/non-200 is not cleartext proof
+                ctype = (r.headers.get("Content-Type", "") or "").lower()
+                if ctype and "html" not in ctype:
+                    return None
+                raw = await r.read()
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+        return None
+    except Exception:
+        return None
+    body = raw[:40000].decode("utf-8", "ignore")
+    if not _PANEL_PW_FIELD_RE.search(body):
+        return None                        # no login form in the clear → nothing
+    tmatch = _PANEL_TITLE_TEXT_RE.search(body)
+    amatch = _PANEL_FORM_ACTION_RE.search(body)
+    act = (amatch.group(1) if amatch else "").lower()
+    action_scheme = ("https" if act.startswith("https:")
+                     else "http" if act.startswith("http:") else "relative")
+    return {"url": url, "status": 200,
+            "title": (tmatch.group(1).strip() if tmatch else ""),
+            "known_panel": bool(_PANEL_LOGIN_TITLE_RE.search(body)),
+            "form_action_scheme": action_scheme}
+
+
 async def _postgres_default_creds(host: str, port: int = 5432,
                                   timeout: float = 6.0) -> Optional[dict]:
     """Try a small set of PostgreSQL defaults. A completed startup/auth handshake
@@ -1553,6 +1605,50 @@ async def analyze_network_exposure(net_data: dict, *, active_snmp: bool = True,
                 vnc_f["typical_cvss"] = 9.8
                 findings.append(vnc_f)
                 break
+
+        # 2h) Cleartext HTTP login/admin panel (CWE-319). cPanel/WHM/Webmail
+        # expose cleartext twins of their SSL panels (2082/2086/2095), and nmap
+        # frequently fingerprints those non-standard ports as a random non-HTTP
+        # service, so the web/auth crawlers (which key off an HTTP service or the
+        # standard 80/8080) never reach them — that is exactly how a cleartext
+        # admin login slips through. Target that gap directly: candidates are
+        # services nmap did name as a hosting panel plus the well-known cleartext
+        # panel ports. Generic HTTP (80/8080) is intentionally left to the web
+        # scanners so this neither double-reports nor probes every site's :80.
+        # The GET is the real gate: it fires only on a 200 login form served over
+        # http:// (a port that redirects to HTTPS yields nothing), so a seeded
+        # guess cannot become an FP. Distinct from the dir_fuzzer control-panel
+        # guard, which only drops path-discovery hits — this reports the insecure
+        # cleartext delivery itself.
+        if active_probes:
+            panel_ports = sorted({
+                p for p, s in pairs
+                if (("cpanel" in s or "whm" in s or "webmail" in s
+                     or "plesk" in s or "directadmin" in s)
+                    and "ssl" not in s and "https" not in s)
+                or p in (2082, 2086, 2095, 2079, 2080)})
+            for pport in panel_ports[:8]:
+                panel = await _cleartext_http_login_panel(ip, pport)
+                if not panel:
+                    continue
+                name = {2082: "cPanel", 2086: "WHM", 2095: "Webmail"}.get(
+                    pport, panel.get("title") or "Login panel")
+                findings.append(_finding(
+                    f"{ip}:{pport}", "cleartext_service", "high",
+                    f"Login Panel Served Over Cleartext HTTP: {name} (port {pport})",
+                    f"An authentication panel ({panel.get('title') or 'login form'}) "
+                    "is served over plaintext HTTP. The login page can be read and "
+                    "modified in transit (an on-path attacker can rewrite the form "
+                    "to harvest credentials), and any submission on the same scheme "
+                    "travels unencrypted (CWE-319). Serve the panel only over HTTPS "
+                    "and redirect the cleartext port to TLS; for cPanel/WHM/Webmail, "
+                    "disable the non-SSL service ports or enforce the SSL redirect.",
+                    confidence=0.9,
+                    evidence={"port": pport, "scheme": "http", "status": 200,
+                              "title": panel.get("title"),
+                              "known_panel": panel.get("known_panel"),
+                              "form_action_scheme": panel.get("form_action_scheme"),
+                              "proven": True}))
 
         # 3) SNMP — exposure + active read-only default-community probe
         snmp_ports = [p for p, s in pairs if p in (161,) or "snmp" in s]

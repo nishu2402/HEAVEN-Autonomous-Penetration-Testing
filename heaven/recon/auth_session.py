@@ -274,7 +274,7 @@ async def perform_json_login(base_url: str, spec: dict[str, str]) -> AuthSession
         raise RuntimeError(f"JSON login returned {status}; check creds and URL")
 
     paths = [spec["token_json"]] if spec.get("token_json") else list(_DEFAULT_TOKEN_PATHS)
-    token = ""
+    token = ""  # nosec B105 # loop accumulator set from the response, not a secret
     for p in paths:
         token = _extract_json_path(data, p)
         if token:

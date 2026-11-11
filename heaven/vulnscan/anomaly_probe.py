@@ -222,49 +222,54 @@ class WebAnomalyProbe:
         self.mutation = MutationEngine()
 
     async def scan_endpoint(self, session: Any, url: str,
-                            params: list[str], method: str = "GET") -> list[AnomalyCandidate]:
-        """Scan a web endpoint for anomalous behaviours that warrant analyst triage."""
+                            params: list[str], method: str = "GET",
+                            deadline: Optional[float] = None) -> list[AnomalyCandidate]:
+        """Scan a web endpoint for anomalous behaviours that warrant analyst triage.
+
+        ``deadline`` (a :func:`time.monotonic` value) lets the caller preempt the
+        battery MID-URL -- checked before every param AND before every per-param
+        test. Several tests are time-based (5 s sleep payloads), so against a slow
+        or throttling host a single URL, or even a single param's full battery,
+        can run for minutes; the orchestrator's per-probe wall-budget is only
+        checked BETWEEN URLs, so without this one URL could overrun it and run to
+        the hard task cap (the 562 s FAIL symptom, then 488 s when the guard was
+        only per-param, on a live full-range scan of a real cPanel host). Stopping
+        early only ends the sweep sooner -- it never changes what counts as a
+        candidate, so it cannot introduce a false positive.
+        """
         candidates = []
 
+        # Per-param battery, in the original order. Several tests are time-based
+        # (5 s sleep payloads), so against a slow / throttling host ONE param's
+        # full battery can run for minutes -- checking the deadline only per-param
+        # let a single battery overrun the wall-budget (the 488 s symptom on the
+        # live full-range cPanel re-run). Checking it before EACH test bounds the
+        # overshoot to one test. _test_nosql_injection returns a list; the others
+        # return one candidate or None.
+        per_param_tests = (
+            self._test_command_injection,   # 1. command injection (time-based)
+            self._test_ssti,                # 2. SSTI (extended engine coverage)
+            self._test_path_traversal,      # 3. path traversal
+            self._test_integer_overflow,    # 4. integer overflow
+            self._test_ldap_injection,      # 5. LDAP injection
+            self._test_xpath_injection,     # 5b. XPath injection
+            self._test_nosql_injection,     # 6. NoSQL (returns a LIST)
+            self._test_prototype_pollution,  # 7. prototype pollution
+        )
         for param in params:
-            # 1. Command injection
-            cmdi = await self._test_command_injection(session, url, param, method)
-            if cmdi:
-                candidates.append(cmdi)
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            for _test in per_param_tests:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                result = await _test(session, url, param, method)
+                if isinstance(result, list):
+                    candidates.extend(result)
+                elif result:
+                    candidates.append(result)
 
-            # 2. SSTI (Server-Side Template Injection) — extended engine coverage
-            ssti = await self._test_ssti(session, url, param, method)
-            if ssti:
-                candidates.append(ssti)
-
-            # 3. Path traversal
-            traversal = await self._test_path_traversal(session, url, param, method)
-            if traversal:
-                candidates.append(traversal)
-
-            # 4. Integer overflow
-            intover = await self._test_integer_overflow(session, url, param, method)
-            if intover:
-                candidates.append(intover)
-
-            # 5. LDAP injection
-            ldap = await self._test_ldap_injection(session, url, param, method)
-            if ldap:
-                candidates.append(ldap)
-
-            # 5b. XPath injection
-            xpath = await self._test_xpath_injection(session, url, param, method)
-            if xpath:
-                candidates.append(xpath)
-
-            # 6. NoSQL injection (MongoDB / Redis / Elasticsearch)
-            nosql_vulns = await self._test_nosql_injection(session, url, param, method)
-            candidates.extend(nosql_vulns)
-
-            # 7. Prototype pollution (JavaScript frameworks)
-            proto = await self._test_prototype_pollution(session, url, param, method)
-            if proto:
-                candidates.append(proto)
+        if deadline is not None and time.monotonic() >= deadline:
+            return candidates
 
         # 8. Header injection (once per URL)
         header_vulns = await self._test_header_injection(session, url)

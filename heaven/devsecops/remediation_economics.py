@@ -196,7 +196,7 @@ def annotate(findings: Iterable[dict[str, Any]]) -> int:
             f["priority_score"] = priority_score(f)
             f["quick_win"] = is_quick_win(f)
             n += 1
-        except Exception:  # noqa: BLE001 — never block on one finding
+        except Exception:  # noqa: BLE001 — never block on one finding  # nosec B112
             continue
     return n
 

@@ -11,8 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
-
 from heaven.vulnscan import dep_confusion as dc
 from heaven.vulnscan.osv_client import Package
 

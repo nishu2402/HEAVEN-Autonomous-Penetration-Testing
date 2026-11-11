@@ -18,6 +18,7 @@ Key features
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import shutil
 import tempfile
@@ -262,6 +263,23 @@ MISS_CODES = {404, 410}
 _DENY_MIN = 10
 _DENY_DISTINCT_MAX = 3
 _DENY_SIZE_BUCKET = 128
+# A shorter run of access-controlled hits that are byte-for-byte IDENTICAL in size
+# is itself proof of a blanket policy: a server returning the SAME fixed-length
+# 401/403 for several DIFFERENT guessed sensitive names carries no per-resource
+# signal, even below _DENY_MIN. This catches a control-panel port (e.g. cPanel
+# :2078) that yields only a handful of wordlist hits yet denies every path with an
+# identical 36-byte 401 — which the ffuf backend, lacking the native per-base
+# wildcard probe, would otherwise leak as "sensitive file" findings.
+_DENY_UNIFORM_MIN = 3
+
+# A response whose <title> names a hosting control panel is that panel's OWN
+# login/landing page, served for a probed path on a shared-hosting port — not a
+# discovered sensitive resource. On a cPanel host the fuzzer otherwise reports the
+# panel UI (e.g. /img → "cPanel Login", /whm → "cPanel Redirect") as a sensitive
+# file. Matched on the <title> (always within the captured response head).
+_PANEL_TITLE_RE = re.compile(
+    r"<title[^>]*>[^<]*\b(?:cpanel|whm|webmail|plesk|directadmin|virtualmin|cyberpanel)\b",
+    re.IGNORECASE)
 
 WILDCARD_SAMPLE = "h3av3n_wildcard_probe_9z8x7"
 # A second, deliberately LONGER non-existent path. Probing two random paths of
@@ -771,6 +789,7 @@ class DirectoryFuzzer:
                 await self._capture_responses(deduped_ffuf)
                 deduped_ffuf = self._collapse_soft200_catchall(deduped_ffuf)
                 deduped_ffuf = self._collapse_blanket_deny(deduped_ffuf)
+                deduped_ffuf = self._drop_control_panel_and_dotht(deduped_ffuf)
                 _out = {"findings": deduped_ffuf,
                         "urls_tested": len(targets), "error": None}
                 if self._truncated:
@@ -805,6 +824,7 @@ class DirectoryFuzzer:
         await self._capture_responses(deduped)
         deduped = self._collapse_soft200_catchall(deduped)
         deduped = self._collapse_blanket_deny(deduped)
+        deduped = self._drop_control_panel_and_dotht(deduped)
         logger.info(f"DirFuzzer: {len(deduped)} unique paths found")
         _out = {"findings": deduped, "urls_tested": len(targets), "error": None}
         if self._truncated:
@@ -948,14 +968,22 @@ class DirectoryFuzzer:
         drop: set[int] = set()
         denied_hosts = 0
         for group in by_host.values():
-            if len(group) < _DENY_MIN:
-                continue
-            buckets: set[int] = set()
-            for f in group:
-                size = (f.get("evidence") or {}).get("response_size")
-                buckets.add(int(size) // _DENY_SIZE_BUCKET
-                            if isinstance(size, int) else -1)
-            if len(buckets) <= _DENY_DISTINCT_MAX:
+            sizes = [(f.get("evidence") or {}).get("response_size") for f in group]
+            buckets = {int(s) // _DENY_SIZE_BUCKET if isinstance(s, int) else -1
+                       for s in sizes}
+            # Scale tell: many access-controlled hits collapsing to a few sizes.
+            scale_blanket = (len(group) >= _DENY_MIN
+                             and len(buckets) <= _DENY_DISTINCT_MAX)
+            # Uniformity tell: a shorter run whose hits are ALL one identical, known
+            # size. Keyed on the EXACT byte size (not the coarse bucket): a server
+            # returning the byte-for-byte SAME 401/403 for several distinct guessed
+            # names carries no per-resource signal, whereas a few genuinely protected
+            # paths that merely fall in one 128-byte band each render their own
+            # distinct body and must NOT be swept.
+            uniform_blanket = (len(group) >= _DENY_UNIFORM_MIN
+                               and all(isinstance(s, int) for s in sizes)
+                               and len(set(sizes)) == 1)
+            if scale_blanket or uniform_blanket:
                 denied_hosts += 1
                 for f in group:
                     drop.add(id(f))
@@ -966,6 +994,41 @@ class DirectoryFuzzer:
             "DirFuzzer: dropped %d blanket-deny 401/403 hit(s) on %d host(s) that "
             "answer every path with the same access-controlled response",
             len(findings) - len(kept), denied_hosts)
+        return kept
+
+    @staticmethod
+    def _drop_control_panel_and_dotht(findings: list[dict]) -> list[dict]:
+        """Drop two residual catch-all false positives that neither size model covers.
+
+        1. A ``.ht*`` path answered with an access-controlled status. Apache's
+           universal ``<Files ~ "^\\.ht">`` rule returns 403 for EVERY ``.ht*`` path
+           whether or not it exists, so a 401/403 there is the global deny, never a
+           disclosure — a real leak is a 200 carrying the file's bytes, which is kept.
+        2. A response whose body is a hosting control-panel surface (cPanel / WHM /
+           Webmail / Plesk …). On shared hosting these ports answer guessed paths with
+           the panel's own login/landing page (``/img`` → "cPanel Login", ``/whm`` →
+           "cPanel Redirect") — the panel UI, not a discovered sensitive resource.
+           Matched on the <title>; a genuinely sensitive file (config, backup, source,
+           a real listing) carries no control-panel title and is untouched.
+        """
+        kept: list[dict] = []
+        dropped = 0
+        for f in findings:
+            if not isinstance(f, dict):
+                kept.append(f)
+                continue
+            ev = f.get("evidence") if isinstance(f.get("evidence"), dict) else {}
+            base = urlparse(f.get("target", "")).path.rstrip("/").rsplit("/", 1)[-1].lower()
+            status = ev.get("status_code") or ev.get("status")
+            if base.startswith(".ht") and status in (401, 403):
+                dropped += 1
+                continue
+            if _PANEL_TITLE_RE.search((ev.get("response_body") or "")[:4000]):
+                dropped += 1
+                continue
+            kept.append(f)
+        if dropped:
+            logger.info("DirFuzzer: dropped %d control-panel/.ht* non-finding(s)", dropped)
         return kept
 
 

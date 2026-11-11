@@ -674,7 +674,7 @@ def package_finding(finding: dict, scan_id: str = "") -> EvidencePackage:
         pkg.collected_at = str(_rec.get("collected_at") or pkg.timestamp)
         pkg.tool_version = str(_rec.get("tool_version") or "")
         pkg.collection_method = str(_rec.get("collection_method") or _coc.collection_method(finding))
-    except Exception:  # noqa: BLE001 — integrity is additive, never block packaging
+    except Exception:  # noqa: BLE001 — integrity is additive, never block packaging  # nosec B110
         pass
 
     # Reproduction is chosen dynamically per finding — never a bogus curl on a
@@ -738,7 +738,7 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
             block = _auth_md(authorization)
             if block:
                 out.append(block)
-        except Exception:  # noqa: BLE001 — additive
+        except Exception:  # noqa: BLE001 — additive  # nosec B110
             pass
 
     # Severity histogram
@@ -760,7 +760,7 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
         qw = render_quick_wins_markdown(findings)
         if qw:
             out.append(qw)
-    except Exception:  # noqa: BLE001 — economics is additive
+    except Exception:  # noqa: BLE001 — economics is additive  # nosec B110
         pass
 
     # Per-finding sections, sorted by severity then confidence
@@ -807,7 +807,7 @@ def export_findings_markdown(findings: list[dict], engagement_name: str = "",
             section = render_manifest_markdown(findings)
             if section:
                 out.append(section)
-        except Exception:  # noqa: BLE001 — manifest is additive
+        except Exception:  # noqa: BLE001 — manifest is additive  # nosec B110
             pass
 
     return "\n".join(out)

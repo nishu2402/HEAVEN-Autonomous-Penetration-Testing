@@ -185,7 +185,6 @@ def _scope_of(name: str) -> str:
 def _finding(pkg: Package, *, severity: str, confidence: float, url: str,
              signals: list[str], rationale: str, target: str) -> dict[str, Any]:
     vector, score = _CVSS[severity]
-    ver = f"@{pkg.version}" if pkg.version else ""
     title = (f"Dependency-confusion candidate: {pkg.name} ({pkg.ecosystem}) "
              f"is unclaimed on the public registry")
     return {

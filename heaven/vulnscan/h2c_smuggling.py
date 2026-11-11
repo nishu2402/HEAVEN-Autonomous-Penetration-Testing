@@ -39,7 +39,7 @@ import asyncio
 import base64
 import secrets
 import ssl
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from urllib.parse import urljoin, urlparse
 
 from heaven.utils.logger import get_logger
@@ -192,7 +192,7 @@ async def _read_status_for_stream(reader: Any, writer: Any, stream_id: int,
                     ack.flags.add("ACK")
                     writer.write(ack.serialize())
                     await writer.drain()
-                except Exception:  # noqa: BLE001 - ack is best-effort
+                except Exception:  # noqa: BLE001 - ack is best-effort  # nosec B110
                     pass
                 continue
             if name == "GoAwayFrame":
@@ -200,7 +200,13 @@ async def _read_status_for_stream(reader: Any, writer: Any, stream_id: int,
             if name == "HeadersFrame":
                 frame.parse_body(memoryview(body))
                 try:
-                    headers = dict(decoder.decode(bytes(frame.data)))
+                    # ``frame`` is a HeadersFrame here (name-checked above);
+                    # hpack decodes to str pairs by default, so getattr + cast
+                    # keep this mypy-clean without changing the runtime shape.
+                    headers = cast(
+                        "dict[str, str]",
+                        dict(decoder.decode(bytes(getattr(frame, "data", b"")))),
+                    )
                 except Exception:  # noqa: BLE001 - HPACK desync → give up on this conn
                     return None
                 if frame.stream_id == stream_id:
@@ -273,7 +279,7 @@ async def _tunnel_status_prior_knowledge(host: str, port: int, use_tls: bool,
 def _close(writer: Any) -> None:
     try:
         writer.close()
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # nosec B110
         pass
 
 

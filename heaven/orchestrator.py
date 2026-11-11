@@ -2378,8 +2378,15 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
                     if not has_injectable_surface(url):
                         continue
                     try:
+                        # Hand the probe the SAME wall-budget so it can stop
+                        # mid-URL: several per-param tests are time-based, so one
+                        # slow/throttling URL battery could otherwise overrun the
+                        # between-URL budget check below and run to the hard task
+                        # cap (the 562s symptom). Preempting only ends the sweep
+                        # sooner — it never fabricates a candidate.
                         found = await scanner.scan_endpoint(
-                            session, url, ["id", "q", "page", "file", "url"])
+                            session, url, ["id", "q", "page", "file", "url"],
+                            deadline=_started + _budget_s)
                     except (aiohttp.ClientError, asyncio.TimeoutError):
                         # A URL the target dropped: count it and bail out of the
                         # whole probe if the target has gone dark for several in a
@@ -2413,10 +2420,12 @@ def build_full_scan(targets: dict, config: Optional[HeavenConfig] = None,
         "Anomaly Probe", _anomaly_probe,
         phase=ScanPhase.VULN_SCAN, depends_on=[adapt_id],
         modes=WEBAPI_MODES,
-        # Hard ceiling well under the old 600 s: the internal wall-budget +
-        # consecutive-stall breaker should stop the probe long before this, but a
-        # single very slow ``scan_endpoint`` call can't be interrupted mid-flight,
-        # so keep a firm cap so one hung sweep can never dominate the scan again.
+        # Hard ceiling well under the old 600 s: the internal wall-budget (now
+        # threaded INTO scan_endpoint so it preempts between params mid-URL, not
+        # only between URLs) + the consecutive-stall breaker stop the probe long
+        # before this. A single in-flight request still can't be interrupted
+        # mid-flight, so keep a firm cap as the last backstop against one hung
+        # sweep dominating the scan.
         timeout=300,
     )
 

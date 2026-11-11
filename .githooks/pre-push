@@ -1,0 +1,88 @@
+#!/bin/sh
+# HEAVEN pre-push hook: run the same static checks CI runs (ruff, mypy, bandit)
+# so a red-CI push is caught locally, before it ever leaves your machine.
+#
+# Why this exists
+# ---------------
+# CI's "Lint (ruff)" job HARD-fails the build on any lint error, and the
+# "Type check (mypy)" and "SAST (bandit)" jobs surface type errors and security
+# findings (the latter become GitHub code-scanning alerts). All three have gone
+# red on a push before. This hook mirrors those three jobs against the working
+# tree so you see the failure in seconds, not after a round trip to GitHub.
+# The unit-test job is NOT run here (it takes minutes); CI still runs that.
+#
+# Behaviour: a tool that RUNS and reports a problem BLOCKS the push. A tool that
+# is genuinely absent (e.g. the venv is not set up yet) prints a loud warning
+# and is skipped, so a fresh checkout is never hard-blocked. Bypass once with:
+#     git push --no-verify
+# Enabled via `git config core.hooksPath .githooks` (already set in this repo).
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+# Resolve a tool: prefer the project venv, then PATH. Empty output = unavailable.
+resolve_tool() {
+    if [ -x "./venv/bin/$1" ]; then
+        printf './venv/bin/%s' "$1"
+    elif command -v "$1" >/dev/null 2>&1; then
+        printf '%s' "$1"
+    else
+        printf ''
+    fi
+}
+
+RUFF="$(resolve_tool ruff)"
+MYPY="$(resolve_tool mypy)"
+BANDIT="$(resolve_tool bandit)"
+
+fail=0
+skipped=0
+
+echo "heaven pre-push: mirroring CI static checks (ruff, mypy, bandit)..." >&2
+
+# 1. Lint (ruff) -- CI runs: ruff check heaven/ tests/   (hard blocker)
+if [ -n "$RUFF" ]; then
+    if ! "$RUFF" check heaven/ tests/; then
+        echo "heaven pre-push: FAIL ruff found lint errors (CI Lint job would go red)." >&2
+        fail=1
+    fi
+else
+    echo "heaven pre-push: WARN ruff not found (venv not set up?); skipping lint." >&2
+    skipped=1
+fi
+
+# 2. Type check (mypy) -- CI runs: mypy --ignore-missing-imports --no-strict-optional heaven/
+if [ -n "$MYPY" ]; then
+    if ! "$MYPY" --ignore-missing-imports --no-strict-optional heaven/; then
+        echo "heaven pre-push: FAIL mypy found type errors (CI Type check job would go red)." >&2
+        fail=1
+    fi
+else
+    echo "heaven pre-push: WARN mypy not found; skipping type check." >&2
+    skipped=1
+fi
+
+# 3. SAST (bandit) -- CI runs: bandit -r heaven/ -l -c pyproject.toml (feeds code scanning)
+if [ -n "$BANDIT" ]; then
+    if ! "$BANDIT" -r heaven/ -l -c pyproject.toml -q; then
+        echo "heaven pre-push: FAIL bandit found security issues (would open code-scanning alerts)." >&2
+        fail=1
+    fi
+else
+    echo "heaven pre-push: WARN bandit not found; skipping SAST." >&2
+    skipped=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "" >&2
+    echo "heaven pre-push: BLOCKED. Fix the failures above, then push again." >&2
+    echo "                 (to bypass this one push: git push --no-verify)" >&2
+    exit 1
+fi
+
+if [ "$skipped" -ne 0 ]; then
+    echo "heaven pre-push: some checks were skipped (see warnings); pushing anyway." >&2
+fi
+
+echo "heaven pre-push: all available checks passed." >&2
+exit 0

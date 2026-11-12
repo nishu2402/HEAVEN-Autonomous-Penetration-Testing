@@ -1,6 +1,6 @@
 # Build-based (COPY, not bind-mount) so the context ships over the Docker socket
 # and never hits the colima "operation not permitted" VM-mount gotcha.
-FROM golang:1.23-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY main.go ./

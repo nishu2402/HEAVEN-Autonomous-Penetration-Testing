@@ -6,36 +6,38 @@
 // mode is a label naming the surface you're primarily assessing, and FULL runs
 // them all. Keep this in lockstep with heaven/config.py::ScanMode.
 
+// `icon` is a key into the shared stroke-icon set (components/NavIcons.jsx), so
+// the quick-launch tiles match the sidebar: one weight, one color, sized by CSS.
 export const SCAN_MODES = [
-  { value: "full",      icon: "🛰️", short: "Full",      title: "FULL: every module (recommended)",
+  { value: "full",      icon: "full",      short: "Full",      title: "FULL: every module (recommended)",
     desc: "Runs every scanner phase end-to-end" },
-  { value: "web",       icon: "🌐", short: "Web app",   title: "WEB: web application",
+  { value: "web",       icon: "web",       short: "Web app",   title: "WEB: web application",
     desc: "OWASP web-app assessment" },
-  { value: "network",   icon: "🖧",  short: "Network",   title: "NETWORK: hosts & services",
+  { value: "network",   icon: "network",   short: "Network",   title: "NETWORK: hosts & services",
     desc: "Hosts, ports & service CVEs" },
-  { value: "wireless",  icon: "📶", short: "Wireless",  title: "WIRELESS: AP / controller config review",
+  { value: "wireless",  icon: "wireless",  short: "Wireless",  title: "WIRELESS: AP / controller config review",
     desc: "Exposed AP / router / WLAN admin panels" },
-  { value: "api",       icon: "🔌", short: "API",       title: "API: REST / GraphQL security",
+  { value: "api",       icon: "api",       short: "API",       title: "API: REST / GraphQL security",
     desc: "REST & GraphQL endpoint testing" },
-  { value: "cloud",     icon: "☁️", short: "Cloud",     title: "CLOUD: cloud assets & public buckets",
+  { value: "cloud",     icon: "cloud",     short: "Cloud",     title: "CLOUD: cloud assets & public buckets",
     desc: "Cloud posture & public buckets" },
-  { value: "container", icon: "📦", short: "Container", title: "CONTAINER: Docker / Kubernetes",
+  { value: "container", icon: "container", short: "Container", title: "CONTAINER: Docker / Kubernetes",
     desc: "Docker & Kubernetes exposure" },
-  { value: "iot",       icon: "📡", short: "IoT",       title: "IOT: IoT / SCADA devices",
+  { value: "iot",       icon: "iot",       short: "IoT",       title: "IOT: IoT / SCADA devices",
     desc: "IoT & smart-device surface" },
-  { value: "ot",        icon: "🏭", short: "OT",        title: "OT: operational technology",
+  { value: "ot",        icon: "ot",        short: "OT",        title: "OT: operational technology",
     desc: "ICS / SCADA / operational tech" },
-  { value: "ad",        icon: "🗝️", short: "AD",        title: "AD: Active Directory",
+  { value: "ad",        icon: "ad",        short: "AD",        title: "AD: Active Directory",
     desc: "Active Directory & domain" },
-  { value: "email",     icon: "✉️", short: "Email",     title: "EMAIL: SPF / DMARC / DKIM posture",
+  { value: "email",     icon: "email",     short: "Email",     title: "EMAIL: SPF / DMARC / DKIM posture",
     desc: "SPF / DMARC / DKIM posture" },
-  { value: "dos",       icon: "💥", short: "DoS",       title: "DOS: DoS/DDoS susceptibility (amplification + slow-HTTP)",
+  { value: "dos",       icon: "dos",       short: "DoS",       title: "DOS: DoS/DDoS susceptibility (amplification + slow-HTTP)",
     desc: "Reflection/amplification reflectors + Slowloris susceptibility (no flood)" },
-  { value: "sniff",     icon: "👂", short: "Sniffing",  title: "SNIFF: internal MITM / name-poisoning susceptibility",
+  { value: "sniff",     icon: "sniff",     short: "Sniffing",  title: "SNIFF: internal MITM / name-poisoning susceptibility",
     desc: "LLMNR / NBT-NS / mDNS / WPAD / mitm6 + cleartext-credential exposure" },
-  { value: "malware",   icon: "🦠", short: "Malware",   title: "MALWARE: backdoor & webshell threat detection",
+  { value: "malware",   icon: "malware",   short: "Malware",   title: "MALWARE: backdoor & webshell threat detection",
     desc: "Backdoor listener ports/banners + webshell signature sweep" },
-  { value: "exploit",   icon: "⚔️", short: "Exploit",   title: "EXPLOIT: confirm RCE on discovered services (authorized)",
+  { value: "exploit",   icon: "exploit",   short: "Exploit",   title: "EXPLOIT: confirm RCE on discovered services (authorized)",
     desc: "Active exploitation with a benign proof command" },
 ];
 
@@ -44,10 +46,10 @@ export const SCAN_MODES = [
 // dashboard alongside the active-scan modes so every capability is one click
 // away from the landing page.
 export const ANALYSIS_TOOLS = [
-  { to: "/sast",            icon: "🔬", short: "SAST",   desc: "Static source-code analysis (Semgrep)" },
-  { to: "/sca",             icon: "📦", short: "SCA",    desc: "Dependency audit vs. OSV.dev" },
-  { to: "/cve",             icon: "🛡️", short: "CVE",    desc: "Live CVE lookup (NVD + CIRCL)" },
-  { to: "/analyze?kind=apk", icon: "📱", short: "Mobile", desc: "Mobile app analysis (Android APK / iOS IPA)" },
+  { to: "/sast",            icon: "sast",   short: "SAST",   desc: "Static source-code analysis (Semgrep)" },
+  { to: "/sca",             icon: "sca",    short: "SCA",    desc: "Dependency audit vs. OSV.dev" },
+  { to: "/cve",             icon: "cve",    short: "CVE",    desc: "Live CVE lookup (NVD + CIRCL)" },
+  { to: "/analyze?kind=apk", icon: "mobile", short: "Mobile", desc: "Mobile app analysis (Android APK / iOS IPA)" },
 ];
 
 // Long-form options for the launcher <select>.

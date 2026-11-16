@@ -2,6 +2,7 @@
 // Mirrors `heaven coverage` from the CLI.
 
 import React, { useState, useEffect } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Coverage, Engagement, Priors } from "../api";
 import { useJob } from "../context/Jobs.jsx";
@@ -69,7 +70,7 @@ export default function CoveragePage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>📊 Coverage Self-Grading</h2>
+        <h2 className="page-title" style={{ color: "var(--text-0)", marginTop: 0 }}><NavIcon name="coverage" size={20} />Coverage Self-Grading</h2>
         <p className="page-lead">
           Rule-based OWASP coverage + scope hit-rate + auth/auto-prove/post-ex
           flags, with optional LLM-driven gap analysis.

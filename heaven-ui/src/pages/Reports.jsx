@@ -10,6 +10,7 @@
 // of what will be in the report so it's clear the output reflects current data.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Engagement, Engagements, Compliance, downloadReport, previewReport, downloadSbom } from "../api";
 import { safeHref } from "../safeHref";
 import { useToast } from "../components/Toast.jsx";
@@ -180,7 +181,7 @@ export default function Reports() {
     return (
       <div className="page">
         <EmptyState
-          icon="📄"
+          icon="reports"
           headline="No findings to report yet"
           body="Reports are generated from an engagement's findings. Run a scan first, then come back to export a deliverable in any format."
           cta="Launch a scan →"
@@ -195,7 +196,7 @@ export default function Reports() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>📄 Reports</h2>
+        <h2 className="page-title" style={{ color: "var(--text-0)", marginTop: 0 }}><NavIcon name="reports" size={20} />Reports</h2>
         <p className="dim" style={{ fontSize: 12 }}>
           Generate a deliverable from the engagement selected below. Output is built
           live from that engagement's findings, so it always reflects current data.
@@ -263,8 +264,8 @@ export default function Reports() {
       }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 240 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
-              📄 Professional penetration test report
+            <div className="page-title" style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
+              <NavIcon name="reports" size={18} />Professional penetration test report
             </div>
             <p className="dim" style={{ fontSize: 12, margin: "6px 0 0", lineHeight: 1.6 }}>
               A complete, client-ready deliverable: cover page, executive summary, scope &amp;
@@ -320,8 +321,8 @@ export default function Reports() {
           framework's controls (an honest coverage view, not an attestation). */}
       {frameworks.length > 0 && (
         <div className="card" style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
-            🛡 Compliance-mapped report
+          <div className="page-title" style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
+            <NavIcon name="compliance" size={18} />Compliance-mapped report
           </div>
           <p className="dim" style={{ fontSize: 12, margin: "6px 0 10px", lineHeight: 1.6 }}>
             Map this engagement's findings onto a compliance framework's controls, a
@@ -389,8 +390,8 @@ export default function Reports() {
           proof, and an honest Confirmed/Potential label). The platform picker
           changes only the section wording, never what is reported. */}
       <div className="card" style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
-          🎯 Bug-bounty submission pack
+        <div className="page-title" style={{ fontSize: 15, fontWeight: 700, color: "var(--text-0)" }}>
+          <NavIcon name="crosshair" size={18} />Bug-bounty submission pack
         </div>
         <p className="dim" style={{ fontSize: 12, margin: "6px 0 10px", lineHeight: 1.6 }}>
           One report block per finding, ready to paste into a program's triage form:

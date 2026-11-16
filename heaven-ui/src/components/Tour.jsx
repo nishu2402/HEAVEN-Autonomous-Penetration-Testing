@@ -11,21 +11,22 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Demo } from "../api";
 import { useToast } from "./Toast.jsx";
+import NavIcon from "./NavIcons.jsx";
 
 const SEEN_KEY = "heaven.tour.v1";
 
 const STEPS = [
-  { icon: "☠", title: "Welcome to HEAVEN",
+  { icon: "crosshair", title: "Welcome to HEAVEN",
     body: "An autonomous pen-testing platform: recon → vulnerability detection → verified exploitation → risk-scored reporting. You can explore everything with sample data, no setup required." },
-  { icon: "▣", title: "Dashboard", to: "/",
+  { icon: "dashboard", title: "Dashboard", to: "/",
     body: "Your severity overview and MITRE heat-map, plus a 'Fix this first' list that ranks findings by risk and shows a one-line remediation for each." },
-  { icon: "⚡", title: "Scans", to: "/scans",
+  { icon: "scans", title: "Scans", to: "/scans",
     body: "Launch real scans: targets are validated live and gated behind an authorization confirmation, or click 'Run demo scan' to watch the full loop with no target." },
-  { icon: "⚠", title: "Findings & Reports", to: "/findings",
+  { icon: "findings", title: "Findings & Reports", to: "/findings",
     body: "Triage findings with full evidence and a copy-paste curl repro, then export a deliverable in 10 formats (PDF, HTML, SARIF, JUnit, Burp XML, bug-bounty submission …)." },
-  { icon: "⚙", title: "Settings", to: "/settings",
+  { icon: "settings", title: "Settings", to: "/settings",
     body: "Add API keys (Gemini / Anthropic / OpenAI, Shodan, NVD, Jira …) anytime, saved to .env and live across the CLI, API and web UI. All optional." },
-  { icon: "🩺", title: "System Health", to: "/health",
+  { icon: "health", title: "System Health", to: "/health",
     body: "See which external tools and keys are active: the browser equivalent of 'heaven doctor'. A missing tool just disables one capability; it never breaks the app." },
 ];
 
@@ -96,7 +97,7 @@ export default function Tour() {
           </button>
         </div>
 
-        <div style={{ fontSize: 34, marginTop: 10 }} aria-hidden="true">{step.icon}</div>
+        <div style={{ marginTop: 10, color: "var(--accent)" }} aria-hidden="true"><NavIcon name={step.icon} size={32} /></div>
         <h2 style={{ color: "var(--text-0)", fontSize: 20, margin: "6px 0 8px" }}>{step.title}</h2>
         <p style={{ color: "var(--text-1)", fontSize: 13.5, lineHeight: 1.6, margin: 0 }}>{step.body}</p>
 

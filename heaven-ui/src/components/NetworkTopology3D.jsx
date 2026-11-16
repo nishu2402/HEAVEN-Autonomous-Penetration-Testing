@@ -11,6 +11,7 @@ const SEV_COLORS = {
 }
 const ACCENT = '#6D7CFF'
 const ACCENT_2 = '#A78BFA'
+const EDGE_LIGHT = '#6366F1'      // deeper indigo so links read on a white floor
 
 // The scene draws to the GPU with literal colours (CSS vars can't reach it), so
 // the grid / starfield / node tooltip can't inherit the theme tokens. Track the
@@ -40,7 +41,7 @@ function hostSeverity(h) {
   return h.severity || h.max_severity || 'unknown'
 }
 
-function Edge({ start, end, color }) {
+function Edge({ start, end, color, isLight }) {
   const ref = useRef()
   const points = useMemo(() => [
     new THREE.Vector3(...start),
@@ -48,15 +49,20 @@ function Edge({ start, end, color }) {
   ], [start, end])
   const geo = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points])
 
+  // A faint violet link glows against the dark void but vanishes on a white
+  // page, so light mode rides a deeper indigo at a higher floor opacity. Dark
+  // keeps the original soft pulse.
+  const base = isLight ? 0.30 : 0.09
+  const amp = isLight ? 0.10 : 0.05
   useFrame(({ clock }) => {
     if (ref.current) {
-      ref.current.material.opacity = 0.09 + 0.05 * Math.sin(clock.elapsedTime * 1.5 + start[0])
+      ref.current.material.opacity = base + amp * Math.sin(clock.elapsedTime * 1.5 + start[0])
     }
   })
 
   return (
     <line ref={ref} geometry={geo}>
-      <lineBasicMaterial color={color || ACCENT} transparent opacity={0.14} />
+      <lineBasicMaterial color={color || (isLight ? EDGE_LIGHT : ACCENT)} transparent opacity={base} />
     </line>
   )
 }
@@ -81,6 +87,16 @@ function HostNode({ host, position, severity, portCount, sizeScale, onClick, isL
 
   return (
     <group>
+      {/* A soft severity-coloured aura gives each node presence on a white page
+          (the emissive glow that carries it on the dark void disappears on
+          white). Light mode only; dark keeps its clean emissive sphere. */}
+      {isLight && (
+        <mesh position={position}>
+          <sphereGeometry args={[radius * 2.3, 16, 16]} />
+          <meshBasicMaterial color={color} transparent opacity={0.16} depthWrite={false} />
+        </mesh>
+      )}
+
       <mesh
         ref={mesh}
         position={position}
@@ -91,15 +107,15 @@ function HostNode({ host, position, severity, portCount, sizeScale, onClick, isL
         <icosahedronGeometry args={[radius, 1]} />
         <meshStandardMaterial
           color={color} emissive={color}
-          emissiveIntensity={hovered ? 0.9 : 0.35}
-          transparent opacity={0.9}
+          emissiveIntensity={hovered ? 0.9 : (isLight ? 0.55 : 0.35)}
+          transparent opacity={isLight ? 1 : 0.9}
           wireframe={hovered}
         />
       </mesh>
 
       <mesh ref={ring} position={position} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius * 1.6, 0.012, 8, 32]} />
-        <meshBasicMaterial color={color} transparent opacity={hovered ? 0.7 : 0.22} />
+        <torusGeometry args={[radius * 1.6, isLight ? 0.016 : 0.012, 8, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={hovered ? 0.75 : (isLight ? 0.42 : 0.22)} />
       </mesh>
 
       {hovered && (
@@ -130,9 +146,10 @@ function HostNode({ host, position, severity, portCount, sizeScale, onClick, isL
 }
 
 function GridPlane({ isLight }) {
-  // Light theme: soft slate lines on the (transparent) white page. Dark theme:
-  // the original near-black grid.
-  const [line, cell] = isLight ? ['#C2CBDA', '#DCE3EE'] : ['#1b2336', '#141a28']
+  // Light theme: slate lines deep enough to read as a floor on the near-white
+  // backdrop (the old near-white pair vanished). Dark theme: the original
+  // near-black grid.
+  const [line, cell] = isLight ? ['#90A1BE', '#C0CADD'] : ['#1b2336', '#141a28']
   return (
     <gridHelper args={[20, 20, line, cell]} position={[0, -2, 0]} />
   )
@@ -192,16 +209,19 @@ function Scene({ hosts, onSelect, isLight }) {
 
   return (
     <>
-      <ambientLight intensity={isLight ? 0.5 : 0.12} />
+      <ambientLight intensity={isLight ? 0.55 : 0.12} />
       <pointLight position={[0, 5, 0]} intensity={0.6} color={ACCENT} />
       <pointLight position={[-5, -2, -5]} intensity={0.35} color={ACCENT_2} />
+      {/* A neutral key light in light mode shades the icosahedra into faceted
+          solids instead of flat discs; dark keeps its moody accent-only glow. */}
+      {isLight && <directionalLight position={[4, 6, 5]} intensity={0.7} color="#ffffff" />}
       {/* A starfield only makes sense against a dark void — drop it in light mode. */}
       {!isLight && (
         <Stars radius={30} depth={20} count={300} factor={2} saturation={0} fade speed={0.5} />
       )}
       <GridPlane isLight={isLight} />
       {edges.map((e, i) => (
-        <Edge key={i} start={e.start} end={e.end} />
+        <Edge key={i} start={e.start} end={e.end} isLight={isLight} />
       ))}
       {hosts.map((host, i) => (
         <HostNode

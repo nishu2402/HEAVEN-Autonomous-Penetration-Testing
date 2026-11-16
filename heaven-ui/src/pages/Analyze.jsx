@@ -3,6 +3,7 @@
 // /api/analyze/report (downloadable Markdown/HTML/JSON report).
 
 import React, { useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { useSearchParams } from "react-router";
 import { Analyze, getUser } from "../api";
 import { useJob } from "../context/Jobs.jsx";
@@ -142,7 +143,7 @@ export default function AnalyzePage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>🔎 Offline Artifact Analysis</h2>
+        <h2 className="page-title" style={{ marginTop: 0 }}><NavIcon name="analyze" size={20} />Offline Artifact Analysis</h2>
         <p className="page-lead">
           Analyze a file you are authorized to examine: a packet capture,
           firmware image, binary, mobile app (Android APK or iOS IPA), office

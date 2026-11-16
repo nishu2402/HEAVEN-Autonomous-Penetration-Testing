@@ -7,6 +7,7 @@
 // sent back to the browser in full; we only show a masked preview + "is it set".
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Settings as SettingsApi, Egress as EgressApi, changePassword, getUser } from "../api";
 import { safeHref } from "../safeHref";
 import { useToast } from "../components/Toast.jsx";
@@ -204,7 +205,7 @@ export default function Settings() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>⚙ Settings, API keys & integrations</h2>
+        <h2 className="page-title" style={{ color: "var(--text-0)", marginTop: 0 }}><NavIcon name="settings" size={20} />Settings, API keys & integrations</h2>
         <p className="dim" style={{ fontSize: 12, lineHeight: 1.6 }}>
           Everything here is <strong style={{ color: "var(--text-0)" }}>optional</strong>, HEAVEN
           scans, reports and the ML risk scoring all work with no keys. Add a key to unlock its

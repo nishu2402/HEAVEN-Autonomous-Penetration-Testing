@@ -68,7 +68,7 @@ javalang>=0.13.0         # pure-Python Java parser powering the SAST dataflow
 # nmap / nuclei / sqlmap are SYSTEM binaries (apt/brew), not pip packages -
 # HEAVEN shells out to them. Shodan recon and WHOIS use plain HTTP (aiohttp).
 scapy>=2.8.0              # floor patched (OSV)
-dnspython>=2.9.0         # floor patched: CVE-2026-114605 (OSV)
+dnspython>=2.9.2         # floor patched: CVE-2026-114605 + CVE-2026-128089 (OSV)
 asyncssh>=2.24.1         # SSH credential testing; floor patched: SCP path-traversal +
                          # AuthorizedKeysFile %u escape (CVE-2026-54590/54591, OSV)
 

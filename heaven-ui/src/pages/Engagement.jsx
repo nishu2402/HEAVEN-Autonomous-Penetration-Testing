@@ -277,7 +277,7 @@ export default function EngagementPage() {
           </div>
         )}
         <EmptyState
-          icon="◈"
+          icon="engagement"
           headline="No active engagement yet"
           body="HEAVEN organizes findings per engagement. Click ＋ New engagement above to start one, launch a scan with an engagement name, or use the CLI steps below."
           cta="Launch a scan →"

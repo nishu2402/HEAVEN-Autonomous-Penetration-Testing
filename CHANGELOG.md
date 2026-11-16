@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0]: 2026-11-16
+
 ### Added
 
 - **A Recycle Bin for deleted scans and engagements.** Removing a scan or an
@@ -20,6 +22,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`HEAVEN_TRASH_RETENTION_DAYS`, 30 days by default). An empty engagement is
   still removed outright, and `?permanent=1` on the delete endpoints (or
   `heaven engage delete --permanent`) skips the Bin.
+- **HTTP/2 cleartext (h2c) request-smuggling detection.** A new
+  `heaven/vulnscan/h2c_smuggling.py` catches a reverse proxy that enforces
+  access control on the HTTP/1.1 layer but forwards an `Upgrade: h2c` (or a raw
+  HTTP/2 preface) to a backend that then speaks HTTP/2 straight to the client,
+  past the proxy's rules. It reports only a proven access-control differential:
+  a path the proxy denies over HTTP/1.1 that becomes reachable through the
+  tunnel. A certainly-absent control path is tunnelled in the same run, so a
+  catch-all backend that answers everything never yields a false bypass. Both
+  the upgrade and the prior-knowledge variants are probed, and the scan is
+  skipped when the optional `hpack` / `hyperframe` framing libraries are not
+  installed.
+- **Dependency-confusion auditing in `heaven sca`.** Beside the existing
+  known-vulnerable check, the dependency scanner now answers the supply-chain
+  question: is a package a manifest depends on unclaimed on its public
+  registry, so somebody else could publish it and have the build pull it. A
+  finding fires only on a hard `404` from the registry; a timeout, a rate
+  limit, or any other answer is treated as unknown and emits nothing, so an
+  offline run never fabricates one. Locally defined workspace packages are
+  suppressed, and an unclaimed name is a medium candidate that escalates to
+  high only when the project genuinely consumes internal packages from a
+  private feed. PyPI, npm, RubyGems, crates.io, Packagist, and NuGet are
+  covered, and every check is a read-only registry GET.
+- **Remediation economics on every finding.**
+  `heaven/devsecops/remediation_economics.py` stamps each finding with a fix
+  `effort` (low, medium, or high, by weakness class), a `priority_score` of
+  risk over effort so the roadmap can lead with the best return on effort, and
+  a `quick_win` flag for high-impact issues whose fix is cheap. Risk is lifted
+  by concrete exploit signals: a CISA KEV listing, a public exploit, or a high
+  EPSS probability. The scoring is deterministic and offline, and the same
+  three values flow through the API, the UI, and the reports.
+- **Evidence chain of custody and a recorded authorization.** Every finding now
+  carries an integrity record (`heaven/devsecops/chain_of_custody.py`): a
+  SHA-256 digest over its proof content, the UTC collection time, and the
+  collecting tool, version, and method. A reader can confirm the evidence shown
+  is the evidence captured, and a re-test correlates the same finding by
+  digest. Each run also records its authorization
+  (`heaven/devsecops/authorization_record.py`): who acknowledged it, when, how
+  (flag, environment variable, or interactive confirm), which targets were in
+  scope, and which intrusive capabilities were enabled. The report then shows
+  whether a run was read-only reconnaissance or an authorized exploitation
+  engagement. Both render into the Markdown, HTML, and PDF reports.
+
+### Changed
+
+- **Business-logic probes gained mass assignment and password-reset host
+  poisoning.** `heaven/vulnscan/logic_scanner.py` adds a mass-assignment check
+  (CWE-915): it submits a form with privileged fields the form never exposed,
+  each a unique canary, and fires only when the server reflects a privileged
+  canary back as accepted while a garbage control field is not, so a form that
+  simply echoes input does not trigger it. It also flags a password-reset flow
+  whose reset link follows an attacker-supplied `Host` header. Both sit on top
+  of the numeric and quantity tampering and the step-skip checks the scanner
+  already ran.
+- **The README demo now shows the real web UI.** The "See it in 60 seconds"
+  demo pointed at `docs/assets/demo.svg`, a hand-drawn SVG that animated a
+  terminal typing `heaven quickstart` and `heaven serve`. It now points at
+  `docs/assets/demo.gif`, a loop of the running UI on sample data captured across
+  five views: the dashboard and its risk topology, launching a scan, the ranked
+  findings, the cyber kill chain, and the reports page. The synthetic SVG is
+  removed.
+
+### Fixed
+
+- **Cleartext login panels are no longer missed.**
+  `heaven/recon/network_exposure.py` now flags a login form served over plain
+  HTTP that accepts a password in the clear (CWE-319), including control-panel
+  logins on their own ports (cPanel, WHM, Webmail) that a port-name mislabel
+  previously hid from the crawlers. A form that redirects to HTTPS before it
+  takes the password does not fire.
+- **A control panel is no longer reported as a successful login.** The auth
+  scanner (`heaven/vulnscan/auth_scanner.py`) now treats a `401` or `403` as a
+  failed login, so a panel that answers every request with an auth challenge no
+  longer reads as a valid-credentials finding, and uniform `401`s across a
+  wordlist are not mistaken for a missing lockout.
+- **The directory fuzzer drops control-panel and `.ht*` noise.** On top of the
+  blanket-deny suppression from 4.4.0, control-panel responses and `.ht*`
+  surfaces are now collapsed instead of each being reported as a finding
+  (`heaven/vulnscan/dir_fuzzer.py`).
+- **The anomaly probe honours its time budget.** `heaven/vulnscan/anomaly_probe.py`
+  now carries a per-URL deadline into `scan_endpoint`, so it preempts a slow
+  host between requests instead of overrunning the budget mid-URL. The change
+  is preempt-only, so it never drops a finding it would otherwise report.
+- **The dashboard 3D network map reads clearly in light mode.** The topology
+  (`heaven-ui/src/components/NetworkTopology3D.jsx`) drew its grid, links, and
+  nodes with dark-theme values on the light theme's near-white canvas, so the
+  map read as an empty void. Its grid lines, link web, node auras, and severity
+  rings are now theme-aware, a neutral key light shades the host nodes in light
+  mode, and the map sits in a framed panel with a soft radial floor
+  (`heaven-ui/src/index.css`). The dark theme is unchanged.
+- **Commands and payloads render literally in code and console blocks.** The
+  monospace font ligated sequences such as `--` (a curl flag or a SQL comment),
+  `->`, and `!=` into single glyphs, which misread in a tool built for
+  copy-paste. Ligatures are now disabled on every code, console, and command
+  surface (`heaven-ui/src/index.css`), so exact text shows exact characters
+  while the Inter UI font keeps its standard typography.
 
 ### Security
 
@@ -33,6 +130,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and no way to change it, so an operator on an untrusted network can now set
   `HEAVEN_DB_SSL_MODE=verify-full` for a connection that resists an active
   man-in-the-middle. The default behaviour is unchanged.
+- **Dependency floors raised past new OSV advisories.** Three manifest floors
+  still permitted versions flagged by freshly published advisories, so each was
+  lifted to its first patched release: `dnspython` to 2.9.2 (CVE-2026-128089, a
+  resource-exhaustion fix), the `pypdf` test dependency to 6.21.4
+  (CVE-2026-119203/119204/119205, three parser denial-of-service fixes), and the
+  `vite` dev dependency to 8.1.6 (CVE-2026-112942/943/944/945/946, patching a
+  bundled `launch-editor` command execution and a dev-server file read). The
+  installed and locked versions already satisfied the new floors, so this only
+  makes the declared minimums honest; `heaven sca` now reports no
+  known-vulnerable dependencies across `requirements.txt`, `pyproject.toml`, and
+  `heaven-ui/package.json`.
 
 ## [4.4.0]: 2026-11-03
 

@@ -13,6 +13,7 @@
 // navigating away and back — and a full page refresh.
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Watch, Engagement, openWatchStream } from "../api";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
@@ -221,7 +222,7 @@ export default function WatchPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--cyan)", marginTop: 0 }}>🔁 Watch Mode</h2>
+        <h2 className="page-title" style={{ color: "var(--cyan)", marginTop: 0 }}><NavIcon name="watch" size={20} />Watch Mode</h2>
         <p className="page-lead">
           Continuous monitoring with auto-diff. Runs scans on an interval,
           diffs each against the previous, and alerts <strong>only</strong> when
@@ -413,7 +414,7 @@ export default function WatchPage() {
       {!isRunning && !job && rows.length === 0 && (
         <div className="card" style={{ marginTop: 12 }}>
           <EmptyState
-            icon="🔁"
+            icon="watch"
             headline="No watch loop running"
             body="Fill in the targets above and start a loop: its iterations, diffs, and alerts stream here live."
           />

@@ -372,9 +372,15 @@ a:hover { color: var(--accent-2); }
   box-shadow: 0 0 12px var(--accent);
 }
 .nav-icon {
-  font-size: 15px; width: 20px; text-align: center; flex-shrink: 0;
-  opacity: 0.92;
+  width: 20px; height: 20px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-2);
+  transition: color 0.16s;
 }
+.nav-icon svg { width: 16px; height: 16px; display: block; }
+/* Icon tracks the item: muted at rest, brighter on hover, accent-tinted when active. */
+.nav-item:hover .nav-icon { color: var(--text-0); }
+.nav-item.active .nav-icon { color: #fff; }
 
 .sidebar-status {
   padding: 14px 18px;
@@ -997,6 +1003,17 @@ a:hover { color: var(--accent-2); }
   overflow-x: auto; white-space: pre; line-height: 1.7;
 }
 
+/* Exact commands and payloads must read literally. JetBrains Mono / Fira Code
+   ligate sequences like `--` (curl flags, SQL comments), `->`, `=>`, `!=`, `>=`
+   and `www` into single glyphs by default, which misreads on a tool people paste
+   straight into a terminal. Force plain glyphs on every code / console / mono
+   surface; Inter keeps its own standard UI ligatures, since this is mono-only. */
+.mono, .mono-input, code, pre, kbd, samp,
+.cli-block, .code, pre.code, .terminal-body, .evidence-block {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
 /* ── States ── */
 .error { border-color: rgba(255,77,106,0.45) !important; color: var(--crit); }
 .dim, .text-dim { color: var(--text-1); }
@@ -1080,7 +1097,9 @@ a:hover { color: var(--accent-2); }
   transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
 }
 .launch-tile:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: var(--shadow-md); color: var(--text-0); }
-.launch-tile-icon { font-size: 18px; line-height: 1; }
+.launch-tile-icon { line-height: 1; display: inline-flex; color: var(--text-2); transition: color 0.15s; }
+.launch-tile-icon svg { width: 22px; height: 22px; display: block; }
+.launch-tile:hover .launch-tile-icon { color: var(--text-0); }
 .launch-tile-name { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
 .launch-tile.is-primary { border-color: var(--accent); }
 .launch-tile.is-primary .launch-tile-icon,
@@ -1303,6 +1322,16 @@ a:hover { color: var(--accent-2); }
 .topology-legend { position: absolute; bottom: 14px; left: 14px; display: flex; gap: 14px; font-size: 10.5px; color: var(--text-2); }
 .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
 
+/* Light mode: the transparent 3D canvas otherwise sits on a flat white void that
+   reads as empty and unfinished. Frame the map and give it a soft radial "floor"
+   glow so the grid, links and nodes have depth to sit in. Dark mode keeps its
+   aurora-lit backdrop untouched. */
+:root[data-theme="light"] .dashboard-topology {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: radial-gradient(ellipse 85% 72% at 50% 38%, #FFFFFF 0%, #EDF2F9 54%, #DEE6F1 100%);
+}
+
 /* ════════════════════════════════════════════════════════════════════
    TOASTS
    ════════════════════════════════════════════════════════════════════ */
@@ -1353,7 +1382,9 @@ a:hover { color: var(--accent-2); }
   width: 100%; text-align: left; font-family: var(--font-ui); border-radius: var(--radius-sm);
 }
 .cmd-palette-item:hover, .cmd-palette-item.active { background: rgba(109,124,255,0.14); color: var(--text-0); }
-.cmd-palette-item-icon { width: 20px; text-align: center; font-size: 15px; flex-shrink: 0; }
+.cmd-palette-item-icon { width: 20px; font-size: 15px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.cmd-palette-item.active .cmd-palette-item-icon { color: var(--text-0); }
+.cmd-palette-item-icon svg { display: block; }
 .cmd-palette-item-label { flex: 1; }
 .cmd-palette-item-hint { color: var(--text-2); font-size: 11px; font-family: var(--font-mono); }
 .cmd-palette-empty { padding: 32px; text-align: center; color: var(--text-2); font-size: 13px; }
@@ -1379,7 +1410,10 @@ kbd {
 @keyframes skeleton-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
 .empty-state { text-align: center; padding: 64px 24px; color: var(--text-1); }
-.empty-state-icon { font-size: 42px; opacity: 0.5; margin-bottom: 16px; }
+.empty-state-icon { opacity: 0.5; margin-bottom: 16px; display: flex; justify-content: center; color: var(--text-1); }
+/* Page-section headings: icon sits inline with the title, inheriting its color. */
+.page-title { display: flex; align-items: center; gap: 8px; }
+.page-title svg { flex-shrink: 0; }
 .empty-state-headline { color: var(--text-0); font-weight: 700; margin-bottom: 8px; font-size: 16px; }
 .empty-state-body { font-size: 13px; margin-bottom: 20px; line-height: 1.6; max-width: 420px; margin-left: auto; margin-right: auto; }
 .empty-state-cta {

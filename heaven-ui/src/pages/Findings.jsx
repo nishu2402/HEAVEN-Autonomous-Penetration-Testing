@@ -226,7 +226,7 @@ export default function Findings() {
 
       {noEng && (
         <EmptyState
-          icon="🛰"
+          icon="findings"
           headline="No active engagement yet"
           body="Findings show up here after your first scan. Launch one from the Scans page: no terminal required."
           cta="Launch a scan →"

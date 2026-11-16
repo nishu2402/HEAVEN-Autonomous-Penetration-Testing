@@ -5,6 +5,7 @@
 // stack fingerprint, and is labelled so it's never read as a confirmed fact.
 
 import React, { useEffect, useMemo, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Assets } from "../api";
 import { SkeletonCard, EmptyState } from "../components/Skeleton.jsx";
@@ -192,7 +193,7 @@ export default function AssetsPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🖧 Host &amp; Service Inventory</h2>
+        <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="assets" size={20} />Host &amp; Service Inventory</h2>
         <p className="page-lead">
           Every open port, service version and operating system the network scan
           discovered, reported exactly as observed by nmap, nothing fabricated.
@@ -260,7 +261,7 @@ export default function AssetsPage() {
       {!loading && !error && inventory.length === 0 && dns.length === 0 && (
         <div className="card" style={{ marginTop: 12 }}>
           <EmptyState
-            icon="🖧"
+            icon="assets"
             headline="No host inventory yet"
             body="Run a network or DNS scan for this engagement: discovered hosts, ports, service versions, OS and DNS records appear here."
             cta="Launch a scan"
@@ -396,7 +397,7 @@ export default function AssetsPage() {
 
       {!loading && visibleDns.length > 0 && (
         <div className="card" style={{ marginTop: 18 }}>
-          <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🌐 DNS Enumeration</h2>
+          <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="web" size={20} />DNS Enumeration</h2>
           <p className="page-lead" style={{ marginBottom: 8 }}>
             DNS records and resolvable subdomains discovered for this engagement, 
             reported exactly as authoritative DNS returned them. A subdomain is

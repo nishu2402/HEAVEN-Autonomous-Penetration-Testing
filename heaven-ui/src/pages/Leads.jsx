@@ -81,6 +81,7 @@ export default function Leads() {
         <SkeletonTable rows={5} />
       ) : leads.length === 0 ? (
         <EmptyState
+          icon="leads"
           title="No leads for review"
           hint="Every substantiated signal reached the finding bar, or none was seen this scan."
         />

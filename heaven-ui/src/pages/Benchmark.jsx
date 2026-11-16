@@ -209,7 +209,7 @@ export default function Benchmark() {
 
         {data && data.available === false && (
           <EmptyState
-            icon="≡"
+            icon="benchmark"
             headline="No benchmark reports yet"
             body={data.note || "Run `heaven benchmark --tier all` on the server, then Refresh to load the results here."}
           />

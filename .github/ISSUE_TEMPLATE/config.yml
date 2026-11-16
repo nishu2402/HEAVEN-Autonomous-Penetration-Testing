@@ -1,0 +1,11 @@
+# Issue-chooser configuration. The bug_report and feature_request templates
+# appear automatically; these entries add the non-issue routes so security
+# reports and questions do not land in the public tracker.
+blank_issues_enabled: true
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/security/advisories/new
+    about: Please do not open a public issue for security bugs. Report it privately through a GitHub Security Advisory. See SECURITY.md for the full disclosure policy.
+  - name: 💬 Question, setup help, or troubleshooting
+    url: https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/discussions
+    about: Ask in Discussions. Check the FAQ and QUICKSTART first; for a private matter, DM the maintainer on LinkedIn (linked in the README Authors section).

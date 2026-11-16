@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { useSearchParams } from "react-router";
 import { Scans as ScansApi, Demo, Engagement, Engagements, Retest, previewRetestReport } from "../api";
 import { useToast } from "../components/Toast.jsx";
@@ -344,7 +345,7 @@ export default function Scans() {
               common (unauthenticated) launch stays uncluttered. */}
           <details className="form-full" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
             <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-              🔐 Authenticated scan <span className="dim" style={{ fontWeight: 400 }}>, optional · reach pages behind a login (enables IDOR &amp; access-control audits)</span>
+              <NavIcon name="lock" size={14} /> Authenticated scan <span className="dim" style={{ fontWeight: 400 }}>, optional · reach pages behind a login (enables IDOR &amp; access-control audits)</span>
             </summary>
             <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
               <span className="dim" style={{ fontSize: 11, lineHeight: 1.6 }}>

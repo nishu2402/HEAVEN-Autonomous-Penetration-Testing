@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "heaven-pentest"
-version = "4.4.0"
-description = "HEAVEN — autonomous penetration-testing framework with AI-driven attack-chain planning, continuous monitoring, SAST/DAST, and 70 CLI commands"
+version = "4.5.0"
+description = "HEAVEN — autonomous penetration-testing framework with AI-driven attack-chain planning, continuous monitoring, SAST/DAST, and 71 CLI commands"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -100,7 +100,7 @@ dependencies = [
     # and heavyweight GCP/Azure SDKs remain opt-in. All of the following ship
     # prebuilt wheels for every supported platform, so the base install stays
     # wheel-only (no compilers).
-    "dnspython>=2.9.0",           # DNS enumeration (recon); floor patched: CVE-2026-114605 (OSV)
+    "dnspython>=2.9.2",           # DNS enumeration (recon); floor patched: CVE-2026-114605 + CVE-2026-128089 (OSV)
     "scapy>=2.8.0",               # raw-packet probes (recon); floor patched (OSV)
     "jinja2>=3.1.6",              # HTML report templating (reports); floor patched: CVE-2026-* template advisories (OSV)
     "reportlab>=5.1.0",           # PDF reports (reports)
@@ -165,8 +165,9 @@ dev = [
     # infinite loop in TreeObject.insert_child (CVE-2026-84309/84310/84311, fixed
     # 6.16.1) on top of the earlier CVE-2026-71852 / CVE-2026-71870 fixes, and the
     # later parser-DoS batch CVE-2026-113786/789/790/791/792/793/794/795 +
-    # CVE-2026-115572/580/585 (fixed thru 6.21.2; 6.21.3 is the latest).
-    "pypdf>=6.21.3",
+    # CVE-2026-115572/580/585 (fixed thru 6.21.2) and the later parser-DoS batch
+    # CVE-2026-119203/119204/119205 (fixed 6.21.4) (OSV).
+    "pypdf>=6.21.4",
 ]
 # Heavyweight cloud-provider SDKs (opt-in). Each extra carries both the resource
 # SDKs (compute/storage recon) and the identity/IAM SDKs the authenticated
@@ -198,7 +199,7 @@ llm = ["google-genai>=2.33.0", "anthropic>=2.3.0", "openai>=3.40.0"]
 # already-satisfied subsets of `dependencies` above; `pip install -e ".[recon]"`
 # still resolves for anyone with it in their scripts. The only genuine opt-ins
 # left are dev tooling, the alternate LLM providers, and the heavy GCP/Azure SDKs.
-recon = ["dnspython>=2.9.0", "scapy>=2.8.0"]
+recon = ["dnspython>=2.9.2", "scapy>=2.8.0"]
 reports = ["jinja2>=3.1.6", "reportlab>=5.1.0", "tabulate>=0.10.0"]
 lateral = ["impacket>=0.13.1", "asyncssh>=2.24.1", "ldap3>=2.9.1", "pywinrm>=0.5.0"]
 # MITRE ATT&CK mapping ships a bundled dataset and talks TAXII over plain HTTP,
@@ -211,7 +212,7 @@ cloud-aws = ["boto3>=1.43.119"]
 # (install [cloud-aws] / [cloud-gcp] / [cloud-azure] on their own) —
 # `pip install -e ".[all]"`
 all = [
-    "dnspython>=2.9.0", "scapy>=2.8.0",
+    "dnspython>=2.9.2", "scapy>=2.8.0",
     "jinja2>=3.1.6", "reportlab>=5.1.0", "tabulate>=0.10.0",
     "impacket>=0.13.1", "asyncssh>=2.24.1", "ldap3>=2.9.1", "pywinrm>=0.5.0",
     "docker>=7.2.0", "kubernetes>=37.0.1",

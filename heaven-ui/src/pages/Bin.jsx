@@ -8,6 +8,7 @@
 // DELETE /api/trash/{id} and POST /api/trash/empty.
 
 import React, { useCallback, useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Trash } from "../api";
 import { useToast } from "../components/Toast.jsx";
 import { SkeletonTable, EmptyState } from "../components/Skeleton.jsx";
@@ -116,7 +117,7 @@ export default function Bin() {
           display: "flex", alignItems: "center", justifyContent: "space-between",
           gap: 12, flexWrap: "wrap",
         }}>
-          <h2 style={{ marginTop: 0, marginBottom: 0 }}>🗑 Recycle Bin</h2>
+          <h2 className="page-title" style={{ marginTop: 0, marginBottom: 0 }}><NavIcon name="bin" size={20} />Recycle Bin</h2>
           {items && items.length > 0 && (
             <button type="button" className="btn-small danger" onClick={emptyBin} disabled={busyAll}>
               {busyAll ? "…" : "Empty Bin"}
@@ -136,7 +137,7 @@ export default function Bin() {
 
         {items && items.length === 0 && !error && (
           <EmptyState
-            icon="🗑"
+            icon="bin"
             headline="The Bin is empty"
             body="Deleted scans and engagements appear here so you can restore them or remove them permanently."
           />
@@ -154,7 +155,7 @@ export default function Bin() {
               return (
                 <div className="bin-row" key={it.id}>
                   <span className="bin-icon" aria-hidden="true">
-                    {it.kind === "engagement" ? "📁" : "🔍"}
+                    {it.kind === "engagement" ? <NavIcon name="folder" size={16} /> : <NavIcon name="analyze" size={16} />}
                   </span>
                   <div className="bin-main">
                     <div className="bin-label">
@@ -179,7 +180,7 @@ export default function Bin() {
                       disabled={b || busyAll} onClick={() => purge(it)}
                       aria-label={`Permanently delete ${it.label}`}
                     >
-                      {b ? "…" : "🗑 Delete permanently"}
+                      {b ? "…" : <><NavIcon name="bin" size={14} /> Delete permanently</>}
                     </button>
                   </div>
                 </div>

@@ -6,6 +6,7 @@
 // Backend: POST /api/ai/plan/run  →  PlannerOutput { plans: [...] }
 
 import React, { useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { AI, SIEM, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
@@ -54,7 +55,7 @@ export default function AIPlans() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>✦ AI Attack-Chain Planner</h2>
+        <h2 className="page-title" style={{ color: "var(--text-0)", marginTop: 0 }}><NavIcon name="aiplans" size={20} />AI Attack-Chain Planner</h2>
         <p className="page-lead">
           Proposes multi-step attack chains from a list of findings. HEAVEN
           builds a plan on its own, adding an AI provider key

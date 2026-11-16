@@ -10,7 +10,7 @@ export default function NotFound() {
   return (
     <div className="page">
       <EmptyState
-        icon="🧭"
+        icon="compass"
         headline="Page not found"
         body="The page you're looking for doesn't exist or may have moved."
         cta="Back to dashboard"

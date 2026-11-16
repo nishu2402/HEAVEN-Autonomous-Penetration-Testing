@@ -5,6 +5,7 @@
 // answer about the active engagement's findings. Streams replies token-by-token.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Settings } from "../api";
 import { useChat } from "../hooks/useChat.js";
@@ -42,7 +43,7 @@ export default function Chat() {
 
       {showSetupHint && (
         <div className="card chat-setup-hint">
-          <strong>💡 Set up a free local model</strong>, no API key, no rate limits.
+          <strong><NavIcon name="leads" size={14} /> Set up a free local model</strong>, no API key, no rate limits.
           Run <code>heaven ai setup</code> in your terminal (installs Ollama +
           pulls <code>{local.default_model}</code>), or configure a provider in{" "}
           <Link to="/settings">Settings</Link>.

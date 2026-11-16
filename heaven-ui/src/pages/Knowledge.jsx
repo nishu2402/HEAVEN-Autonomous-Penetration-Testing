@@ -2,6 +2,7 @@
 // Mirrors `heaven knowledge stats` + `heaven knowledge rank`.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Knowledge } from "../api";
 import { EmptyState, SkeletonStatGrid } from "../components/Skeleton.jsx";
 
@@ -35,7 +36,7 @@ export default function KnowledgePage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🧠 Knowledge Graph</h2>
+        <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="knowledge" size={20} />Knowledge Graph</h2>
         <p className="page-lead">
           A cross-engagement memory of what has worked before. HEAVEN records
           which techniques succeeded against which kinds of target, then uses
@@ -58,7 +59,7 @@ export default function KnowledgePage() {
 
       {stats && stats.attempts === 0 && (
         <EmptyState
-          icon="🧠"
+          icon="knowledge"
           headline="The knowledge graph is empty"
           body="It learns which techniques work against which target profiles, then biases the autonomous planner toward what's worked before. Run a scan to start populating it."
           cta="Launch a scan →"

@@ -2,6 +2,7 @@
 // Mirrors `heaven diff <baseline> <current>` from the CLI.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { useNavigate } from "react-router";
 import { Diff, Scans } from "../api";
 import { useJob } from "../context/Jobs.jsx";
@@ -84,7 +85,7 @@ export default function DiffPage() {
 
       {scans.length < 2 && !report && !loading && (
         <EmptyState
-          icon="↹"
+          icon="diff"
           headline="Need at least two scans to compare"
           body="Scan diff buckets findings into new / resolved / regressed between two runs of the same engagement. Run a couple of scans first."
           cta="Launch a scan →"
@@ -154,7 +155,7 @@ function RiskDriftCard({ drift }) {
   const cc = drift.current?.counts || {};
   return (
     <div className="card" style={{ marginTop: 12 }}>
-      <div className="card-title">⚖ Risk drift</div>
+      <div className="card-title page-title"><NavIcon name="scale" size={16} />Risk drift</div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 28, fontWeight: 700, color }}>
           {drift.baseline?.index ?? 0} {arrow} {drift.current?.index ?? 0}

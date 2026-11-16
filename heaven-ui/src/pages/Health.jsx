@@ -5,6 +5,7 @@
 // API keys are configured, Python module health, and actionable next steps.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { System, Fleet } from "../api";
 import { useToast } from "../components/Toast.jsx";
@@ -57,7 +58,7 @@ export default function Health() {
     <div className="page">
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <h2 style={{ color: "var(--text-0)", margin: 0 }}>🩺 System Health</h2>
+          <h2 className="page-title" style={{ color: "var(--text-0)", margin: 0 }}><NavIcon name="health" size={20} />System Health</h2>
           <button className="btn" onClick={() => { setH(null); load(); toast.info?.("Refreshing…"); }}>
             Refresh
           </button>

@@ -9,6 +9,7 @@
 // list to correlate on demand (POST /api/correlate).
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Correlate, Engagement } from "../api";
 import { EmptyState, SkeletonCard } from "../components/Skeleton.jsx";
 import HelpTip from "../components/HelpTip.jsx";
@@ -361,8 +362,8 @@ export default function Correlations() {
     <div className="page">
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <h2 style={{ color: "var(--text-0)", marginTop: 0, marginBottom: 0 }}>
-            🔗 Combined Risk<HelpTip term="correlation" />
+          <h2 className="page-title" style={{ color: "var(--text-0)", marginTop: 0, marginBottom: 0 }}>
+            <NavIcon name="risk" size={20} />Combined Risk<HelpTip term="correlation" />
           </h2>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn-small" onClick={load} disabled={loading}>Refresh</button>
@@ -421,7 +422,7 @@ export default function Correlations() {
       {!loading && noEng && (
         <div style={{ marginTop: 12 }}>
           <EmptyState
-            icon="⛓"
+            icon="risk"
             headline="No findings to correlate"
             body="Run a scan on the active engagement, or paste a findings list above."
           />
@@ -431,7 +432,7 @@ export default function Correlations() {
       {!loading && !noEng && combos.length === 0 && (
         <div style={{ marginTop: 12 }}>
           <EmptyState
-            icon="✓"
+            icon="check"
             headline="No combined risks found"
             body="None of the current findings form a known amplification chain. This is a good sign."
           />

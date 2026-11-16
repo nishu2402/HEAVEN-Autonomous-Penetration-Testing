@@ -3,6 +3,7 @@
 // state comes from the useChat hook passed in.
 
 import React, { useEffect, useRef, useState } from "react";
+import NavIcon from "./NavIcons.jsx";
 import Markdown from "./Markdown.jsx";
 
 export default function ChatPanel({ chat, placeholder, emptyHint, compact = false }) {
@@ -35,7 +36,7 @@ export default function ChatPanel({ chat, placeholder, emptyHint, compact = fals
       <div className="chat-scroll" ref={scrollRef}>
         {messages.length === 0 && (
           <div className="chat-empty">
-            <div className="chat-empty-icon">💬</div>
+            <div className="chat-empty-icon"><NavIcon name="assistant" size={40} /></div>
             <p>{emptyHint || "Ask about your findings, a CVE, an attack chain, or how to fix something."}</p>
             <div className="chat-suggestions">
               {["Summarize my highest-risk findings",

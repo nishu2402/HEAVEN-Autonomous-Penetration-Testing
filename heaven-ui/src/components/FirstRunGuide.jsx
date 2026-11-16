@@ -6,6 +6,7 @@
 // itself once every step is done, or when dismissed (persisted in localStorage).
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "./NavIcons.jsx";
 import { Link } from "react-router";
 import { Engagement } from "../api";
 
@@ -49,8 +50,8 @@ export default function FirstRunGuide() {
   return (
     <div className="card" style={{ gridColumn: "1 / -1", padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div className="card-title" style={{ margin: 0 }}>
-          🚀 Get started <span className="dim" style={{ fontWeight: 400 }}>· {completed}/{steps.length}</span>
+        <div className="card-title page-title" style={{ margin: 0 }}>
+          <NavIcon name="rocket" size={16} /> Get started <span className="dim" style={{ fontWeight: 400 }}>· {completed}/{steps.length}</span>
         </div>
         <button className="btn-small" onClick={dismiss} title="Don't show this again">Dismiss</button>
       </div>

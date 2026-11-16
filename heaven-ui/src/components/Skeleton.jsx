@@ -6,6 +6,7 @@
 
 import React from "react";
 import { Link } from "react-router";
+import NavIcon from "./NavIcons.jsx";
 
 // ── Skeleton primitives ──────────────────────────────────────────
 
@@ -69,7 +70,7 @@ export function SkeletonCard({ lines = 4 }) {
 // ── Empty state ──────────────────────────────────────────────────
 
 export function EmptyState({
-  icon = "📭",
+  icon = "inbox",
   headline,
   body,
   cta,
@@ -78,7 +79,7 @@ export function EmptyState({
 }) {
   return (
     <div className="empty-state">
-      <div className="empty-state-icon">{icon}</div>
+      <div className="empty-state-icon"><NavIcon name={icon} size={40} /></div>
       {headline && <div className="empty-state-headline">{headline}</div>}
       {body && <div className="empty-state-body">{body}</div>}
       {cta && (

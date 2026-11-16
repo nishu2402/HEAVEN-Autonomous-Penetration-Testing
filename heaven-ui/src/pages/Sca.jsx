@@ -2,6 +2,7 @@
 // Mirrors `heaven sca` from the CLI. Audits dependency manifests against OSV.dev.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { SCA, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
@@ -56,7 +57,7 @@ export default function ScaPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>📦 SCA · Dependency Audit</h2>
+        <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="sca" size={20} />SCA · Dependency Audit</h2>
         <p className="page-lead">
           Software Composition Analysis. Parses dependency manifests
           (<code>requirements.txt</code>, <code>package-lock.json</code>,{" "}
@@ -169,7 +170,7 @@ export default function ScaPage() {
           showReplay={false}
           refreshKey={historyRefresh}
           emptyState={{
-            icon: "📦",
+            icon: "sca",
             title: "No SCA audits recorded",
             hint: "Run an SCA audit with an engagement set: persisted audits appear here.",
           }}

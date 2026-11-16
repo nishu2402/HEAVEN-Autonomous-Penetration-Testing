@@ -2,6 +2,7 @@
 // Wraps POST /api/postex/{module}/run. Admin-only — refuses to run for non-admin.
 
 import React, { useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Postex, getUser } from "../api";
 import { useJob } from "../context/Jobs.jsx";
 import { SkeletonCard } from "../components/Skeleton.jsx";
@@ -81,7 +82,7 @@ export default function PostexPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--crit)", marginTop: 0 }}>⚡ Post-Exploitation</h2>
+        <h2 className="page-title" style={{ color: "var(--crit)", marginTop: 0 }}><NavIcon name="postex" size={20} />Post-Exploitation</h2>
         <p className="page-lead">
           Destructive operations. Every module is admin-gated server-side and
           requires <code>authorized=True</code>; this UI checkbox is the

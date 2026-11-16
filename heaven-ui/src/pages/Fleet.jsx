@@ -11,6 +11,7 @@
 // browser can never arm active exploitation.
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Fleet, Engagement, openFleetStream } from "../api";
 import { SkeletonCard } from "../components/Skeleton.jsx";
@@ -206,7 +207,7 @@ export default function FleetPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>⚙ Agent Fleet</h2>
+        <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="fleet" size={20} />Agent Fleet</h2>
         <p className="page-lead">
           A role-scoped multi-agent engine over the whole engagement: one lead
           agent per scan mode plus recon, strategy, hypothesis, FP-critic and

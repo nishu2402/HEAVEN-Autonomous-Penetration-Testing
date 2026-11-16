@@ -13,25 +13,27 @@
 <div align="center">
 
   <p>
-    <img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-    <img src="https://img.shields.io/badge/API-FastAPI_112_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
-    <img src="https://img.shields.io/github/actions/workflow/status/nishu2402/HEAVEN-Autonomous-Penetration-Testing/ci.yml?style=for-the-badge&logo=pytest&logoColor=black&label=Tests" alt="Tests"/>
-    <img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM"/>
-    <img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="License"/>
+    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11+-FF36AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+"/></a>
+    <a href="#api"><img src="https://img.shields.io/badge/API-FastAPI_112_Routes-7400B8?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/></a>
+    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/nishu2402/HEAVEN-Autonomous-Penetration-Testing/ci.yml?style=for-the-badge&logo=pytest&logoColor=black&label=Tests" alt="CI status"/></a>
+    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/releases/latest"><img src="https://img.shields.io/github/v/release/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=for-the-badge&logo=github&logoColor=white&label=Release&color=B8FF00" alt="Latest release"/></a>
+    <a href="#api-keys"><img src="https://img.shields.io/badge/LLM-Anthropic_%7C_OpenAI_%7C_Gemini-FF6E00?style=for-the-badge&logo=openai&logoColor=white" alt="LLM providers"/></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-00D2FF?style=for-the-badge&logo=opensourceinitiative&logoColor=black" alt="MIT License"/></a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Modules-252-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/>
-    <img src="https://img.shields.io/badge/CLI_Commands-71-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/>
-    <img src="https://img.shields.io/badge/UI_Pages-33-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/>
-    <img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/>
-    <img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.99-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/>
+    <a href="#structure"><img src="https://img.shields.io/badge/Modules-252-FF36AB?style=flat-square&logo=python&logoColor=white" alt="Modules"/></a>
+    <a href="#cli"><img src="https://img.shields.io/badge/CLI_Commands-71-7400B8?style=flat-square&logo=gnubash&logoColor=white" alt="CLI"/></a>
+    <a href="#web-ui"><img src="https://img.shields.io/badge/UI_Pages-33-B8FF00?style=flat-square&logo=react&logoColor=black" alt="UI"/></a>
+    <a href="#architecture"><img src="https://img.shields.io/badge/DB-PostgreSQL_%2B_SQLite-00D2FF?style=flat-square&logo=postgresql&logoColor=black" alt="DB"/></a>
+    <a href="#risk-scoring"><img src="https://img.shields.io/badge/CVSS_Predictor-R²%3D0.99-FF6E00?style=flat-square&logo=databricks&logoColor=white" alt="CVSS"/></a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Stars-★_Give_a_Star-FF36AB?style=flat-square&logo=github&logoColor=white" alt="Stars"/>
-    <img src="https://img.shields.io/badge/Forks-Share_This_Project-7400B8?style=flat-square&logo=git&logoColor=white" alt="Forks"/>
-    <img src="https://img.shields.io/badge/Issues-Report_a_Bug-B8FF00?style=flat-square&logo=quicklook&logoColor=black" alt="Issues"/>
+    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"><img src="https://img.shields.io/badge/Stars-★_Give_a_Star-FF36AB?style=flat-square&logo=github&logoColor=white" alt="Give a star"/></a>
+    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/fork"><img src="https://img.shields.io/badge/Forks-Share_This_Project-7400B8?style=flat-square&logo=git&logoColor=white" alt="Fork the project"/></a>
+    <a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/issues/new/choose"><img src="https://img.shields.io/badge/Issues-Report_a_Bug-B8FF00?style=flat-square&logo=quicklook&logoColor=black" alt="Report a bug"/></a>
+    <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-Welcome-00D2FF?style=flat-square&logo=github&logoColor=white" alt="PRs welcome"/></a>
   </p>
 
 </div>
@@ -85,7 +87,7 @@
 <img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF36AB,50:7400B8,100:B8FF00"/>
 </p>
 
-HEAVEN is a **production-grade offensive-security platform** that automates the repeatable, time-consuming parts of a professional engagement (reconnaissance, vulnerability detection, exploitation proof, risk triage, and reporting) so the operator can focus on the judgment work only a human can do.
+HEAVEN is an **offensive-security platform** that automates the repeatable, time-consuming parts of a professional engagement (reconnaissance, vulnerability detection, exploitation proof, risk triage, and reporting) so the operator can focus on the judgment work only a human can do.
 
 One `--profile` switch points the **same deep engine** at either job: `pentest` (the default) for a full internal/external assessment, or `bugbounty` for scope-constrained, internet-facing programs · polite adaptive rate limiting, routable HTTP + DNS out-of-band callbacks, program-scope import, active OAuth/SAML flow abuse, single-packet race, reciprocal-proof BOLA, and a submission-ready per-finding report. See [🎯 Bug Bounty Mode](#capabilities).
 
@@ -96,7 +98,7 @@ It runs three ways from the **same engagement dataset**:
 - **REST + WebSocket API**: 112 RBAC-protected routes for automation and integration.
 
 <div align="center">
-<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.4.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
+<img width="760" alt="HEAVEN: Autonomous Penetration Testing Platform v4.5.0" src="docs/screenshots/Heaven_Autonomous_Penetration_Testing_Platform.png" />
 </div>
 
 ---
@@ -145,7 +147,7 @@ It runs three ways from the **same engagement dataset**:
 | Area | What It Does |
 |---|---|
 | 🔍 **Reconnaissance** | nmap · web crawling · DNS brute-force · cert transparency · Shodan · AD enumeration · cloud (AWS/GCP/Azure) · containers & Kubernetes (Docker socket / K8s API / RBAC) · IoT/SCADA · Git secrets · email OSINT · honeypot detection · firewall / IDS-IPS / WAF detection + adaptive evasion re-probe (`--evade`) |
-| 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS (reflected-origin + credentials) · CRLF · open redirect (canary-confirmed) · IDOR · mass assignment · dir/file fuzzing · JWT attacks (alg:none · weak-secret crack) · insecure session cookies · race conditions (incl. **true single-packet last-byte-sync** limit-overrun, reproduce-first) · **business-logic abuse** (numeric/quantity tampering · workflow step-skip · mass-assignment binding · password-reset host poisoning, each evidence-first with a control comparison) · request smuggling · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
+| 🎯 **Vuln Detection** | SQLi (error/boolean/UNION/time-blind) · XSS · LFI/RFI · command injection · SSRF · XXE · CORS (reflected-origin + credentials) · CRLF · open redirect (canary-confirmed) · IDOR · mass assignment · dir/file fuzzing · JWT attacks (alg:none · weak-secret crack) · insecure session cookies · race conditions (incl. **true single-packet last-byte-sync** limit-overrun, reproduce-first) · **business-logic abuse** (numeric/quantity tampering · workflow step-skip · mass-assignment binding · password-reset host poisoning, each evidence-first with a control comparison) · request smuggling (incl. **HTTP/2 cleartext h2c** access-control bypass, proven differential) · GraphQL introspection · default creds · subdomain takeover · Nuclei templates |
 | 🗝️ **Active Directory & Identity** | authenticated LDAP assessment (Kerberoasting · AS-REP roasting via LDAP *and* credential-free Kerberos pre-auth · DCSync rights · unconstrained/constrained delegation · SMB-signing / SMBv1 / NTLMv1 · anonymous LDAP) · **AD CS certificate-template abuse (ESC1 to ESC4 · ESC8 web-enrolment relay)** · **NTLM coercion surface (PetitPotam · PrinterBug · DFSCoerce, bind-only, never triggers coercion)** · Kerberos pre-auth username enumeration · BloodHound-style path analysis · SSO & OAuth/OIDC/SAML flow abuse (redirect_uri off-origin bypass proven from an observed `Location` · password-reset host-header poisoning from a reflected marker · implicit-flow / ROPC / PKCE-not-advertised read from OIDC discovery metadata · **SAML** assertion-signing not enforced · RelayState open redirect) |
 | 🌐 **Network & Threat** | cleartext/legacy protocols · SNMP/IPMI/NFS/VNC exposure · Cisco Smart Install · SMB-signing → NTLM-relay · **internet-facing edge/VPN appliance KEV fingerprint** (Citrix NetScaler · Ivanti Connect Secure · FortiOS SSL-VPN · PAN GlobalProtect · Exchange · F5 BIG-IP → actively-exploited CVEs) · **DoS/DDoS susceptibility**: amplification-reflector detection with a *measured* factor (NTP monlist · open DNS · memcached · SSDP · CLDAP · chargen · RIPv1 · NetBIOS) + Slowloris slow-HTTP (`-m dos`, one benign probe, never a flood) · **sniffing / internal MITM**: LLMNR / NBT-NS / mDNS name-poisoning + mitm6 dual-stack susceptibility (`-m sniff`) · **malware / backdoor**: Ingreslock/NetBus/Back-Orifice listeners · unauthenticated-shell banners · trojaned vsftpd 2.3.4 / UnrealIRCd / ProFTPD · webshell signature sweep (`-m malware`) |
 | 📱 **Offline & Mobile Analysis** | `heaven analyze` / `heaven mobile`: binary (ELF/PE/Mach-O hardening) · firmware carving · pcap · steganography · documents/archives · audio/video media · hash/crypto · **mobile apps: Android APK + iOS IPA scored vs OWASP Mobile Top 10** (embedded secrets · cleartext/ATS · permissions · debuggable/allowBackup · URL schemes) |
@@ -158,7 +160,7 @@ It runs three ways from the **same engagement dataset**:
 | 📊 **Risk Scoring** | CVSS v4.0 (current standard) scored alongside CVSS v3.1 · the score a client sees is computed **exactly** from each finding's CVSS vector via the reference formula; the hybrid ML predictor (13-feature ExtraTrees vector model R²=0.99 + TF-IDF word 1-3 gram text description/type model on 304k real NVD CVEs, Spearman ρ=0.81 and right band 99% within one level on the findings it actually scores, exact-score R²=0.65) only ranks findings with no published score · EPSS · CISA KEV · asset-criticality multiplier · empirical Bayesian priors |
 | 🗺️ **Threat Mapping** | Every finding mapped to MITRE ATT&CK techniques + Lockheed Cyber Kill Chain phases · TAXII threat-intel feed |
 | 🔗 **Combined Risk** | Correlates individually-rated findings into materially worse combined issues, then chains them into end-to-end attack paths where each step yields a capability the next one uses · ranks the single "break the chain" fixes that collapse the most paths · OWASP Top 10:2025 crosswalk · rendered in the web UI, the CLI, and the PDF/HTML reports |
-| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA: dependency audit against OSV.dev (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
+| 🔁 **DevSecOps** | Scheduled re-scans with differential alerts (`watch`) · Semgrep SAST · **SCA: dependency audit against OSV.dev + dependency-confusion check (`heaven sca`)** · CycloneDX SBOM (`heaven sbom`) · Jira / Linear ticketing · Splunk / Elastic SIEM forwarding |
 | 📄 **Reporting** | 10 formats from CLI and web UI: PDF · HTML · compliance HTML (OWASP/NIST) · Markdown · CSV · JSON · SARIF · JUnit XML · Burp XML · proxy-JSONL · bug-bounty submission (H1/Bugcrowd/Intigriti) · every finding **SHA-256 evidence-integrity hashed** for chain of custody (verifiable, tamper-evident, manifest in the report) · **remediation roadmap is risk×effort** with a quick-wins view (fix the cheap high-impact items first) · **authorization record** (operator · time · acknowledgement method · scope · intrusive capabilities enabled) |
 | 🔇 **FP Suppression + Calibration** | Two-stage confirmation pass · source-weighted **confidence calibration** (a validated proof scores high, a version-only CVE match scores honestly low) · a substantiated signal below the finding bar becomes a **lead** for a human, never a silent drop · optional LLM second opinion |
 | 🎯 **Bug Bounty Mode** | `heaven scan --profile bugbounty` overlays the same deep core for scope-constrained, internet-facing programs: polite adaptive rate limiting · **program-scope import** (`heaven scope import <file> --program`: HackerOne/Bugcrowd JSON, out-of-scope subtraction, `*.wildcard` entries) feeds the runtime scope guard · **routable HTTP + DNS out-of-band** collaborator (`heaven oast`) · active **OAuth/OIDC/SAML flow abuse** · **true single-packet race** · **business-logic abuse** · **reciprocal-proof BOLA** · **submission-ready per-finding report** (`heaven export --format bugbounty --platform hackerone\|bugcrowd\|intigriti`, also one click in the web UI) |
@@ -291,7 +293,9 @@ tooling and alternate LLM providers (`pip install -e ".[anthropic]"` /
 ### See it in 60 seconds
 
 <p align="center">
-<img src="docs/assets/demo.svg" alt="HEAVEN demo: heaven quickstart loads sample data, heaven serve starts the web UI, and the dashboard shows ranked findings" width="820"/>
+<img src="docs/assets/demo.gif" alt="A tour of the HEAVEN web UI on sample data: the dashboard and its live risk topology, launching a scan, findings ranked by confidence, the cyber kill chain, and client-ready reports." width="860"/>
+<br/>
+<sub><em>The HEAVEN web UI on sample data · Dashboard → Scans → Findings → Kill Chain → Reports</em></sub>
 </p>
 
 One command takes a fresh clone to a populated dashboard, and **nothing is scanned**:
@@ -307,8 +311,8 @@ In the web UI you can also click **Load sample data** on the dashboard, watch a
 Health** (under *System*) to see which tools and API keys are active, the web
 equivalent of `heaven doctor`.
 
-> The animation above is a lightweight SVG cast (it plays on GitHub). To swap in
-> a real screen recording, drop a `docs/assets/demo.gif` and point the `<img>` at it.
+> Every frame above is the real web UI on sample data, captured from a running
+> `heaven serve`.
 
 ### Configure
 
@@ -471,7 +475,7 @@ AI feature falls back to a deterministic heuristic (or pass `--no-llm`).
 71 commands. Run `heaven <command> --help` for full options.
 
 <div align="center">
-<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.4.0)" src="docs/screenshots/Heaven_cli.png" />
+<img width="820" alt="heaven CLI dashboard: module status + live command reference (v4.5.0)" src="docs/screenshots/Heaven_cli.png" />
 </div>
 
 <div align="center">
@@ -862,14 +866,17 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CODE_OF_CONDUCT.md`](CODE_OF_CONDU
 | Document | Purpose |
 |---|---|
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 5-minute end-to-end walkthrough |
+| [`docs/LOCAL_AI.md`](docs/LOCAL_AI.md) | Run the AI loop locally: no API key, no rate limits, private |
 | [`docs/FAQ.md`](docs/FAQ.md) | FAQ & troubleshooting: common fixes |
 | [`docs/BENCHMARK_HOWTO.md`](docs/BENCHMARK_HOWTO.md) | Reproduce DVWA precision/recall numbers |
+| [`docs/BENCHMARK_RESULTS.md`](docs/BENCHMARK_RESULTS.md) | Benchmark scorecards: live DVWA / Metasploitable2 / API tiers |
 | [`docs/COMPARISON.md`](docs/COMPARISON.md) | Head-to-head vs Burp Suite / ZAP / Nessus / sqlmap |
 | [`docs/methodology/`](docs/methodology/) | Live coverage maps: OWASP WSTG · NIST 800-115 · PTES · Cyber Essentials (+Plus) · ISO 27001 · PCI DSS · CIS v8.1 · NIST CSF 2.0 · SOC 2 |
 | [`CHANGELOG.md`](CHANGELOG.md) | Full version history |
 | [`SECURITY.md`](SECURITY.md) | Responsible disclosure policy |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Community conduct |
+| [`SUPPORT.md`](SUPPORT.md) | Where to get help and how to route a request |
 
 </div>
 
@@ -903,7 +910,7 @@ By using HEAVEN you agree you are solely responsible for ensuring you have prope
 </p>
 
 <p align="center">
-<img src="https://img.shields.io/github/stars/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Stars"/>
-<img src="https://img.shields.io/github/forks/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Forks"/>
-<img src="https://img.shields.io/github/watchers/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Watchers"/>
+<a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/stargazers"><img src="https://img.shields.io/github/stars/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Stars"/></a>
+<a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/network/members"><img src="https://img.shields.io/github/forks/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Forks"/></a>
+<a href="https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/watchers"><img src="https://img.shields.io/github/watchers/nishu2402/HEAVEN-Autonomous-Penetration-Testing?style=social&v=1" alt="Watchers"/></a>
 </p>

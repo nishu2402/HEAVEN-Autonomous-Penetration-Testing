@@ -2,6 +2,7 @@
 // Mirrors `heaven sast scan` from the CLI.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { SAST, Engagement } from "../api";
 import { useJob } from "../context/Jobs.jsx";
@@ -64,7 +65,7 @@ export default function SastPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🔬 SAST (Semgrep)</h2>
+        <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="sast" size={20} />SAST (Semgrep)</h2>
         <p className="page-lead">
           Static source-code analysis. Uses HEAVEN's curated rule pack
           (Python/JS/Go) + any extra Semgrep registry packs you list.
@@ -209,7 +210,7 @@ export default function SastPage() {
           showReplay={false}
           refreshKey={historyRefresh}
           emptyState={{
-            icon: "🔬",
+            icon: "sast",
             title: "No SAST runs recorded",
             hint: "Run a SAST scan with an engagement set: persisted runs appear here.",
           }}

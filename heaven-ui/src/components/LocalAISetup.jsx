@@ -12,6 +12,7 @@
 //   toast     — useToast() handle for success/error notices
 
 import React, { useEffect, useRef, useState } from "react";
+import NavIcon from "./NavIcons.jsx";
 import { Settings as SettingsApi, openLocalPullStream } from "../api";
 
 export default function LocalAISetup({ status, onChanged, toast }) {
@@ -128,7 +129,7 @@ export default function LocalAISetup({ status, onChanged, toast }) {
   return (
     <div style={card}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>🖥️ Local AI, no key, no rate limits</div>
+        <div className="page-title" style={{ fontWeight: 700, fontSize: 14 }}><NavIcon name="monitor" size={16} />Local AI, no key, no rate limits</div>
         <span style={{ flex: 1 }} />
         <div style={tabRow}>
           <button type="button" onClick={() => setTab("ollama")}

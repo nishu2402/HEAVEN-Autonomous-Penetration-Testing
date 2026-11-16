@@ -7,64 +7,65 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router";
 import Logo from "./Logo.jsx";
+import NavIcon from "./NavIcons.jsx";
 import { localClock, tzLabel } from "../datetime.js";
 
 const GROUPS = [
   {
     name: "Operations",
     items: [
-      { to: "/",            label: "Dashboard",    icon: "▣" },
-      { to: "/scans",       label: "Scans",        icon: "⚡" },
-      { to: "/assets",      label: "Assets",       icon: "🖧" },
-      { to: "/watch",       label: "Watch",        icon: "🔁" },
-      { to: "/autonomous",  label: "Autonomous",   icon: "∞" },
-      { to: "/fleet",       label: "Agent Fleet",  icon: "⚙" },
-      { to: "/diff",        label: "Scan Diff",    icon: "↹" },
-      { to: "/sast",        label: "SAST",         icon: "🔬" },
-      { to: "/sca",         label: "SCA · Deps",   icon: "📦" },
-      { to: "/cve",         label: "CVE Lookup",   icon: "🧾" },
-      { to: "/analyze",     label: "Analyze",      icon: "🔎" },
+      { to: "/",            label: "Dashboard",    icon: "dashboard" },
+      { to: "/scans",       label: "Scans",        icon: "scans" },
+      { to: "/assets",      label: "Assets",       icon: "assets" },
+      { to: "/watch",       label: "Watch",        icon: "watch" },
+      { to: "/autonomous",  label: "Autonomous",   icon: "autonomous" },
+      { to: "/fleet",       label: "Agent Fleet",  icon: "fleet" },
+      { to: "/diff",        label: "Scan Diff",    icon: "diff" },
+      { to: "/sast",        label: "SAST",         icon: "sast" },
+      { to: "/sca",         label: "SCA · Deps",   icon: "sca" },
+      { to: "/cve",         label: "CVE Lookup",   icon: "cve" },
+      { to: "/analyze",     label: "Analyze",      icon: "analyze" },
     ],
   },
   {
     name: "Findings",
     items: [
-      { to: "/findings",    label: "Findings",     icon: "⚠" },
-      { to: "/leads",       label: "Leads",        icon: "◇" },
-      { to: "/correlations", label: "Combined Risk", icon: "🔗" },
-      { to: "/kill-chain",  label: "Kill Chain",   icon: "⛓" },
-      { to: "/ai-plans",    label: "AI Plans",     icon: "✦" },
-      { to: "/chat",        label: "Assistant",    icon: "💬" },
-      { to: "/coverage",    label: "Coverage",     icon: "◐" },
+      { to: "/findings",    label: "Findings",     icon: "findings" },
+      { to: "/leads",       label: "Leads",        icon: "leads" },
+      { to: "/correlations", label: "Combined Risk", icon: "risk" },
+      { to: "/kill-chain",  label: "Kill Chain",   icon: "killchain" },
+      { to: "/ai-plans",    label: "AI Plans",     icon: "aiplans" },
+      { to: "/chat",        label: "Assistant",    icon: "assistant" },
+      { to: "/coverage",    label: "Coverage",     icon: "coverage" },
     ],
   },
   {
     name: "Engagement",
     items: [
-      { to: "/engagement",  label: "Engagement",   icon: "◈" },
-      { to: "/knowledge",   label: "Knowledge",    icon: "🧠" },
-      { to: "/lateral",     label: "Lateral",      icon: "↔" },
-      { to: "/exploit",     label: "Exploit",      icon: "⚔" },
-      { to: "/pivot",       label: "Pivot",        icon: "🕳" },
-      { to: "/postex",      label: "Post-Ex",      icon: "☣" },
+      { to: "/engagement",  label: "Engagement",   icon: "engagement" },
+      { to: "/knowledge",   label: "Knowledge",    icon: "knowledge" },
+      { to: "/lateral",     label: "Lateral",      icon: "lateral" },
+      { to: "/exploit",     label: "Exploit",      icon: "exploit" },
+      { to: "/pivot",       label: "Pivot",        icon: "pivot" },
+      { to: "/postex",      label: "Post-Ex",      icon: "postex" },
     ],
   },
   {
     name: "Reporting",
     items: [
-      { to: "/reports",     label: "Reports",      icon: "📄" },
-      { to: "/tickets",     label: "Tickets",      icon: "🎫" },
-      { to: "/benchmark",   label: "Benchmark",    icon: "≡" },
-      { to: "/methodology", label: "Methodology",  icon: "§" },
-      { to: "/compliance",  label: "Compliance",   icon: "🛡" },
+      { to: "/reports",     label: "Reports",      icon: "reports" },
+      { to: "/tickets",     label: "Tickets",      icon: "tickets" },
+      { to: "/benchmark",   label: "Benchmark",    icon: "benchmark" },
+      { to: "/methodology", label: "Methodology",  icon: "methodology" },
+      { to: "/compliance",  label: "Compliance",   icon: "compliance" },
     ],
   },
   {
     name: "System",
     items: [
-      { to: "/health",      label: "System Health", icon: "🩺" },
-      { to: "/bin",         label: "Bin",           icon: "🗑" },
-      { to: "/settings",    label: "Settings",      icon: "⚙" },
+      { to: "/health",      label: "System Health", icon: "health" },
+      { to: "/bin",         label: "Bin",           icon: "bin" },
+      { to: "/settings",    label: "Settings",      icon: "settings" },
     ],
   },
 ];
@@ -150,7 +151,7 @@ export default function Sidebar() {
                     end={it.to === "/"}
                     className={({ isActive }) => "nav-item" + (isActive ? " active" : "")}
                   >
-                    <span className="nav-icon" aria-hidden="true">{it.icon}</span>
+                    <span className="nav-icon" aria-hidden="true"><NavIcon name={it.icon} /></span>
                     <span>{it.label}</span>
                   </NavLink>
                 ))}
@@ -168,7 +169,7 @@ export default function Sidebar() {
           </span>
         </div>
         <div style={{ marginTop: 8, fontSize: 10.5, color: 'var(--text-2)' }}>
-          v4.4.0 · press <kbd>⌘K</kbd> for commands
+          v4.5.0 · press <kbd>⌘K</kbd> for commands
         </div>
       </div>
     </aside>

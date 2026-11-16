@@ -11,6 +11,7 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router";
 import { useToast } from "./Toast.jsx";
+import NavIcon from "./NavIcons.jsx";
 
 // ── Catalogue ──────────────────────────────────────────────────────
 // One entry per navigable destination + one entry per quick-trigger
@@ -18,34 +19,34 @@ import { useToast } from "./Toast.jsx";
 
 const CATALOGUE = [
   // --- Navigation
-  { group: "Navigate", icon: "▣",  label: "Dashboard",    hint: "g d",        nav: "/" },
-  { group: "Navigate", icon: "◈",  label: "Engagement",   hint: "g e",        nav: "/engagement" },
-  { group: "Navigate", icon: "⚠",  label: "Findings",     hint: "g f",        nav: "/findings" },
-  { group: "Navigate", icon: "🔗", label: "Combined Risk", hint: "",          nav: "/correlations" },
-  { group: "Navigate", icon: "⛓",  label: "Kill Chain",   hint: "g k",        nav: "/kill-chain" },
-  { group: "Navigate", icon: "⚡", label: "Scans",        hint: "g s",        nav: "/scans" },
-  { group: "Navigate", icon: "🖧", label: "Assets",       hint: "",           nav: "/assets" },
-  { group: "Navigate", icon: "🔁", label: "Watch",        hint: "g w",        nav: "/watch" },
-  { group: "Navigate", icon: "↹",  label: "Scan Diff",    hint: "g D",        nav: "/diff" },
-  { group: "Navigate", icon: "🔬", label: "SAST",         hint: "g S",        nav: "/sast" },
-  { group: "Navigate", icon: "📦", label: "SCA · Deps",   hint: "",           nav: "/sca" },
-  { group: "Navigate", icon: "🧾", label: "CVE Lookup",   hint: "",           nav: "/cve" },
-  { group: "Navigate", icon: "∞",  label: "Autonomous",   hint: "g a",        nav: "/autonomous" },
-  { group: "Navigate", icon: "✦",  label: "AI Plans",     hint: "g p",        nav: "/ai-plans" },
-  { group: "Navigate", icon: "◐",  label: "Coverage",     hint: "g c",        nav: "/coverage" },
-  { group: "Navigate", icon: "☣", label: "Post-Ex",      hint: "g x",        nav: "/postex" },
-  { group: "Navigate", icon: "⚔", label: "Exploit",      hint: "",           nav: "/exploit" },
-  { group: "Navigate", icon: "🕳", label: "Pivot",        hint: "",           nav: "/pivot" },
-  { group: "Navigate", icon: "🔎", label: "Analyze",      hint: "",           nav: "/analyze" },
-  { group: "Navigate", icon: "↔",  label: "Lateral",      hint: "g l",        nav: "/lateral" },
-  { group: "Navigate", icon: "🧠", label: "Knowledge",    hint: "g K",        nav: "/knowledge" },
-  { group: "Navigate", icon: "🎫", label: "Tickets",      hint: "g t",        nav: "/tickets" },
-  { group: "Navigate", icon: "≡",  label: "Benchmark",    hint: "g b",        nav: "/benchmark" },
-  { group: "Navigate", icon: "§",  label: "Methodology",  hint: "g m",        nav: "/methodology" },
-  { group: "Navigate", icon: "🛡", label: "Compliance",   hint: "",           nav: "/compliance" },
-  { group: "Navigate", icon: "📄", label: "Reports",      hint: "",           nav: "/reports" },
-  { group: "Navigate", icon: "🩺", label: "System Health", hint: "",           nav: "/health" },
-  { group: "Navigate", icon: "⚙",  label: "Settings",     hint: "",           nav: "/settings" },
+  { group: "Navigate", icon: "dashboard",   label: "Dashboard",    hint: "g d",        nav: "/" },
+  { group: "Navigate", icon: "engagement",  label: "Engagement",   hint: "g e",        nav: "/engagement" },
+  { group: "Navigate", icon: "findings",    label: "Findings",     hint: "g f",        nav: "/findings" },
+  { group: "Navigate", icon: "risk",        label: "Combined Risk", hint: "",          nav: "/correlations" },
+  { group: "Navigate", icon: "killchain",   label: "Kill Chain",   hint: "g k",        nav: "/kill-chain" },
+  { group: "Navigate", icon: "scans",       label: "Scans",        hint: "g s",        nav: "/scans" },
+  { group: "Navigate", icon: "assets",      label: "Assets",       hint: "",           nav: "/assets" },
+  { group: "Navigate", icon: "watch",       label: "Watch",        hint: "g w",        nav: "/watch" },
+  { group: "Navigate", icon: "diff",        label: "Scan Diff",    hint: "g D",        nav: "/diff" },
+  { group: "Navigate", icon: "sast",        label: "SAST",         hint: "g S",        nav: "/sast" },
+  { group: "Navigate", icon: "sca",         label: "SCA · Deps",   hint: "",           nav: "/sca" },
+  { group: "Navigate", icon: "cve",         label: "CVE Lookup",   hint: "",           nav: "/cve" },
+  { group: "Navigate", icon: "autonomous",  label: "Autonomous",   hint: "g a",        nav: "/autonomous" },
+  { group: "Navigate", icon: "aiplans",     label: "AI Plans",     hint: "g p",        nav: "/ai-plans" },
+  { group: "Navigate", icon: "coverage",    label: "Coverage",     hint: "g c",        nav: "/coverage" },
+  { group: "Navigate", icon: "postex",      label: "Post-Ex",      hint: "g x",        nav: "/postex" },
+  { group: "Navigate", icon: "exploit",     label: "Exploit",      hint: "",           nav: "/exploit" },
+  { group: "Navigate", icon: "pivot",       label: "Pivot",        hint: "",           nav: "/pivot" },
+  { group: "Navigate", icon: "analyze",     label: "Analyze",      hint: "",           nav: "/analyze" },
+  { group: "Navigate", icon: "lateral",     label: "Lateral",      hint: "g l",        nav: "/lateral" },
+  { group: "Navigate", icon: "knowledge",   label: "Knowledge",    hint: "g K",        nav: "/knowledge" },
+  { group: "Navigate", icon: "tickets",     label: "Tickets",      hint: "g t",        nav: "/tickets" },
+  { group: "Navigate", icon: "benchmark",   label: "Benchmark",    hint: "g b",        nav: "/benchmark" },
+  { group: "Navigate", icon: "methodology", label: "Methodology",  hint: "g m",        nav: "/methodology" },
+  { group: "Navigate", icon: "compliance",  label: "Compliance",   hint: "",           nav: "/compliance" },
+  { group: "Navigate", icon: "reports",     label: "Reports",      hint: "",           nav: "/reports" },
+  { group: "Navigate", icon: "health",      label: "System Health", hint: "",           nav: "/health" },
+  { group: "Navigate", icon: "settings",    label: "Settings",     hint: "",           nav: "/settings" },
 
   // --- Quick actions (synthesised; wire to real handlers as needed)
   { group: "Action", icon: "+",  label: "New scan",
@@ -56,16 +57,16 @@ const CATALOGUE = [
     hint: "r",  reload: true },
   { group: "Action", icon: "?",  label: "Open API docs (/api/docs)",
     hint: "?",  external: "/api/docs" },
-  { group: "Action", icon: "📐", label: "Open OWASP methodology",
+  { group: "Action", icon: "methodology", label: "Open OWASP methodology",
     nav: "/methodology" },
 
   // --- Help
-  { group: "Help", icon: "🧭", label: "Take the tour", tour: true },
+  { group: "Help", icon: "compass", label: "Take the tour", tour: true },
   { group: "Help", icon: "?", label: "Keyboard shortcuts",
     hint: "?",  showShortcuts: true },
-  { group: "Help", icon: "📚", label: "Quick start guide",
+  { group: "Help", icon: "knowledge", label: "Quick start guide",
     external: "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/docs/QUICKSTART.md" },
-  { group: "Help", icon: "🔒", label: "Report a security issue",
+  { group: "Help", icon: "lock", label: "Report a security issue",
     external: "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/blob/main/SECURITY.md" },
 ];
 
@@ -228,7 +229,7 @@ export function CommandPalette() {
                       onClick={() => activate(it)}
                       type="button"
                     >
-                      <span className="cmd-palette-item-icon">{it.icon}</span>
+                      <span className="cmd-palette-item-icon"><NavIcon name={it.icon} size={16} /></span>
                       <span className="cmd-palette-item-label">{it.label}</span>
                       {it.hint && (
                         <span className="cmd-palette-item-hint">

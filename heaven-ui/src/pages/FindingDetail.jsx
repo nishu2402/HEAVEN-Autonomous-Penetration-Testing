@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { useParams, Link } from "react-router";
 import { Engagement, ExploitProof, AI, ExploitDB } from "../api";
 import Markdown from "../components/Markdown";
@@ -668,7 +669,7 @@ function RemediationCard({ id, staticText }) {
 
       {aiIsTailored && (
         <div style={{ marginTop: staticText ? 14 : 0 }}>
-          <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>✨ AI-tailored remediation</div>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}><NavIcon name="aiplans" size={13} /> AI-tailored remediation</div>
           <div className="md-block"><Markdown>{ai.remediation}</Markdown></div>
         </div>
       )}
@@ -692,7 +693,7 @@ function RemediationCard({ id, staticText }) {
       {error && <div className="evidence-block" style={{ color: "var(--red)" }}>{error}</div>}
 
       <button className="btn" onClick={generate} disabled={loading} style={{ marginTop: 14 }}>
-        {loading ? "Generating…" : aiIsTailored ? "↻ Regenerate" : "✨ Generate AI remediation"}
+        {loading ? "Generating…" : aiIsTailored ? "↻ Regenerate" : <><NavIcon name="aiplans" size={13} /> Generate AI remediation</>}
       </button>
     </div>
   );

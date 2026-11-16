@@ -3,12 +3,13 @@ import { useNavigate, useLocation } from "react-router";
 import { motion } from "framer-motion";
 import { login } from "../api";
 import Logo from "../components/Logo.jsx";
+import NavIcon from "../components/NavIcons.jsx";
 
 const CAPS = [
-  { icon: "🛰", title: "Autonomous recon", body: "LLM-driven attack-chain planning across scope" },
-  { icon: "🧠", title: "ML risk triage", body: "13-feature CVSS model scores every finding" },
-  { icon: "⛓", title: "Verified exploitation", body: "RCE canaries & SSRF callbacks: proven, not guessed" },
-  { icon: "📡", title: "Continuous monitoring", body: "Scheduled re-scans with differential alerts" },
+  { icon: "autonomous", title: "Autonomous recon", body: "LLM-driven attack-chain planning across scope" },
+  { icon: "aiplans", title: "ML risk triage", body: "13-feature CVSS model scores every finding" },
+  { icon: "exploit", title: "Verified exploitation", body: "RCE canaries & SSRF callbacks: proven, not guessed" },
+  { icon: "watch", title: "Continuous monitoring", body: "Scheduled re-scans with differential alerts" },
 ];
 
 const ease = [0.22, 1, 0.36, 1];
@@ -74,7 +75,7 @@ export default function LoginPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease, delay: 0.25 + i * 0.08 }}
             >
-              <div className="login-cap-icon">{c.icon}</div>
+              <div className="login-cap-icon"><NavIcon name={c.icon} size={20} /></div>
               <div>
                 <div className="login-cap-title">{c.title}</div>
                 <div className="login-cap-body">{c.body}</div>

@@ -4,6 +4,7 @@
 // looked up live against NVD + CIRCL, merged/de-duped, and version-confirmed.
 
 import React, { useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Cve } from "../api";
 import { useJob } from "../context/Jobs.jsx";
@@ -48,7 +49,7 @@ export default function CvePage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>🧾 CVE Lookup · Live Feed</h2>
+        <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="cve" size={20} />CVE Lookup · Live Feed</h2>
         <p className="page-lead">
           Dynamic CVE discovery for products <strong>not</strong> in HEAVEN's curated
           offline DB. Queries authoritative live feeds, <strong>NVD</strong> (CPE-matched,

@@ -1,0 +1,9 @@
+# CODEOWNERS -- who gets a review request when files change.
+#
+# HEAVEN is maintained by one person, so the owner is the default reviewer for
+# the whole tree. GitHub auto-requests their review on every pull request and,
+# if branch protection requires code-owner review, blocks merge until it lands.
+#
+# Docs: https://docs.github.com/articles/about-code-owners
+
+*       @nishu2402

@@ -7,6 +7,7 @@ import { Engagement, Dashboard as DashApi, Demo, Engagements, Scans } from '../a
 import { useToast } from '../components/Toast.jsx'
 import HelpTip from '../components/HelpTip.jsx'
 import Marquee from '../components/Marquee.jsx'
+import NavIcon from '../components/NavIcons.jsx'
 import { SCAN_MODES, ANALYSIS_TOOLS } from '../scanModes.js'
 
 // three.js + r3f + drei are heavy (~600 KB). Load them only when the dashboard
@@ -334,7 +335,7 @@ export default function Dashboard() {
                 title={m.desc}
                 onClick={() => navigate(`/scans?mode=${m.value}`)}
               >
-                <span className="launch-tile-icon">{m.icon}</span>
+                <span className="launch-tile-icon"><NavIcon name={m.icon} /></span>
                 <span className="launch-tile-name">{m.short}</span>
               </button>
             ))}
@@ -346,7 +347,7 @@ export default function Dashboard() {
                 title={t.desc}
                 onClick={() => navigate(t.to)}
               >
-                <span className="launch-tile-icon">{t.icon}</span>
+                <span className="launch-tile-icon"><NavIcon name={t.icon} /></span>
                 <span className="launch-tile-name">{t.short}</span>
               </button>
             ))}
@@ -428,7 +429,7 @@ export default function Dashboard() {
                           : `Move "${e.name}" to the Bin (restorable)`}
                         aria-label={`Delete engagement ${e.name}`}
                       >
-                        {busy ? '…' : '🗑'}
+                        {busy ? '…' : <NavIcon name="bin" size={15} />}
                       </button>
                     </div>
                   )

@@ -5,6 +5,7 @@
 // Chat page. Grounded in the active engagement by default.
 
 import React, { useState } from "react";
+import NavIcon from "./NavIcons.jsx";
 import { Link } from "react-router";
 import { useChat } from "../hooks/useChat.js";
 import ChatPanel from "./ChatPanel.jsx";
@@ -18,7 +19,7 @@ export default function ChatWidget() {
       {open && (
         <div className="chat-widget-panel card" role="dialog" aria-label="AI assistant">
           <div className="chat-widget-head">
-            <span className="chat-widget-title">✦ AI Assistant</span>
+            <span className="chat-widget-title"><NavIcon name="aiplans" size={16} /> AI Assistant</span>
             <div className="chat-widget-actions">
               <Link to="/chat" className="chat-widget-expand" title="Open full page"
                 onClick={() => setOpen(false)}>⤢</Link>
@@ -33,7 +34,7 @@ export default function ChatWidget() {
       )}
       <button type="button" className="chat-fab" title="AI assistant"
         aria-label="Open AI assistant" onClick={() => setOpen((v) => !v)}>
-        {open ? "✕" : "✦"}
+        {open ? "✕" : <NavIcon name="aiplans" size={22} />}
       </button>
     </div>
   );

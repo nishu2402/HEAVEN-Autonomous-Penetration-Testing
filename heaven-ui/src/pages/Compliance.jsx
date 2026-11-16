@@ -7,6 +7,7 @@
 // the findings. It is an honest coverage view, NOT an attestation of compliance.
 
 import React, { useEffect, useMemo, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Compliance as C, downloadCompliance } from "../api";
 import { safeHref } from "../safeHref";
@@ -268,7 +269,7 @@ export default function Compliance() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--text-0)", marginTop: 0 }}>🛡 Compliance Coverage</h2>
+        <h2 className="page-title" style={{ color: "var(--text-0)", marginTop: 0 }}><NavIcon name="compliance" size={20} />Compliance Coverage</h2>
         <p className="dim" style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 0 }}>
           How this engagement's findings map onto each framework's controls, a{" "}
           <strong style={{ color: "var(--brand)" }}>live, control-by-control</strong> coverage

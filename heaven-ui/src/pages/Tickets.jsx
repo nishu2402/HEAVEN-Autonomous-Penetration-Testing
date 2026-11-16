@@ -2,6 +2,7 @@
 // Mirrors `heaven tickets status` from the CLI.
 
 import React, { useEffect, useState } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Tickets } from "../api";
 import { SkeletonStatGrid } from "../components/Skeleton.jsx";
 
@@ -16,7 +17,7 @@ export default function TicketsPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--med)", marginTop: 0 }}>🎫 Ticketing</h2>
+        <h2 className="page-title" style={{ color: "var(--med)", marginTop: 0 }}><NavIcon name="tickets" size={20} />Ticketing</h2>
         <p className="page-lead">
           Auto-create Jira / Linear issues from findings. Backends are
           env-configured, once set, the "Push to ticketing" button on

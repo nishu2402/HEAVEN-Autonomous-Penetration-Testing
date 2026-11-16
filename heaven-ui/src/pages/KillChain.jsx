@@ -2,16 +2,17 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Engagement } from '../api'
 import { EmptyState } from '../components/Skeleton.jsx'
+import NavIcon from '../components/NavIcons.jsx'
 import HelpTip from '../components/HelpTip.jsx'
 
 const PHASES = [
-  { name: 'Recon',       icon: '🔍', keys: ['scan', 'enum', 'recon', 'fingerprint', 'osint', 'shodan'] },
-  { name: 'Weaponize',   icon: '🔧', keys: ['exploit_dev', 'payload', 'zeroday'] },
-  { name: 'Delivery',    icon: '📨', keys: ['phishing', 'upload', 'injection', 'sqli', 'xss'] },
-  { name: 'Exploit',     icon: '💥', keys: ['rce', 'ssrf', 'lfi', 'xxe', 'idor', 'ssti', 'jwt'] },
-  { name: 'Install',     icon: '🔩', keys: ['backdoor', 'persistence', 'shell', 'cron'] },
-  { name: 'C2',          icon: '📡', keys: ['c2', 'beacon', 'tunnel', 'dns'] },
-  { name: 'Impact',      icon: '🎯', keys: ['exfil', 'ransomware', 'wipe', 'denial', 'takeover'] },
+  { name: 'Recon',       icon: 'analyze',   keys: ['scan', 'enum', 'recon', 'fingerprint', 'osint', 'shodan'] },
+  { name: 'Weaponize',   icon: 'wrench',    keys: ['exploit_dev', 'payload', 'zeroday'] },
+  { name: 'Delivery',    icon: 'send',      keys: ['phishing', 'upload', 'injection', 'sqli', 'xss'] },
+  { name: 'Exploit',     icon: 'exploit',   keys: ['rce', 'ssrf', 'lfi', 'xxe', 'idor', 'ssti', 'jwt'] },
+  { name: 'Install',     icon: 'install',   keys: ['backdoor', 'persistence', 'shell', 'cron'] },
+  { name: 'C2',          icon: 'c2',        keys: ['c2', 'beacon', 'tunnel', 'dns'] },
+  { name: 'Impact',      icon: 'crosshair', keys: ['exfil', 'ransomware', 'wipe', 'denial', 'takeover'] },
 ]
 
 function findPhase(vuln_type) {
@@ -98,7 +99,7 @@ export default function KillChain() {
 
       {noEng && (
         <EmptyState
-          icon="⛓"
+          icon="killchain"
           headline="No kill-chain data yet"
           body="The kill chain maps your findings onto attack phases. Run a scan to populate it."
           cta="Launch a scan →"
@@ -123,7 +124,7 @@ export default function KillChain() {
               onClick={() => hasFindings && setSelected(selected === i ? null : i)}
             >
               <div className="phase-num">PHASE {i + 1}</div>
-              <div style={{ fontSize: 20, marginBottom: 6 }}>{phase.icon}</div>
+              <div style={{ marginBottom: 6 }}><NavIcon name={phase.icon} size={22} /></div>
               <div className="phase-name">{phase.name}</div>
               <div className={`phase-count ${hasFindings ? '' : 'zero'}`} style={{ color }}>
                 {phase.findings.length}

@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+title: "HEAVEN: Autonomous Penetration-Testing Framework"
+message: "If you use HEAVEN in your research, writeups, or tooling, please cite it using the metadata below."
+type: software
+authors:
+  - given-names: Nisarg
+    family-names: Chasmawala
+    alias: HEAVEN
+repository-code: "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
+url: "https://github.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing"
+abstract: >-
+  HEAVEN is an autonomous offensive-security platform that
+  automates reconnaissance, vulnerability detection, verified exploitation,
+  risk triage, and reporting across web, network, Active Directory, and cloud
+  targets. It pairs real detectors with an observe-plan-act LLM loop (with a
+  deterministic fallback that needs no API key) and a hybrid machine-learning
+  CVSS predictor, and runs from a CLI, a React web UI, and a REST plus
+  WebSocket API.
+keywords:
+  - penetration-testing
+  - offensive-security
+  - vulnerability-scanner
+  - red-team
+  - cvss
+  - machine-learning
+  - owasp
+  - mitre-attack
+  - bug-bounty
+  - security-automation
+license: MIT
+version: 4.5.0
+date-released: "2026-11-16"

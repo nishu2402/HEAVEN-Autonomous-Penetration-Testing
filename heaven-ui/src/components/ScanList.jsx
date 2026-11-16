@@ -10,6 +10,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router";
 import { Scans as ScansApi, Replay } from "../api";
 import { useToast } from "./Toast.jsx";
+import NavIcon from "./NavIcons.jsx";
 import { sevColor } from "../theme";
 
 const SEV_ORDER = ["critical", "high", "medium", "low", "info"];
@@ -214,7 +215,7 @@ export default function ScanList({
   const failedCount    = (scans || []).filter((s) => s.status === "failed").length;
 
   const empty = {
-    icon: emptyState.icon || "🛰",
+    icon: emptyState.icon || "scans",
     title: emptyState.title || "No scans yet",
     hint: emptyState.hint || "Launch a scan above, run the demo, or start one from the CLI.",
   };
@@ -243,7 +244,7 @@ export default function ScanList({
 
       {scans.length === 0 ? (
         <div className="info-state">
-          <div style={{ fontSize: 30, marginBottom: 8 }}>{empty.icon}</div>
+          <div style={{ marginBottom: 8, opacity: 0.55 }}><NavIcon name={empty.icon} size={30} /></div>
           <h3>{empty.title}</h3>
           <div className="dim">{empty.hint}</div>
         </div>
@@ -357,7 +358,7 @@ export default function ScanList({
                       title={running ? "Cancel this running scan" : "Move this scan to the Bin (restorable)"}
                       onClick={() => removeScan(id, s.status)}
                     >
-                      {deleting[id] ? "…" : (running ? "✕ Cancel" : "🗑 Remove")}
+                      {deleting[id] ? "…" : (running ? "✕ Cancel" : <><NavIcon name="bin" size={13} /> Remove</>)}
                     </button>
                   </div>
                 </div>

@@ -10,6 +10,7 @@
 // navigating away and back — and a full page refresh.
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import NavIcon from "../components/NavIcons.jsx";
 import { Link } from "react-router";
 import { Autonomous, Engagement, openAutonomousStream } from "../api";
 import { SkeletonCard } from "../components/Skeleton.jsx";
@@ -197,7 +198,7 @@ export default function AutonomousPage() {
   return (
     <div className="page">
       <div className="card">
-        <h2 style={{ color: "var(--accent-2)", marginTop: 0 }}>⚙ Autonomous Loop</h2>
+        <h2 className="page-title" style={{ color: "var(--accent-2)", marginTop: 0 }}><NavIcon name="autonomous" size={20} />Autonomous Loop</h2>
         <p className="page-lead">
           Iterative observe → plan → act loop. The LLM-driven planner picks
           the next action each iteration; falls back to a deterministic

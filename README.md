@@ -293,7 +293,9 @@ tooling and alternate LLM providers (`pip install -e ".[anthropic]"` /
 ### See it in 60 seconds
 
 <p align="center">
+<video src="https://raw.githubusercontent.com/nishu2402/HEAVEN-Autonomous-Penetration-Testing/main/docs/assets/demo.mp4" controls autoplay loop muted playsinline width="860">
 <img src="docs/assets/demo.gif" alt="A tour of the HEAVEN web UI on sample data: the dashboard and its live risk topology, launching a scan, findings ranked by confidence, the cyber kill chain, and client-ready reports." width="860"/>
+</video>
 <br/>
 <sub><em>The HEAVEN web UI on sample data · Dashboard → Scans → Findings → Kill Chain → Reports</em></sub>
 </p>

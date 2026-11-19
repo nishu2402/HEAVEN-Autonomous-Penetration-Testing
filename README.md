@@ -43,6 +43,10 @@
 <a id="authors"></a>
 ## 👾 Authors
 
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:7400B8,50:FF6E00,100:FF36AB"/>
+</p>
+
 ### Nisarg Chasmawala · Alias: **HEAVEN**
 
 <div align="center">
@@ -58,6 +62,10 @@
 ---
 
 ## 📋 Table of Contents
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF6E00,50:FF36AB,100:7400B8"/>
+</p>
 
 - [👾 Authors](#authors)
 - [🧠 What is HEAVEN?](#what-is-heaven)
@@ -378,6 +386,10 @@ heaven serve            # opens http://localhost:8443 in your browser
 
 <a id="api-keys"></a>
 ## 🔑 API Keys & Configuration
+
+<p align="center">
+<img src="https://capsule-render.vercel.app/api?type=rect&height=4&color=0:FF36AB,50:7400B8,100:B8FF00"/>
+</p>
 
 **HEAVEN runs with zero API keys.** Scanning, the web UI, reports, and ML risk
 scoring all work offline. Keys only unlock *optional* enrichments, most
